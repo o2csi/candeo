@@ -8,7 +8,7 @@ jobs:
   rust:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with: { components: rustfmt, clippy }
       - uses: Swatinem/rust-cache@v2
@@ -16,13 +16,23 @@ jobs:
       - run: cargo clippy -p candeo-protocol -p candeo-device --all-targets -- -D warnings
       - run: cargo test -p candeo-protocol -p candeo-device
 
+  # Avis de sécurité des dépendances Rust. Séparé du job `rust` pour que
+  # l'apparition d'un avis ne masque pas une régression de code.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: rustsec/audit-check@v2.0.0
+        with: { token: "${{ secrets.GITHUB_TOKEN }}" }
+
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
+      - uses: actions/checkout@v7
+      # La version de pnpm vient du champ `packageManager` de package.json :
+      # une seule source de vérité, locale et en intégration continue.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @candeo/desktop exec vue-tsc --noEmit
