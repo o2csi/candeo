@@ -6,12 +6,16 @@
  * qui fait que l'aperçu **est** la production, et non sa ressemblance
  * (`docs/design/studio.md` §3).
  *
- * ## Le canal ne s'ouvre qu'une fois l'effet lancé
+ * ## Le canal ne s'ouvre qu'une fois l'effet lancé, et sur **un** appareil
  *
- * `subscribe_frames` dépose le canal dans l'état de la boucle en cours. Sans
- * boucle, il n'y a pas d'état où le déposer, et `start_effect` en crée un neuf
- * à chaque démarrage : il faut donc se réabonner **après** chaque lancement,
- * pas une fois pour toutes à l'ouverture de l'éditeur.
+ * `subscribe_frames` dépose le canal dans l'état de la boucle en cours, celle
+ * de l'appareil visé. Sans boucle, il n'y a pas d'état où le déposer, et
+ * `start_effect` en crée un neuf à chaque démarrage : il faut donc se réabonner
+ * **après** chaque lancement, pas une fois pour toutes à l'ouverture de
+ * l'éditeur.
+ *
+ * Chaque appareil a sa boucle et son canal : le simulateur suit celui qu'on a
+ * sélectionné, changer de sélection ferme un canal et en ouvre un autre.
  *
  * ## Se désabonner n'arrête pas l'effet
  *
@@ -30,7 +34,7 @@
 import { computed, onBeforeUnmount, shallowRef } from 'vue'
 
 import { subscribeFrames } from '../api/candeo'
-import type { Rgb } from '../api/types'
+import type { DeviceRef, Rgb } from '../api/types'
 import type { LayoutView } from './layout'
 
 const BLACK: Rgb = [0, 0, 0]
@@ -73,20 +77,29 @@ export function useEngineFrames(layout: () => LayoutView | null) {
 
   /** Ce qui ferme le canal. `null` quand personne n'écoute. */
   let release: (() => void) | null = null
+  /** L'appareil auquel ce canal est abonné, pour savoir quand il faut le fermer. */
+  let source: DeviceRef | null = null
   /** Faux dès la destruction : l'abonnement est asynchrone, il peut aboutir après. */
   let alive = true
 
   /**
-   * S'abonne au flux. Réabonnable : le moteur ne retient qu'un canal, le
-   * nouveau remplace l'ancien.
+   * S'abonne au flux d'un appareil. Réabonnable : le moteur ne retient qu'un
+   * canal **par appareil**, le nouveau remplace l'ancien.
    *
-   * On ne se **désabonne pas d'abord** : ce serait deux commandes en vol dont
-   * l'ordre d'arrivée n'est pas garanti, et un désabonnement qui arriverait le
-   * second effacerait le canal qu'on vient d'ouvrir — le simulateur resterait
-   * figé sans que rien ne le signale.
+   * Sur le même appareil, on ne se **désabonne pas d'abord** : ce serait deux
+   * commandes en vol dont l'ordre d'arrivée n'est pas garanti, et un
+   * désabonnement qui arriverait le second effacerait le canal qu'on vient
+   * d'ouvrir — le simulateur resterait figé sans que rien ne le signale.
+   *
+   * Changer d'appareil, en revanche, exige de fermer l'ancien : le moteur ne
+   * remplacerait pas un canal posé sur une autre boucle, et les deux flux
+   * alimenteraient le même simulateur.
    */
-  async function listen(): Promise<void> {
-    const close = await subscribeFrames((bytes) => {
+  async function listen(device: DeviceRef): Promise<void> {
+    if (source && (source.vid !== device.vid || source.pid !== device.pid)) stop()
+
+    source = device
+    const close = await subscribeFrames(device, (bytes) => {
       received.value = colors(bytes)
     })
     // Le composant a pu disparaître pendant l'aller-retour. Fermer tout de
@@ -102,6 +115,7 @@ export function useEngineFrames(layout: () => LayoutView | null) {
   function stop(): void {
     release?.()
     release = null
+    source = null
   }
 
   onBeforeUnmount(() => {

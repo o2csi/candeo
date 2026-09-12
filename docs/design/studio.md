@@ -295,8 +295,11 @@ Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hor
 - **La bascule est réappliquée à chaque lancement.** `start_effect` repart d'un
   état neuf, dont la sortie clavier est active ; sans cela, « ne pas envoyer »
   serait oublié au démarrage suivant.
-- **Le canal d'images n'existe que pendant un effet.** Il est déposé dans l'état
-  de la boucle en cours, et chaque `start_effect` en crée un neuf : l'éditeur se
-  réabonne après chaque lancement, pas une fois pour toutes à l'ouverture.
+- **Le canal d'images n'existe que pendant un effet, et il vise un appareil.** Il
+  est déposé dans l'état de la boucle en cours **de cet appareil**, et chaque
+  `start_effect` en crée un neuf : l'éditeur se réabonne après chaque lancement,
+  pas une fois pour toutes à l'ouverture. Changer d'appareil ferme le canal
+  précédent — le moteur ne le remplacerait pas, et les deux flux alimenteraient
+  le même simulateur.
 - **Quitter l'éditeur n'arrête pas l'effet.** Le canal libéré coupe le flux
   d'images ; la boucle continue d'alimenter le clavier, fenêtre fermée comprise.

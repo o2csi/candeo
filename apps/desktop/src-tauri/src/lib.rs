@@ -4,7 +4,7 @@
 //! `candeo-protocol` et `candeo-device` restent ainsi sans dépendance à serde
 //! ni à Tauri, et donc réutilisables et testables hors application.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use candeo_device::{Keyboard, Layout, DEATHSTALKER_V2_PRO};
@@ -26,6 +26,41 @@ const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
 // Les champs partent en camelCase : c'est la convention du côté qui les lit.
 // Laisser filtrer le nommage Rust jusque dans l'interface serait une fuite
 // d'abstraction, et elle ne se verrait qu'à l'exécution.
+
+/// Désigne un appareil, et rien d'autre.
+///
+/// VID et PID, comme l'adoption les identifie (issue #25) : c'est la clé de la
+/// table des appareils ouverts, de celle des échecs d'ouverture et de celle des
+/// boucles de rendu. Le numéro de série départage deux exemplaires du même
+/// modèle dans `settings.json`, mais il ne peut pas servir de clé ici — une
+/// énumération muette (hidraw sans règle udev) n'en déclare aucun, et l'appareil
+/// deviendrait indésignable.
+///
+/// Un type plutôt que deux entiers baladés côte à côte : il apparaît en argument
+/// de commande **et** dans l'état que rend le moteur, et les inverser ne se
+/// verrait qu'à l'exécution.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRef {
+    pub vid: u16,
+    pub pid: u16,
+}
+
+impl DeviceRef {
+    fn of(layout: &Layout) -> Self {
+        Self {
+            vid: layout.vid,
+            pid: layout.pid,
+        }
+    }
+}
+
+/// Tel qu'il apparaît dans un message destiné à être lu.
+impl std::fmt::Display for DeviceRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#06x}:{:#06x}", self.vid, self.pid)
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,19 +180,90 @@ impl From<EffectDto> for Effect {
 
 // ---------------------------------------------------------------- état
 
+/// Tout ce que l'application tient ouvert, **appareil par appareil**.
+///
+/// # Ordre de prise des verrous
+///
+/// Un interblocage a déjà été attrapé ici : `list_devices` prenait le verrou du
+/// clavier puis celui des échecs, `ignore_device` l'inverse. Avec une table
+/// d'appareils et une boucle de rendu par appareil, la règle est donc explicite
+/// et tenue :
+///
+/// > **Aucun code ne tient deux de ces verrous en même temps.** Une table est
+/// > verrouillée le temps d'y lire ou d'y poser un `Arc`, jamais le temps d'une
+/// > écriture HID, d'un démarrage de boucle ni d'une attente de fin.
+///
+/// C'est ce que font [`AppState::handle`] et [`AppState::open_handles`] : elles
+/// clonent sous le verrou de la table et rendent celui-ci avant d'interroger
+/// quoi que ce soit. Si deux verrous devenaient inévitables, l'ordre est celui
+/// de la déclaration ci-dessous — `devices`, puis `engine`, puis `failures`,
+/// puis la poignée d'un appareil, puis l'état partagé d'une boucle. Le fil de
+/// rendu, lui, ne connaît que les deux derniers : il n'a aucun moyen de prendre
+/// un verrou de l'application, donc aucun moyen d'en bloquer une commande.
 #[derive(Default)]
 pub struct AppState {
-    /// `Arc` parce que le fil de rendu du moteur écrit sur le même clavier, et
-    /// qu'il survit à la fenêtre : il ne peut donc rien emprunter à l'état
-    /// d'une commande.
-    pub(crate) keyboard: Arc<Mutex<Option<Keyboard>>>,
+    /// Les appareils, **un par poignée**.
+    ///
+    /// Une entrée apparaît dès qu'un appareil est visé et n'est plus retirée ;
+    /// c'est son contenu qui dit s'il est ouvert. Refermer met l'`Option` à
+    /// `None` sans toucher à l'`Arc` : la boucle qui en tient une copie s'en
+    /// aperçoit à l'image suivante et cesse d'écrire, au lieu de continuer sur
+    /// une poignée que plus personne ne regarde.
+    pub(crate) devices: Mutex<HashMap<DeviceRef, runtime::Handle>>,
+    /// Les boucles de rendu, une par appareil. Voir [`runtime`].
     pub(crate) engine: runtime::Engine,
-    /// Dernier échec d'ouverture, **par appareil**, indexé sur VID/PID.
+    /// Dernier échec d'ouverture, **par appareil**.
     ///
     /// Une table plutôt qu'un champ unique : c'est ce qui fait qu'un appareil
     /// en échec n'en entraîne aucun autre. Un message global obligerait à
     /// choisir lequel afficher, et le suivant effacerait le précédent.
-    pub(crate) failures: Mutex<HashMap<(u16, u16), String>>,
+    pub(crate) failures: Mutex<HashMap<DeviceRef, String>>,
+}
+
+impl AppState {
+    /// La poignée de cet appareil, créée fermée si elle n'existait pas.
+    ///
+    /// Le verrou de la table n'est tenu que le temps du clonage : ce qu'on fera
+    /// ensuite de la poignée — une écriture HID, une boucle qui démarre — ne
+    /// doit retenir aucune commande visant un autre appareil.
+    pub(crate) fn handle(&self, device: DeviceRef) -> runtime::Handle {
+        Arc::clone(self.devices.lock().unwrap().entry(device).or_default())
+    }
+
+    /// La poignée de cet appareil, **sans en créer une**.
+    ///
+    /// Les commandes qui exigent un appareil ouvert passent par ici : viser un
+    /// appareil inconnu doit être un refus, pas une ligne de plus dans la table.
+    fn opened(&self, device: DeviceRef) -> Option<runtime::Handle> {
+        self.devices.lock().unwrap().get(&device).map(Arc::clone)
+    }
+
+    /// Ouvre — ou referme, avec `None` — cet appareil.
+    fn set_open(&self, device: DeviceRef, keyboard: Option<Keyboard>) {
+        *self.handle(device).lock().unwrap() = keyboard;
+    }
+
+    /// Les appareils réellement ouverts en ce moment.
+    ///
+    /// Deux temps, et jamais les deux verrous ensemble : on copie les poignées
+    /// sous le verrou de la table, on le rend, puis on les interroge. Les
+    /// interroger sur place bloquerait toute la table pendant l'écriture HID
+    /// d'une boucle.
+    fn open_handles(&self) -> HashSet<DeviceRef> {
+        let handles: Vec<(DeviceRef, runtime::Handle)> = self
+            .devices
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(d, h)| (*d, Arc::clone(h)))
+            .collect();
+
+        handles
+            .into_iter()
+            .filter(|(_, h)| h.lock().unwrap().is_some())
+            .map(|(d, _)| d)
+            .collect()
+    }
 }
 
 /// Gabarit utilisé quand aucun périphérique n'est connecté.
@@ -176,12 +282,12 @@ fn hid() -> CmdResult<hidapi::HidApi> {
     hidapi::HidApi::new().map_err(|e| format!("initialisation HID impossible : {e}"))
 }
 
-fn find_layout(vid: u16, pid: u16) -> CmdResult<&'static Layout> {
+fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
     LAYOUTS
         .iter()
         .copied()
-        .find(|l| l.vid == vid && l.pid == pid)
-        .ok_or_else(|| format!("aucun gabarit connu pour {vid:#06x}:{pid:#06x}"))
+        .find(|l| DeviceRef::of(l) == device)
+        .ok_or_else(|| format!("aucun gabarit connu pour {device}"))
 }
 
 /// Numéro de série de l'exemplaire branché — s'il y en a un de branché.
@@ -209,12 +315,11 @@ fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
 /// Ce qu'a donné la tentative d'ouverture d'**un** appareil.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct OpenOutcome {
-    pub vid: u16,
-    pub pid: u16,
+    pub device: DeviceRef,
     pub error: Option<String>,
 }
 
-/// Ouvre les appareils **pilotés et présents**, un par un.
+/// Ouvre **tous** les appareils pilotés et présents, un par un.
 ///
 /// C'est la boucle de démarrage, écrite sans Tauri ni HID — la présence et
 /// l'ouverture arrivent en argument — pour que son invariant soit vérifiable
@@ -222,17 +327,16 @@ pub(crate) struct OpenOutcome {
 /// Chaque tentative produit sa propre ligne de compte-rendu, et une erreur
 /// n'interrompt pas la boucle.
 ///
-/// Ne renvoie qu'un seul appareil ouvert : `AppState` n'en porte qu'un pour
-/// l'instant (issue #26). Les pilotés suivants sont donc laissés fermés plutôt
-/// qu'ouverts puis relâchés aussitôt — toucher un appareil qu'on ne pilotera
-/// pas serait exactement ce que l'adoption sert à éviter.
+/// Tous, et non plus un seul : `AppState` porte désormais une table d'appareils
+/// ouverts (issue #26). Le second appareil piloté n'est donc plus laissé fermé
+/// faute de place pour lui.
 fn open_adopted<K>(
     layouts: &[&'static Layout],
     settings: &Settings,
     present: impl Fn(&Layout) -> Option<Option<String>>,
     mut open: impl FnMut(&'static Layout) -> Result<K, String>,
-) -> (Option<K>, Vec<OpenOutcome>) {
-    let mut opened = None;
+) -> (Vec<(&'static Layout, K)>, Vec<OpenOutcome>) {
+    let mut opened = Vec::new();
     let mut outcomes = Vec::new();
 
     for layout in layouts {
@@ -244,19 +348,15 @@ fn open_adopted<K>(
         {
             continue;
         }
-        if opened.is_some() {
-            continue;
-        }
         let error = match open(layout) {
             Ok(k) => {
-                opened = Some(k);
+                opened.push((*layout, k));
                 None
             }
             Err(e) => Some(e),
         };
         outcomes.push(OpenOutcome {
-            vid: layout.vid,
-            pid: layout.pid,
+            device: DeviceRef::of(layout),
             error,
         });
     }
@@ -285,31 +385,32 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         }
     };
 
-    let (keyboard, outcomes) = open_adopted(
+    let (ouverts, outcomes) = open_adopted(
         LAYOUTS,
         &settings,
         |l| plugged(&api, l),
         |l| Keyboard::open(&api, l).map_err(|e| e.to_string()),
     );
 
+    // Les poignées d'abord, les échecs ensuite : deux tables, jamais verrouillées
+    // ensemble. Rien d'autre n'a encore pu ouvrir quoi que ce soit — l'état vient
+    // d'être construit et n'est pas encore confié au gestionnaire.
+    for (layout, keyboard) in ouverts {
+        state.set_open(DeviceRef::of(layout), Some(keyboard));
+    }
+
     let mut failures = state.failures.lock().unwrap();
     for outcome in outcomes {
         match outcome.error {
             Some(e) => {
-                eprintln!(
-                    "adoption : {:#06x}:{:#06x} non ouvert — {e}",
-                    outcome.vid, outcome.pid
-                );
-                failures.insert((outcome.vid, outcome.pid), e);
+                eprintln!("adoption : {} non ouvert — {e}", outcome.device);
+                failures.insert(outcome.device, e);
             }
             None => {
-                failures.remove(&(outcome.vid, outcome.pid));
+                failures.remove(&outcome.device);
             }
         }
     }
-    // Rien d'autre n'a encore pu ouvrir quoi que ce soit : l'état vient d'être
-    // construit et n'est pas encore confié au gestionnaire.
-    *state.keyboard.lock().unwrap() = keyboard;
 }
 
 // ---------------------------------------------------------------- commandes
@@ -319,21 +420,17 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
     let settings = storage::store(&app)?.read_settings()?;
     let api = hid()?;
-    // Les deux verrous ne sont jamais tenus ensemble, et l'ordre n'est pas
-    // indifférent : `ignore_device` prend le clavier puis les échecs. Les
-    // prendre ici dans l'ordre inverse, tous les deux à la fois, suffirait à
-    // bloquer les deux commandes l'une contre l'autre.
-    let ouvert = state
-        .keyboard
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|kb| (kb.layout().vid, kb.layout().pid));
-    let failures = state.failures.lock().unwrap();
+    // Les deux relevés sont faits l'un après l'autre, chacun rendant son verrou
+    // avant le suivant. C'est la règle documentée sur [`AppState`], et elle vient
+    // d'un interblocage réel : cette commande prenait le clavier puis les échecs,
+    // `ignore_device` l'inverse, et les deux se bloquaient l'une l'autre.
+    let ouverts = state.open_handles();
+    let failures = state.failures.lock().unwrap().clone();
 
     Ok(LAYOUTS
         .iter()
         .map(|l| {
+            let device = DeviceRef::of(l);
             let branche = plugged(&api, l);
             let present = branche.is_some();
             let serial = branche.flatten();
@@ -343,8 +440,8 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 pid: l.pid,
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
-                open: ouvert == Some((l.vid, l.pid)),
-                error: failures.get(&(l.vid, l.pid)).cloned(),
+                open: ouverts.contains(&device),
+                error: failures.get(&device).cloned(),
             }
         })
         .collect())
@@ -367,7 +464,8 @@ fn adopt_device(
     vid: u16,
     pid: u16,
 ) -> CmdResult<Option<LayoutInfo>> {
-    let layout = find_layout(vid, pid)?;
+    let device = DeviceRef { vid, pid };
+    let layout = find_layout(device)?;
     let api = hid()?;
     let branche = plugged(&api, layout);
     let present = branche.is_some();
@@ -383,8 +481,10 @@ fn adopt_device(
     }
     match Keyboard::open(&api, layout) {
         Ok(kb) => {
-            *state.keyboard.lock().unwrap() = Some(kb);
-            state.failures.lock().unwrap().remove(&(vid, pid));
+            // Les autres appareils ouverts le restent : adopter celui-ci n'est
+            // pas un choix à la place des autres.
+            state.set_open(device, Some(kb));
+            state.failures.lock().unwrap().remove(&device);
             Ok(Some(LayoutInfo::from(layout)))
         }
         Err(e) => {
@@ -393,7 +493,7 @@ fn adopt_device(
                 .failures
                 .lock()
                 .unwrap()
-                .insert((vid, pid), message.clone());
+                .insert(device, message.clone());
             Err(message)
         }
     }
@@ -406,7 +506,8 @@ fn adopt_device(
 /// elle se donne — [`storage::DeviceRecord::matches`] retrouve l'entrée sans.
 #[tauri::command]
 fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<()> {
-    let layout = find_layout(vid, pid)?;
+    let device = DeviceRef { vid, pid };
+    let layout = find_layout(device)?;
     let serial = hid().ok().and_then(|api| plugged(&api, layout)).flatten();
 
     let store = storage::store(&app)?;
@@ -414,20 +515,12 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
     settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Ignored);
     store.write_settings(&settings)?;
 
-    // « Laissé tranquille » : on ne garde pas ouvert ce qu'on s'engage à ne
-    // plus toucher. Le bloc rend le verrou avant de prendre celui des échecs —
-    // les tenir tous les deux ici, quand `list_devices` les prend dans l'autre
-    // ordre, suffirait à bloquer les deux commandes l'une contre l'autre.
-    {
-        let mut guard = state.keyboard.lock().unwrap();
-        if guard
-            .as_ref()
-            .is_some_and(|kb| kb.layout().vid == vid && kb.layout().pid == pid)
-        {
-            *guard = None;
-        }
-    }
-    state.failures.lock().unwrap().remove(&(vid, pid));
+    // « Laissé tranquille » : on ne garde pas ouvert ce qu'on s'engage à ne plus
+    // toucher. La poignée est vidée, pas retirée : la boucle qui l'alimentait en
+    // tient une copie, elle s'en aperçoit à l'image suivante et cesse d'écrire —
+    // sans que les autres appareils soient touchés.
+    state.set_open(device, None);
+    state.failures.lock().unwrap().remove(&device);
     Ok(())
 }
 
@@ -438,23 +531,27 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
 /// appareil sans s'engager.
 #[tauri::command]
 fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutInfo> {
-    let layout = find_layout(vid, pid)?;
+    let device = DeviceRef { vid, pid };
+    let layout = find_layout(device)?;
 
     let api = hid()?;
     let kb = Keyboard::open(&api, layout).map_err(|e| e.to_string())?;
-    *state.keyboard.lock().unwrap() = Some(kb);
-    state.failures.lock().unwrap().remove(&(vid, pid));
+    state.set_open(device, Some(kb));
+    state.failures.lock().unwrap().remove(&device);
     Ok(LayoutInfo::from(layout))
 }
 
+/// Referme **un** appareil. Les autres ne sont pas touchés.
 #[tauri::command]
-fn disconnect(state: State<'_, AppState>) {
-    *state.keyboard.lock().unwrap() = None;
+fn disconnect(state: State<'_, AppState>, device: DeviceRef) {
+    state.set_open(device, None);
 }
 
 #[tauri::command]
-fn is_connected(state: State<'_, AppState>) -> bool {
-    state.keyboard.lock().unwrap().is_some()
+fn is_connected(state: State<'_, AppState>, device: DeviceRef) -> bool {
+    state
+        .opened(device)
+        .is_some_and(|h| h.lock().unwrap().is_some())
 }
 
 /// Gabarit servant de repli quand rien n'est connecté.
@@ -470,26 +567,44 @@ fn get_default_layout() -> LayoutInfo {
     LayoutInfo::from(default_layout())
 }
 
-/// Gabarit du périphérique connecté.
+/// Agit sur la poignée d'un appareil, **si** il est ouvert.
+///
+/// Un seul verrou est tenu, celui de la poignée, et jamais celui d'une table :
+/// une écriture HID prend quelques millisecondes et ne doit retenir aucune
+/// commande visant un autre appareil.
+fn with_keyboard<T>(
+    state: &AppState,
+    device: DeviceRef,
+    f: impl FnOnce(&Keyboard) -> CmdResult<T>,
+) -> CmdResult<T> {
+    let handle = state
+        .opened(device)
+        .ok_or_else(|| format!("aucun appareil ouvert pour {device}"))?;
+    let guard = handle.lock().unwrap();
+    let kb = guard
+        .as_ref()
+        .ok_or_else(|| format!("aucun appareil ouvert pour {device}"))?;
+    f(kb)
+}
+
+/// Gabarit d'un appareil ouvert.
 #[tauri::command]
-fn get_layout(state: State<'_, AppState>) -> CmdResult<LayoutInfo> {
-    let guard = state.keyboard.lock().unwrap();
-    let kb = guard.as_ref().ok_or("aucun périphérique connecté")?;
-    Ok(LayoutInfo::from(kb.layout()))
+fn get_layout(state: State<'_, AppState>, device: DeviceRef) -> CmdResult<LayoutInfo> {
+    with_keyboard(&state, device, |kb| Ok(LayoutInfo::from(kb.layout())))
 }
 
 #[tauri::command]
-fn set_brightness(state: State<'_, AppState>, level: u8) -> CmdResult<()> {
-    let guard = state.keyboard.lock().unwrap();
-    let kb = guard.as_ref().ok_or("aucun périphérique connecté")?;
-    kb.set_brightness(level).map_err(|e| e.to_string())
+fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> CmdResult<()> {
+    with_keyboard(&state, device, |kb| {
+        kb.set_brightness(level).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
-fn set_effect(state: State<'_, AppState>, effect: EffectDto) -> CmdResult<()> {
-    let guard = state.keyboard.lock().unwrap();
-    let kb = guard.as_ref().ok_or("aucun périphérique connecté")?;
-    kb.set_effect(effect.into()).map_err(|e| e.to_string())
+fn set_effect(state: State<'_, AppState>, device: DeviceRef, effect: EffectDto) -> CmdResult<()> {
+    with_keyboard(&state, device, |kb| {
+        kb.set_effect(effect.into()).map_err(|e| e.to_string())
+    })
 }
 
 /// Pousse une image complète.
@@ -498,38 +613,43 @@ fn set_effect(state: State<'_, AppState>, effect: EffectDto) -> CmdResult<()> {
 /// cases de la matrice. En envoyer moins laisse les dernières rangées figées
 /// sur leur valeur précédente — c'est le piège classique de ce matériel.
 #[tauri::command]
-fn present(state: State<'_, AppState>, frame: Vec<u8>) -> CmdResult<()> {
-    let guard = state.keyboard.lock().unwrap();
-    let kb = guard.as_ref().ok_or("aucun périphérique connecté")?;
-    let expected = kb.layout().led_count();
-
-    if frame.len() != expected * 3 {
-        return Err(format!(
-            "image de {} octets, {} attendus ({expected} cases × 3)",
-            frame.len(),
-            expected * 3
-        ));
-    }
-    let colors: Vec<Rgb> = frame
-        .chunks_exact(3)
-        .map(|c| Rgb::new(c[0], c[1], c[2]))
-        .collect();
-    kb.present(&colors).map_err(|e| e.to_string())
+fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> CmdResult<()> {
+    with_keyboard(&state, device, |kb| {
+        let expected = kb.layout().led_count();
+        if frame.len() != expected * 3 {
+            return Err(format!(
+                "image de {} octets, {} attendus ({expected} cases × 3)",
+                frame.len(),
+                expected * 3
+            ));
+        }
+        let colors: Vec<Rgb> = frame
+            .chunks_exact(3)
+            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .collect();
+        kb.present(&colors).map_err(|e| e.to_string())
+    })
 }
 
 /// Écrit un segment de rangée, sans toucher au reste.
 #[tauri::command]
-fn write_row(state: State<'_, AppState>, row: u8, col_start: u8, colors: Vec<u8>) -> CmdResult<()> {
-    let guard = state.keyboard.lock().unwrap();
-    let kb = guard.as_ref().ok_or("aucun périphérique connecté")?;
-    if colors.len() % 3 != 0 || colors.is_empty() {
-        return Err("les couleurs doivent former des triplets RGB non vides".into());
-    }
-    let c: Vec<Rgb> = colors
-        .chunks_exact(3)
-        .map(|x| Rgb::new(x[0], x[1], x[2]))
-        .collect();
-    kb.write_row(row, col_start, &c).map_err(|e| e.to_string())
+fn write_row(
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    row: u8,
+    col_start: u8,
+    colors: Vec<u8>,
+) -> CmdResult<()> {
+    with_keyboard(&state, device, |kb| {
+        if colors.len() % 3 != 0 || colors.is_empty() {
+            return Err("les couleurs doivent former des triplets RGB non vides".into());
+        }
+        let c: Vec<Rgb> = colors
+            .chunks_exact(3)
+            .map(|x| Rgb::new(x[0], x[1], x[2]))
+            .collect();
+        kb.write_row(row, col_start, &c).map_err(|e| e.to_string())
+    })
 }
 
 // ---------------------------------------------------------------- point d'entrée
@@ -626,6 +746,12 @@ mod tests {
         settings
     }
 
+    /// Les gabarits réellement ouverts, par leur nom — la valeur que rend le
+    /// faux « ouvrir » des tests.
+    fn ouverts(opened: &[(&'static Layout, &'static str)]) -> Vec<&'static str> {
+        opened.iter().map(|(_, name)| *name).collect()
+    }
+
     /// **Le cœur de l'adoption.** Le premier appareil refuse de s'ouvrir ; le
     /// second doit s'ouvrir quand même, et le message d'échec rester attaché à
     /// celui qui a échoué.
@@ -633,7 +759,7 @@ mod tests {
     fn un_appareil_en_echec_n_en_bloque_aucun_autre() {
         let mut tentatives = Vec::new();
 
-        let (ouvert, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
+        let (opened, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
             tentatives.push(l.pid);
             if l.pid == PREMIER.pid {
                 Err("accès refusé par le système".into())
@@ -647,22 +773,20 @@ mod tests {
             vec![PREMIER.pid, SECOND.pid],
             "la boucle s'est arrêtée au premier échec"
         );
-        assert_eq!(ouvert, Some("Second"));
+        assert_eq!(ouverts(&opened), vec!["Second"]);
 
         assert_eq!(comptes.len(), 2);
         assert_eq!(
             comptes[0],
             OpenOutcome {
-                vid: PREMIER.vid,
-                pid: PREMIER.pid,
+                device: DeviceRef::of(&PREMIER),
                 error: Some("accès refusé par le système".into()),
             }
         );
         assert_eq!(
             comptes[1],
             OpenOutcome {
-                vid: SECOND.vid,
-                pid: SECOND.pid,
+                device: DeviceRef::of(&SECOND),
                 error: None,
             },
             "l'échec du premier a débordé sur le second"
@@ -682,7 +806,7 @@ mod tests {
         );
 
         let mut tentatives = 0;
-        let (ouvert, comptes) = open_adopted(
+        let (opened, comptes) = open_adopted(
             &[&PREMIER, &SECOND], // PREMIER n'a jamais été vu : détecté
             &settings,
             branches,
@@ -693,7 +817,7 @@ mod tests {
         );
 
         assert_eq!(tentatives, 0, "un appareil non piloté a été ouvert");
-        assert_eq!(ouvert, None);
+        assert!(opened.is_empty());
         assert!(comptes.is_empty());
     }
 
@@ -701,30 +825,56 @@ mod tests {
     /// n'est pas un échec, l'appareil est simplement ailleurs.
     #[test]
     fn un_appareil_pilote_mais_debranche_ne_produit_aucune_erreur() {
-        let (ouvert, comptes) = open_adopted(
+        let (opened, comptes) = open_adopted(
             &[&PREMIER, &SECOND],
             &pilotes(),
             |_| None,
             |l| Ok(l.name) as Result<&'static str, String>,
         );
 
-        assert_eq!(ouvert, None);
+        assert!(opened.is_empty());
         assert!(comptes.is_empty());
     }
 
-    /// `AppState` ne porte qu'un clavier (issue #26) : le second appareil
-    /// piloté est laissé fermé, pas ouvert puis relâché. Ouvrir un appareil
-    /// qu'on ne pilotera pas est exactement ce que l'adoption sert à éviter.
+    /// Ce que l'issue #26 change : `AppState` porte une **table** d'appareils, le
+    /// second piloté n'est donc plus laissé fermé faute de place. Chacun aura sa
+    /// poignée, sa boucle et son effet.
     #[test]
-    fn le_second_appareil_pilote_n_est_pas_touche_pour_rien() {
+    fn tous_les_appareils_pilotes_sont_ouverts() {
         let mut tentatives = Vec::new();
-        let (ouvert, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
+        let (opened, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
             tentatives.push(l.pid);
             Ok(l.name)
         });
 
-        assert_eq!(tentatives, vec![PREMIER.pid]);
-        assert_eq!(ouvert, Some("Premier"));
-        assert_eq!(comptes.len(), 1);
+        assert_eq!(tentatives, vec![PREMIER.pid, SECOND.pid]);
+        assert_eq!(ouverts(&opened), vec!["Premier", "Second"]);
+        assert_eq!(comptes.len(), 2);
+        assert!(comptes.iter().all(|c| c.error.is_none()));
+    }
+
+    /// La table est indexée sur VID/PID : deux appareils du même fabricant ne
+    /// doivent pas se confondre, sans quoi ouvrir le second refermerait le
+    /// premier.
+    #[test]
+    fn deux_appareils_du_meme_fabricant_ont_des_cles_distinctes() {
+        let state = AppState::default();
+        let premier = DeviceRef::of(&PREMIER);
+        let second = DeviceRef::of(&SECOND);
+
+        assert_ne!(premier, second);
+        assert!(state.open_handles().is_empty());
+
+        // Sans matériel on ne peut pas poser de `Keyboard` : on vérifie ce qui
+        // ne dépend que de la table — la poignée d'un appareil est bien la
+        // sienne, et viser un appareil jamais ouvert n'en fabrique aucune.
+        assert!(state.opened(premier).is_none());
+        let handle = state.handle(premier);
+        assert!(state.opened(premier).is_some());
+        assert!(
+            state.opened(second).is_none(),
+            "viser un appareil en a ouvert un autre"
+        );
+        assert!(Arc::ptr_eq(&handle, &state.handle(premier)));
     }
 }

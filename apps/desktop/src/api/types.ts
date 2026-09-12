@@ -15,6 +15,18 @@
  */
 export type DeviceState = 'detected' | 'adopted' | 'ignored'
 
+/**
+ * Désigne un appareil, et rien d'autre.
+ *
+ * VID et PID, comme l'adoption les identifie : c'est la clé de la table des
+ * appareils ouverts côté Rust, et celle des boucles de rendu. Toute commande qui
+ * agit sur **un** appareil en prend un — il n'y a plus d'appareil implicite.
+ */
+export interface DeviceRef {
+  vid: number
+  pid: number
+}
+
 export interface DeviceInfo {
   name: string
   vid: number

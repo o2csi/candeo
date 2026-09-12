@@ -23,11 +23,23 @@ import { listEffects, type EffectEntry } from '../api/candeo'
 import EffectCard from '../components/EffectCard.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import { useDevice } from '../composables/useDevice'
-import { hardwareEffects, useEffects } from '../composables/useEffects'
+import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 
 const router = useRouter()
-const { layout, busy } = useDevice()
+const { layout, current, busy } = useDevice()
 const { applied, applying, error, apply } = useEffects()
+
+/**
+ * Un effet matériel se pose **sur un appareil** : il n'y en a plus d'implicite.
+ *
+ * `current` est le seul ouvert tant qu'il n'y en a qu'un, et les boutons sont
+ * de toute façon désactivés hors connexion — la garde couvre l'aller-retour
+ * pendant lequel la liste n'est pas encore arrivée.
+ */
+function applyTo(e: HardwareEffect) {
+  const device = current.value
+  if (device) void apply(device, e)
+}
 
 /**
  * La bibliothèque, intégrés et effets écrits confondus.
@@ -113,7 +125,7 @@ const noDevice = computed(() => !connected.value && !busy.value)
             :applied="applied === e.id"
             :busy="applying === e.id"
             :disabled="!connected || applying !== null"
-            @select="apply(e)"
+            @select="applyTo(e)"
           />
         </li>
       </ul>
