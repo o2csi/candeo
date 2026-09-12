@@ -72,6 +72,11 @@ buf[0]      = 0x00        identifiant de rapport HID
 buf[1..91]  = rapport     les 90 octets décrits ci-dessous
 ```
 
+**Sens retour** : `GET_REPORT` — `bRequest 0x01`, `bmRequestType 0xa1`
+(périphérique→hôte), reste du setup identique. Relevé par l'API et non par
+capture : `hid_get_feature_report` (hidapi), `HidD_GetFeature` sous Windows,
+même tampon de 91 octets. Ce que la réponse contient est décrit au §8.
+
 ---
 
 ## 3. Structure du rapport (90 octets)
@@ -79,7 +84,8 @@ buf[1..91]  = rapport     les 90 octets décrits ci-dessous
 ```
  offset  taille  contenu
  ------  ------  -----------------------------------------------------
-   0       1     status                      observé : 0x00
+   0       1     ÉTAT                        0x00 en écriture ; porte le sens
+                                             dans les RÉPONSES — voir §8
    1       1     identifiant de transaction  observé : 0x9f
    2       2     paquets restants            observé : 0x0000
    4       1     type de protocole           observé : 0x00
@@ -107,9 +113,19 @@ let crc = report[2..88].iter().fold(0u8, |acc, b| acc ^ b);
 
 | Commande | Taille args | Rôle |
 |---|---|---|
-| `0x02` | `0x06` | définir l'effet |
+| `0x02` | `0x06`–`0x09` | définir l'effet |
 | `0x03` | `0x47` | écrire une rangée de couleurs |
 | `0x04` | `0x03` | définir la luminosité |
+| `0x80` | `0x03` | **lire** un descripteur — contient `06 16`, soit nos 6×22 |
+| `0x81` | `0x03` | **lire** une énumération `00`…`09`, sens non établi |
+| `0x82` | `0x03` | **lire l'effet courant** — voir §8 |
+| `0x84` | `0x03` | **lire la luminosité** |
+| `0x86` | `0x03` | **lire** `00 01`, sens non établi |
+
+Les deux premiers octets d'arguments valent `00 00` dans toutes nos captures. Un
+pilote tiers les nomme *variable storage* et *identifiant de LED* ; nous ne
+l'avons **pas vérifié** — et les réponses en lecture commencent souvent par `05`,
+ce qui irait dans le sens d'un identifiant de LED « rétroéclairage ». À établir.
 
 ### `0x0f` / `0x04` — luminosité
 
@@ -125,20 +141,37 @@ Observé systématiquement à `00 00 ff`. Émis avant et après chaque changemen
 args = 00 00 <effet> <param1> <param2> 00
 ```
 
-| Effet | Valeur | Paramètres |
-|---|---|---|
-| Off | `0x00` | — |
-| Spectrum Cycle | `0x03` | — |
-| Wave | `0x04` | `param1` direction (obs. `02`), `param2` vitesse (obs. `0x28`) |
-| **Direct / custom** | `0x08` | — |
+| Effet | Valeur | Taille | Paramètres | Pris en charge |
+|---|---|---|---|---|
+| Off | `0x00` | `0x06` | — | ✅ |
+| **Statique** | `0x01` | `0x09` | `args[5]=01`, puis R G B | ✅ |
+| **Respiration** | `0x02` | `0x09` | `args[5]=01`, puis R G B | ✅ |
+| Spectrum Cycle | `0x03` | `0x06` | — | ✅ |
+| Wave | `0x04` | `0x06` | `param1` direction (`00`–`02`), `param2` vitesse (obs. `0x28`) | ✅ |
+| Réactif | `0x05` | `0x09` | — | ❌ **refusé** |
+| Étoilé | `0x07` | `0x06`+ | — | ❌ **refusé** |
+| **Direct / custom** | `0x08` | `0x06` | — | ✅ |
+
+**La colonne « pris en charge » est mesurée, pas déduite** : on pose l'effet, puis
+on le relit par `0x0f`/`0x82` (§8). Les identifiants `0x05` et `0x07`, présents sur
+d'autres appareils de la marque, laissent l'effet **inchangé** sur celui-ci —
+la Vague posée juste avant restait relue à l'identique, paramètres compris.
+`0x06` n'a pas été essayé.
+
+> ⚠️ **Et l'écriture de ces deux effets refusés est pourtant « acceptée » : état
+> `0x02`.** C'est la démonstration en direct du danger décrit au §8 — l'appareil
+> valide le couple classe/commande, **pas la valeur d'un argument**. Un identifiant
+> d'effet est un argument. Aucun octet d'état ne remplacera donc une relecture.
 
 > **Correction d'une lecture initiale.** La septième trame de chaque cycle de mise à
 > jour n'est pas une commande de validation : c'est `0x02` avec effet `0x08`, donc le
 > **passage en mode custom**, émis après l'envoi des rangées.
 
-> **Non élucidé** : les bascules vers `Static` et `Breathing` n'ont produit aucune
-> trame `0x02` pendant la capture. Hypothèse — ces effets exigent une couleur associée
-> et la commande n'est émise que lorsqu'une couleur est fournie.
+> **Résolu.** `Static` et `Breathing` n'avaient produit aucune trame pendant la
+> capture, et un premier balayage les avait manqués — il les posait **sans
+> couleur**, donc en noir, ce qui ne se distingue pas d'un effet inexistant à
+> l'œil. Avec `args[5]=01` suivi d'un triplet RGB, les deux répondent et se
+> relisent.
 
 ### `0x0f` / `0x03` — écriture d'une rangée
 
@@ -255,10 +288,14 @@ contre l'appareil.
 |---|---|---|---|
 | 0 | `Direct` | `0x08` | **l'hôte** |
 | 1 | `Off` | `0x00` | — |
-| 2 | `Static` | non capturé | firmware |
-| 3 | `Breathing` | non capturé | firmware |
+| 2 | `Static` | `0x01` + RGB | firmware |
+| 3 | `Breathing` | `0x02` + RGB | firmware |
 | 4 | `Spectrum Cycle` | `0x03` | firmware |
 | 5 | `Wave` | `0x04` + direction + vitesse | firmware |
+
+Les six modes du SDK correspondent donc exactement aux six identifiants que
+l'appareil accepte — ni plus (`0x05` et `0x07` sont refusés), ni moins. La
+concordance vaut confirmation croisée des deux relevés.
 
 Les effets firmware **survivent à l'extinction du logiciel hôte** et ne coûtent aucun
 temps processeur. Le mode `Direct` impose une poussée continue d'images — c'est le
@@ -267,7 +304,113 @@ doit pouvoir tourner sans interface.
 
 ---
 
-## 8. Reproduire le relevé
+## 8. Lire l'appareil — `GET_REPORT` et la classe `0x00`
+
+**Le périphérique répond.** C'est ce qui manquait pour distinguer une écriture
+*acceptée* d'une écriture *comprise* — la seule chose qui sépare aujourd'hui un
+clavier qui obéit d'un clavier qui jette nos trames en silence.
+
+### Transport de lecture
+
+`HidD_GetFeature` sous Windows, `hid_get_feature_report` via hidapi. **Même
+interface MI_03, même tampon de 91 octets** que l'écriture. On écrit la commande,
+puis on relit : la réponse réutilise la structure du §3, avec deux différences
+utiles — l'octet 0 porte un **état**, et les octets 6 et 7 **renvoient en écho**
+la classe et la commande, ce qui permet de vérifier qu'on lit bien la réponse
+qu'on attend et non la précédente.
+
+### L'octet d'état (offset 0)
+
+| Valeur | Sens |
+|---|---|
+| `0x00` | aucune |
+| `0x01` | occupé |
+| `0x02` | **compris** |
+| `0x03` | échec |
+| `0x04` | expiré |
+| `0x05` | **non pris en charge** |
+
+**Vérifié qu'il discrimine réellement**, plutôt que supposé : une classe
+inexistante (`0xee`) et une commande inexistante sur une classe valide
+(`0x0f`/`0xee`) rendent toutes deux `0x05`, là où une commande valide rend
+`0x02`.
+
+⚠️ **Limite mesurée** : une taille d'arguments aberrante sur une commande valide
+rend quand même `0x02`. L'appareil valide le **couple classe/commande**, pas la
+cohérence de ses arguments. Un contrôle de compatibilité ne peut donc affirmer
+que « cette commande existe », jamais « mes arguments sont bons ».
+
+### Classe `0x00` — informations
+
+Relevé le 12/09/2026 sur notre exemplaire, micrologiciel v1.5.
+
+| Commande | Réponse | Sens | Établi par |
+|---|---|---|---|
+| `0x81` | `01 05` | **version du micrologiciel — 1.05** | concordance avec la version déclarée par ailleurs |
+| `0x82` | *(masqué)* | **numéro de série** (15 car. ASCII) | format, et stabilité entre lectures |
+| `0x83` | `01 25` | **inconnu** | inconnu d'OpenRazer également |
+| `0x84` | `00 00` | **mode de l'appareil** — `0x00` normal, `0x03` pilote | voir ci-dessous |
+| `0x85` | `01 00` | **fréquence d'interrogation** — `01`=1000 Hz, `02`=500, `08`=125 | |
+| `0x86` | `04 80` | **disposition nationale** — `04` = `fr_FR` | vérifié : notre `layout.rs` est bien AZERTY |
+| `0x87` | `01 05` | **inconnu** | inconnu d'OpenRazer, « valeurs de retour variables » |
+| `0x80`, `0x88`–`0x8f` | — | `0x05` non pris en charge | |
+
+Le numéro de série est **volontairement tronqué ici** : il identifie un exemplaire
+précis.
+
+⚠️ **Le descripteur USB ne porte aucun numéro de série** (`serial_number()` est
+vide sur les quatre interfaces) — seule cette commande en donne un. Et
+`release_number` vaut `0x0200` sur tout le composite alors que le micrologiciel
+est en v1.5 : **le `bcdDevice` est une révision matérielle, pas une version de
+micrologiciel.** Ne pas les confondre.
+
+### Classe `0x0f` — relire l'éclairage
+
+C'est la partie la plus utile du sens retour : **elle permet de vérifier un effet
+sans dépendre de l'œil**, ce qui manquait cruellement au premier balayage des
+identifiants.
+
+| Commande | Réponse observée | Sens |
+|---|---|---|
+| `0x82` | `00 00 <effet> <p1> <p2>` | **effet courant**, paramètres compris |
+| `0x84` | `00 00 ff` | **luminosité courante** |
+| `0x80` | `05 19 03 06 16` | descripteur — `06 16` = **6 rangées × 22 colonnes**, notre matrice |
+| `0x81` | `05 00 01 02 03 04 05 06 07 08 09` | énumération de 10 valeurs, **sens non établi** |
+| `0x86` | `00 01` | non établi |
+
+⚠️ **`0x81` n'est PAS la liste des effets pris en charge**, même si elle en a
+l'air : elle contient `05` et `07`, que l'appareil refuse en pratique. C'est
+exactement le genre de coïncidence qu'il faut tester au lieu de conclure.
+
+**Méthode de vérification d'un effet** : poser l'effet, attendre ~150 ms, relire
+par `0x82`. Si l'identifiant relu diffère de celui posé, l'appareil a **ignoré**
+la commande — quand bien même l'écriture aurait rendu `0x02`.
+
+### Le mode de l'appareil — et pourquoi candeo n'y touche pas
+
+`0x00`/`0x84` rend `0x00`, soit **mode normal**, et notre éclairage custom
+fonctionne parfaitement ainsi. OpenRazer, lui, bascule les appareils en **mode
+pilote** (`0x03`, via `0x00`/`0x04`) à l'initialisation de son démon.
+
+La raison est documentée chez eux, et elle explique pourquoi **nous ne devons pas
+l'imiter** : en mode pilote, le micrologiciel **cesse de traiter certaines
+touches lui-même** et se contente d'émettre des évènements HID que l'hôte est
+censé reprendre. Si personne n'écoute, ces touches ne font plus rien — cas
+constaté sur un Basilisk V3, dont le cycle DPI et le verrou de molette sont
+devenus inertes, corrigé en repassant en mode normal.
+
+OpenRazer est un **pilote complet** : il gère les touches macro, le DPI, les
+profils, donc il a besoin que le micrologiciel lui cède la main. **candeo ne
+pilote que l'éclairage.** Basculer en mode pilote ne nous apporterait rien et
+casserait des touches que l'appareil gère très bien seul.
+
+> **Décision : ne jamais écrire `0x00`/`0x04`.** À porter comme mise en garde
+> explicite dans le SDK d'appareils (#34) — c'est typiquement l'étape qu'un
+> contributeur recopierait d'un pilote existant sans voir ce qu'elle coûte.
+
+---
+
+## 9. Reproduire le relevé
 
 ```powershell
 # 1. Repérer le hub portant le clavier
@@ -298,19 +441,29 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 
 ---
 
-## 9. Reste à établir
+## 10. Reste à établir
 
-- [ ] Commandes exactes pour `Static` et `Breathing`
-- [ ] Signification des arguments 0 et 1 (offsets 8 et 9), constants à `0x00`
+- [x] **Contenu des réponses du périphérique (`GET_REPORT`)** — §8
+- [x] **Lire la version du micrologiciel** — `0x00`/`0x81`, §8
+- [x] **Obtenir un numéro de série** — `0x00`/`0x82`, le descripteur USB n'en porte aucun
+- [x] **Commandes exactes pour `Static` et `Breathing`** — `0x01` et `0x02`, taille `0x09`, `args[5]=01` puis RGB, §4
+- [x] **Relire l'effet courant** — `0x0f`/`0x82`, ce qui permet de vérifier sans l'œil
+- [x] **Quels identifiants d'effet l'appareil accepte** — les six du SDK ; `0x05` et `0x07` sont refusés
+- [ ] Signification des arguments 0 et 1 (offsets 8 et 9), constants à `0x00` — un pilote tiers les nomme *variable storage* et *identifiant de LED*, non vérifié
 - [ ] L'identifiant de transaction (`0x9f`) est-il vérifié par l'appareil ?
-- [ ] Plage et effet réels des paramètres direction et vitesse de `Wave`
+- [ ] Plage réelle de la vitesse de `Wave` ; la direction est bornée à `00`–`02`
+- [ ] Identifiant d'effet `0x06` : jamais essayé
 - [ ] Débit maximal accepté avant décrochage
-- [ ] Contenu des réponses du périphérique (`GET_REPORT`)
 - [ ] L'appareil accepte-t-il un rapport plus court que 90 octets ?
+- [ ] Sens de `0x0f`/`0x81` (énumération `00`…`09`) et `0x0f`/`0x86` (`00 01`)
+- [ ] Les trois premiers octets de `0x0f`/`0x80` (`05 19 03`), dont les deux suivants donnent bien 6×22
+- [ ] Sens de `0x00`/`0x83` (`01 25`) et `0x00`/`0x87` (`01 05`) — inconnus d'OpenRazer aussi
+- [ ] Second octet de la disposition, `0x86` → `04 80` : que vaut `0x80` ?
+- [ ] Une entrée HID fantôme `interface -1`, `release_number 0x0101`, sans nom de produit, sur les mêmes VID/PID — à écarter de l'énumération ou à comprendre
 
 ---
 
-## 10. Journal
+## 11. Journal
 
 | Date | Événement |
 |---|---|
@@ -321,8 +474,14 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 | 2026-09-12 | **Jeu de commandes complet** : `0x02` effet, `0x03` rangée, `0x04` luminosité |
 | 2026-09-12 | **Validation en écriture directe** via `HidD_SetFeature`, sans logiciel tiers. Tampon de 91 octets et écriture partielle de rangée confirmés |
 | 2026-09-12 | Clarification 132 / 106 et correspondance index → touche |
+| 2026-09-12 | **Le périphérique répond.** `GET_REPORT` relevé : octet d'état, écho classe/commande, et vérification qu'un `0x05` distingue bien une commande inconnue d'une commande valide |
+| 2026-09-12 | **Classe `0x00` relevée** : micrologiciel (`0x81`), numéro de série (`0x82`), mode (`0x84`), fréquence d'interrogation (`0x85`), disposition nationale (`0x86`). `0x83` et `0x87` restent inconnus |
+| 2026-09-12 | Établi que `release_number` (`bcdDevice`, `0x0200`) **n'est pas** la version du micrologiciel (v1.5), et que le descripteur USB ne porte aucun numéro de série |
+| 2026-09-12 | **Décision : ne jamais basculer en mode pilote.** Il ferait cesser au micrologiciel le traitement de certaines touches, sans contrepartie pour un contrôleur d'éclairage |
+| 2026-09-12 | **`0x0f`/`0x82` relit l'effet courant** — vérification d'un effet sans dépendre de l'œil. `Static` (`0x01`) et `Breathing` (`0x02`) enfin établis : ils exigent une couleur, et le premier balayage les posait en noir |
+| 2026-09-12 | **Les identifiants `0x05` et `0x07` sont refusés** par cet appareil, alors que l'écriture rend `0x02`. Démonstration en direct qu'un octet d'état ne valide pas les arguments |
 
-## 11. Captures
+## 12. Captures
 
 | Fichier | Contenu |
 |---|---|

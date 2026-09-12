@@ -16,6 +16,9 @@ use storage::{DeviceState, Settings};
 
 mod builtins;
 mod runtime;
+/// Sondes matérielles, toutes `#[ignore]` — voir le module.
+#[cfg(test)]
+mod sonde;
 mod storage;
 
 /// Gabarits connus. Un seul pour l'instant.
