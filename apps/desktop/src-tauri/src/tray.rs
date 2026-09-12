@@ -260,8 +260,12 @@ fn pilotes(settings: &storage::Settings) -> Vec<Pilote> {
         .collect()
 }
 
-/// Le menu, bâti sur l'état **courant**.
-fn menu(app: &AppHandle) -> CmdResult<Menu<Wry>> {
+/// Les sous-menus des appareils pilotés, bâtis sur l'état **courant**.
+///
+/// Isolé du reste du menu parce que c'est la seule part qui dépende du disque et
+/// de l'USB : voir [`menu`], qui traite son échec comme une dégradation et non
+/// comme un refus.
+fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
     let store = storage::store(app)?;
     let settings = store.read_settings()?;
     let bibliotheque = store.list_effects()?;
@@ -269,20 +273,51 @@ fn menu(app: &AppHandle) -> CmdResult<Menu<Wry>> {
     // commande `engine_status` que lit la fenêtre.
     let moteur = app.state::<AppState>().engine.status();
 
+    pilotes(&settings)
+        .iter()
+        .map(|pilote| sous_menu(app, pilote, &bibliotheque, &moteur))
+        .collect()
+}
+
+/// Le menu, et ce qui a manqué pour le bâtir en entier.
+///
+/// Le second membre est `Some` quand le menu est **dégradé** : l'icône est là,
+/// « Ouvrir la fenêtre » et « Quitter candeo » aussi, mais la liste des appareils
+/// a manqué. C'est délibérément une dégradation et non une erreur — les deux
+/// articles qui restent sont ceux qui ne dépendent de rien, et ce sont eux dont
+/// on a le plus besoin quand quelque chose ne va pas. Refuser de poser l'icône
+/// pour un `settings.json` illisible rendrait en prime la croix à nouveau
+/// mortelle pour les effets, le temps d'une session entière.
+///
+/// Et le dire **dans le menu** n'est pas un pis-aller : en `release` le binaire
+/// est compilé sans console, et l'icône est précisément l'endroit où un échec
+/// peut se voir sans en ouvrir une.
+fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
     let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
-    let pilotes = pilotes(&settings);
-    if pilotes.is_empty() {
-        // Une section vide se lirait comme une panne de l'icône. Nommer
-        // l'absence, et dire où se prend la décision, coûte une ligne.
-        articles.push(Box::new(muet(
-            app,
-            "Aucun appareil piloté — ouvrez la fenêtre pour en adopter un",
-        )?));
-    }
-    for pilote in &pilotes {
-        articles.push(Box::new(sous_menu(app, pilote, &bibliotheque, &moteur)?));
-    }
+    let degrade = match appareils(app) {
+        Ok(sous_menus) => {
+            if sous_menus.is_empty() {
+                // Une section vide se lirait comme une panne de l'icône. Nommer
+                // l'absence, et dire où se prend la décision, coûte une ligne.
+                articles.push(Box::new(muet(
+                    app,
+                    "Aucun appareil piloté — ouvrez la fenêtre pour en adopter un",
+                )?));
+            }
+            for appareil in sous_menus {
+                articles.push(Box::new(appareil));
+            }
+            None
+        }
+        Err(e) => {
+            articles.push(Box::new(muet(
+                app,
+                &format!("Appareils indisponibles — {e}"),
+            )?));
+            Some(e)
+        }
+    };
 
     articles.push(Box::new(separateur(app)?));
     articles.push(Box::new(article(
@@ -303,7 +338,8 @@ fn menu(app: &AppHandle) -> CmdResult<Menu<Wry>> {
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = articles.iter().map(AsRef::as_ref).collect();
-    Menu::with_items(app, &refs).map_err(|e| format!("menu non assemblé : {e}"))
+    let assemble = Menu::with_items(app, &refs).map_err(|e| format!("menu non assemblé : {e}"))?;
+    Ok((assemble, degrade))
 }
 
 /// Le sous-menu d'un appareil : son effet, sa sortie, son extinction.
@@ -580,6 +616,10 @@ fn eteindre(app: &AppHandle, device: DeviceRef) {
 /// Un échec ici ne doit pas empêcher l'application de démarrer : il la ramène à
 /// ce qu'elle était avant cette issue — une fenêtre, et la croix pour la quitter.
 /// C'est [`installee`] qui porte cette bascule, et [`crate::run`] qui la lit.
+///
+/// Restent les échecs qui n'en sont pas : un `settings.json` illisible ou une
+/// énumération USB en panne posent l'icône quand même, avec un menu qui le dit.
+/// Voir [`menu`].
 pub(crate) fn installer(app: &AppHandle) {
     match poser(app) {
         Ok(()) => {
@@ -605,10 +645,15 @@ fn poser(app: &AppHandle) -> CmdResult<()> {
         .cloned()
         .ok_or_else(|| "aucune icône d'application dans le paquet".to_string())?;
 
+    // Le menu de départ, dégradation comprise ; ce qui a manqué est consigné par
+    // le même chemin que les suivants, pour n'en garder que le début.
+    let (depart, degrade) = menu(app)?;
+    consigner(degrade.as_deref());
+
     TrayIconBuilder::with_id(ICONE)
         .icon(icone)
         .tooltip("candeo")
-        .menu(&menu(app)?)
+        .menu(&depart)
         // Le clic gauche ouvre la fenêtre, le clic droit ouvre le menu : c'est la
         // convention de la zone de notification, et elle met « Ouvrir la
         // fenêtre » à un seul clic. Sous Linux aucun clic n'est signalé, seul le
@@ -653,13 +698,17 @@ pub(crate) fn rafraichir(app: &AppHandle) {
         return;
     };
 
-    let echec = menu(app)
-        .and_then(|menu| {
-            icone
-                .set_menu(Some(menu))
-                .map_err(|e| format!("menu non remplacé : {e}"))
-        })
-        .err();
+    let echec = match menu(app) {
+        // Un menu dégradé est bel et bien posé : il porte de quoi ouvrir la
+        // fenêtre et de quoi quitter, et il **dit** ce qui a manqué. Ce que le
+        // journal en retient, c'est le début de la panne, pas un survol sur deux.
+        Ok((menu, degrade)) => icone
+            .set_menu(Some(menu))
+            .map_err(|e| format!("menu non remplacé, l'ancien reste affiché : {e}"))
+            .err()
+            .or(degrade),
+        Err(e) => Some(e),
+    };
     consigner(echec.as_deref());
 }
 
@@ -673,10 +722,10 @@ fn consigner(echec: Option<&str>) {
 
     match bascule {
         journal::Bascule::Commence => tracing::error!(
-            "menu de la zone de notification figé sur sa version précédente : {}",
+            "menu de la zone de notification incomplet : {}",
             echec.unwrap_or_default()
         ),
-        journal::Bascule::Retabli => tracing::info!("menu de la zone de notification refait"),
+        journal::Bascule::Retabli => tracing::info!("menu de la zone de notification rétabli"),
         journal::Bascule::Rien => {}
     }
 }
