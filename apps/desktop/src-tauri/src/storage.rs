@@ -704,6 +704,15 @@ impl Store {
     /// été essayé puis retiré — il défendait contre un entrelacement que rien ne
     /// produit, et laissait un fichier derrière lui à chaque échec, là où un nom
     /// fixe est simplement réécrit à la tentative suivante.
+    ///
+    /// ⚠️ **Ce raisonnement vaut à l'intérieur d'un processus, pas entre deux.**
+    /// Deux candeo écriraient dans le *même* `settings.json.tmp`, et l'un
+    /// renommerait ce que l'autre est en train d'écrire : le renommage resterait
+    /// atomique, mais ce qu'il publierait ne le serait plus — des réglages
+    /// tronqués, ou ceux du voisin. Ce qui tient ce nom fixe, c'est donc
+    /// [`crate::single_instance`], et les deux décisions ne se défont pas l'une
+    /// sans l'autre : rendre candeo multi-instance obligerait à reprendre ce nom,
+    /// et le reprendre sans cela n'achèterait rien.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
             return Err("chemin de réglages sans dossier parent".into());
