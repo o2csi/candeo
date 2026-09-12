@@ -492,10 +492,15 @@ boucle en cours : celle-ci écrit sur disque et ne change rien à ce qui tourne.
 d'un côté, un seul quand le curseur s'arrête de l'autre — ni la même destination.
 
 Une commande dédiée plutôt qu'un `set_settings` depuis la fenêtre : la lecture,
-la modification et l'écriture se font côté Rust, d'un seul tenant. Un front qui
-relirait, modifierait puis réécrirait tout le fichier écraserait au passage une
-adoption décidée entre-temps — et ce n'est pas un cas d'école, `adopt_device`
-écrit `settings.json`.
+la modification et l'écriture se font côté Rust, d'un seul tenant.
+
+Ce n'est pas une précaution contre un entrelacement — les commandes synchrones
+s'exécutent sur le fil principal, elles ne se chevauchent pas. C'est une
+précaution contre une **copie périmée** : la fenêtre lit les réglages une fois,
+au montage de l'écran, et un `set_settings` posté au premier mouvement de curseur
+renverrait cet instantané tel quel, effaçant ce qui aurait été décidé depuis. Ce
+n'est pas un cas d'école — `adopt_device` écrit `settings.json`, et adopter un
+appareil est justement ce qu'on fait entre deux réglages.
 
 Une table `params` **vide** efface l'entrée : c'est « rétablir les valeurs
 déclarées ». L'effet repart alors de son manifeste, y compris si une version

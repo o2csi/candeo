@@ -52,9 +52,6 @@ pub const EFFECTS_API_VERSION: u32 = 1;
 /// Longueur maximale d'un identifiant d'effet, donc d'un nom de dossier.
 const MAX_ID_LEN: usize = 64;
 
-/// Distingue deux fichiers temporaires de réglages écrits en même temps.
-static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 const SOURCE_FILE: &str = "source.ts";
 const JS_FILE: &str = "effect.js";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -687,11 +684,12 @@ impl Store {
     /// d'écriture laisserait sinon des réglages tronqués, donc une application
     /// qui ne démarre plus.
     ///
-    /// Le nom du temporaire est **unique**, et non `settings.json.tmp` : deux
-    /// écritures qui se chevauchent — un réglage retenu pendant qu'une adoption
-    /// se décide — écriraient sinon dans le même fichier, et le renommage du
-    /// second publierait un mélange des deux. Le renommage, lui, reste atomique :
-    /// le dernier arrivé gagne, ce qui est le pire cas acceptable.
+    /// Un seul nom de temporaire, et il peut le rester : les commandes Tauri
+    /// **synchrones** s'exécutent sur le fil principal, donc deux séquences
+    /// lire-modifier-écrire ne s'entrelacent pas. Un nom unique par écriture a
+    /// été essayé puis retiré — il défendait contre un entrelacement que rien ne
+    /// produit, et laissait un fichier derrière lui à chaque échec, là où un nom
+    /// fixe est simplement réécrit à la tentative suivante.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
             return Err("chemin de réglages sans dossier parent".into());
@@ -700,10 +698,7 @@ impl Store {
 
         let json = serde_json::to_string_pretty(settings)
             .map_err(|e| format!("réglages non sérialisables : {e}"))?;
-        let rang = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp = self
-            .settings_file
-            .with_extension(format!("json.{}.{rang}.tmp", std::process::id()));
+        let tmp = self.settings_file.with_extension("json.tmp");
         write(&tmp, &json)?;
         fs::rename(&tmp, &self.settings_file).map_err(|e| {
             format!(
@@ -873,10 +868,16 @@ pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
 /// Retient les réglages d'un effet pour un appareil, sans toucher au reste.
 ///
 /// Une commande dédiée plutôt qu'un `set_settings` depuis l'interface : la
-/// lecture, la modification et l'écriture se font ici, d'un seul tenant. Un
-/// front qui relirait, modifierait puis réécrirait tout le fichier écraserait au
-/// passage une adoption décidée entre-temps — et ce n'est pas un cas d'école, le
-/// Rust écrit `settings.json` à chaque `adopt_device`.
+/// lecture, la modification et l'écriture se font ici, d'un seul tenant.
+///
+/// Ce n'est pas une précaution contre un entrelacement — les commandes
+/// synchrones s'exécutent sur le fil principal, elles ne se chevauchent pas.
+/// C'est une précaution contre une **copie périmée** : la fenêtre lit les
+/// réglages une fois, au montage de l'écran, et un `set_settings` posté au
+/// premier mouvement de curseur renverrait cet instantané tel quel, effaçant
+/// tout ce qui aurait été décidé depuis. Ce n'est pas un cas d'école — le Rust
+/// écrit `settings.json` à chaque `adopt_device`, et adopter un appareil est
+/// justement ce qu'on fait entre deux réglages.
 ///
 /// Elle ne change **rien** à l'effet en cours : ajuster à chaud, c'est
 /// [`crate::runtime::set_effect_params`]. Les deux sont séparées parce qu'elles

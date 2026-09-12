@@ -161,6 +161,14 @@ const fields = computed<Field[]>(() =>
   }),
 )
 
+/**
+ * Ce que la région d'annonce dit, ou rien.
+ *
+ * Vide quand l'effet ne déclare aucun paramètre : le message d'absence est là au
+ * chargement de l'écran, il n'a rien d'un changement à signaler.
+ */
+const announced = computed(() => (fields.value.length ? (props.frozen ?? '') : ''))
+
 /** Vrai dès qu'un réglage s'écarte du manifeste : c'est ce qu'on peut rétablir. */
 const touched = computed(() =>
   Object.entries(props.specs).some(([id, spec]) => {
@@ -179,6 +187,20 @@ function onNumber(id: string, e: Event) {
 
 function onColor(id: string, e: Event) {
   emit('change', id, fromHex(input(e).value))
+}
+
+// La fin d'un geste relit la valeur avant de dire « écris ». Émettre `commit`
+// seul supposerait qu'un `input` vient de passer — vrai pour un glissement, pas
+// garanti pour un sélecteur de couleur, dont la boîte de dialogue système peut
+// ne rendre son verdict qu'au `change`.
+function onNumberEnd(id: string, e: Event) {
+  onNumber(id, e)
+  emit('commit')
+}
+
+function onColorEnd(id: string, e: Event) {
+  onColor(id, e)
+  emit('commit')
 }
 
 // Une case et une liste n'ont pas d'état intermédiaire : leur `change` est à la
@@ -203,25 +225,30 @@ function onChoice(id: string, e: Event) {
   <section class="settings">
     <h2>Réglages</h2>
 
+    <!--
+      La région d'annonce, **montée en permanence** — hors de tout `v-if`, y
+      compris celui qui distingue « aucun paramètre » du formulaire.
+
+      Un lecteur d'écran n'annonce de façon fiable qu'une région vivante déjà
+      présente dans le document, dont le contenu change ; insérée en même temps
+      que son texte, elle reste souvent muette. La placer sous le `v-else` la
+      remontait à chaque passage d'un effet sans paramètre à un effet qui en
+      déclare — exactement le cas qu'elle devait servir.
+
+      Elle ne coûte rien en mise en page : `.sr-only` est en `position: absolute`,
+      donc ce n'est même pas un élément flexible et aucun espacement ne s'ajoute.
+    -->
+    <p class="sr-only" role="status">{{ announced }}</p>
+
     <p v-if="!fields.length" class="hint">{{ empty }}</p>
 
     <template v-else>
       <!--
         La phrase visible, et rien de plus : `aria-hidden` parce que la région
-        d'annonce ci-dessous porte déjà le même texte, et qu'il serait lu deux
+        d'annonce ci-dessus porte déjà le même texte, et qu'il serait lu deux
         fois.
       -->
       <p v-if="frozen" class="hint frozen" aria-hidden="true">{{ frozen }}</p>
-
-      <!--
-        La région d'annonce, **montée en permanence**.
-        Un lecteur d'écran n'annonce de façon fiable qu'une région vivante déjà
-        présente dans le document, dont le contenu change ; insérée en même temps
-        que son texte, elle reste souvent muette. Elle est hors flux — `.sr-only`
-        est en `position: absolute`, donc elle n'est même pas un élément flexible
-        et n'ajoute aucun espacement.
-      -->
-      <p class="sr-only" role="status">{{ frozen ?? '' }}</p>
 
       <fieldset class="fields" :disabled="frozen !== null">
         <div v-for="f in fields" :key="f.id" class="field">
@@ -247,7 +274,7 @@ function onChoice(id: string, e: Event) {
             :step="f.step"
             :value="f.value"
             @input="onNumber(f.id, $event)"
-            @change="emit('commit')"
+            @change="onNumberEnd(f.id, $event)"
           />
 
           <!--
@@ -261,7 +288,7 @@ function onChoice(id: string, e: Event) {
             type="color"
             :value="f.hex"
             @input="onColor(f.id, $event)"
-            @change="emit('commit')"
+            @change="onColorEnd(f.id, $event)"
           />
 
           <input
@@ -274,19 +301,21 @@ function onChoice(id: string, e: Event) {
           />
 
           <!--
-            La clé porte les options, et c'est elle qui corrige un piège réel :
-            deux effets peuvent déclarer un `choice` de même identifiant avec des
-            options différentes. Le `v-for` réutiliserait alors le même `<select>`
-            et, la valeur courante n'ayant pas changé, Vue ne réécrirait pas
-            `el.value` — les `<option>` seraient remplacés et le navigateur
+            `:value` suffit, et ce n'est pas évident. Deux effets peuvent
+            déclarer un `choice` de même identifiant avec des options
+            différentes : le `v-for` réutilise alors ce `<select>`, et si la
+            valeur courante est identique, on pourrait croire que rien n'est
+            réécrit — les `<option>` seraient remplacés et le navigateur
             retomberait sur le premier, affichant une sélection que rien dans
-            l'état ne dit. Une clé qui change force un élément neuf, dont la
-            valeur est posée après ses enfants.
+            l'état ne dit. Vue l'évite deux fois : les enfants sont rendus avant
+            les propriétés, et `value` est **toujours** repassée, même inchangée,
+            puis comparée au `el.value` vivant et non à l'ancienne propriété.
+            Une clé de secours a été essayée puis retirée : elle ne défendait
+            rien, et deux listes d'options distinctes pouvaient la partager.
           -->
           <select
             v-else
             :id="`${uid}-${f.id}`"
-            :key="f.options.join(' ')"
             class="choice"
             :value="f.value"
             @change="onChoice(f.id, $event)"
