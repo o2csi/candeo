@@ -30,6 +30,18 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-candeo.rules": "../../../packaging/linux/60-candeo.rules"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/lib/udev/rules.d/60-candeo.rules": "../../../packaging/linux/60-candeo.rules"
+        }
+      }
+    }
   }
 }

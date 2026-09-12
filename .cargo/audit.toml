@@ -10,17 +10,19 @@ ignore = [
     #
     # Pourquoi ignoré, au 12/09/2026 :
     #
-    # 1. Le code n'est jamais compilé. `glib` arrive par la pile GTK3, que
-    #    Tauri n'utilise que sous Linux ; `cargo tree --invert glib` est vide
-    #    sur la cible Windows et ne renvoie un résultat qu'avec `--target all`.
-    #    Nous ne produisons pour l'instant que des binaires Windows.
+    # 1. ~~Le code n'est jamais compilé.~~ **Plus vrai depuis le job `linux`.**
+    #    `glib` arrive par la pile GTK3, que Tauri n'utilise que sous Linux :
+    #    `cargo tree --invert glib` reste vide sur la cible Windows, mais le job
+    #    `linux` de la CI compile désormais cette pile, et les paquets deb et rpm
+    #    qu'il produit l'embarquent. Le point 1 est donc tombé — restent 2 et 3,
+    #    qui suffisent.
     # 2. Aucune version corrigée n'est atteignable. Tauri 2.11.5 — la dernière —
     #    épingle gtk 0.18 ; et gtk 0.19, la dernière publiée de gtk3-rs, reste
     #    sur glib 0.19, donc toujours dans la plage vulnérable (< 0.20). Le
     #    correctif vit dans la branche gtk4, où Tauri n'est pas.
     # 3. Nous n'appelons pas `VariantStrIter`, ni directement ni indirectement.
     #
-    # À rouvrir dès que l'une des trois cesse d'être vraie — en particulier au
-    # premier build Linux.
+    # À rouvrir dès que l'un des deux points restants cesse d'être vrai — en
+    # pratique, dès que Tauri passera à gtk4 ou publiera un correctif glib.
     "RUSTSEC-2024-0429",
 ]

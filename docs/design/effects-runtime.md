@@ -193,22 +193,112 @@ fonctionnalité y est la même. Ce qui change d'un système à l'autre :
 
 | | Windows | Linux |
 |---|---|---|
-| Dorsale par défaut | hidapi C (`hid.dll`) | `linux-static-hidraw` (compile du C) |
-| Dorsale pur Rust | `windows-native` | `linux-native` (udev + nix) |
+| Dorsale par défaut | hidapi C (`hid.dll`) | `linux-static-hidraw` (compile du C, lie `libudev`) |
+| Dorsale pur Rust | `windows-native` | `linux-native` (crate `udev` + `nix`) |
 | Accès non privilégié | immédiat | **règle udev requise** |
 
-Sous Linux, `/dev/hidraw*` n'est pas accessible à l'utilisateur par défaut. Il
-faudra livrer une règle :
+> **Compilé, ou supposé ?** Le dépôt distingue les deux. Un job `linux` de la
+> CI construit l'espace de travail complet sous `ubuntu-latest` : ce qui y passe
+> est *compilé*. Le reste — tout ce qui exige un clavier branché sur une machine
+> Linux — reste *supposé*, et est signalé comme tel ci-dessous.
+
+### Ce que la CI établit
+
+Le job `linux` (`.github/workflows/ci.yml`) fait, dans cet ordre : dépendances
+système Debian de Tauri 2 plus `libudev-dev`, `cargo check --workspace
+--all-targets`, `cargo test --workspace`, puis `tauri build --debug --bundles
+deb,rpm` et lecture des deux paquets produits.
+
+Il établit donc que :
+
+- la dorsale `linux-static-hidraw` se compile et se lie ;
+- aucune partie de l'espace de travail — `candeo-protocol`, `candeo-device`,
+  `candeo-desktop` — ne dépend de Windows pour compiler ;
+- les tests passent à l'identique sur un système de fichiers sensible à la
+  casse ;
+- l'application s'empaquette en `.deb` et en `.rpm` ;
+- la règle udev est **réellement présente** dans les deux, à
+  `/usr/lib/udev/rules.d/60-candeo.rules`. La vérification lit les paquets
+  (`dpkg-deb -c`, `rpm -qpl`), elle ne relit pas la configuration — `deb` et
+  `rpm` étant deux déclarations distinctes, n'en vérifier qu'une laisserait
+  l'autre se tromper en silence.
+
+### Ce qui reste supposé
+
+Il n'y a pas d'USB derrière un coureur GitHub. Restent à confirmer sur une
+machine Linux munie du clavier :
+
+- que `send_feature_report` aboutisse par hidraw sur ce périphérique — l'API est
+  la même, le chemin noyau ne l'est pas ;
+- que `interface_number` distingue bien les interfaces du composite. Le code
+  choisit son périphérique là-dessus (§ `Keyboard::open`), et ouvrir la mauvaise
+  interface donne, sous Windows, un handle valide sur lequel toute écriture
+  échoue. La dorsale hidraw lit l'attribut `bInterfaceNumber` du parent USB, ce
+  qui devrait donner la même valeur — *devrait* ;
+- que `app_data_dir()` et `app_config_dir()` tombent bien dans
+  `~/.local/share/com.oorabona.candeo` et `~/.config/com.oorabona.candeo`. C'est
+  ce que documente Tauri, et le code ne construit aucun chemin lui-même (§3),
+  mais rien ici ne l'a observé.
+
+### La règle udev, et qui la livre
+
+`/dev/hidraw*` est créé en `0600 root:root`. La règle est dans le dépôt à
+[`packaging/linux/60-candeo.rules`](../../packaging/linux/60-candeo.rules) :
 
 ```udev
-# /etc/udev/rules.d/60-candeo.rules
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", MODE="0660", TAG+="uaccess"
 ```
 
-Les dorsales `*-native` retireraient toute dépendance à un compilateur C, ce qui
-simplifierait la compilation croisée. À évaluer au premier build Linux — pas
-avant : elles ne sont pas la valeur par défaut du greffon, et le défaut
-fonctionne.
+Trois points qui ne sont pas des détails :
+
+1. **`uaccess` plutôt qu'un groupe.** systemd-logind pose une ACL pour
+   l'utilisateur de la session locale active et la retire à la déconnexion. Un
+   groupe fixe (`plugdev`) donnerait l'accès en permanence, y compris à une
+   session distante.
+2. **Le préfixe 60.** La règle qui applique l'ACL est `70-uaccess.rules` : un
+   fichier numéroté au-dessus de 70 poserait le marqueur trop tard et ne ferait
+   rien.
+3. **`/usr/lib/udev/rules.d/`, pas `/etc/`.** Le paquet est un fournisseur ;
+   `/etc/udev/rules.d/` appartient à l'administrateur, qui doit pouvoir nous
+   contredire. C'est aussi là qu'il faut copier le fichier à la main quand on
+   lance candeo depuis les sources.
+
+La livraison passe par `bundle.linux.deb.files` et `bundle.linux.rpm.files` de
+`tauri.conf.json`. La clé est le chemin **dans le paquet**, la valeur le chemin
+de la source **relatif à `tauri.conf.json`** — pas l'inverse.
+
+### Dorsales `*-native` : évaluées, non adoptées
+
+L'intention était de retirer la dépendance à un compilateur C pour simplifier la
+compilation croisée. La lecture du `build.rs` d'`hidapi` 2.6.7 ne la soutient
+pas :
+
+- **Le gain est partiel.** `linux-static-hidraw` fait
+  `pkg_config::probe_library("libudev")` ; `linux-native` s'appuie sur la crate
+  `udev`, c'est-à-dire une liaison vers cette même `libudev`. Passer à la
+  dorsale native ne retire donc pas `libudev-dev` de la liste des dépendances,
+  seulement l'appel à `cc`. Seule `linux-native-basic-udev` s'en affranchirait,
+  via `basic-udev` — une crate en 0.1.
+- **Le compilateur C reste requis de toute façon.** `rquickjs` compile les
+  sources C de QuickJS ; `cc` est dans `Cargo.lock` pour cette raison seule. La
+  dépendance qu'on voulait supprimer ne partirait pas.
+- **La compilation croisée n'est pas simplifiée pour l'application.** Sous
+  Linux, Tauri se lie à webkit2gtk, GTK 3 et libsoup par `pkg-config` : il faut
+  déjà un sysroot complet. Le gain ne concernerait qu'un usage sans interface de
+  `candeo-device` seul.
+- **Le coût n'est pas nul.** Le `build.rs` d'`hidapi` s'arrête si deux dorsales
+  Linux sont actives (« Exactly one linux hidapi backend must be selected »).
+  Adopter `linux-native` impose donc `default-features = false` dans les deux
+  manifestes qui déclarent `hidapi`, et de réénumérer à la main les défauts des
+  autres systèmes.
+- **`windows-native` est hors de question pour l'instant.** Windows est le seul
+  système où le protocole a été validé sur le matériel. Changer sa dorsale
+  échangerait un chemin vérifié contre un chemin non vérifié, pour un gain nul :
+  MSVC est déjà là, le toolchain Rust l'exige.
+
+**Décision : on garde les dorsales par défaut.** La CI prouve que le défaut
+compile sous Linux. À rouvrir si l'on veut un binaire statique sans interface —
+c'est le seul cas où le calcul changerait.
 
 ---
 
@@ -220,8 +310,12 @@ fonctionne.
 - [x] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
 - [x] Lecture et écriture de `settings.json`
 - [x] Effets intégrés, écrits contre l'API publique
+- [x] Règle udev, livrée par les paquets `deb` et `rpm`
+- [x] Compilation et empaquetage Linux vérifiés en intégration continue
 - [ ] Reprise de l'effet actif au démarrage
-- [ ] Règle udev et vérification de la dorsale `hidraw` sous Linux
+- [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
+      de fonctionnalité, filtrage par `interface_number`, chemins résolus par
+      Tauri. Demande un clavier branché sur une machine Linux.
 
 ### Ce que l'implémentation a précisé
 
