@@ -25,11 +25,29 @@ pub struct DeviceInfo {
     pub present: bool,
 }
 
+/// Une touche, telle que le simulateur doit la dessiner.
+///
+/// Deux systèmes de coordonnées cohabitent, et ils ne disent pas la même chose :
+///
+/// - `row` / `col` situent la LED dans la matrice, donc son rang dans une image ;
+/// - `x` / `y` / `w` / `h` donnent le rectangle physique, en unités de pas de
+///   clavier (1 u = une touche alphabétique), origine en haut à gauche.
+///
+/// Le second ne se déduit pas du premier : le périphérique ne déclare aucune
+/// dimension, la géométrie est une transcription manuelle de la disposition ISO
+/// pleine taille. Voir `candeo_device::Key`.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KeyInfo {
     pub index: u16,
     pub row: u8,
     pub col: u8,
+    /// Nom gravé, variante French (ISO).
+    pub name: &'static str,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
 }
 
 #[derive(Serialize)]
@@ -45,12 +63,27 @@ pub struct LayoutInfo {
 
 impl From<&'static Layout> for LayoutInfo {
     fn from(l: &'static Layout) -> Self {
-        let mut keys = Vec::new();
+        // Parcours ligne par ligne de la matrice, pour que `keys` sorte dans
+        // l'ordre des index. La table de `candeo-device` couvre toutes les
+        // positions allumées — invariant tenu par son test
+        // `every_lit_position_has_a_key`.
+        let mut keys = Vec::with_capacity(l.lit_count());
         for row in 0..l.rows {
             for col in 0..l.cols {
-                if let Some(index) = l.at(row, col) {
-                    keys.push(KeyInfo { index, row, col });
-                }
+                let Some(index) = l.at(row, col) else {
+                    continue;
+                };
+                let Some(k) = l.key(index) else { continue };
+                keys.push(KeyInfo {
+                    index,
+                    row,
+                    col,
+                    name: k.name,
+                    x: k.x,
+                    y: k.y,
+                    w: k.w,
+                    h: k.h,
+                });
             }
         }
         Self {

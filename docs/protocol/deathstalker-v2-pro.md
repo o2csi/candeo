@@ -242,6 +242,11 @@ déclare. Les comptes par rangée tombent juste : 16 + 21 + 21 + 17 + 18 + 13 = 
 Le dessin réaliste utilisé par l'interface est écrit à la main depuis la disposition
 ISO pleine taille standard — voir `docs/design/studio.md`.
 
+L'expansion index par index de la table ci-dessus, et le rectangle de chaque touche,
+vivent dans `crates/candeo-device/src/layout.rs`. **Les deux n'ont pas le même statut** :
+les noms sont un relevé, la géométrie une convention. Seuls les premiers se vérifient
+contre l'appareil.
+
 ---
 
 ## 7. Modes exposés
