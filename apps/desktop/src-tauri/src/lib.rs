@@ -16,6 +16,7 @@ use storage::{DeviceState, Settings};
 
 mod builtins;
 mod runtime;
+mod single_instance;
 /// Sondes matérielles, toutes `#[ignore]` — voir le module.
 #[cfg(test)]
 mod sonde;
@@ -698,6 +699,10 @@ fn write_row(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // En tête, et l'ordre n'est pas décoratif : c'est là que le second
+        // processus s'arrête, et il doit le faire avant d'avoir touché au
+        // clavier. Voir [`single_instance`].
+        .plugin(single_instance::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let state = AppState::default();

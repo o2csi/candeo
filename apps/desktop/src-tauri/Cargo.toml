@@ -24,6 +24,12 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde_json = "1"
 
+# Une seule instance à la fois — voir `src/single_instance.rs`. Sans la
+# fonctionnalité `semver`, qui laisserait cohabiter deux versions incompatibles :
+# ce qui ne se partage pas ici, c'est le clavier et `settings.json`, et ni l'un
+# ni l'autre ne s'entend mieux avec un voisin d'une autre version.
+tauri-plugin-single-instance = "2"
+
 # Moteur d'effets. `loader` sert à résoudre `@candeo/effects-api` vers un
 # module interne, sans bundler ni `node_modules`.
 rquickjs = { version = "0.13", features = ["loader"] }

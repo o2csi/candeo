@@ -625,6 +625,15 @@ périphérique branché une fois.
 L'écriture passe par un fichier temporaire suivi d'un renommage : une coupure en
 cours d'écriture laisserait sinon des réglages tronqués.
 
+Le nom de ce temporaire est **fixe**, et il peut l'être parce que les commandes
+synchrones s'exécutent sur le fil principal : deux séquences lire-modifier-écrire
+ne s'entrelacent pas. Le raisonnement vaut *à l'intérieur* d'un processus — entre
+deux, rien ne les sérialiserait, et l'un renommerait ce que l'autre est en train
+d'écrire. C'est donc l'**instance unique**
+([`single_instance.rs`](../../apps/desktop/src-tauri/src/single_instance.rs)) qui
+rend ce nom fixe sûr : les deux décisions se tiennent, et ne se défont pas l'une
+sans l'autre.
+
 ---
 
 ## Erreurs
