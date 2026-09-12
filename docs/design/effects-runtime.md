@@ -464,6 +464,9 @@ permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne des
       configuration (`reset_settings`) — deux gestes distincts, l'un sur le
       contenu et l'autre sur la configuration, qui arrêtent l'un comme l'autre
       les boucles concernées **avant** d'écrire
+- [x] Bornes d'exécution d'un effet : un temps de calcul par image et au
+      chargement, une mémoire par effet — un `while (true)` ou un tableau qui
+      grandit à chaque image deviennent une erreur d'image, pas un gel
 - [ ] Reprise de l'effet actif au démarrage
 - [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
       de fonctionnalité, filtrage par `interface_number`, chemins résolus par
@@ -497,11 +500,30 @@ permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne des
   diagonale qui avance : c'est ce qui empêche un effet spatial et un effet
   uniforme de se ressembler. Un prélèvement toujours au même endroit les
   confondrait, une moyenne de l'image entière aussi.
-- **Échantillonner borne le temps d'exécution ; la boucle, non.** Un effet qui
-  boucle sans fin monopolise son propre fil de rendu, ce qui se voit et s'arrête.
-  Le même effet échantillonné tourne dans le fil d'une commande : sans échéance,
-  un `while (true)` empêcherait son installation d'aboutir. `prepare` accepte
-  donc une échéance facultative, posée **avant** l'évaluation du module.
+- **Tout ce qui exécute du code d'effet est borné**, en temps comme en mémoire.
+  C'était d'abord vrai du seul échantillonnage, parce qu'un `while (true)` y
+  empêchait une installation d'aboutir. Ça l'est maintenant de la boucle de
+  rendu, où l'absence de borne était pire : le drapeau `stop` est lu *entre* deux
+  images, un rendu qui ne revient pas ne le relit jamais — et comme un effet
+  tourne fenêtre fermée, la fermer ne sauvait pas.
+- **La forme des deux bornes n'est pas la même**, parce que le gestionnaire
+  d'interruption se pose sur le `Runtime` **une fois**. L'échantillonnage n'a
+  besoin que d'une échéance, capturée par valeur ; la boucle en change à chaque
+  image et partage donc une cellule qu'elle renouvelle avant chaque appel. Cette
+  cellule porte aussi de quoi savoir que c'est bien l'échéance qui a coupé :
+  QuickJS lève « InternalError: interrupted » quelle qu'en soit la raison.
+- **Un dépassement est une erreur d'image ordinaire.** Il emprunte le chemin des
+  exceptions ci-dessus, celui que trente images consécutives en échec
+  transforment en arrêt propre — aucun chemin nouveau. Le moteur y ajoute
+  seulement le nom de la cause, en français : « l'effet a dépassé son temps de
+  calcul » se relie à son code, une erreur de QuickJS non.
+- **Les budgets sont mesurés, et le temps dépend du profil de compilation.**
+  QuickJS est du C, compilé au niveau d'optimisation du profil : la même image du
+  même effet coûte 0,23 ms en `release` et 6,3 ms en débogage. Le budget suit —
+  8 ms et 200 ms —, faute de quoi il aurait fallu choisir entre couper des effets
+  irréprochables sous `tauri dev` et laisser un gel de plusieurs secondes en
+  production. La mémoire, elle, ne dépend pas du profil : 32 Mo, soit cinq fois
+  l'effet à état le plus démesuré qu'on sache écrire pour 132 LED.
 - **Un appareil a une ligne d'état dès qu'il a porté un effet, et la garde.**
   `engine_status()` rend une entrée par appareil visé, `running` à faux une fois
   l'effet arrêté. Retirer la ligne rendrait « cet appareil ne fait rien »

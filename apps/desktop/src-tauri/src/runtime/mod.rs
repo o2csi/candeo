@@ -16,6 +16,22 @@
 //! Le jour où un gabarit couvrira plusieurs appareils, c'est [`DeviceOut`] qui
 //! répartira l'image, et le code des effets ne changera pas d'une ligne.
 //!
+//! # Ce qu'un effet ne peut pas faire durer
+//!
+//! Un `while (true)` dans `render` gèlerait son fil définitivement : le drapeau
+//! `stop` est lu *entre* deux images, il ne serait donc jamais relu — et comme
+//! un effet tourne fenêtre fermée, la fermer ne sauverait pas. Une allocation
+//! sans fin, elle, emporterait le processus entier plutôt que le seul effet.
+//!
+//! Ni l'une ni l'autre n'est une question de malveillance : ce sont deux erreurs
+//! de programmation ordinaires, et deux bornes suffisent à les traiter comme
+//! telles — un temps de calcul par image ([`BUDGET_IMAGE`], et
+//! [`BUDGET_CHARGEMENT`] pour le corps du module) et une mémoire par effet
+//! ([`BUDGET_MEMOIRE`]). Le dépassement n'ouvre **aucun chemin nouveau** : il
+//! emprunte celui des exceptions, que [`MAX_CONSECUTIVE_ERRORS`] transforme en
+//! arrêt propre. Ce que le moteur ajoute, c'est le nom de la cause : voir
+//! [`nommer_la_cause`].
+//!
 //! # Ordre de prise des verrous
 //!
 //! Trois, et l'ordre est celui de la déclaration : **table des boucles → fil d'un
@@ -35,7 +51,9 @@
 //!
 //! Voir `docs/design/effects-runtime.md`.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -44,6 +62,7 @@ use std::time::{Duration, Instant};
 use candeo_device::{Keyboard, Layout};
 use candeo_protocol::Rgb;
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
+use rquickjs::runtime::InterruptHandler;
 use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -63,6 +82,74 @@ const FPS: u32 = 60;
 /// Au-delà, on arrête. Un effet qui lève à chaque image ne se rétablira pas
 /// tout seul, et continuer reviendrait à remplir le journal en silence.
 const MAX_CONSECUTIVE_ERRORS: u32 = 30;
+
+/// Temps accordé au calcul d'**une** image.
+///
+/// La moitié de la période, qui est de 16,7 ms à 60 img/s. Le choix se tient par
+/// les deux bouts :
+///
+/// - **il est très au-dessus d'un effet honnête.** Mesuré sur ce moteur, en
+///   `release` : 0,23 ms pour une image d'un effet qui parcourt les 106 touches,
+///   1,1 ms pour un champ de cinq mille particules avec une seconde d'images
+///   gardées — un effet démesuré pour un clavier de 132 LED. Huit millisecondes
+///   laissent donc entre sept et trente-cinq fois le nécessaire. Et l'échéance
+///   se mesure en temps réel, pas en temps de calcul : un fil que
+///   l'ordonnanceur suspend au milieu d'une image consomme son budget sans rien
+///   exécuter, il faut de quoi absorber un à-coup de la machine ;
+/// - **il est très en-dessous d'un gel.** Un effet qui ne sort pas s'arrête au
+///   bout de [`MAX_CONSECUTIVE_ERRORS`] images, soit un quart de seconde — alors
+///   qu'un budget d'une seconde par image aurait fait attendre une demi-minute
+///   avant de dire ce qui ne va pas.
+///
+/// Dépasser une fois n'arrête rien : le compteur d'erreurs consécutives repart
+/// à zéro dès la première image rendue. Il en faut trente d'affilée.
+#[cfg(not(debug_assertions))]
+const BUDGET_IMAGE: Duration = Duration::from_millis(8);
+
+/// Le même budget, à la vitesse du moteur qu'on a réellement compilé.
+///
+/// QuickJS est du C, compilé au niveau d'optimisation du profil. En débogage —
+/// donc sous `tauri dev` et sous `cargo test` — la **même** image du **même**
+/// effet simple passe de 0,23 ms à 6,3 ms de JavaScript : vingt-cinq fois plus
+/// lent, mesuré. Ce n'est pas l'effet qui a changé, c'est l'interpréteur.
+///
+/// Un budget unique aurait donc dû choisir son camp : à 8 ms il couperait des
+/// effets irréprochables dès qu'on lance l'application en développement ; à
+/// 200 ms il laisserait un gel de six secondes en production. Le facteur est
+/// appliqué là où il vient, et le rapport entre les deux valeurs est celui qu'on
+/// a mesuré entre les deux moteurs.
+#[cfg(debug_assertions)]
+const BUDGET_IMAGE: Duration = Duration::from_millis(200);
+
+/// Temps accordé au **chargement** d'un effet, corps du module compris.
+///
+/// Le corps du module s'exécute une fois, avant la première image : il échappe
+/// donc au budget d'image. Sans borne ici, une boucle écrite hors de `render`
+/// bloquerait [`DeviceLoop::start`] pour toujours — la commande attend le
+/// verdict du chargement, le verrou de l'appareil à la main, et ce clavier ne
+/// démarrerait ni n'arrêterait plus rien.
+///
+/// Analyser et évaluer un module se compte en millisecondes ; deux secondes
+/// sont trois ordres de grandeur au-dessus, et ce prix n'est payé qu'une fois.
+const BUDGET_CHARGEMENT: Duration = Duration::from_secs(2);
+
+/// Mémoire accordée au moteur JavaScript d'un effet — **un par appareil**.
+///
+/// Le tampon d'image ne pèse rien : `bootstrap.js` le réutilise d'une image à
+/// l'autre. Mais un effet a le droit de garder un état, et c'est lui qu'il faut
+/// loger. Mesuré, contexte QuickJS et modules chargés compris : 0,17 Mo pour un
+/// effet sans état, 2,7 Mo pour deux mille particules gardant une seconde
+/// d'images, 6 Mo pour cinq mille. Trente-deux mégaoctets laissent donc cinq
+/// fois l'effet le plus démesuré qu'on sache écrire pour 132 LED, et près de
+/// deux cents fois l'effet ordinaire — tout en restant négligeables devant
+/// l'application, même avec un effet par clavier.
+///
+/// Contrairement au temps, la mémoire ne dépend pas du profil de compilation :
+/// les mêmes objets occupent les mêmes octets.
+///
+/// Ce qu'on borne, ce n'est pas l'appétit d'un effet : c'est qu'un tableau qui
+/// grandit à chaque image emporte tout le processus au lieu de lui-même.
+const BUDGET_MEMOIRE: usize = 32 * 1024 * 1024;
 
 /// Ce que la boucle partage avec le reste de l'application.
 ///
@@ -464,16 +551,30 @@ fn render_loop(
 ) {
     let frame_len = layout.led_count();
 
+    // Le budget naît ici et ne sort pas du fil : le gestionnaire d'interruption
+    // ne traverse aucune frontière, et l'échéance n'est écrite que par cette
+    // boucle, juste avant chaque exécution de code d'effet.
+    let budget = Rc::new(Budget::default());
+
+    // Le chargement a la sienne : le corps du module tourne une fois, avant la
+    // première image, donc hors de tout budget d'image.
+    budget.accorder(BUDGET_CHARGEMENT);
+
     // `_rt` doit vivre aussi longtemps que le contexte : c'est lui qui porte
     // le résolveur de modules. Le laisser tomber ici rendrait tout `import`
     // introuvable à la première image.
-    let (_rt, ctx) = match prepare(&js, layout) {
+    let (_rt, ctx) = match prepare_budgeted(&js, layout, &budget) {
         Ok(c) => {
             let _ = ready.send(Ok(()));
             c
         }
         Err(e) => {
-            let _ = ready.send(Err(e));
+            let _ = ready.send(Err(nommer_la_cause(
+                e,
+                &budget,
+                "le chargement de l'effet",
+                &format!("{} s", BUDGET_CHARGEMENT.as_secs()),
+            )));
             return;
         }
     };
@@ -488,6 +589,11 @@ fn render_loop(
         let params = shared.params.lock().unwrap().clone();
         let time = started.elapsed().as_secs_f64();
 
+        // L'échéance est renouvelée avant **chaque** image : c'est tout l'objet
+        // de la cellule partagée. Le gestionnaire, lui, a été posé une fois pour
+        // toutes sur le `Runtime`.
+        budget.accorder(BUDGET_IMAGE);
+
         match render_once(&ctx, time, frame_index, &params, frame_len) {
             Ok(bytes) => {
                 consecutive_errors = 0;
@@ -497,6 +603,15 @@ fn render_loop(
                 emit(&shared, out.as_ref(), &bytes);
             }
             Err(e) => {
+                // Un dépassement n'ouvre aucun chemin nouveau : c'est une erreur
+                // d'image comme une autre, que le compteur ci-dessous finit par
+                // transformer en arrêt propre.
+                let e = nommer_la_cause(
+                    e,
+                    &budget,
+                    "l'effet",
+                    &format!("{} ms par image", BUDGET_IMAGE.as_millis()),
+                );
                 consecutive_errors += 1;
                 *shared.error.lock().unwrap() = Some(e);
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
@@ -521,31 +636,109 @@ fn render_loop(
     }
 }
 
-/// Contexte JavaScript prêt à rendre : modules résolus, `__candeo_render` posé.
+/// L'échéance que le gestionnaire d'interruption consulte — et ce qu'il en a
+/// fait.
+///
+/// Une cellule partagée, et non une échéance capturée : le gestionnaire se pose
+/// sur le `Runtime` **une fois**, alors que l'échéance change à **chaque image**.
+/// [`prepare_bounded`], qui n'en accorde qu'une pour toute une installation,
+/// peut se contenter de la capturer ; la boucle de rendu, non.
+///
+/// Le drapeau sert à **nommer la cause**. QuickJS lève la même
+/// « InternalError: interrupted » quelle que soit la raison d'une interruption,
+/// et c'est le gestionnaire — lui seul — qui sait que c'est l'échéance qui l'a
+/// fait lever.
+#[derive(Default)]
+struct Budget {
+    deadline: Cell<Option<Instant>>,
+    depasse: Cell<bool>,
+}
+
+impl Budget {
+    /// Accorde `duree` à l'exécution qui suit, drapeau baissé.
+    fn accorder(&self, duree: Duration) {
+        self.deadline.set(Some(Instant::now() + duree));
+        self.depasse.set(false);
+    }
+
+    /// Le gestionnaire lui-même : `true` coupe l'exécution en cours.
+    ///
+    /// QuickJS l'appelle toutes les 10 000 instructions — un `Instant::now()` à
+    /// cette fréquence ne se mesure pas.
+    fn expire(&self) -> bool {
+        match self.deadline.get() {
+            Some(fin) if Instant::now() >= fin => {
+                self.depasse.set(true);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Contexte JavaScript prêt à rendre, **sans borne de temps**.
+///
+/// Réservé aux tests. Depuis que la boucle de rendu borne chaque image et que
+/// l'échantillonnage borne son installation, plus aucun appelant de production
+/// ne prépare un contexte qu'un `while (true)` pourrait figer — c'est tout
+/// l'objet des deux budgets. Restent les tests qui ne portent pas sur les
+/// bornes, et auxquels une échéance n'ajouterait qu'un aléa de machine.
 ///
 /// Le `Runtime` est renvoyé avec le contexte, et non gardé ici : c'est lui qui
 /// porte le résolveur de modules, il doit donc vivre aussi longtemps.
+#[cfg(test)]
 fn prepare(js: &str, layout: &'static Layout) -> Result<(Runtime, Context), String> {
     prepare_bounded(js, layout, None)
 }
 
-/// Comme [`prepare`], mais l'exécution s'interrompt passé `deadline`.
+/// Comme [`prepare_with`], avec une échéance **unique**, capturée par valeur.
 ///
-/// La boucle de rendu, elle, n'impose aucune échéance : un effet qui boucle y
-/// monopolise son propre fil, ce qui se voit et s'arrête. L'échantillonnage du
-/// repère, lui, tourne dans le fil d'une commande — sans borne, un `while (true)`
-/// empêcherait une installation d'aboutir. L'échéance est posée **avant** toute
-/// évaluation, pour couvrir aussi le corps du module.
+/// Elle couvre tout ce que l'appelant fera du contexte, du chargement à la
+/// dernière image. C'est ce dont a besoin l'échantillonnage du repère —
+/// quelques images, une seule borne, dans le fil d'une commande où un
+/// `while (true)` empêcherait une installation d'aboutir. La boucle de rendu,
+/// elle, en change à chaque image : voir [`Budget`].
+///
+/// L'échéance est posée **avant** toute évaluation, pour couvrir aussi le corps
+/// du module.
 fn prepare_bounded(
     js: &str,
     layout: &'static Layout,
     deadline: Option<Instant>,
 ) -> Result<(Runtime, Context), String> {
+    let interrupt =
+        deadline.map(|fin| -> InterruptHandler { Box::new(move || Instant::now() >= fin) });
+    prepare_with(js, layout, interrupt)
+}
+
+/// Comme [`prepare_with`], mais borné **appel par appel** : le gestionnaire lit
+/// un budget que l'appelant renouvelle avant chaque exécution.
+fn prepare_budgeted(
+    js: &str,
+    layout: &'static Layout,
+    budget: &Rc<Budget>,
+) -> Result<(Runtime, Context), String> {
+    let budget = Rc::clone(budget);
+    prepare_with(js, layout, Some(Box::new(move || budget.expire())))
+}
+
+/// Le tronc commun : bornes posées, modules résolus, `__candeo_render` installé.
+///
+/// Les deux bornes sont posées **avant** toute évaluation — le corps du module
+/// est du code d'effet comme un autre.
+fn prepare_with(
+    js: &str,
+    layout: &'static Layout,
+    interrupt: Option<InterruptHandler>,
+) -> Result<(Runtime, Context), String> {
     let rt = Runtime::new().map_err(|e| format!("QuickJS : {e}"))?;
 
-    if let Some(deadline) = deadline {
-        rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
-    }
+    rt.set_interrupt_handler(interrupt);
+
+    // La borne mémoire, elle, ne se renouvelle pas et vaut pour tous les
+    // appelants : une allocation sans fin emporte le processus entier, qu'elle
+    // survienne dans une boucle de rendu ou pendant l'installation d'un effet.
+    rt.set_memory_limit(BUDGET_MEMOIRE);
 
     // `@candeo/effects-api` est **interne**. C'est ce qui permet d'écrire un
     // `import` normal sans bundler, sans résolution de chemins et sans
@@ -606,6 +799,45 @@ fn render_once(
         }
         Ok(out)
     })
+}
+
+/// Le texte que QuickJS lève quand la limite mémoire est atteinte, et le seul
+/// signe qu'il en donne (`JS_ThrowOutOfMemory`).
+const OOM_QUICKJS: &str = "out of memory";
+
+/// Traduit un échec d'exécution bornée en une cause que l'auteur de l'effet
+/// peut relier à **son** code.
+///
+/// QuickJS ne nomme aucune des deux bornes : une interruption remonte en
+/// « InternalError: interrupted », qui ne désigne rien, et un dépassement
+/// mémoire en « out of memory », qui ne dit ni de qui ni de combien. Les deux
+/// bornes sont posées ici ; c'est donc ici, et nulle part ailleurs, qu'on sait
+/// les expliquer.
+///
+/// Le temps se lit sur le drapeau du budget, jamais sur le message : c'est le
+/// gestionnaire qui a coupé, il est seul à le savoir de source sûre. La mémoire
+/// n'a que le texte de QuickJS — d'où la comparaison, et le repli sur l'erreur
+/// brute quand elle ne dit rien : mal nommer une cause serait pire que de ne pas
+/// la nommer.
+///
+/// `sujet` distingue les deux endroits bornés — une image, un chargement. La
+/// boucle qui ne se termine pas n'est pas au même endroit du fichier, et le
+/// temps accordé n'est pas le même.
+fn nommer_la_cause(erreur: String, budget: &Budget, sujet: &str, accorde: &str) -> String {
+    if budget.depasse.get() {
+        return format!(
+            "{sujet} a dépassé son temps de calcul ({accorde}) : \
+             une boucle qui ne se termine pas, ou un calcul trop lourd."
+        );
+    }
+    if erreur.contains(OOM_QUICKJS) {
+        return format!(
+            "{sujet} a dépassé la mémoire qui lui est accordée ({} Mo) : \
+             un état qui grandit à chaque image, ou une allocation démesurée.",
+            BUDGET_MEMOIRE / (1024 * 1024)
+        );
+    }
+    erreur
 }
 
 /// Les deux sorties, indépendantes : chacune peut être absente.
@@ -899,15 +1131,28 @@ mod tests {
     }
 
     /// Attend qu'une condition se réalise, ou échoue. Voir [`PATIENCE`].
-    fn attendre(quoi: &str, mut pret: impl FnMut() -> bool) {
-        let limite = Instant::now() + PATIENCE;
+    fn attendre(quoi: &str, pret: impl FnMut() -> bool) {
+        attendre_au_plus(PATIENCE, quoi, pret);
+    }
+
+    /// Comme [`attendre`], mais avec une patience calculée sur la borne qu'on
+    /// éprouve.
+    ///
+    /// [`PATIENCE`] est une durée fixe, choisie pour des conditions qui se
+    /// réalisent en quelques images. Une borne, elle, promet une durée : l'arrêt
+    /// d'un effet qui boucle demande [`MAX_CONSECUTIVE_ERRORS`] images coupées,
+    /// et une image coupée dure tout le [`BUDGET_IMAGE`] — lequel n'est pas le
+    /// même selon le profil de compilation. Attendre un multiple de ce qu'on
+    /// éprouve garde le test juste dans les deux cas.
+    fn attendre_au_plus(patience: Duration, quoi: &str, mut pret: impl FnMut() -> bool) {
+        let limite = Instant::now() + patience;
         while Instant::now() < limite {
             if pret() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        panic!("{quoi} : rien en {PATIENCE:?}");
+        panic!("{quoi} : rien en {patience:?}");
     }
 
     /// **L'invariant de l'adoption, au niveau du moteur.**
@@ -1230,6 +1475,246 @@ mod tests {
         "#;
         let (_rt, ctx) = prepare(js, layout()).expect("chargement");
         render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+    }
+
+    // ------------------------------------------------------- bornes d'exécution
+
+    /// Une boucle qui ne rend jamais la main, écrite comme on l'écrit par
+    /// accident : une condition de sortie qui n'arrive pas.
+    const RENDU_SANS_FIN: &str = r#"
+        export default {
+          name: 'Sans fin',
+          render() {
+            let i = 0
+            while (i >= 0) i += 1
+          },
+        }
+    "#;
+
+    /// Un état qui grandit à chaque image, et que rien ne libère.
+    const ALLOCATION_SANS_FIN: &str = r#"
+        const garde = []
+        export default {
+          name: 'Fuite',
+          render() {
+            garde.push(new Uint8Array(4 * 1024 * 1024))
+          },
+        }
+    "#;
+
+    /// Comme [`demarrer`], mais avec un effet donné, et sans exiger qu'il parte.
+    fn demarrer_js(
+        engine: &Engine,
+        device: DeviceRef,
+        js: &str,
+        out: Arc<Sortie>,
+    ) -> Result<(), String> {
+        engine.start(
+            device,
+            "borne".into(),
+            js.into(),
+            "{}".into(),
+            layout(),
+            Box::new(out),
+        )
+    }
+
+    /// Lance `f` à côté, et rend son résultat — ou échoue si elle ne revient pas.
+    ///
+    /// Appeler directement une fonction qu'on soupçonne de ne jamais revenir
+    /// donne un test qui ne peut pas échouer : il gèle, et c'est l'intégration
+    /// continue qui finit par le tuer, des heures plus tard. Ici, c'est le test
+    /// qui tranche. Le fil laissé derrière tournerait dans le vide, mais il
+    /// n'empêche rien de se terminer — et un test déjà échoué n'a plus rien à
+    /// protéger.
+    fn sans_geler<T: Send + 'static>(
+        patience: Duration,
+        quoi: &str,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(patience)
+            .unwrap_or_else(|_| panic!("{quoi} : rien en {patience:?}"))
+    }
+
+    /// **Un effet qui ne rend jamais la main ne gèle plus son fil.**
+    ///
+    /// C'est la panne que les bornes existent pour traiter : sans elles, le
+    /// drapeau `stop` ne serait jamais relu, et fermer la fenêtre ne sauverait
+    /// pas — un effet tourne fenêtre fermée. L'arrêt doit donc venir du moteur,
+    /// par le chemin d'erreur ordinaire.
+    #[test]
+    fn un_effet_qui_boucle_a_chaque_image_est_arrete_proprement() {
+        let engine = Engine::default();
+        let out = Arc::new(Sortie::default());
+        demarrer_js(&engine, PREMIER, RENDU_SANS_FIN, Arc::clone(&out)).expect("démarrage");
+
+        // Le garde-fou du test : si rien n'arrêtait la boucle, c'est lui qui
+        // échouerait, et non l'intégration continue qui expirerait des heures
+        // plus tard. Trois fois ce que la borne promet — trente images coupées,
+        // chacune de tout son budget.
+        attendre_au_plus(
+            BUDGET_IMAGE * MAX_CONSECUTIVE_ERRORS * 3,
+            "la boucle ne s'est pas arrêtée",
+            || !etat(&engine, PREMIER).running,
+        );
+
+        let erreur = etat(&engine, PREMIER)
+            .error
+            .expect("aucune erreur consignée");
+        assert!(
+            erreur.contains("temps de calcul"),
+            "la cause n'est pas nommée : {erreur}"
+        );
+        assert_eq!(
+            out.ecrites.load(Ordering::Relaxed),
+            0,
+            "une image est sortie d'un effet qui n'en a jamais terminé une"
+        );
+
+        // La boucle a bien rendu son fil : sans quoi c'est ici que le test
+        // s'arrêterait pour toujours, sur l'attente de la fin.
+        engine.stop(PREMIER);
+    }
+
+    /// **Un effet qui alloue sans fin n'emporte plus que lui-même.**
+    ///
+    /// Les premières images passent — l'effet a le droit de garder un état —,
+    /// puis la borne tombe et le dépassement devient une erreur d'image comme
+    /// une autre.
+    #[test]
+    fn un_effet_qui_alloue_sans_fin_est_arrete_proprement() {
+        let engine = Engine::default();
+        let out = Arc::new(Sortie::default());
+        demarrer_js(&engine, PREMIER, ALLOCATION_SANS_FIN, Arc::clone(&out)).expect("démarrage");
+
+        attendre("la boucle ne s'est pas arrêtée", || {
+            !etat(&engine, PREMIER).running
+        });
+
+        let erreur = etat(&engine, PREMIER)
+            .error
+            .expect("aucune erreur consignée");
+        assert!(
+            erreur.contains("mémoire"),
+            "la cause n'est pas nommée : {erreur}"
+        );
+
+        engine.stop(PREMIER);
+    }
+
+    /// **Une boucle hors de `render` ne bloque plus le démarrage.**
+    ///
+    /// Le corps du module s'exécute au chargement, hors de toute image, et
+    /// `start` en attend le verdict, le verrou de l'appareil à la main : sans
+    /// borne, ce clavier ne démarrerait ni n'arrêterait plus jamais rien.
+    #[test]
+    fn un_effet_qui_boucle_au_chargement_rend_la_main() {
+        let erreur = sans_geler(
+            BUDGET_CHARGEMENT * 3,
+            "le démarrage n'est jamais revenu",
+            || {
+                let engine = Engine::default();
+                demarrer_js(
+                    &engine,
+                    PREMIER,
+                    "while (true) {}\nexport default { name: 'X', render() {} }",
+                    Arc::new(Sortie::default()),
+                )
+                .expect_err("le chargement aurait dû être interrompu")
+            },
+        );
+
+        assert!(
+            erreur.contains("temps de calcul"),
+            "la cause n'est pas nommée : {erreur}"
+        );
+    }
+
+    /// Une exception ordinaire garde son message : les bornes n'expliquent que
+    /// ce qu'elles ont coupé, et un `throw` de l'effet se lit déjà tout seul.
+    #[test]
+    fn une_exception_ordinaire_garde_son_message() {
+        let engine = Engine::default();
+        let js = "export default { name: 'X', render() { throw new Error('boum') } }";
+        demarrer_js(&engine, PREMIER, js, Arc::new(Sortie::default())).expect("démarrage");
+
+        attendre("aucune erreur consignée", || {
+            etat(&engine, PREMIER).error.is_some()
+        });
+        let erreur = etat(&engine, PREMIER).error.unwrap();
+        assert!(erreur.contains("boum"), "message réécrit : {erreur}");
+
+        engine.stop(PREMIER);
+    }
+
+    /// **Les bornes ne doivent étrangler aucun effet honnête.**
+    ///
+    /// Le tampon d'image ne coûte rien — `bootstrap.js` le réutilise — mais un
+    /// effet a le droit de garder un état et de le faire vivre. Deux mille
+    /// particules et une traînée d'une seconde d'images, pour un clavier qui
+    /// compte 132 LED, c'est démesuré à dessein : si les bornes laissent passer
+    /// celui-là, elles laissent passer tout ce qu'on écrira.
+    ///
+    /// Le rendu va au-delà de la profondeur de la traînée, jusqu'à son régime
+    /// permanent : un état qui ne se libère qu'à la soixantième image ne se voit
+    /// pas sur trente.
+    ///
+    /// La marge est vérifiée, et pas seulement le succès : un effet qui
+    /// passerait de justesse ne passerait plus sur la machine du voisin.
+    #[test]
+    fn les_bornes_laissent_passer_un_effet_qui_garde_un_etat() {
+        let js = r#"
+            const particules = Array.from({ length: 2000 }, (_, i) => ({
+              x: (i * 7) % 20,
+              y: (i * 3) % 6,
+              vx: 0.11,
+              vy: 0.07,
+            }))
+            const trainee = []
+
+            export default {
+              name: 'Particules',
+              render({ layout, frame }) {
+                for (const p of particules) {
+                  p.x = (p.x + p.vx) % layout.cols
+                  p.y = (p.y + p.vy) % layout.rows
+                }
+                // Une seconde d'images conservées, la plus ancienne libérée.
+                trainee.push(particules.map((p) => (p.x + p.y) | 0))
+                if (trainee.length > 60) trainee.shift()
+
+                for (const key of layout.keys) {
+                  frame.set(key, { r: (key.col * 8) % 256, g: (key.row * 40) % 256, b: 60 })
+                }
+              },
+            }
+        "#;
+
+        let budget = Rc::new(Budget::default());
+        budget.accorder(BUDGET_CHARGEMENT);
+        let (rt, ctx) = prepare_budgeted(js, layout(), &budget).expect("chargement");
+
+        for image in 0..90u32 {
+            budget.accorder(BUDGET_IMAGE);
+            render_once(
+                &ctx,
+                f64::from(image) / f64::from(FPS),
+                image,
+                "{}",
+                layout().led_count(),
+            )
+            .unwrap_or_else(|e| panic!("image {image} : {e}"));
+        }
+
+        let utilise = rt.memory_usage().malloc_size as usize;
+        assert!(
+            utilise * 4 < BUDGET_MEMOIRE,
+            "un effet à état frôle la borne mémoire : {utilise} octets sur {BUDGET_MEMOIRE}"
+        );
     }
 
     // ------------------------------------------------------------ intégrés
