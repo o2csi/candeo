@@ -3,6 +3,9 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+  # Permet de lancer le job `linux` à la demande sur une branche donnée, sans
+  # attendre la fusion. Voir la condition portée par ce job.
+  workflow_dispatch:
 
 jobs:
   rust:
@@ -35,7 +38,18 @@ jobs:
   #
   # Ce qu'il ne prouve pas, et ne peut pas prouver : qu'un clavier réponde. Il
   # n'y a pas d'USB derrière un coureur GitHub.
+  # Pas sur les propositions de fusion : ce job coûte un quart d'heure, dont une
+  # dizaine de minutes passées à recompresser un `.rpm` de débogage (voir plus
+  # bas). Le développement se fait sous Windows, et un Linux est disponible en
+  # local via WSL — payer ce prix à chaque itération n'achète rien.
+  #
+  # Il reste **obligatoire sur `main`** : c'est le seul endroit qui atteste que
+  # la règle udev est réellement livrée par les paquets. Le filet se déplace donc
+  # de « avant la fusion » à « juste après », et `workflow_dispatch` permet de le
+  # lancer sur une branche quand un changement touche l'empaquetage, les I/O HID
+  # ou les dépendances système.
   linux:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
