@@ -43,9 +43,12 @@ impl Layout {
 
 /// Razer DeathStalker V2 Pro, filaire.
 ///
-/// Matrice relevée par interrogation du périphérique : 6 × 22 = 132 positions,
-/// dont 106 portent une LED dans cette transcription (voir la note du test
-/// `lit_count_matches_transcribed_matrix` au sujet d'un écart d'une unité).
+/// Matrice relevée par interrogation du périphérique : 6 × 22 = **132**
+/// positions — la taille d'une image — dont **106** portent une LED.
+///
+/// Les deux chiffres ne sont pas interchangeables : en envoyer 106 laisse les
+/// dernières rangées figées sur leur valeur précédente. Voir
+/// `docs/protocol/deathstalker-v2-pro.md` §6.
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     name: "Razer DeathStalker V2 Pro (filaire)",
     vid: 0x1532,
