@@ -16,7 +16,12 @@ const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
 
 // ---------------------------------------------------------------- types exposés
 
+// Les champs partent en camelCase : c'est la convention du côté qui les lit.
+// Laisser filtrer le nommage Rust jusque dans l'interface serait une fuite
+// d'abstraction, et elle ne se verrait qu'à l'exécution.
+
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub name: String,
     pub vid: u16,
@@ -51,6 +56,7 @@ pub struct KeyInfo {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayoutInfo {
     pub name: String,
     pub rows: u8,
