@@ -264,12 +264,16 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
  * Trop tôt après la précédente, on ne fait rien : la temporisation armée par
  * `persist` est toujours là et écrira le dernier état. Rien ne se perd, l'ordre
  * est seulement décalé — voir {@link DISK_PERIOD}.
+ *
+ * `now` lève cet écart, pour les gestes qui ne se répètent pas : un clic sur
+ * « Rétablir » n'a aucune raison d'attendre parce qu'un curseur vient d'être
+ * relâché.
  */
-function settleOne(device: DeviceRef, effect: string): void {
+function settleOne(device: DeviceRef, effect: string, now = false): void {
   const k = key(device, effect)
   const w = writes.get(k)
   if (!w) return
-  if (Date.now() - (written.get(k) ?? 0) < DISK_PERIOD) return
+  if (!now && Date.now() - (written.get(k) ?? 0) < DISK_PERIOD) return
 
   window.clearTimeout(w.timer)
   w.run()
@@ -392,7 +396,7 @@ export function useEffectParams() {
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
     hot(device, merge(specs, {}))
     persist(device, effect, {})
-    settleOne(device, effect)
+    settleOne(device, effect, true)
   }
 
   return { load, valuesFor, adjust, settle, forget, flush: flushAll, error: readonly(error) }
