@@ -224,6 +224,14 @@ export function listEffects(): Promise<EffectEntry[]> {
  * Ici, avec le manifeste qui les porte, et non dans l'éditeur : la galerie lance
  * désormais un effet, et elle n'a aucune raison de charger le module d'analyse
  * syntaxique pour recopier quatre valeurs par défaut.
+ *
+ * ⚠️ **La même règle est écrite en Rust**, dans `storage::starting_params` :
+ * l'icône de zone de notification lance un effet sans fenêtre, elle ne peut donc
+ * rien emprunter d'ici. Ce que les deux doivent dire pareil : les défauts du
+ * manifeste, recouverts par ce qu'on a retenu (`merge`, dans
+ * `useEffectParams`), et **bornés aux paramètres déclarés**. Les désaccorder
+ * donnerait deux éclairages différents pour le même effet selon l'endroit d'où
+ * on l'a lancé.
  */
 export function startingParams(declaring: Pick<EffectManifest, 'params'>): EffectParams {
   const out: EffectParams = {}
