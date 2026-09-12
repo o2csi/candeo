@@ -89,10 +89,18 @@ export function demoFrame(layout: LayoutView, seconds: number): Rgb[] {
  * autant de mandataires réactifs, soixante fois par seconde, pour une
  * granularité dont personne n'a l'usage.
  */
-export function useDemoFrames(layout: () => LayoutView) {
+export function useDemoFrames(layout: () => LayoutView | null) {
+  // Le gabarit arrive du Rust, donc de façon asynchrone : il est nul le temps
+  // d'un aller-retour. On rend alors une image vide plutôt que d'échouer — le
+  // simulateur ne se dessine pas encore de toute façon.
+  const at = (seconds: number): readonly Rgb[] => {
+    const l = layout()
+    return l ? demoFrame(l, seconds) : []
+  }
+
   // Première image posée tout de suite : sans elle, le premier rendu montrerait
   // un clavier sans couleurs le temps d'une trame.
-  const frame = shallowRef<readonly Rgb[]>(demoFrame(layout(), 0))
+  const frame = shallowRef<readonly Rgb[]>(at(0))
 
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
   let raf = 0
@@ -100,7 +108,7 @@ export function useDemoFrames(layout: () => LayoutView) {
 
   function tick(now: number) {
     raf = requestAnimationFrame(tick)
-    frame.value = demoFrame(layout(), (now - origin) / 1000)
+    frame.value = at((now - origin) / 1000)
   }
 
   function stop() {
@@ -117,7 +125,7 @@ export function useDemoFrames(layout: () => LayoutView) {
   function apply() {
     stop()
     if (reduced.matches) {
-      frame.value = demoFrame(layout(), 0)
+      frame.value = at(0)
       return
     }
     origin = performance.now()
@@ -127,7 +135,7 @@ export function useDemoFrames(layout: () => LayoutView) {
   // Un changement de gabarit — connexion, déconnexion — n'attend pas la
   // prochaine trame quand il n'y en a plus.
   watch(layout, () => {
-    if (!raf) frame.value = demoFrame(layout(), 0)
+    if (!raf) frame.value = at(0)
   })
 
   onMounted(() => {

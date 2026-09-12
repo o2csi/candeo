@@ -31,6 +31,18 @@ export function getLayout(): Promise<LayoutInfo> {
   return invoke('get_layout')
 }
 
+/**
+ * Gabarit de repli, quand rien n'est connecté.
+ *
+ * `getLayout` refuse hors connexion, et c'est le cas qu'il faut servir : on
+ * dessine le clavier et on écrit un effet avant d'avoir branché quoi que ce
+ * soit. La géométrie reste ainsi définie **au seul endroit** où elle est
+ * testée, dans `crates/candeo-device`.
+ */
+export function getDefaultLayout(): Promise<LayoutInfo> {
+  return invoke('get_default_layout')
+}
+
 /** `level` de 0 à 255. */
 export function setBrightness(level: number): Promise<void> {
   return invoke('set_brightness', { level })

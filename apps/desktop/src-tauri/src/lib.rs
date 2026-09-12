@@ -198,6 +198,19 @@ fn is_connected(state: State<'_, AppState>) -> bool {
     state.keyboard.lock().unwrap().is_some()
 }
 
+/// Gabarit servant de repli quand rien n'est connecté.
+///
+/// `get_layout` refuse hors connexion, et c'est justement le cas qu'il faut
+/// servir : on dessine le clavier et on écrit un effet **avant** d'avoir
+/// branché quoi que ce soit, ou sans posséder le clavier.
+///
+/// Sans cette commande, l'interface n'aurait d'autre choix que de recopier la
+/// géométrie — une seconde source de vérité qui divergerait en silence.
+#[tauri::command]
+fn get_default_layout() -> LayoutInfo {
+    LayoutInfo::from(default_layout())
+}
+
 /// Gabarit du périphérique connecté.
 #[tauri::command]
 fn get_layout(state: State<'_, AppState>) -> CmdResult<LayoutInfo> {
@@ -276,6 +289,7 @@ pub fn run() {
             disconnect,
             is_connected,
             get_layout,
+            get_default_layout,
             set_brightness,
             set_effect,
             present,

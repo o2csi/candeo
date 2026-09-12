@@ -8,23 +8,33 @@
  * effet ne doit exiger ni de regarder le vrai clavier, ni d'en posséder un
  * (`docs/design/studio.md` §2).
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { getDefaultLayout } from '../api/candeo'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { useDemoFrames } from '../keyboard/demoFrames'
-import { DEFAULT_LAYOUT, type LayoutView } from '../keyboard/layout'
+import type { LayoutView } from '../keyboard/layout'
 
 const router = useRouter()
 const { layout } = useDevice()
 
 /**
- * Sans périphérique ouvert, le gabarit de repli. `get_layout()` refuse hors
- * connexion, et c'est précisément le cas qu'il faut servir : on écrit un effet
- * avant de brancher quoi que ce soit, ou sans posséder le clavier.
+ * Gabarit de repli, demandé au Rust plutôt que recopié ici.
+ *
+ * `get_layout()` refuse hors connexion, et c'est précisément le cas qu'il faut
+ * servir : on écrit un effet avant de brancher quoi que ce soit, ou sans
+ * posséder le clavier. `get_default_layout()` existe pour ça — la géométrie
+ * reste ainsi définie au seul endroit où elle est testée.
  */
-const board = computed<LayoutView>(() => layout.value ?? DEFAULT_LAYOUT)
+const fallback = ref<LayoutView | null>(null)
+
+onMounted(async () => {
+  fallback.value = await getDefaultLayout()
+})
+
+const board = computed<LayoutView | null>(() => layout.value ?? fallback.value)
 
 /**
  * Source d'images **provisoire**. Le moteur d'effets n'existe pas encore
@@ -58,7 +68,11 @@ const { frame } = useDemoFrames(() => board.value)
           </p>
         </div>
 
-        <KeyboardSimulator class="sim-board" :layout="board" :frame="frame" />
+        <!--
+          Le gabarit vient du Rust : il est nul le temps d'un aller-retour.
+          On ne dessine pas un clavier vide en attendant.
+        -->
+        <KeyboardSimulator v-if="board" class="sim-board" :layout="board" :frame="frame" />
       </div>
     </div>
   </section>
