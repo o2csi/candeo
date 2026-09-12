@@ -483,6 +483,44 @@ pub fn engine_status(state: State<'_, AppState>) -> EngineStatus {
 mod tests {
     use super::*;
 
+    /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.
+    ///
+    /// `cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bout_en_bout_sur_le_vrai_clavier() {
+        let api = hidapi::HidApi::new().expect("HID");
+        let l = layout();
+        let kb = match Keyboard::open(&api, l) {
+            Ok(kb) => kb,
+            Err(e) => panic!("ouverture impossible : {e}"),
+        };
+        println!("clavier ouvert : {}", l.name);
+
+        let keyboard = Arc::new(Mutex::new(Some(kb)));
+        let engine = Engine::default();
+        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
+
+        engine
+            .start(
+                "onde-radiale".into(),
+                js.to_string(),
+                "{}".into(),
+                l,
+                Arc::clone(&keyboard),
+            )
+            .expect("démarrage");
+        println!("moteur démarré — 3 s d'onde radiale sur le clavier");
+        std::thread::sleep(Duration::from_secs(3));
+
+        let s = engine.status();
+        println!("état : running={} erreur={:?}", s.running, s.error);
+        assert!(s.running, "la boucle s'est arrêtée");
+        assert!(s.error.is_none(), "erreur pendant le rendu : {:?}", s.error);
+
+        engine.stop();
+        println!("arrêté proprement");
+    }
     /// Un effet minimal, écrit comme l'utilisateur l'écrirait.
     const EFFET: &str = r#"
         import { hsv } from '@candeo/effects-api'

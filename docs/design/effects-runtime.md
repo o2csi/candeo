@@ -340,3 +340,20 @@ c'est le seul cas où le calcul changerait.
 - **Une exception ne tue rien.** Elle est rattrapée par image et exposée par
   `engine_status`, puis effacée dès que l'effet se rétablit. Après trente images
   consécutives en échec, la boucle s'arrête.
+
+### Le seul essai qui traverse toute la chaîne
+
+Tout le reste se vérifie sans matériel : les rapports, la matrice, le moteur,
+les effets intégrés. Reste qu'aucun de ces tests ne prouve qu'un octet atteint
+le clavier.
+
+```
+cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture
+```
+
+`bout_en_bout_sur_le_vrai_clavier` ouvre le périphérique, fait tourner un effet
+intégré trois secondes par le moteur, vérifie que la boucle tient et qu'aucune
+image n'a levé, puis s'arrête. Marqué `#[ignore]` : il exige un clavier branché,
+il n'a donc rien à faire en intégration continue.
+
+**Il écrit vraiment sur le clavier** — c'est le but, et c'est visible.
