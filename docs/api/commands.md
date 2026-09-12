@@ -483,9 +483,8 @@ l'application muette au démarrage.
 ### `remember_effect_params(device, effect, params)`
 
 Retient les réglages d'un effet **pour un appareil**, et rien d'autre du
-fichier. À ne pas confondre avec [`set_effect_params`](#stop_effectdevice--set_effect_paramsdevice-params),
-qui ajuste la boucle en cours : celle-ci écrit sur disque et ne change rien à ce
-qui tourne. Les deux n'ont ni la même cadence — des dizaines d'appels par seconde
+fichier. À ne pas confondre avec `set_effect_params`, plus bas, qui ajuste la
+boucle en cours : celle-ci écrit sur disque et ne change rien à ce qui tourne. Les deux n'ont ni la même cadence — des dizaines d'appels par seconde
 d'un côté, un seul quand le curseur s'arrête de l'autre — ni la même destination.
 
 Une commande dédiée plutôt qu'un `set_settings` depuis la fenêtre : la lecture,
@@ -624,8 +623,7 @@ dernier, et une file d'attente ne ferait que le lui livrer en retard. Le dernier
 celui qu'on voit.
 
 Retenir ces valeurs d'un lancement à l'autre est l'affaire de
-[`remember_effect_params`](#remember_effect_paramsdevice-effect-params), qui
-n'écrit que sur disque.
+`remember_effect_params` (§Réglages), qui n'écrit que sur disque.
 
 ### `set_output_to_keyboard(device, on)`
 

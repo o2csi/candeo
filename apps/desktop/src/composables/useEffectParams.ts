@@ -286,6 +286,11 @@ export function useEffectParams() {
     id: string,
     value: ParamValue,
   ): void {
+    // Comme `useEffects.apply` : l'échec précédent s'efface à la tentative
+    // suivante. Sans cela un incident passager laisserait un bandeau rouge
+    // jusqu'à la fermeture, longtemps après que tout est rentré dans l'ordre.
+    error.value = null
+
     const complete = { ...valuesFor(device, effect, specs), [id]: value }
     const kept = apart(specs, complete)
 
@@ -301,6 +306,7 @@ export function useEffectParams() {
    * `settings.json` au lieu d'y garder une copie des défauts.
    */
   function forget(device: DeviceRef, effect: string, specs: Record<string, ParamSpec>): void {
+    error.value = null
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
     hot(device, merge(specs, {}))
     persist(device, effect, {})

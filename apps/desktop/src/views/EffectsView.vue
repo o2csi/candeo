@@ -475,7 +475,10 @@ const paramValues = computed(() =>
  */
 const frozen = computed<string | null>(() => {
   if (!selectedDevice.value) {
-    return "Aucun appareil piloté : un réglage agit sur la boucle d'un appareil, et il n'y en a aucune."
+    // L'avertissement plus haut dit déjà « aucun appareil piloté » : le répéter
+    // mot pour mot ferait lire deux fois la même phrase pour deux raisons
+    // différentes.
+    return "Un réglage agit sur la boucle d'un appareil, et il n'y en a aucune tant qu'aucun appareil n'est piloté."
   }
   if (!applied.value) {
     return "Ces réglages agissent sur l'effet en cours sur l'appareil. « Appliquer » lance celui-ci avec les valeurs ci-dessous, et ils redeviennent réglables."
