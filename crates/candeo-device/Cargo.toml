@@ -1,0 +1,13 @@
+[package]
+name = "candeo-device"
+description = "Transport HID et description des peripheriques"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+candeo-protocol.workspace = true
+hidapi.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,19 @@
+# Rust
+/target
+**/target
+
+# Node
+node_modules
+dist
+.pnpm-store
+
+# Tauri
+apps/desktop/src-tauri/gen
+
+# Editeurs / OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# Captures volumineuses : conservees hors depot
+docs/captures/*.pcap

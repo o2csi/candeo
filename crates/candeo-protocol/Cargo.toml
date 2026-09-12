@@ -1,0 +1,10 @@
+[package]
+name = "candeo-protocol"
+description = "Construction des rapports du protocole d'eclairage, sans dependance systeme"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
