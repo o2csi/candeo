@@ -9,7 +9,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
-import type { DeviceInfo, DeviceRef, Effect, LayoutInfo, Rgb } from './types'
+import type { DeviceInfo, DeviceRef, DeviceState, Effect, LayoutInfo, Rgb } from './types'
 
 /** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -210,9 +210,79 @@ export function startingParams(declaring: Pick<EffectManifest, 'params'>): Effec
   return out
 }
 
-// ---------------------------------------------------------------- moteur
+// ---------------------------------------------------------------- réglages
 
 export type EffectParams = Record<string, ParamValue>
+
+/** Une décision d'adoption, telle que `settings.json` la retient. */
+export interface DeviceRecord {
+  vid: number
+  pid: number
+  /** Absent quand le système n'en déclare pas — pas `null`. */
+  serial?: string
+  state: DeviceState
+}
+
+/**
+ * Les réglages retenus pour un effet, sur un appareil.
+ *
+ * `values` ne porte que ce qui **diffère** de ce que l'effet déclare : un
+ * paramètre laissé à sa valeur de départ n'y figure pas, et suivra donc le
+ * manifeste si une version ultérieure de l'effet en change le défaut.
+ *
+ * La clé est la paire appareil / effet, **sans numéro de série** : toutes les
+ * commandes du moteur visent un `DeviceRef`, deux exemplaires du même modèle
+ * partagent déjà leur boucle de rendu, et les distinguer ici promettrait une
+ * séparation que le reste de l'application ne tient pas.
+ */
+export interface EffectParamsRecord {
+  vid: number
+  pid: number
+  effect: string
+  values: EffectParams
+}
+
+/** Miroir de `Settings`, dans `src-tauri/src/storage.rs`. */
+export interface Settings {
+  activeEffect: string | null
+  brightness: number
+  device: DeviceRef | null
+  devices: DeviceRecord[]
+  effectParams: EffectParamsRecord[]
+}
+
+/**
+ * Lit `settings.json`.
+ *
+ * Au premier lancement il n'y a pas de fichier : ce sont les **défauts** qui
+ * arrivent, ce n'est pas une erreur.
+ */
+export function getSettings(): Promise<Settings> {
+  return invoke('get_settings')
+}
+
+/**
+ * Retient les réglages d'un effet pour un appareil, sans toucher au reste.
+ *
+ * À ne pas confondre avec {@link setEffectParams}, qui ajuste la boucle en
+ * cours : celle-ci écrit sur disque, et ne change rien à ce qui tourne. Les deux
+ * n'ont ni la même cadence ni la même destination.
+ *
+ * Une commande dédiée plutôt qu'un `set_settings` : le Rust relit, modifie et
+ * réécrit d'un seul tenant. Renvoyer tout le fichier depuis la fenêtre
+ * écraserait au passage une adoption décidée entre-temps.
+ *
+ * Une table **vide** efface l'entrée : c'est « rétablir les valeurs déclarées ».
+ */
+export function rememberEffectParams(
+  device: DeviceRef,
+  effect: string,
+  params: EffectParams,
+): Promise<void> {
+  return invoke('remember_effect_params', { device, effect, params })
+}
+
+// ---------------------------------------------------------------- moteur
 
 export interface EngineStatus {
   running: boolean

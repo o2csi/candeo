@@ -60,15 +60,16 @@ import {
   getLayout,
   listEffects,
   startEffect,
-  startingParams,
   stopEffect,
   type DeviceEngineStatus,
   type EffectEntry,
 } from '../api/candeo'
 import type { DeviceRef } from '../api/types'
+import EffectParamsForm from '../components/EffectParamsForm.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
+import { useEffectParams } from '../composables/useEffectParams'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useEngineFrames } from '../keyboard/engineFrames'
 import type { LayoutView } from '../keyboard/layout'
@@ -84,6 +85,15 @@ const { devices, current, select, busy, refresh } = useDevice()
 // `apply` ne lève pas : il range son échec dans `applyError`, qu'il faut donc
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
 const { appliedOn, apply, error: applyError } = useEffects()
+const {
+  load: loadParams,
+  valuesFor,
+  adjust,
+  settle,
+  forget,
+  flush: flushParams,
+  error: paramsError,
+} = useEffectParams()
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
@@ -397,12 +407,14 @@ async function applyEffect(): Promise<void> {
       stopFrames()
       await apply(device, c.hardware)
     } else {
-      // Les valeurs déclarées par l'effet. Les ajuster est l'issue #28.
+      // Les réglages retenus pour **cette paire**, et non les valeurs déclarées :
+      // un effet réglé puis quitté doit repartir comme on l'avait laissé, sans
+      // quoi il faudrait rebouger chaque curseur après chaque « Appliquer ».
       //
       // Rien à abonner ici : le canal vit dans l'état de la boucle, et c'est la
       // surveillance plus haut qui l'ouvre dès que le moteur dit « en cours ».
       // Un abonnement de plus, posé ici, en ferait deux pour un seul flux.
-      await startEffect(device, c.id, startingParams(c))
+      await startEffect(device, c.id, paramValues.value)
     }
   } catch (e) {
     problem.value = message(e)
@@ -433,20 +445,76 @@ async function halt(): Promise<void> {
   }
 }
 
-/** Une valeur de paramètre, telle que l'effet la déclare. */
-function show(v: ParamValue): string {
-  return Array.isArray(v) ? v.join(', ') : String(v)
+// ---------------------------------------------------------------- réglages
+
+/** Les paramètres déclarés par l'effet regardé. */
+const specs = computed<Record<string, ParamSpec>>(() => selectedEffect.value?.params ?? {})
+
+/**
+ * Les valeurs sur lesquelles cet effet tourne — ou tournerait — sur cet
+ * appareil : son manifeste, recouvert par ce qu'on a retenu pour cette paire.
+ */
+const paramValues = computed(() =>
+  valuesFor(selectedDevice.value, selectedEffect.value?.id ?? '', specs.value),
+)
+
+/**
+ * Pourquoi les contrôles sont inertes, ou `null` s'ils sont vivants.
+ *
+ * **Un réglage n'a de sens que sur l'effet en cours sur l'appareil.** La boucle
+ * est le seul endroit où un paramètre change quelque chose ; bouger un curseur
+ * pour un effet qu'on n'a pas appliqué ne pourrait rien produire.
+ *
+ * D'où le choix : figer et le dire, plutôt qu'appliquer l'effet au premier
+ * mouvement de curseur. Lancer une boucle sur un clavier est un geste qu'on
+ * décide — c'est tout le sens de « Appliquer », et de l'adoption avant lui.
+ * Qu'un glissement de souris s'en charge à la place ferait d'un réglage une
+ * prise de contrôle.
+ *
+ * Les valeurs restent **visibles** et retenues : ce sont celles avec lesquelles
+ * « Appliquer » lancera l'effet.
+ */
+const frozen = computed<string | null>(() => {
+  if (!selectedDevice.value) {
+    // L'avertissement plus haut dit déjà « aucun appareil piloté » : le répéter
+    // mot pour mot ferait lire deux fois la même phrase pour deux raisons
+    // différentes.
+    return "Un réglage agit sur la boucle d'un appareil, et il n'y en a aucune tant qu'aucun appareil n'est piloté."
+  }
+  if (!applied.value) {
+    return "Ces réglages agissent sur l'effet en cours sur l'appareil. « Appliquer » lance celui-ci avec les valeurs ci-dessous, et ils redeviennent réglables."
+  }
+  return null
+})
+
+/** Un effet sans paramètre le dit — et il ne le dit pas de la même façon selon sa nature. */
+const noParams = computed(() =>
+  selectedEffect.value?.hardware
+    ? "Exécuté par le micrologiciel : il n'expose aucun réglage à l'application."
+    : "Cet effet n'en déclare aucun : il fait la même chose à chaque lancement.",
+)
+
+function onParamChange(id: string, value: ParamValue): void {
+  const d = selectedDevice.value
+  const c = selectedEffect.value
+  if (!d || !c) return
+  adjust({ vid: d.vid, pid: d.pid }, c.id, specs.value, id, value)
 }
 
-const declared = computed(() => {
+/** Le geste est fini — curseur relâché, case cochée : on écrit maintenant. */
+function onParamCommit(): void {
+  const d = selectedDevice.value
   const c = selectedEffect.value
-  if (!c) return []
-  return Object.entries(c.params).map(([id, spec]) => ({
-    id,
-    label: spec.label,
-    value: show(spec.default),
-  }))
-})
+  if (!d || !c) return
+  settle({ vid: d.vid, pid: d.pid }, c.id)
+}
+
+function onParamReset(): void {
+  const d = selectedDevice.value
+  const c = selectedEffect.value
+  if (!d || !c) return
+  forget({ vid: d.vid, pid: d.pid }, c.id, specs.value)
+}
 
 // ---------------------------------------------------------------- cycle de vie
 
@@ -458,6 +526,10 @@ onMounted(async () => {
   void getDefaultLayout().then((l) => {
     fallback.value = l
   })
+
+  // Avant tout le reste : « Appliquer » part des valeurs retenues, et les lire
+  // après coup laisserait une fenêtre où l'effet démarrerait sur ses défauts.
+  await loadParams()
 
   await refresh()
 
@@ -479,6 +551,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   alive = false
   window.clearInterval(statusTimer)
+  // Le dernier mouvement d'un curseur ne doit pas dépendre du fait qu'on soit
+  // resté devant le temps du repos d'écriture.
+  flushParams()
 })
 </script>
 
@@ -601,6 +676,7 @@ onBeforeUnmount(() => {
       <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
       <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
       <p v-if="applyError" class="failure" role="alert">{{ applyError }}</p>
+      <p v-if="paramsError" class="failure" role="alert">{{ paramsError }}</p>
       <p v-if="status?.error" class="failure" role="alert">
         Erreur de l'effet, à l'image en cours : {{ status.error }}
       </p>
@@ -643,26 +719,19 @@ onBeforeUnmount(() => {
         </div>
 
         <!--
-          L'emplacement des réglages. Les curseurs qui les ajustent à chaud sont
-          l'issue #28 : ici on montre ce que l'effet déclare, et ce sur quoi il
-          tourne aujourd'hui.
+          Les réglages, engendrés depuis le manifeste. Le formulaire ne connaît
+          aucun effet en particulier : il connaît les quatre sortes de
+          `ParamSpec`, et rien d'autre.
         -->
-        <section class="settings">
-          <h2>Réglages</h2>
-          <p v-if="!declared.length" class="cost">Cet effet n'en déclare aucun.</p>
-          <template v-else>
-            <dl class="params">
-              <div v-for="p in declared" :key="p.id">
-                <dt>{{ p.label }}</dt>
-                <dd class="num">{{ p.value }}</dd>
-              </div>
-            </dl>
-            <p class="cost">
-              Valeurs déclarées par l'effet, sur lesquelles il tourne. Les ajuster à chaud est
-              l'issue&nbsp;#28.
-            </p>
-          </template>
-        </section>
+        <EffectParamsForm
+          :specs="specs"
+          :values="paramValues"
+          :frozen="frozen"
+          :empty="noParams"
+          @change="onParamChange"
+          @commit="onParamCommit"
+          @reset="onParamReset"
+        />
 
         <footer class="actions">
           <button
@@ -1092,39 +1161,6 @@ onBeforeUnmount(() => {
    SVG garde ses proportions, une hauteur maximale le ferait rogner. */
 .sim {
   max-width: 760px;
-}
-
-.settings {
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-2);
-  padding-top: var(--gap-3);
-  border-top: 1px solid var(--line);
-}
-
-.settings h2 {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.params {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-2) var(--gap-4);
-  margin: 0;
-}
-
-dt {
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-dd {
-  margin: 0;
-  font-size: 14px;
 }
 
 .actions {

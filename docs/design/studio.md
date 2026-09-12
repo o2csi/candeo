@@ -280,9 +280,8 @@ comme absent, pas l'omettre.
       aperçu dans le panneau de droite (§8). Le repère de couleurs remplace la
       vignette animée : il est prélevé sur le rendu de l'effet, il ne peut donc
       pas décrire autre chose que ce que l'effet fait.
-- [ ] Réglage des paramètres déclarés — la colonne de droite les **affiche**
-      avec leur valeur de départ, lue dans le manifeste ; les ajuster à chaud
-      reste à faire
+- [x] Réglage des paramètres déclarés — un contrôle par sorte, engendré depuis
+      le manifeste, ajusté à chaud et retenu par appareil et par effet (§9)
 
 Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hors
 `monaco-editor`.
@@ -397,3 +396,117 @@ injoignable — fondre les deux rendrait « piloté mais absent » indicible.
 | Un dessin de souris | Le seul gabarit connu | La maquette l'utilise pour illustrer qu'un effet reçoit *un gabarit*, pas un clavier. Dessiner une souris qu'aucun relevé ne décrit serait inventer du matériel. |
 | Un repère de couleurs pour les effets matériels | Pastille sourde | Le repère est **prélevé en exécutant l'effet**. Le micrologiciel exécute ceux-là : l'application ne voit jamais leurs images, et quatre couleurs plausibles décriraient un effet qu'on n'a pas regardé. |
 | « L'aperçu tourne quand même » sans appareil | Aucun aperçu animé | L'aperçu est alimenté par la boucle du moteur, qui vise un appareil. Sans appareil piloté il n'y a pas de boucle — et en animer une sur un appareil que l'utilisateur n'a pas autorisé est exactement ce que l'adoption interdit. |
+
+---
+
+## 9. Les réglages sont un formulaire, pas un éditeur
+
+C'est **le morceau qui sert le public qui n'écrira jamais de code**. Celui qui
+veut « la vague, mais plus lente » n'a pas besoin d'ouvrir Monaco : il lui faut
+un curseur. Tout le reste de l'application a servi celui qui écrit des effets ;
+cette colonne sert l'autre.
+
+Les contrôles sont **engendrés depuis le manifeste**, jamais écrits pour un effet
+en particulier. Le formulaire connaît les quatre sortes de `ParamSpec`, et rien
+d'autre : un effet installé demain obtient ses réglages sans que rien ne change
+ici.
+
+| Sorte | Contrôle | Ce qui l'accompagne |
+|---|---|---|
+| `number` | curseur `min`/`max`/`step` | la valeur, avec les décimales que le pas demande — point et non virgule, comme dans le manifeste |
+| `color` | sélecteur de couleur | le code `#rrggbb`, en toutes lettres |
+| `boolean` | case à cocher | « activé » / « désactivé » |
+| `choice` | liste | l'option retenue |
+
+Un sélecteur de couleur *est* une couleur — c'est le seul endroit de
+l'application où elle est le sujet et non un rôle d'interface, et c'est
+l'exception admise à la règle des jetons de style : aucune couleur n'est écrite
+en dur hors de celles que le clavier **émet**. Le code hexadécimal l'accompagne
+donc toujours : il se lit, se relève et se dicte, ce qu'une pastille ne permet
+pas — et aucune information de ce formulaire n'est portée par la seule couleur.
+
+### Trois destinations pour un geste
+
+Bouger un curseur écrit à trois endroits, qui n'ont ni la même cadence ni la même
+durée de vie :
+
+| Destination | Quand | Ce que c'est |
+|---|---|---|
+| mémoire de la fenêtre | immédiat | ce que le formulaire affiche |
+| boucle de rendu | 25 fois par seconde au plus | `set_effect_params`, à chaud |
+| `settings.json` | **à la fin du geste** | `remember_effect_params` |
+
+**Le débit vers le moteur est borné, et les états intermédiaires sont écrasés.**
+Un glissement de souris produit des dizaines d'événements par seconde ; la boucle
+relit les paramètres à chaque image, soit soixante fois par seconde. Envoyer plus
+vite qu'elle ne lit, c'est remplacer un JSON que personne n'a encore regardé. Un
+seul envoi est en vol à la fois, et le dernier état demandé repart toujours — ce
+qu'on voit à l'écran est le seul qui compte, et il n'est jamais perdu.
+
+**L'écriture disque part à la fin du geste, pas après un repos.** Un curseur
+émet `input` pendant qu'on le glisse et `change` quand on le relâche : le premier
+alimente la boucle, le second écrit. Un glissement de deux secondes produit donc
+**une** écriture, celle de la valeur à laquelle on s'arrête — `settings.json`
+s'écrit par fichier temporaire puis renommage, c'est un geste complet.
+
+La distinction n'est pas cosmétique. Une simple temporisation — « 600 ms sans
+mouvement » — perdrait le dernier réglage à chaque fois qu'on **ferme la
+fenêtre** dans la foulée : fermer détruit la vue web sans passer par les crochets
+de Vue, et c'est le mode d'emploi de l'application, pas un cas limite — un effet
+continue de tourner fenêtre fermée. La temporisation reste, en filet pour les cas
+où `change` n'arrive pas, doublée d'un `pagehide` ; mais aucun des deux n'est le
+chemin nominal, et aucun des deux ne pouvait l'être.
+
+La fin d'un geste n'est d'ailleurs pas toujours rare : une flèche du clavier
+maintenue enfoncée sur un curseur émet `change` **à chaque répétition**. Deux
+écritures d'une même paire restent donc séparées d'au moins 250 ms ; au-delà, la
+temporisation reprend la main et écrit le dernier état à la relâche. On ne perd
+rien, on décale.
+
+### Pourquoi le disque, et pas la seule session
+
+Retenir les réglages en mémoire suffirait à la lettre de l'issue — changer
+d'effet puis revenir ne perd rien. Mais celui que ce formulaire sert règle « la
+vague, mais plus lente » **une fois** ; le lui refaire régler à chaque lancement
+reviendrait à livrer un réglage qu'on ne peut pas garder, c'est-à-dire une
+démonstration. Celui qui écrit du code itère et n'a rien à retenir — c'est
+l'autre public qui paie une mémoire de session, et c'est justement celui que
+cette colonne vise. L'adoption d'un appareil est persistante pour la même raison :
+une décision prise une fois ne se redemande pas.
+
+La clé est la paire **appareil / effet**, et seul ce qui **diffère du manifeste**
+est écrit ; les détails et le sort du numéro de série sont dans
+[`../api/commands.md`](../api/commands.md) §Réglages.
+
+### Régler un effet qu'on n'a pas appliqué
+
+Un paramètre ne change quelque chose que dans la boucle en cours. Bouger un
+curseur pour un effet qui ne tourne pas sur cet appareil ne peut donc rien
+produire — et le laisser bouger sans effet serait pire que de l'interdire.
+
+Le formulaire est **inerte, et il dit pourquoi** : « ces réglages agissent sur
+l'effet en cours sur l'appareil ; *Appliquer* lance celui-ci avec les valeurs
+ci-dessous ». Les valeurs restent visibles et retenues — ce sont exactement
+celles avec lesquelles « Appliquer » démarrera l'effet.
+
+L'autre réponse possible — appliquer l'effet au premier mouvement de curseur — a
+été écartée : lancer une boucle sur un clavier est un geste qu'on décide, c'est
+tout le sens de « Appliquer » et de l'adoption avant lui. Qu'un glissement de
+souris s'en charge à la place ferait d'un réglage une prise de contrôle.
+
+> **Un `fieldset`, et son piège.** L'état inerte se décide une fois, sur le
+> groupe : `<fieldset disabled>` neutralise tous les contrôles descendants, le
+> bouton de rétablissement compris, et un champ ajouté demain l'est sans que
+> personne y pense — même forme que le repliement des colonnes au §8.
+>
+> Mais un `fieldset` porte une largeur minimale implicite (`min-width:
+> min-content`) qu'aucune remise à plat ne supprime. Sans `min-width: 0`, le plus
+> long libellé — écrit par l'effet, donc quelconque — impose sa largeur au groupe
+> et la colonne déborde au lieu de se comprimer.
+
+### Un effet sans paramètre le dit
+
+Et il ne le dit pas de la même façon selon sa nature : un effet hôte « n'en
+déclare aucun », un effet matériel « n'en expose aucun à l'application » — le
+micrologiciel l'exécute, ses réglages ne passent pas par ici. Un cadre vide
+laisserait chercher ce qui n'a pas chargé.

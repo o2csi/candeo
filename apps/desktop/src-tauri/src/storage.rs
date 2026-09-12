@@ -40,7 +40,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::builtins;
 use crate::runtime::swatch::{self, Swatch};
-use crate::CmdResult;
+use crate::{CmdResult, DeviceRef};
 
 /// Version de l'API d'effets fournie par cette version de l'application.
 ///
@@ -51,6 +51,9 @@ pub const EFFECTS_API_VERSION: u32 = 1;
 
 /// Longueur maximale d'un identifiant d'effet, donc d'un nom de dossier.
 const MAX_ID_LEN: usize = 64;
+
+/// Distingue deux fichiers temporaires de réglages écrits en même temps.
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 const SOURCE_FILE: &str = "source.ts";
 const JS_FILE: &str = "effect.js";
@@ -196,6 +199,40 @@ impl DeviceRecord {
     }
 }
 
+/// Réglages d'un effet, retenus pour **un** appareil.
+///
+/// # Pourquoi l'appareil et l'effet ensemble
+///
+/// « La vague, mais plus lente » se règle sur un clavier donné : le même effet
+/// n'a aucune raison de tourner à la même vitesse sur deux appareils, et deux
+/// effets du même appareil n'ont pas les mêmes paramètres. La clé est donc la
+/// paire, et changer d'effet puis revenir retrouve ses réglages.
+///
+/// # Sans le numéro de série, contrairement à [`DeviceRecord`]
+///
+/// Délibéré : toutes les commandes du moteur visent un [`DeviceRef`], c'est-à-dire
+/// un VID et un PID. Deux exemplaires du même modèle partagent déjà leur boucle
+/// de rendu — les distinguer *ici* promettrait une séparation que le reste de
+/// l'application ne tient pas, et le réglage semblerait perdu une fois sur deux.
+/// L'adoption, elle, décide d'ouvrir un appareil précis : elle a besoin de la
+/// série, et c'est pourquoi elle la porte.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectParamsRecord {
+    pub vid: u16,
+    pub pid: u16,
+    /// Identifiant de l'effet réglé.
+    pub effect: String,
+    /// Les valeurs, telles que l'interface les envoie au moteur.
+    ///
+    /// JSON brut, comme [`Manifest::params`] : leur forme est celle de
+    /// `ParamValue` côté TypeScript — un nombre, une chaîne, un booléen ou une
+    /// couleur `{r,g,b}` — et le Rust ne les interprète pas. Les typer ici
+    /// créerait une seconde source de vérité, qui divergerait au premier type
+    /// de paramètre ajouté.
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Réglages persistants.
 ///
 /// `#[serde(default)]` sur la structure entière : un `settings.json` écrit par
@@ -216,6 +253,13 @@ pub struct Settings {
     /// jamais rencontré. Le fichier ne grossit donc pas d'une entrée à chaque
     /// périphérique branché une fois.
     pub devices: Vec<DeviceRecord>,
+    /// Réglages d'effet retenus, par appareil et par effet.
+    ///
+    /// Même économie que `devices` : une entrée n'existe que si quelqu'un a
+    /// **déplacé** un curseur. Rétablir les valeurs déclarées la retire, plutôt
+    /// que d'écrire une copie des défauts que la prochaine version de l'effet
+    /// contredirait.
+    pub effect_params: Vec<EffectParamsRecord>,
 }
 
 impl Default for Settings {
@@ -227,6 +271,7 @@ impl Default for Settings {
             brightness: 255,
             device: None,
             devices: Vec::new(),
+            effect_params: Vec::new(),
         }
     }
 }
@@ -283,6 +328,63 @@ impl Settings {
                 state,
             }),
         }
+    }
+
+    /// Les réglages retenus pour cet effet sur cet appareil, s'il y en a.
+    pub fn effect_params(
+        &self,
+        vid: u16,
+        pid: u16,
+        effect: &str,
+    ) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.effect_params
+            .iter()
+            .find(|r| r.vid == vid && r.pid == pid && r.effect == effect)
+            .map(|r| &r.values)
+    }
+
+    /// Retient des réglages. Une table **vide** efface l'entrée.
+    ///
+    /// C'est ce qui fait de « rétablir les valeurs déclarées » un oubli et non
+    /// une copie : l'effet repart alors de son manifeste, y compris si une
+    /// version ultérieure en change les défauts.
+    pub fn set_effect_params(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        effect: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) {
+        let position = self
+            .effect_params
+            .iter()
+            .position(|r| r.vid == vid && r.pid == pid && r.effect == effect);
+
+        match (position, values.is_empty()) {
+            (Some(i), true) => {
+                self.effect_params.remove(i);
+            }
+            (Some(i), false) => self.effect_params[i].values = values,
+            (None, true) => {}
+            (None, false) => self.effect_params.push(EffectParamsRecord {
+                vid,
+                pid,
+                effect: effect.to_owned(),
+                values,
+            }),
+        }
+    }
+
+    /// Oublie les réglages d'un effet, **sur tous les appareils**.
+    ///
+    /// Appelée quand l'effet est supprimé : sans cela ses réglages resteraient
+    /// dans `settings.json` pour un identifiant que plus rien ne désigne, et le
+    /// fichier ne ferait que grossir. Rend vrai si quelque chose a été retiré,
+    /// pour qu'on ne réécrive pas le fichier quand il n'y a rien à y changer.
+    pub fn forget_effect(&mut self, effect: &str) -> bool {
+        let avant = self.effect_params.len();
+        self.effect_params.retain(|r| r.effect != effect);
+        self.effect_params.len() != avant
     }
 }
 
@@ -584,6 +686,12 @@ impl Store {
     /// Passage par un fichier temporaire puis renommage : une coupure en cours
     /// d'écriture laisserait sinon des réglages tronqués, donc une application
     /// qui ne démarre plus.
+    ///
+    /// Le nom du temporaire est **unique**, et non `settings.json.tmp` : deux
+    /// écritures qui se chevauchent — un réglage retenu pendant qu'une adoption
+    /// se décide — écriraient sinon dans le même fichier, et le renommage du
+    /// second publierait un mélange des deux. Le renommage, lui, reste atomique :
+    /// le dernier arrivé gagne, ce qui est le pire cas acceptable.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
             return Err("chemin de réglages sans dossier parent".into());
@@ -592,7 +700,10 @@ impl Store {
 
         let json = serde_json::to_string_pretty(settings)
             .map_err(|e| format!("réglages non sérialisables : {e}"))?;
-        let tmp = self.settings_file.with_extension("json.tmp");
+        let rang = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = self
+            .settings_file
+            .with_extension(format!("json.{}.{rang}.tmp", std::process::id()));
         write(&tmp, &json)?;
         fs::rename(&tmp, &self.settings_file).map_err(|e| {
             format!(
@@ -717,9 +828,25 @@ pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
 }
 
+/// Supprime un effet, **et les réglages qu'on avait retenus pour lui**.
+///
+/// Les deux vont ensemble : laisser les réglages derrière ferait grossir
+/// `settings.json` d'entrées désignant un identifiant que plus rien ne nomme, et
+/// un effet réinstallé plus tard sous le même nom hériterait en silence des
+/// réglages de son homonyme disparu.
+///
+/// L'oubli vient **après** la suppression : si celle-ci échoue, l'effet est
+/// toujours là et ses réglages doivent l'être aussi.
 #[tauri::command]
 pub fn delete_effect(app: AppHandle, id: String) -> CmdResult<()> {
-    store(&app)?.delete_effect(&id)
+    let store = store(&app)?;
+    store.delete_effect(&id)?;
+
+    let mut settings = store.read_settings()?;
+    if settings.forget_effect(&id) {
+        store.write_settings(&settings)?;
+    }
+    Ok(())
 }
 
 /// Rend la source d'un effet, pour la rouvrir dans l'éditeur.
@@ -741,6 +868,42 @@ pub fn get_settings(app: AppHandle) -> CmdResult<Settings> {
 #[tauri::command]
 pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
     store(&app)?.write_settings(&settings)
+}
+
+/// Retient les réglages d'un effet pour un appareil, sans toucher au reste.
+///
+/// Une commande dédiée plutôt qu'un `set_settings` depuis l'interface : la
+/// lecture, la modification et l'écriture se font ici, d'un seul tenant. Un
+/// front qui relirait, modifierait puis réécrirait tout le fichier écraserait au
+/// passage une adoption décidée entre-temps — et ce n'est pas un cas d'école, le
+/// Rust écrit `settings.json` à chaque `adopt_device`.
+///
+/// Elle ne change **rien** à l'effet en cours : ajuster à chaud, c'est
+/// [`crate::runtime::set_effect_params`]. Les deux sont séparées parce qu'elles
+/// n'ont ni la même cadence ni la même destination — des dizaines d'appels par
+/// seconde vers la boucle de rendu, un seul vers le disque quand le curseur
+/// s'arrête.
+#[tauri::command]
+pub fn remember_effect_params(
+    app: AppHandle,
+    device: DeviceRef,
+    effect: String,
+    params: serde_json::Map<String, serde_json::Value>,
+) -> CmdResult<()> {
+    validate_id(&effect)?;
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+
+    // Rien de neuf : on ne réécrit pas le fichier. Un curseur qu'on déplace puis
+    // qu'on ramène repasse par ici, et l'aller-retour entre deux effets aussi —
+    // une écriture disque par passage n'apprendrait rien à personne.
+    let retenus = settings.effect_params(device.vid, device.pid, &effect);
+    if retenus == Some(&params) || (retenus.is_none() && params.is_empty()) {
+        return Ok(());
+    }
+
+    settings.set_effect_params(device.vid, device.pid, &effect, params);
+    store.write_settings(&settings)
 }
 
 // ---------------------------------------------------------------- tests
@@ -1169,6 +1332,12 @@ mod tests {
                 serial: Some("XY01".into()),
                 state: DeviceState::Adopted,
             }],
+            effect_params: vec![EffectParamsRecord {
+                vid: 0x1532,
+                pid: 0x0292,
+                effect: "respiration".into(),
+                values: valeurs(&[("period", serde_json::json!(12.5))]),
+            }],
         };
 
         store.write_settings(&settings).unwrap();
@@ -1333,5 +1502,167 @@ mod tests {
         assert!(json.contains(r#""devices":[{"vid":5426,"pid":658,"state":"adopted"}]"#));
         assert!(json.contains(r#""activeEffect""#));
         assert!(!json.contains("serial"), "clé vide écrite : {json}");
+    }
+
+    // ------------------------------------------------- réglages d'effet
+
+    /// Une table de valeurs, écrite comme l'interface l'envoie.
+    fn valeurs(paires: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+        paires
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
+    }
+
+    /// Le cœur de l'issue #28 : changer d'effet puis revenir ne perd rien, et
+    /// deux appareils ne se marchent pas dessus.
+    #[test]
+    fn les_reglages_sont_retenus_par_appareil_et_par_effet() {
+        let mut settings = Settings::default();
+        let lent = valeurs(&[("speed", serde_json::json!(0.5))]);
+        let rapide = valeurs(&[("speed", serde_json::json!(9.0))]);
+
+        settings.set_effect_params(VID, PID, "balayage", lent.clone());
+        settings.set_effect_params(VID, PID, "respiration", rapide.clone());
+        // Même effet, autre appareil : une entrée de plus, pas un écrasement.
+        settings.set_effect_params(VID, PID + 1, "balayage", rapide.clone());
+
+        assert_eq!(settings.effect_params(VID, PID, "balayage"), Some(&lent));
+        assert_eq!(
+            settings.effect_params(VID, PID, "respiration"),
+            Some(&rapide)
+        );
+        assert_eq!(
+            settings.effect_params(VID, PID + 1, "balayage"),
+            Some(&rapide)
+        );
+        assert_eq!(settings.effect_params(VID, PID, "onde-radiale"), None);
+    }
+
+    /// Bouger le même curseur cent fois n'écrit pas cent entrées : c'est
+    /// exactement ce que produit un glissement de souris.
+    #[test]
+    fn regler_deux_fois_le_meme_effet_remplace_l_entree() {
+        let mut settings = Settings::default();
+        for i in 0..5 {
+            settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", i.into())]));
+        }
+
+        assert_eq!(settings.effect_params.len(), 1);
+        assert_eq!(
+            settings.effect_params(VID, PID, "balayage"),
+            Some(&valeurs(&[("speed", serde_json::json!(4))]))
+        );
+    }
+
+    /// Rétablir les valeurs déclarées **oublie**, au lieu d'en écrire une copie :
+    /// l'effet repart de son manifeste, y compris si une version ultérieure en
+    /// change les défauts.
+    #[test]
+    fn retablir_les_valeurs_declarees_retire_l_entree() {
+        let mut settings = Settings::default();
+        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID, "balayage", serde_json::Map::new());
+
+        assert!(settings.effect_params.is_empty());
+        assert_eq!(settings.effect_params(VID, PID, "balayage"), None);
+
+        // Et oublier ce qui n'a jamais été réglé ne crée pas d'entrée vide.
+        settings.set_effect_params(VID, PID, "onde-radiale", serde_json::Map::new());
+        assert!(settings.effect_params.is_empty());
+    }
+
+    /// Le fichier d'une version antérieure ne connaît pas `effectParams`. Il se
+    /// relit — c'est ce que `#[serde(default)]` sur la structure garantit — et
+    /// la réécriture ne perd ni l'adoption ni la luminosité.
+    #[test]
+    fn un_fichier_sans_reglages_d_effet_se_relit_et_les_accueille() {
+        let (tmp, store) = store_temporaire();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{"activeEffect":"onde-radiale","brightness":90,
+                "devices":[{"vid":5426,"pid":658,"state":"adopted"}]}"#,
+        )
+        .unwrap();
+
+        let mut settings = store.read_settings().unwrap();
+        assert!(settings.effect_params.is_empty());
+
+        let reglages = valeurs(&[
+            ("speed", serde_json::json!(0.5)),
+            ("color", serde_json::json!({ "r": 0, "g": 180, "b": 255 })),
+        ]);
+        settings.set_effect_params(VID, PID, "balayage", reglages.clone());
+        store.write_settings(&settings).unwrap();
+
+        let relu = store.read_settings().unwrap();
+        assert_eq!(relu.effect_params(VID, PID, "balayage"), Some(&reglages));
+        assert_eq!(relu.brightness, 90);
+        assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
+    }
+
+    /// Les quatre sortes de `ParamSpec` survivent au disque telles quelles : le
+    /// Rust ne les interprète pas, il ne doit pas non plus les abîmer. Une
+    /// couleur est un objet `{r,g,b}`, pas une chaîne.
+    #[test]
+    fn les_quatre_sortes_de_valeurs_font_un_aller_retour() {
+        let (_tmp, store) = store_temporaire();
+        let reglages = valeurs(&[
+            ("speed", serde_json::json!(0.5)),
+            ("bounce", serde_json::json!(true)),
+            ("axis", serde_json::json!("vertical")),
+            ("color", serde_json::json!({ "r": 255, "g": 96, "b": 0 })),
+        ]);
+
+        let mut settings = Settings::default();
+        settings.set_effect_params(VID, PID, "balayage", reglages.clone());
+        store.write_settings(&settings).unwrap();
+
+        assert_eq!(
+            store
+                .read_settings()
+                .unwrap()
+                .effect_params(VID, PID, "balayage"),
+            Some(&reglages)
+        );
+    }
+
+    /// Supprimer un effet emporte ses réglages, sur tous les appareils, et
+    /// n'emporte que les siens. Sans quoi `settings.json` garderait des entrées
+    /// pour un identifiant que plus rien ne désigne — et un effet réinstallé
+    /// plus tard sous le même nom hériterait des réglages de son homonyme.
+    #[test]
+    fn oublier_un_effet_retire_ses_reglages_partout() {
+        let mut settings = Settings::default();
+        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID + 1, "balayage", valeurs(&[("speed", 9.into())]));
+        settings.set_effect_params(VID, PID, "respiration", valeurs(&[("period", 12.into())]));
+
+        assert!(settings.forget_effect("balayage"));
+        assert_eq!(settings.effect_params.len(), 1);
+        assert_eq!(settings.effect_params(VID, PID, "balayage"), None);
+        assert_eq!(settings.effect_params(VID, PID + 1, "balayage"), None);
+        assert!(settings.effect_params(VID, PID, "respiration").is_some());
+
+        // Rien à retirer : le fichier n'a aucune raison d'être réécrit.
+        assert!(!settings.forget_effect("balayage"));
+        assert!(!settings.forget_effect("jamais-regle"));
+    }
+
+    /// Les réglages d'effet partent en camelCase comme le reste des DTO.
+    #[test]
+    fn les_reglages_d_effet_se_serialisent_en_camel_case() {
+        let mut settings = Settings::default();
+        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        let json = serde_json::to_string(&settings).unwrap();
+
+        assert!(
+            json.contains(
+                r#""effectParams":[{"vid":5426,"pid":658,"effect":"balayage","values":{"speed":3}}]"#
+            ),
+            "sérialisation : {json}"
+        );
     }
 }
