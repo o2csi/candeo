@@ -181,9 +181,10 @@ fonctionne.
 
 ## 7. Reste à faire
 
-- [ ] Commandes `install_effect`, `list_effects`, `delete_effect`
+- [x] Commandes `install_effect`, `list_effects`, `delete_effect`
 - [ ] Commandes `start_effect`, `stop_effect`, `set_effect_params`
 - [ ] Commande d'abonnement renvoyant les images par `Channel`
 - [ ] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
-- [ ] Persistance `settings.json` et reprise de l'effet actif au démarrage
+- [x] Lecture et écriture de `settings.json`
+- [ ] Reprise de l'effet actif au démarrage
 - [ ] Règle udev et vérification de la dorsale `hidraw` sous Linux

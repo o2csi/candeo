@@ -99,6 +99,100 @@ qui évitent ainsi de réémettre les 132 positions.
 
 ---
 
+## Bibliothèque d'effets
+
+Les emplacements et le format sont figés dans
+[`../design/effects-runtime.md`](../design/effects-runtime.md) §2 et §3. Aucun
+chemin n'est écrit en dur : `app_data_dir()` porte le contenu, `app_config_dir()`
+la configuration — identiques sous Windows, distincts sous Linux.
+
+```
+app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json
+app_config_dir()/settings.json
+```
+
+### `install_effect(source_ts, js, manifest) -> string`
+
+Écrit les trois fichiers et renvoie l'`id` retenu.
+
+```ts
+manifest: {
+  name: string,
+  description?: string,
+  params?: Record<string, ParamSpec>,   // tel que déclaré côté TypeScript
+  api_version: number                   // version de l'API d'effets à l'écriture
+}
+```
+
+Les paramètres sont stockés **tels quels** : leur forme est celle de `ParamSpec`
+dans `@candeo/effects-api`, elle évolue avec l'éditeur, et le Rust ne les
+interprète pas. Les retyper en Rust créerait une seconde source de vérité.
+
+`api_version` est obligatoire. Un effet écrit pour une version que cette
+application ne connaît pas est refusé à l'installation, avec un message qui le
+dit — plutôt que d'échouer plus tard à la première image.
+
+Le front envoie le JavaScript déjà transpilé par Monaco, **et** la source
+TypeScript : sans elle l'effet ne serait plus modifiable, sans le `.js` il ne
+pourrait plus démarrer sans ouvrir la fenêtre.
+
+**L'`id` est dérivé du nom, jamais repris tel quel.** Seuls `a-z`, `0-9` et le
+tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
+`..`, les séparateurs de chemin et les noms réservés de Windows (`CON`, `NUL`,
+`COM1`…) ne peuvent pas en sortir. Deux effets de même nom obtiennent le même
+`id` : réenregistrer depuis l'éditeur **met à jour** au lieu de dupliquer.
+
+### `list_effects() -> EffectEntry[]`
+
+```ts
+{
+  id: string,
+  kind: 'builtin' | 'user',
+  name: string,
+  description: string,
+  params: Record<string, ParamSpec>,
+  api_version: number
+}
+```
+
+Effets intégrés **et** installés, dans une seule liste : les intégrés sont
+compilés dans le binaire et n'ont pas de dossier, `kind` les distingue. Aucun
+n'est encore livré, le champ existe pour que l'interface n'ait pas à changer
+quand ce sera le cas.
+
+Un dossier dont le manifeste est illisible est ignoré, pas propagé en erreur :
+une bibliothèque de vingt effets ne doit pas disparaître à cause d'un seul.
+L'ordre est stable — le système de fichiers n'en garantit aucun.
+
+### `delete_effect(id)`
+
+Supprime le dossier. Un `id` hors de la liste blanche est refusé avant tout
+accès au disque.
+
+---
+
+## Réglages
+
+### `get_settings() -> Settings` · `set_settings(settings)`
+
+```ts
+{
+  active_effect: string | null,   // id à reprendre au démarrage
+  brightness: number,             // 0-255
+  device: { vid: number, pid: number } | null
+}
+```
+
+Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
+**défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
+version antérieure reprend lui aussi son défaut, plutôt que de rendre
+l'application muette au démarrage.
+
+L'écriture passe par un fichier temporaire suivi d'un renommage : une coupure en
+cours d'écriture laisserait sinon des réglages tronqués.
+
+---
+
 ## Erreurs
 
 Toutes les commandes faillibles renvoient `Result<T, String>`. Le message est
@@ -109,21 +203,10 @@ devenir un code à traduire côté front.
 
 ## Surface prévue — effets utilisateur
 
-Rien de ce qui suit n'est encore implémenté. La conception est figée dans
+Le stockage est en place (voir ci-dessus) ; l'exécution ne l'est pas. La
+conception est figée dans
 [`../design/effects-runtime.md`](../design/effects-runtime.md) ; c'est ici que
 la forme des commandes sera consignée au fur et à mesure.
-
-### Bibliothèque
-
-| Commande | Rôle |
-|---|---|
-| `install_effect(source_ts, js, manifest)` | écrit `effects/<id>/` et renvoie l'`id` |
-| `list_effects()` | effets intégrés **et** utilisateur, avec leur nature |
-| `delete_effect(id)` | supprime le dossier |
-
-Le front envoie le JavaScript déjà transpilé : le transpileur est celui de
-Monaco. Il envoie **aussi** la source TypeScript, sans quoi l'effet ne serait
-plus modifiable.
 
 ### Exécution
 

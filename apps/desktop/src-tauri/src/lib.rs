@@ -11,6 +11,8 @@ use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+mod storage;
+
 /// Gabarits connus. Un seul pour l'instant.
 const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
 
@@ -226,6 +228,11 @@ pub fn run() {
             set_effect,
             present,
             write_row,
+            storage::install_effect,
+            storage::list_effects,
+            storage::delete_effect,
+            storage::get_settings,
+            storage::set_settings,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");
