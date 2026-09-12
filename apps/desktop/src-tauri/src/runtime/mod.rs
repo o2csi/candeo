@@ -218,6 +218,17 @@ impl DeviceLoop {
         self.shared.lock().unwrap().clone()
     }
 
+    /// Vrai si c'est **cet** effet que la boucle fait tourner.
+    ///
+    /// L'identifiant est celui qu'on a demandé à `start`, pas une propriété du
+    /// code chargé : le JavaScript est lu une fois au démarrage et vit ensuite en
+    /// mémoire, il n'y a donc rien à relire pour le savoir — et c'est précisément
+    /// pourquoi supprimer un effet ne se remarque pas tout seul.
+    fn runs(&self, effect: &str) -> bool {
+        self.current()
+            .is_some_and(|s| s.effect_id.lock().unwrap().as_deref() == Some(effect))
+    }
+
     fn status(&self) -> EngineStatus {
         match self.current() {
             None => EngineStatus::default(),
@@ -362,6 +373,45 @@ impl Engine {
         }
     }
 
+    /// Arrête **toutes** les boucles, et attend leur fin.
+    ///
+    /// Sert à la fin du processus comme à la remise à zéro de la configuration :
+    /// dans les deux cas on repart d'un état connu, et laisser tourner des
+    /// boucles que plus rien ne désigne serait exactement le contraire.
+    pub fn stop_all(&self) {
+        for (_, l) in self.all() {
+            l.stop();
+        }
+    }
+
+    /// Arrête cet effet **partout où il tourne**, et rend les appareils touchés.
+    ///
+    /// Appelée avant la suppression d'un effet : la boucle exécute un `effect.js`
+    /// chargé en mémoire au démarrage, elle continuerait donc sans la moindre
+    /// erreur alors que son dossier n'existe plus — un appareil piloté par un
+    /// effet absent de la bibliothèque.
+    ///
+    /// Tous les appareils, pas seulement celui qu'on regarde : le même effet se
+    /// lance sur autant de claviers qu'on veut, et en oublier un le laisserait
+    /// dans cet état invisible.
+    ///
+    /// La ligne d'état de l'appareil ne disparaît pas, mais elle cesse de nommer
+    /// l'effet — c'est ce que fait [`DeviceLoop::stop`], et c'est bien ce qu'on
+    /// veut ici : l'identifiant ne désigne plus rien.
+    pub fn stop_everywhere(&self, effect: &str) -> Vec<DeviceRef> {
+        let mut stopped = Vec::new();
+        for (device, l) in self.all() {
+            // Le verrou de la table est déjà rendu — `all` a copié les pointeurs.
+            // Un arrêt attend la fin d'un fil, et on ne fait jamais attendre une
+            // commande visant un autre appareil.
+            if l.runs(effect) {
+                l.stop();
+                stopped.push(device);
+            }
+        }
+        stopped
+    }
+
     pub fn set_params(&self, device: DeviceRef, params: String) {
         if let Some(s) = self.shared(device) {
             *s.params.lock().unwrap() = params;
@@ -400,9 +450,7 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        for (_, l) in self.all() {
-            l.stop();
-        }
+        self.stop_all();
     }
 }
 
@@ -969,6 +1017,83 @@ mod tests {
         assert!(!s.running);
         assert_eq!(s.effect_id, None);
         assert_eq!(engine.status().len(), 1);
+    }
+
+    /// **Ce que la suppression d'un effet doit obtenir du moteur.**
+    ///
+    /// Un effet supprimé peut tourner sur plusieurs appareils, et il doit
+    /// s'arrêter sur tous — une boucle oubliée continuerait d'exécuter un
+    /// `effect.js` chargé en mémoire, sans erreur visible, alors que son dossier
+    /// n'existe plus. Les boucles qui font tourner **autre chose** ne sont pas
+    /// concernées : supprimer un effet n'éteint pas les claviers des autres.
+    #[test]
+    fn arreter_un_effet_l_arrete_partout_et_nulle_part_ailleurs() {
+        let engine = Engine::default();
+        let voisin = Arc::new(Sortie::default());
+
+        demarrer(&engine, PREMIER, "a-supprimer", Arc::new(Sortie::default()));
+        demarrer(&engine, SECOND, "autre", Arc::clone(&voisin));
+
+        let arretes = engine.stop_everywhere("a-supprimer");
+        assert_eq!(arretes, vec![PREMIER]);
+
+        let supprime = etat(&engine, PREMIER);
+        assert!(!supprime.running);
+        assert_eq!(
+            supprime.effect_id, None,
+            "la ligne d'état nomme encore un effet qui n'existe plus"
+        );
+
+        // Le voisin, lui, n'a rien vu passer : il tourne toujours, et ses images
+        // continuent de partir.
+        let avant = voisin.ecrites.load(Ordering::Relaxed);
+        assert!(etat(&engine, SECOND).running);
+        attendre("le voisin s'est arrêté avec son camarade", || {
+            voisin.ecrites.load(Ordering::Relaxed) > avant
+        });
+
+        engine.stop(SECOND);
+    }
+
+    /// Le même effet sur deux appareils : les deux boucles partent.
+    #[test]
+    fn arreter_un_effet_couvre_tous_les_appareils_qui_le_font_tourner() {
+        let engine = Engine::default();
+        demarrer(&engine, PREMIER, "partout", Arc::new(Sortie::default()));
+        demarrer(&engine, SECOND, "partout", Arc::new(Sortie::default()));
+
+        assert_eq!(engine.stop_everywhere("partout"), vec![PREMIER, SECOND]);
+        assert!(!etat(&engine, PREMIER).running);
+        assert!(!etat(&engine, SECOND).running);
+    }
+
+    /// Un identifiant que personne ne fait tourner n'arrête rien. C'est le cas
+    /// courant : on supprime un effet qu'on n'a pas appliqué.
+    #[test]
+    fn arreter_un_effet_qui_ne_tourne_nulle_part_ne_touche_a_rien() {
+        let engine = Engine::default();
+        demarrer(&engine, PREMIER, "en-cours", Arc::new(Sortie::default()));
+
+        assert!(engine.stop_everywhere("jamais-lance").is_empty());
+        assert!(etat(&engine, PREMIER).running);
+
+        engine.stop(PREMIER);
+    }
+
+    /// Ce que la remise à zéro de la configuration attend du moteur : plus une
+    /// seule boucle, quel que soit l'effet et quel que soit l'appareil.
+    #[test]
+    fn tout_arreter_ne_laisse_aucune_boucle() {
+        let engine = Engine::default();
+        demarrer(&engine, PREMIER, "premier", Arc::new(Sortie::default()));
+        demarrer(&engine, SECOND, "second", Arc::new(Sortie::default()));
+
+        engine.stop_all();
+
+        assert!(engine.status().iter().all(|s| !s.status.running));
+        // Les lignes restent : « cet appareil ne fait rien » et « je ne sais rien
+        // de cet appareil » ne se disent pas pareil, remise à zéro ou non.
+        assert_eq!(engine.status().len(), 2);
     }
 
     /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.

@@ -55,6 +55,7 @@ import { useRouter } from 'vue-router'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import {
+  deleteEffect,
   engineStatus,
   getDefaultLayout,
   getLayout,
@@ -91,6 +92,7 @@ const {
   adjust,
   settle,
   forget,
+  dropEffect,
   flush: flushParams,
   error: paramsError,
 } = useEffectParams()
@@ -445,6 +447,79 @@ async function halt(): Promise<void> {
   }
 }
 
+// ------------------------------------------------------------- suppression
+
+/**
+ * Un effet **écrit** se supprime ; un intégré ou un effet matériel, non.
+ *
+ * Les premiers vivent dans le binaire, les seconds dans le micrologiciel : il
+ * n'y a rien à retirer dans un cas comme dans l'autre. Le geste n'est donc pas
+ * proposé, plutôt que proposé puis refusé — un bouton qui échoue toujours
+ * apprend au mieux que le bouton n'aurait pas dû être là.
+ */
+const removable = computed(() => selectedEffect.value?.nature === 'user')
+
+/**
+ * L'effet dont la suppression attend confirmation, **par son identifiant**.
+ *
+ * Un identifiant et non un booléen : la question ne fige pas l'écran, on peut
+ * cliquer ailleurs pendant qu'elle est posée, et un drapeau se retrouverait à
+ * confirmer la suppression d'un autre effet que celui qu'on avait désigné.
+ */
+const pendingRemoval = ref<string | null>(null)
+
+/**
+ * Changer d'effet retire la question.
+ *
+ * Une confirmation qui survivrait à la sélection se rouvrirait d'elle-même au
+ * retour, sans qu'on l'ait redemandée — et ce n'est pas une boîte qu'on veut
+ * voir apparaître par surprise.
+ */
+watch(
+  () => selectedEffect.value?.id,
+  () => {
+    pendingRemoval.value = null
+  },
+)
+
+/**
+ * Supprime l'effet désigné **par la confirmation**, jamais celui que la
+ * sélection montre au moment du clic.
+ *
+ * Le Rust fait le reste dans l'ordre qu'il faut : il refuse ce qui n'est pas
+ * supprimable, arrête les boucles qui font tourner cet effet sur quelque appareil
+ * que ce soit, efface le dossier, puis oublie les réglages retenus pour lui. Rien
+ * de tout cela n'est réparti ici — c'est la seule façon que l'invariant tienne
+ * quel que soit l'appelant.
+ */
+async function removeEffect(): Promise<void> {
+  const id = pendingRemoval.value
+  if (id === null) return
+
+  problem.value = null
+  working.value = true
+  try {
+    await deleteEffect(id)
+
+    // Le pendant en mémoire de ce que le Rust vient de faire sur disque : sans
+    // cet oubli, un effet réenregistré sous le même nom dans la même session
+    // hériterait des réglages de son homonyme disparu.
+    dropEffect(id)
+
+    pendingRemoval.value = null
+    // La sélection retombe sur le premier de la liste : l'effet qu'elle désignait
+    // n'existe plus.
+    if (chosenEffect.value === id) chosenEffect.value = null
+    library.value = await listEffects()
+  } catch (e) {
+    problem.value = message(e)
+  } finally {
+    working.value = false
+    // La boucle a pu s'arrêter : l'état du moteur ne le dira qu'une fois relu.
+    await refreshStatus()
+  }
+}
+
 // ---------------------------------------------------------------- réglages
 
 /** Les paramètres déclarés par l'effet regardé. */
@@ -760,6 +835,24 @@ onBeforeUnmount(() => {
             Modifier
           </button>
 
+          <!--
+            Proposé aux seuls effets écrits. Un intégré vit dans le binaire, un
+            effet matériel dans le micrologiciel : leur offrir le bouton ne
+            promettrait qu'un refus.
+
+            Il reste en place et actif pendant que la question est posée : le
+            masquer ou le désactiver retirerait le focus du clavier au moment
+            précis où il doit atteindre la réponse, qui suit dans le document.
+          -->
+          <button
+            v-if="removable"
+            class="ghost danger"
+            :disabled="working"
+            @click="pendingRemoval = selectedEffect.id"
+          >
+            Supprimer
+          </button>
+
           <span class="spacer" />
 
           <p class="cost">
@@ -770,6 +863,45 @@ onBeforeUnmount(() => {
             }}
           </p>
         </footer>
+
+        <!--
+          La question est posée dans la colonne, pas dans une boîte modale : elle
+          reste à côté de ce qu'elle décrit, et n'empêche pas de regarder ailleurs
+          pendant qu'on y réfléchit.
+
+          **Après** le bouton qui la déclenche, et c'est ce qui fait tout le
+          parcours au clavier : la réponse est la tabulation suivante. Le titre
+          porte `role="alert"` — l'encart apparaît sans que rien ne bouge à
+          l'écran, il faut bien l'annoncer.
+        -->
+        <div
+          v-if="pendingRemoval"
+          class="confirm"
+          role="group"
+          aria-labelledby="confirm-remove"
+        >
+          <p id="confirm-remove" class="confirm-title" role="alert">
+            Supprimer « {{ selectedEffect.name }} » ?
+          </p>
+          <!--
+            Ce qui part, dit en toutes lettres. La source est le seul élément
+            irremplaçable de la liste : les réglages se refont, la boucle se
+            relance, le code écrit à la main ne se réinstalle pas.
+          -->
+          <p class="cost">
+            Le dossier de l'effet part entier, sa source comprise : c'est du code écrit à la main,
+            et rien ne le réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle
+            s'arrête sur les appareils où il tourne. Les autres effets ne sont pas touchés.
+          </p>
+          <div class="confirm-actions">
+            <button class="solid danger" :disabled="working" @click="removeEffect">
+              Supprimer définitivement
+            </button>
+            <button class="ghost" :disabled="working" @click="pendingRemoval = null">
+              Annuler
+            </button>
+          </div>
+        </div>
       </template>
     </section>
   </section>
@@ -1203,6 +1335,49 @@ onBeforeUnmount(() => {
 .ghost:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/*
+ * Un geste sans retour. La couleur ne le dit pas seule — le libellé annonce la
+ * suppression, et la confirmation énumère ce qui part : un daltonien lit la même
+ * chose que les autres.
+ */
+.danger {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.solid.danger {
+  background: var(--bad);
+  color: var(--accent-ink);
+}
+
+.ghost.danger:hover:not(:disabled) {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  padding: var(--gap-3);
+  border: 1px solid var(--bad);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--bad) 8%, var(--raised));
+}
+
+.confirm-title {
+  font-weight: 600;
+
+  /* Un nom d'effet est libre : il passe à la ligne plutôt que de déborder. */
+  overflow-wrap: anywhere;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
 }
 
 .notice,

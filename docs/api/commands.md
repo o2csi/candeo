@@ -447,6 +447,24 @@ Emporte aussi les **réglages retenus** pour cet effet, sur tous les appareils
 (voir §Réglages). L'oubli vient après la suppression : si celle-ci échoue,
 l'effet est toujours là et ses réglages doivent l'être aussi.
 
+**Trois temps, et l'ordre fait partie du contrat :**
+
+1. **le refus**, avant tout — un effet intégré ou un identifiant qui ne désigne
+   rien s'entend dire non sans que rien n'ait été arrêté ni effacé ;
+2. **l'arrêt des boucles** qui font tourner cet effet, sur **tous** les appareils,
+   et avant l'effacement. Le moteur charge `effect.js` une fois au démarrage et le
+   garde en mémoire : une boucle laissée en vie continuerait sans la moindre
+   erreur visible, sur un dossier qui n'existe plus, et l'appareil resterait
+   piloté par un effet absent de la bibliothèque ;
+3. **l'effacement**, puis l'oubli des réglages.
+
+L'arrêt est fait **côté Rust**, pas dans la fenêtre : c'est le seul endroit qui le
+garantisse quel que soit l'appelant. La ligne d'`engine_status()` de l'appareil
+subsiste, mais elle cesse de nommer l'effet — l'identifiant ne désigne plus rien.
+
+L'interface ne propose pas le geste sur un effet intégré, plutôt que de le
+proposer et de le laisser échouer.
+
 ### `read_effect_source(id) -> string`
 
 La source, pour la rouvrir dans l'éditeur. Un effet intégré rend son JavaScript,
@@ -483,6 +501,50 @@ Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
 **défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
 version antérieure reprend lui aussi son défaut, plutôt que de rendre
 l'application muette au démarrage.
+
+### `reset_settings()`
+
+Réécrit `settings.json` avec les **valeurs par défaut**, et repose les appareils.
+C'est la seule façon de revenir à un état connu sans aller éditer le fichier à la
+main — la première chose qu'on cherche quand quelque chose se comporte mal, et ce
+qui rend un rapport de bogue exploitable.
+
+Ce qui part : les décisions d'adoption — tout repasse en `detected` — et les
+réglages retenus par paire appareil / effet.
+
+**Aucun effet n'est touché.** Les effets écrits vivent dans
+`app_data_dir()/effects/`, pas dans `settings.json` ; les retirer est une autre
+action, `delete_effect`, une par effet. C'est la distinction que tout le stockage
+tient — un effet est du contenu, le choix de l'effet actif est de la
+configuration — et la confondre ferait perdre du code écrit à la main à qui
+voulait seulement désadopter un clavier. La commande n'en a d'ailleurs pas les
+moyens : elle n'écrit que dans le fichier de configuration.
+
+Les appareils sont reposés **avant** l'écriture, dans cet ordre :
+
+1. **les boucles s'arrêtent**, et l'arrêt est attendu — remettre la table des
+   appareils à zéro pendant qu'un effet tourne laisserait des boucles que plus
+   aucune décision ne désigne, et l'image suivante rallumerait ce qu'on est sur le
+   point d'éteindre ;
+2. **le rétroéclairage s'éteint** (`Effect::Off`). Arrêter une boucle laisse le
+   clavier sur sa dernière image, et une image figée ressemble à un effet qui
+   tourne encore ; l'extinction est exécutée par le micrologiciel, elle ne coûte
+   rien ;
+3. **les poignées sont refermées** et les échecs d'ouverture oubliés : on ne garde
+   pas ouvert un appareil que plus aucune décision ne désigne, et un message
+   d'échec décrivant une adoption qui n'existe plus n'apprend rien.
+
+Un clavier qui refuse de s'éteindre — débranché entre-temps, accès perdu —
+n'interrompt pas la remise à zéro : l'extinction est un agrément, pas le geste.
+
+Ce n'est **pas** un endroit où libérer des ressources côté effets. Chaque boucle
+porte son `Runtime` et son `Context` QuickJS, tous deux détruits avec elle : tout
+le tas JavaScript part avec. Aucun point d'entrée `dispose()` n'est souhaitable,
+il mettrait du code utilisateur sur le chemin de l'arrêt.
+
+La fenêtre, elle, garde ce qu'elle avait lu : c'est à elle d'oublier les réglages
+tenus en mémoire après l'appel, sans quoi le premier mouvement de curseur les
+réécrirait.
 
 ### `remember_effect_params(device, effect, params)`
 

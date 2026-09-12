@@ -105,10 +105,24 @@ export function useEffects() {
     return device ? (posed.value[key(device)] ?? null) : null
   }
 
+  /**
+   * Oublie ce que cette session avait posé, sur tous les appareils.
+   *
+   * Appelé après la remise à zéro de la configuration, qui éteint le
+   * rétroéclairage et referme les appareils : ce qu'on retenait ici décrivait un
+   * mode que plus aucun clavier n'affiche. Le garder ferait marquer « actif » un
+   * effet éteint — et cette table ne se corrige pas d'elle-même, puisque le
+   * protocole relevé sait écrire un effet, pas le relire.
+   */
+  function forgetPosed() {
+    posed.value = {}
+  }
+
   return {
     appliedOn,
     applying: readonly(applying),
     error: readonly(error),
     apply,
+    forgetPosed,
   }
 }

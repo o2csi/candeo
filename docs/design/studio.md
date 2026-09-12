@@ -512,3 +512,81 @@ Et il ne le dit pas de la même façon selon sa nature : un effet hôte « n'en
 déclare aucun », un effet matériel « n'en expose aucun à l'application » — le
 micrologiciel l'exécute, ses réglages ne passent pas par ici. Un cadre vide
 laisserait chercher ce qui n'a pas chargé.
+
+---
+
+## 10. Retirer un effet, remettre la configuration au défaut
+
+Deux gestes destructeurs arrivent ensemble (issues #41 et #42), et **la seule
+chose qui compte est qu'on ne puisse pas les confondre.**
+
+| Geste | Où | Ce qui part |
+|---|---|---|
+| Supprimer un effet | bibliothèque, troisième colonne, un effet à la fois | `effects/<id>/`, source comprise, et les réglages retenus pour lui |
+| Remettre la configuration au défaut | écran Périphériques, tout en bas | `settings.json` : adoptions, réglages d'effets |
+
+### Ils ne vivent pas au même endroit, et ce n'est pas une commodité de rangement
+
+Supprimer un effet retire du **code écrit à la main**, que rien ne réinstalle.
+Remettre la configuration au défaut ne touche à **aucun** effet — c'est la
+distinction data / config que le stockage tient depuis le début, et c'est ici
+qu'elle protège quelque chose : si l'interface laissait croire l'inverse,
+quelqu'un qui voulait seulement désadopter un clavier perdrait son travail.
+
+D'où le placement. La remise à zéro est sur l'écran où l'on **remplit**
+`settings.json` — on y décide ce qui est piloté, ignoré, laissé tranquille — et
+non dans la bibliothèque, où le geste voisin efface du code. La suppression est
+dans la bibliothèque, sur l'effet qu'on regarde, une par effet.
+
+### Ce qui est proposé, et à qui
+
+**Seuls les effets écrits.** Un intégré vit dans le binaire, un effet matériel
+dans le micrologiciel : il n'y a rien à retirer. Le bouton n'apparaît pas pour
+eux, plutôt que d'apparaître et d'échouer — un bouton qui échoue toujours
+n'apprend que sa propre inutilité.
+
+### Les deux demandent confirmation, et la confirmation dit ce qui part
+
+Pas une boîte modale : un encart dans la colonne, à côté de ce qu'il décrit. La
+confirmation de la remise à zéro **énumère** — les appareils repassent en
+`detected`, les effets s'arrêtent, le rétroéclairage s'éteint, les réglages sont
+oubliés — et sa dernière ligne est la plus importante : *vos effets ne sont pas
+touchés*.
+
+La question porte sur un **identifiant**, pas sur un drapeau : l'écran n'est pas
+figé pendant qu'elle est posée, et un booléen se retrouverait à confirmer la
+suppression d'un autre effet que celui qu'on avait désigné. Changer de sélection
+retire la question plutôt que de la laisser resurgir au retour.
+
+### Les boucles s'arrêtent avant l'écriture, et c'est le Rust qui s'en charge
+
+Un effet supprimé dont la boucle survivrait continuerait d'exécuter un
+`effect.js` **chargé en mémoire** : aucune erreur, aucun signe, et un appareil
+piloté par un effet absent de la bibliothèque. Une remise à zéro qui viderait la
+table des appareils pendant qu'un effet tourne laisserait des boucles que plus
+aucune décision ne désigne.
+
+L'arrêt est donc fait côté Rust, dans la commande, pas orchestré depuis la
+fenêtre : c'est le seul endroit où l'invariant tienne quel que soit l'appelant.
+L'ordre exact des deux commandes est dans
+[`../api/commands.md`](../api/commands.md) §Bibliothèque d'effets et §Réglages.
+
+La fenêtre a malgré tout quelque chose à oublier : elle tient en mémoire les
+réglages lus au démarrage et ce que la session a posé comme effet matériel. Sans
+cet oubli, le premier mouvement de curseur réécrirait ce que le Rust vient
+d'effacer.
+
+### Éteindre plutôt que laisser la dernière image
+
+Arrêter une boucle laisse le clavier sur sa dernière image, et une image figée
+ressemble à un effet qui tourne encore. La remise à zéro pose donc `Effect::Off` :
+c'est le micrologiciel qui l'exécute, le coût est nul, et l'appareil se retrouve
+dans un état qui se lit. Un clavier qui refuse de s'éteindre n'interrompt rien —
+l'extinction est un agrément, pas le geste.
+
+### Ce que ce n'est pas : un endroit où libérer des ressources
+
+`prepare()` crée un `Runtime` et un `Context` QuickJS **par boucle**, et les deux
+sont détruits avec elle : tout le tas JavaScript part avec. Il n'y a rien à
+libérer à la main, et aucun point d'entrée `dispose()` côté effets n'est
+souhaitable — il mettrait du code utilisateur sur le chemin de l'arrêt.

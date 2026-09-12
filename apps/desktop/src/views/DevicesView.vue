@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+/**
+ * Périphériques — et, plus bas, la configuration qu'ils alimentent.
+ *
+ * Les deux sont sur le même écran parce que c'est le même fichier : les
+ * décisions prises ici sont l'essentiel de `settings.json`, avec les réglages
+ * retenus par paire appareil / effet. Remettre ce fichier au défaut se propose
+ * donc là où on le remplit — et surtout **pas** dans la bibliothèque, où le
+ * geste voisin efface du code écrit à la main.
+ */
 
+import { onMounted, ref } from 'vue'
+
+import { resetSettings } from '../api/candeo'
 import type { DeviceState } from '../api/types'
 import { useDevice } from '../composables/useDevice'
+import { useEffectParams } from '../composables/useEffectParams'
+import { useEffects } from '../composables/useEffects'
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
+const { dropAll } = useEffectParams()
+const { forgetPosed } = useEffects()
 
 /**
  * Les trois états, dans la langue de l'interface.
@@ -16,6 +31,48 @@ const LIBELLES: Record<DeviceState, string> = {
   adopted: 'Piloté',
   detected: 'Détecté',
   ignored: 'Ignoré',
+}
+
+/** La question est posée et attend sa réponse. */
+const asking = ref(false)
+const working = ref(false)
+/** Ce qui a empêché la remise à zéro. Le message du Rust, tel quel. */
+const problem = ref<string | null>(null)
+
+/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
+function message(e: unknown): string {
+  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * Remet `settings.json` au défaut.
+ *
+ * Le Rust fait tout ce qui doit l'être avant d'écrire : arrêter les boucles,
+ * éteindre le rétroéclairage, refermer les appareils. Il ne touche à aucun effet
+ * — et n'en a pas les moyens, la commande n'écrit que dans le fichier de
+ * configuration.
+ */
+async function reset(): Promise<void> {
+  problem.value = null
+  working.value = true
+  try {
+    await resetSettings()
+
+    // La fenêtre, elle, garde ce qu'elle avait lu. Sans ces deux oublis, le
+    // premier mouvement de curseur réécrirait les réglages qu'on vient
+    // d'effacer, et la galerie marquerait « actif » un effet matériel que le
+    // Rust vient d'éteindre.
+    dropAll()
+    forgetPosed()
+
+    asking.value = false
+  } catch (e) {
+    problem.value = message(e)
+  } finally {
+    working.value = false
+    // Tout a changé d'un coup : état de chaque appareil, ouverture, erreurs.
+    await refresh()
+  }
 }
 
 onMounted(refresh)
@@ -94,6 +151,67 @@ onMounted(refresh)
       <div><dt>Taille d'une image</dt><dd class="num">{{ layout.frameLen }}</dd></div>
       <div><dt>Touches éclairées</dt><dd class="num">{{ layout.keys.length }}</dd></div>
     </dl>
+
+    <!--
+      La configuration, et elle seule. Le dire ici est ce qui empêche de
+      confondre « je désadopte un clavier » et « je vide ce que j'ai écrit » :
+      les effets sont une bibliothèque, pas un réglage, et ils se suppriment un
+      par un depuis la galerie.
+    -->
+    <section class="config" aria-labelledby="config-title">
+      <h2 id="config-title">Configuration</h2>
+      <p class="note">
+        candeo retient les décisions prises ci-dessus et les réglages de chaque effet, appareil par
+        appareil. C'est par là qu'on repasse quand quelque chose se comporte mal, et c'est ce qui
+        rend un rapport de bogue exploitable : voilà ce qui se passe en repartant du défaut.
+      </p>
+
+      <p v-if="problem" class="err" role="alert">{{ problem }}</p>
+
+      <!--
+        Le bouton reste en place, et actif, pendant que la question est posée :
+        le masquer retirerait le focus du clavier au moment précis où il doit
+        atteindre la réponse, qui suit dans le document.
+      -->
+      <button class="ghost danger" :disabled="busy || working" @click="asking = true">
+        Remettre la configuration au défaut
+      </button>
+
+      <!--
+        La réponse est la tabulation suivante. Le titre porte `role="alert"` :
+        l'encart apparaît sans que rien ne bouge à l'écran, il faut l'annoncer.
+      -->
+      <div v-if="asking" class="confirm" role="group" aria-labelledby="confirm-reset">
+        <p id="confirm-reset" class="confirm-title" role="alert">
+          Repartir de la configuration par défaut ?
+        </p>
+        <!--
+          Ce qui part, énuméré — et ce qui ne part pas, dit aussi clairement. La
+          dernière ligne est la plus importante des quatre.
+        -->
+        <ul class="what">
+          <li>
+            Tous les appareils repassent en <strong>détecté</strong> : plus aucun n'est ouvert au
+            démarrage.
+          </li>
+          <li>
+            Les effets en cours s'arrêtent et le rétroéclairage s'éteint, plutôt que de rester figé
+            sur la dernière image.
+          </li>
+          <li>Les réglages retenus pour chaque effet, sur chaque appareil, sont oubliés.</li>
+          <li>
+            <strong>Vos effets ne sont pas touchés.</strong> Les supprimer est une autre action, une
+            par effet, depuis la bibliothèque.
+          </li>
+        </ul>
+        <div class="confirm-actions">
+          <button class="solid danger" :disabled="working" @click="reset">
+            Remettre au défaut
+          </button>
+          <button class="ghost" :disabled="working" @click="asking = false">Annuler</button>
+        </div>
+      </div>
+    </section>
   </section>
 </template>
 
@@ -248,6 +366,63 @@ onMounted(refresh)
   margin: 0;
   padding-top: var(--gap-4);
   border-top: 1px solid var(--line);
+}
+
+/* En dernier, et séparée : ce qui s'y trouve ne se reprend pas. */
+.config {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-2);
+  padding-top: var(--gap-4);
+  border-top: 1px solid var(--line);
+}
+
+/*
+ * Un geste sans retour. La couleur ne le dit pas seule — le libellé l'annonce,
+ * et la confirmation énumère ce qui part.
+ */
+.danger {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.solid.danger {
+  background: var(--bad);
+  color: var(--accent-ink);
+}
+
+.ghost.danger:hover:not(:disabled) {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 12%, transparent);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  align-self: stretch;
+  padding: var(--gap-3);
+  background: color-mix(in srgb, var(--bad) 8%, var(--raised));
+  border: 1px solid var(--bad);
+  border-radius: var(--r-md);
+}
+
+.confirm-title {
+  font-weight: 600;
+}
+
+.what {
+  margin: 0;
+  padding-left: var(--gap-4);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
 }
 
 dt {

@@ -292,6 +292,24 @@ function flushAll(): void {
 }
 
 /**
+ * Annule les écritures en attente dont la clé passe le crible, **sans les
+ * exécuter**.
+ *
+ * L'inverse exact de {@link flushAll}, et le seul geste correct quand le Rust
+ * vient de retirer ces entrées de `settings.json` : une temporisation qui
+ * partirait après coup les y réécrirait, ressuscitant précisément ce qu'on
+ * venait d'effacer.
+ */
+function cancelWrites(keep: (key: string) => boolean): void {
+  for (const [k, w] of [...writes.entries()]) {
+    if (keep(k)) continue
+    window.clearTimeout(w.timer)
+    writes.delete(k)
+    written.delete(k)
+  }
+}
+
+/**
  * Dernier filet : fermer la fenêtre détruit la vue web **sans passer par les
  * crochets de Vue**.
  *
@@ -399,5 +417,52 @@ export function useEffectParams() {
     settleOne(device, effect, true)
   }
 
-  return { load, valuesFor, adjust, settle, forget, flush: flushAll, error: readonly(error) }
+  /**
+   * Oublie ce qu'on retenait pour un effet, sur **tous** les appareils.
+   *
+   * Le pendant, en mémoire, de ce que `delete_effect` fait dans `settings.json`.
+   * Sans lui, la fenêtre garderait des réglages désignant un identifiant que plus
+   * rien ne nomme, et un effet réenregistré sous le même nom **dans la même
+   * session** en hériterait — exactement ce que la purge côté Rust évite d'un
+   * lancement à l'autre.
+   *
+   * Rien n'est envoyé au Rust : il a déjà oublié. Ce qui est en vol est annulé,
+   * pas déclenché.
+   */
+  function dropEffect(effect: string): void {
+    // Un identifiant d'effet ne contient ni `/` ni `:` — la liste blanche du Rust
+    // n'accepte que `a-z`, `0-9` et le tiret. Le suffixe ne peut donc pas
+    // désigner la mauvaise paire.
+    const suffix = `/${effect}`
+    const autres = (k: string) => !k.endsWith(suffix)
+    cancelWrites(autres)
+    remembered.value = Object.fromEntries(
+      Object.entries(remembered.value).filter(([k]) => autres(k)),
+    )
+  }
+
+  /**
+   * Oublie **tout**, comme la remise à zéro de la configuration vient de le faire
+   * sur disque.
+   *
+   * Sans cela le premier mouvement de curseur réécrirait les réglages qu'on
+   * venait d'effacer : la fenêtre les tient en mémoire, et n'envoie au Rust que
+   * ce qui diffère du manifeste — c'est-à-dire ce qu'elle croit savoir.
+   */
+  function dropAll(): void {
+    cancelWrites(() => false)
+    remembered.value = {}
+  }
+
+  return {
+    load,
+    valuesFor,
+    adjust,
+    settle,
+    forget,
+    dropEffect,
+    dropAll,
+    flush: flushAll,
+    error: readonly(error),
+  }
 }

@@ -460,6 +460,10 @@ permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne des
 - [x] Compilation et empaquetage Linux vérifiés en intégration continue
 - [x] Adoption appareil par appareil, et ouverture des pilotés au démarrage
 - [x] Un effet par appareil : table d'appareils ouverts, une boucle chacun
+- [x] Retrait d'un effet depuis la bibliothèque, et remise à zéro de la
+      configuration (`reset_settings`) — deux gestes distincts, l'un sur le
+      contenu et l'autre sur la configuration, qui arrêtent l'un comme l'autre
+      les boucles concernées **avant** d'écrire
 - [ ] Reprise de l'effet actif au démarrage
 - [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
       de fonctionnalité, filtrage par `interface_number`, chemins résolus par
