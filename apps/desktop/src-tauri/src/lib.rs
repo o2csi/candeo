@@ -4,13 +4,14 @@
 //! `candeo-protocol` et `candeo-device` restent ainsi sans dépendance à serde
 //! ni à Tauri, et donc réutilisables et testables hors application.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use candeo_device::{Keyboard, Layout, DEATHSTALKER_V2_PRO};
 use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+mod runtime;
 mod storage;
 
 /// Gabarits connus. Un seul pour l'instant.
@@ -129,7 +130,19 @@ impl From<EffectDto> for Effect {
 
 #[derive(Default)]
 pub struct AppState {
-    keyboard: Mutex<Option<Keyboard>>,
+    /// `Arc` parce que le fil de rendu du moteur écrit sur le même clavier, et
+    /// qu'il survit à la fenêtre : il ne peut donc rien emprunter à l'état
+    /// d'une commande.
+    pub(crate) keyboard: Arc<Mutex<Option<Keyboard>>>,
+    pub(crate) engine: runtime::Engine,
+}
+
+/// Gabarit utilisé quand aucun périphérique n'est connecté.
+///
+/// Sert au moteur et au simulateur : écrire un effet ne doit pas exiger de
+/// posséder le clavier.
+pub(crate) fn default_layout() -> &'static Layout {
+    LAYOUTS[0]
 }
 
 /// Les erreurs remontent au front sous forme de chaîne : l'interface les
@@ -267,9 +280,17 @@ pub fn run() {
             set_effect,
             present,
             write_row,
+            runtime::start_effect,
+            runtime::stop_effect,
+            runtime::set_effect_params,
+            runtime::set_output_to_keyboard,
+            runtime::subscribe_frames,
+            runtime::unsubscribe_frames,
+            runtime::engine_status,
             storage::install_effect,
             storage::list_effects,
             storage::delete_effect,
+            storage::read_effect_source,
             storage::get_settings,
             storage::set_settings,
         ])

@@ -182,9 +182,28 @@ fonctionne.
 ## 7. Reste à faire
 
 - [x] Commandes `install_effect`, `list_effects`, `delete_effect`
-- [ ] Commandes `start_effect`, `stop_effect`, `set_effect_params`
-- [ ] Commande d'abonnement renvoyant les images par `Channel`
-- [ ] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
+- [x] Commandes `start_effect`, `stop_effect`, `set_effect_params`
+- [x] Commande d'abonnement renvoyant les images par `Channel`
+- [x] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
 - [x] Lecture et écriture de `settings.json`
 - [ ] Reprise de l'effet actif au démarrage
 - [ ] Règle udev et vérification de la dorsale `hidraw` sous Linux
+
+### Ce que l'implémentation a précisé
+
+- **Un effet exporte par défaut.** La colle importe l'espace de noms plutôt que
+  l'export par défaut : `import effect from 'effect'` échoue à la *liaison* du
+  module quand il manque, avec un message de QuickJS qu'on ne peut relier à
+  aucune ligne de son propre code.
+- **Chaque image repart du noir.** Un effet qui n'écrit qu'une partie du clavier
+  n'hérite pas en silence de l'image précédente : une image est complète par
+  définition.
+- **Les couleurs sont bornées côté JavaScript**, pas seulement dans `rgb()` :
+  rien n'oblige un effet à passer par l'API, il peut fabriquer `{r, g, b}` à la
+  main. Sans cela, c'est la conversion côté Rust qui échoue — loin de la cause.
+- **La boucle vise une échéance absolue**, pas `sleep(période)` : une image
+  lente ne doit pas décaler toutes les suivantes. En cas de retard, on repart de
+  maintenant plutôt que de rattraper en accéléré.
+- **Une exception ne tue rien.** Elle est rattrapée par image et exposée par
+  `engine_status`, puis effacée dès que l'effet se rétablit. Après trente images
+  consécutives en échec, la boucle s'arrête.

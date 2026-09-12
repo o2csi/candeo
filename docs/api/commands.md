@@ -233,29 +233,81 @@ devenir un code à traduire côté front.
 
 ---
 
-## Surface prévue — effets utilisateur
 
-Le stockage est en place (voir ci-dessus) ; l'exécution ne l'est pas. La
-conception est figée dans
-[`../design/effects-runtime.md`](../design/effects-runtime.md) ; c'est ici que
-la forme des commandes sera consignée au fur et à mesure.
+## Moteur d'effets
 
-### Exécution
+Un fil de rendu Rust, **indépendant de la fenêtre** : fermer l'application
+n'éteint pas l'effet. C'est le seul endroit où du code d'effet s'exécute — le
+front n'en exécute jamais, ce qui lui retire au passage tout accès au DOM et à
+l'API Tauri. Conception dans
+[`../design/effects-runtime.md`](../design/effects-runtime.md) §4 et §5.
 
-| Commande | Rôle |
-|---|---|
-| `start_effect(id, params)` | démarre le fil de rendu |
-| `stop_effect()` | l'arrête |
-| `set_effect_params(params)` | ajuste à chaud, sans redémarrer |
-| `subscribe_frames(channel)` | ouvre le flux d'images vers le simulateur |
+### `start_effect(id, params)`
 
-### Le flux d'images ne passe pas par une commande
+Charge `effects/<id>/effect.js` et démarre la boucle. Remplace l'effet en cours,
+s'il y en avait un — l'arrêt précédent est **attendu**, sans quoi deux boucles
+écriraient un instant sur le même clavier.
+
+Une erreur de syntaxe ou un module mal formé est signalé **à l'appel**, pas
+découvert plus tard dans un état : l'appel attend le verdict du chargement.
+
+Le gabarit vient du périphérique connecté ; à défaut, du gabarit par défaut.
+Délibéré : on doit pouvoir écrire et prévisualiser un effet **sans posséder le
+clavier**.
+
+#### Ce qu'un module d'effet doit exposer
+
+```ts
+import { hsv } from '@candeo/effects-api'
+
+export default {
+  name: 'Mon effet',
+  render({ layout, time, frameIndex, frame, params }) { … },
+}
+```
+
+**Un export par défaut, et rien d'autre.** L'import de `@candeo/effects-api` est
+résolu vers un module interne fourni par l'hôte : pas de bundler, pas de
+`node_modules`, pas de résolution de chemins.
+
+Chaque image repart du noir. Un effet qui n'écrit qu'une partie du clavier
+n'hérite donc pas en silence de l'image précédente — une image est complète par
+définition.
+
+### `stop_effect()` · `set_effect_params(params)`
+
+`set_effect_params` ajuste **à chaud** : la boucle relit les paramètres à chaque
+image, elle ne redémarre pas.
+
+### `set_output_to_keyboard(on)`
+
+Coupe ou rétablit l'écriture vers le clavier **sans toucher au simulateur**. Les
+deux sorties de la boucle sont indépendantes, et chacune peut être absente :
+
+- fenêtre fermée → seule l'écriture HID subsiste, aucune image n'est sérialisée ;
+- sortie clavier coupée → seul le simulateur est alimenté ;
+- les deux actives → l'aperçu montre exactement les octets envoyés.
+
+### `subscribe_frames(channel)` · `unsubscribe_frames()`
 
 Une commande répond **une fois** ; un effet produit 60 images par seconde. La
-remontée se fait donc par `tauri::ipc::Channel`, créé côté front et passé en
-argument de `subscribe_frames`. Les images y circulent en binaire
-(`InvokeResponseBody::Raw`) : 396 octets, contre plus de 1,5 Ko si on les
-sérialisait en tableau JSON d'entiers.
+remontée passe donc par `tauri::ipc::Channel`, créé côté front et passé en
+argument. Les images y circulent en binaire (`InvokeResponseBody::Raw`) :
+396 octets, contre plus de 1,5 Ko sérialisées en tableau JSON d'entiers.
 
-Libérer le canal suffit à arrêter le flux — sans arrêter l'effet, qui continue
-d'alimenter le clavier fenêtre fermée.
+Se désabonner arrête le flux **sans arrêter l'effet**, qui continue d'alimenter
+le clavier.
+
+### `engine_status() -> EngineStatus`
+
+```ts
+{ running: boolean, effectId: string | null, error: string | null, toKeyboard: boolean }
+```
+
+Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire à
+la réouverture, ce qu'un événement ponctuel ne permet pas.
+
+Une exception dans un effet **ne fait pas tomber l'application** : elle est
+rattrapée par image, exposée ici, et effacée dès que l'effet se rétablit. Après
+trente images consécutives en échec, la boucle s'arrête — un effet qui lève à
+chaque image ne se rétablira pas tout seul.

@@ -4,6 +4,29 @@
  * Un effet est une fonction pure du temps et de la position vers une couleur.
  * C'est ce qui rend YAML inadapté : on décrirait une configuration, pas un
  * comportement. Ici l'effet *est* du code.
+ *
+ * ## Le contrat
+ *
+ * Un module d'effet **exporte par défaut** un {@link EffectModule}. Le moteur
+ * ne cherche rien d'autre :
+ *
+ * ```ts
+ * import { hsv } from '@candeo/effects-api'
+ *
+ * export default {
+ *   name: 'Mon effet',
+ *   render({ layout, time, frame }) { … },
+ * } satisfies EffectModule
+ * ```
+ *
+ * ## Ce fichier a un jumeau
+ *
+ * ⚠️ Il décrit ce que l'**éditeur** montre en autocomplétion ; ce que le moteur
+ * fournit réellement est écrit dans
+ * `apps/desktop/src-tauri/src/runtime/api.js`. S'ils divergent, l'éditeur
+ * promet une fonction qui n'existe pas, et l'erreur ne se voit qu'à la première
+ * image. Le test Rust `api_js_exports_match_the_typescript_surface` échoue si
+ * un nom disparaît du jumeau — toute modification doit toucher les deux.
  */
 
 export interface Rgb {
@@ -101,29 +124,6 @@ export function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return rgb(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t))
 }
 
-// ---------------------------------------------------------------- exemple
-
-/**
- * Onde circulaire partant du centre du clavier.
- *
- * Sert d'exemple de référence : un effet tient en quelques lignes, et se lit
- * comme ce qu'il fait.
- */
-export const ripple: EffectModule = {
-  name: 'Onde',
-  description: 'Une onde de teinte se propage depuis le centre',
-  params: {
-    speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
-    scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },
-  },
-  render({ layout, time, frame, params }) {
-    const cx = (layout.cols - 1) / 2
-    const cy = (layout.rows - 1) / 2
-    const speed = Number(params.speed ?? 120)
-    const scale = Number(params.scale ?? 18)
-    for (const key of layout.keys) {
-      const d = Math.hypot(key.col - cx, key.row - cy)
-      frame.set(key, hsv(time * speed + d * scale, 1, 1))
-    }
-  },
-}
+// L'exemple de référence vit dans `example.ts` : ce fichier décrit l'API, il
+// n'exporte pas d'effet. Un export par défaut ici ferait de la bibliothèque
+// elle-même un effet, ce qu'elle n'est pas.
