@@ -18,7 +18,20 @@ jobs:
       # que l'image du coureur le contient déjà.
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
+      # `rust-cache` bâtit sa clé sur `Cargo.lock` et la chaîne d'outils — **pas**
+      # sur les profils de compilation. Quand `[profile.dev.package."*"]` est passé
+      # à `opt-level = 2` sans que `Cargo.lock` bouge, la clé n'a donc pas changé :
+      # chaque exécution restaurait des dépendances non optimisées, les
+      # recompilait toutes, puis renonçait à sauvegarder — clé déjà présente, donc
+      # « Cache up-to-date ». Un cache périmé que rien ne remplace, et un job passé
+      # de 2 à 30 minutes sans que le cache paraisse en cause.
+      #
+      # L'empreinte du `Cargo.toml` racine referme le trou : c'est le seul fichier
+      # où cargo lit les profils, donc toucher un profil ouvre un espace de noms
+      # neuf, payé une fois puis réutilisé. À ne pas retirer en la prenant pour du
+      # bruit — cette clé est tout ce qui relie le cache aux profils.
       - uses: Swatinem/rust-cache@v2
+        with: { key: "${{ hashFiles('Cargo.toml') }}" }
       - run: cargo fmt --all -- --check
       # Tout l'espace de travail, et non les deux seules crates sans Tauri :
       # les effets livrés avec l'application sont du JavaScript compilé dans le
@@ -54,8 +67,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Même clé d'empreinte des profils que le job `rust`, et pour la même
+      # raison : ce job compile lui aussi en débogage, donc sous
+      # `[profile.dev.package."*"]`. Notation développée et non compacte — deux
+      # clés dont les valeurs portent déjà des guillemets, c'est là que ce fichier
+      # s'est fait piéger une fois.
       - uses: Swatinem/rust-cache@v2
-        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+        with:
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
+          key: "${{ hashFiles('Cargo.toml') }}"
       # Liste de Tauri 2 pour Debian, plus trois ajouts : `libudev-dev`, qu'une
       # dorsale `hidapi` résout par pkg-config quelle qu'elle soit ; `pkg-config`
       # lui-même ; et `rpm`, pour relire le paquet produit — aucun des trois
@@ -177,6 +197,13 @@ jobs:
       # L'écriture est réservée à `main` : une branche ne peut relire que le
       # cache de sa base, et les caches de PR ne feraient qu'évincer celui dont
       # tout le monde repart.
+      #
+      # Sans l'empreinte des profils ajoutée aux jobs `rust` et `linux`, et c'est
+      # délibéré : seul `[profile.dev.package."*"]` a bougé, et il ne touche pas
+      # `release` — ce job est resté à ses six minutes pendant que les deux autres
+      # passaient à trente. Le trou reste néanmoins ouvert ici : le jour où
+      # `[profile.release]` change, la clé ne bougera pas davantage et ce cache-ci
+      # se figera de la même façon. C'est la même clé qu'il faudra lui donner.
       - uses: Swatinem/rust-cache@v2
         with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
       - uses: pnpm/action-setup@v6
