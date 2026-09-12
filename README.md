@@ -32,14 +32,9 @@ Le protocole a été établi **par observation du matériel** : énumération Pn
 Windows, interrogation d'un serveur SDK par son protocole réseau, capture du bus
 USB avec USBPcap et Wireshark, puis écriture et lecture directes via l'API HID.
 
-Ce qui compte pour qui relit ce relevé, ce n'est pas une profession de foi, c'est
-la **provenance d'ingénierie** : chaque fait porte la date où il a été établi et
-**la version de micrologiciel contre laquelle il l'a été** — v1.5, les 11 et
-12/09/2026. Un comportement inattendu se diagnostique avec ça, pas sans.
-
-Le relevé signale explicitement les rares points **repris d'une source publique
-plutôt que mesurés** — et ceux-là ont été reconfirmés sur l'appareil quand c'était
-possible. Ce qui n'a pas pu l'être est marqué comme non vérifié.
+Chaque fait porte la date où il a été établi et **la version de micrologiciel
+contre laquelle il l'a été** — v1.5, les 11 et 12/09/2026. C'est ce qui permet de
+diagnostiquer un comportement inattendu.
 
 Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur
 relevé aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du
