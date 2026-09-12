@@ -10,9 +10,9 @@
 //!    garderait sa vignette rouge. Ici, il *vient* de l'effet.
 //!
 //! Le moteur sait déjà produire une image sans toucher au matériel —
-//! [`super::prepare`] puis [`super::render_once`]. L'échantillonnage n'est que
-//! quelques appels de plus, sur le même chemin que la production : ce qu'on
-//! montre dans la liste est rendu par le code qui allumera le clavier.
+//! [`super::prepare_bounded`] puis [`super::render_once`]. L'échantillonnage
+//! n'est que quelques appels de plus, sur le même chemin que la production : ce
+//! qu'on montre dans la liste est rendu par le code qui allumera le clavier.
 //!
 //! # Où l'on prélève, et pourquoi
 //!
