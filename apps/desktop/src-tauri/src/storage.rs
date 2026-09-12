@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
-//! app_config_dir()/settings.json   effet actif, luminosité, périphérique choisi
+//! app_config_dir()/settings.json   effet actif, luminosité, appareils adoptés
 //! ```
 //!
 //! L'effet est du **contenu**, le choix de l'effet actif est de la
@@ -130,6 +130,72 @@ pub struct DeviceSelection {
     pub pid: u16,
 }
 
+/// Décision prise pour un appareil, une fois, et retenue.
+///
+/// Le défaut est [`Detected`](DeviceState::Detected) : **un appareil jamais vu
+/// n'est pas piloté**. Écrire sur un périphérique USB qu'on comprend mal n'est
+/// pas anodin, et à l'échelle d'un catalogue qui grandit — claviers, souris,
+/// mémoire, ventilateurs — adopter par défaut est la façon de casser le
+/// matériel de quelqu'un.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceState {
+    /// Listé, mais **pas** ouvert. C'est l'état de tout appareil sur lequel
+    /// personne ne s'est encore prononcé.
+    #[default]
+    Detected,
+    /// Ouvert automatiquement au démarrage, sans rien demander.
+    Adopted,
+    /// Laissé tranquille, et il le reste.
+    Ignored,
+}
+
+/// Ce que `settings.json` retient d'un appareil : son identité, et la décision.
+///
+/// # L'identité, c'est VID / PID / numéro de série
+///
+/// **Ni la variante, ni le micrologiciel.** Le même clavier s'est déclaré
+/// `v1.4 / Unkown Variant` puis `v1.5 / Quartz` pendant le relevé du protocole :
+/// une liaison qui apparie sur ces champs se rompt à la mise à jour, et
+/// l'appareil adopté redevient un inconnu du jour au lendemain.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceRecord {
+    pub vid: u16,
+    pub pid: u16,
+    /// Numéro de série, quand le système en déclare un.
+    ///
+    /// Absent du fichier plutôt qu'à `null` : la majorité des entrées n'en
+    /// auront pas, et une clé vide répétée n'apprend rien à qui relit ses
+    /// réglages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
+    pub state: DeviceState,
+}
+
+impl DeviceRecord {
+    /// Vrai si cette entrée désigne l'appareil énuméré.
+    ///
+    /// Le VID et le PID doivent correspondre ; la série n'est comparée que si
+    /// **les deux côtés** en portent une. Ce n'est pas du laxisme, c'est le
+    /// seul arbitrage qui tienne dans les deux sens :
+    ///
+    /// - la série départage deux exemplaires du même modèle — sans elle, adopter
+    ///   l'un adopterait l'autre ;
+    /// - mais une énumération muette — hidraw sans règle udev, un concentrateur
+    ///   qui ne relaie rien — ne doit pas désapparier un appareil déjà adopté,
+    ///   sans quoi la décision serait à reprendre à chaque branchement.
+    pub fn matches(&self, vid: u16, pid: u16, serial: Option<&str>) -> bool {
+        if self.vid != vid || self.pid != pid {
+            return false;
+        }
+        match (self.serial.as_deref(), serial) {
+            (Some(mien), Some(sien)) => mien == sien,
+            _ => true,
+        }
+    }
+}
+
 /// Réglages persistants.
 ///
 /// `#[serde(default)]` sur la structure entière : un `settings.json` écrit par
@@ -143,6 +209,13 @@ pub struct Settings {
     pub brightness: u8,
     /// Périphérique choisi, quand il y en a plusieurs de connus.
     pub device: Option<DeviceSelection>,
+    /// Décisions prises appareil par appareil.
+    ///
+    /// Ne contient que celles qui **diffèrent du défaut** : un appareil absent
+    /// de cette liste est `detected`, ce qui est exactement l'état d'un appareil
+    /// jamais rencontré. Le fichier ne grossit donc pas d'une entrée à chaque
+    /// périphérique branché une fois.
+    pub devices: Vec<DeviceRecord>,
 }
 
 impl Default for Settings {
@@ -153,6 +226,62 @@ impl Default for Settings {
             // brancher, donc le défaut le moins surprenant.
             brightness: 255,
             device: None,
+            devices: Vec::new(),
+        }
+    }
+}
+
+impl Settings {
+    /// Rang de l'entrée décrivant cet appareil, s'il y en a une.
+    ///
+    /// L'identité exacte d'abord — série comprise, `None` comprise —, puis la
+    /// règle tolérante de [`DeviceRecord::matches`]. L'ordre compte : une entrée
+    /// sans série ne doit pas décider à la place de celle qui en porte une,
+    /// sinon deux exemplaires du même modèle se confondraient dès qu'un seul
+    /// d'entre eux aurait été adopté sans série.
+    fn position(&self, vid: u16, pid: u16, serial: Option<&str>) -> Option<usize> {
+        self.devices
+            .iter()
+            .position(|r| r.vid == vid && r.pid == pid && r.serial.as_deref() == serial)
+            .or_else(|| {
+                self.devices
+                    .iter()
+                    .position(|r| r.matches(vid, pid, serial))
+            })
+    }
+
+    /// Décision retenue pour cet appareil, ou [`DeviceState::Detected`].
+    pub fn device_state(&self, vid: u16, pid: u16, serial: Option<&str>) -> DeviceState {
+        self.position(vid, pid, serial)
+            .map(|i| self.devices[i].state)
+            .unwrap_or_default()
+    }
+
+    /// Retient une décision pour cet appareil.
+    pub fn set_device_state(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        serial: Option<&str>,
+        state: DeviceState,
+    ) {
+        match self.position(vid, pid, serial) {
+            Some(i) => {
+                let record = &mut self.devices[i];
+                record.state = state;
+                // La série se complète si on vient de l'apprendre, mais ne
+                // s'efface jamais : une énumération muette ne doit pas faire
+                // perdre à l'entrée ce qui la distingue de l'exemplaire voisin.
+                if record.serial.is_none() {
+                    record.serial = serial.map(str::to_owned);
+                }
+            }
+            None => self.devices.push(DeviceRecord {
+                vid,
+                pid,
+                serial: serial.map(str::to_owned),
+                state,
+            }),
         }
     }
 }
@@ -1034,6 +1163,12 @@ mod tests {
                 vid: 0x1532,
                 pid: 0x0292,
             }),
+            devices: vec![DeviceRecord {
+                vid: 0x1532,
+                pid: 0x0292,
+                serial: Some("XY01".into()),
+                state: DeviceState::Adopted,
+            }],
         };
 
         store.write_settings(&settings).unwrap();
@@ -1065,5 +1200,138 @@ mod tests {
 
         let err = store.read_settings().unwrap_err();
         assert!(err.contains("réglages illisibles"), "message : {err}");
+    }
+
+    // ------------------------------------------------------- adoption
+
+    const VID: u16 = 0x1532;
+    const PID: u16 = 0x0292;
+
+    /// Le défaut, et c'est le cœur de la décision : brancher n'est pas adopter.
+    #[test]
+    fn un_appareil_jamais_vu_est_detecte_pas_pilote() {
+        let settings = Settings::default();
+        assert_eq!(
+            settings.device_state(VID, PID, Some("XY01")),
+            DeviceState::Detected
+        );
+        assert!(settings.devices.is_empty());
+    }
+
+    #[test]
+    fn une_decision_se_retient_puis_se_change() {
+        let (_tmp, store) = store_temporaire();
+        let mut settings = Settings::default();
+
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+        store.write_settings(&settings).unwrap();
+        assert_eq!(
+            store
+                .read_settings()
+                .unwrap()
+                .device_state(VID, PID, Some("XY01")),
+            DeviceState::Adopted
+        );
+
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Ignored);
+        store.write_settings(&settings).unwrap();
+        let relu = store.read_settings().unwrap();
+        assert_eq!(
+            relu.device_state(VID, PID, Some("XY01")),
+            DeviceState::Ignored
+        );
+        // Changer d'avis modifie l'entrée, il n'en empile pas une seconde :
+        // sinon la plus ancienne finirait par répondre à la place de la bonne.
+        assert_eq!(relu.devices.len(), 1);
+    }
+
+    /// La série est l'identité, et elle sert à ça : deux claviers identiques,
+    /// une seule décision. Sans elle, adopter l'un adopterait l'autre.
+    #[test]
+    fn deux_exemplaires_du_meme_modele_se_distinguent_par_la_serie() {
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+
+        assert_eq!(
+            settings.device_state(VID, PID, Some("XY01")),
+            DeviceState::Adopted
+        );
+        assert_eq!(
+            settings.device_state(VID, PID, Some("XY02")),
+            DeviceState::Detected,
+            "le second exemplaire a hérité de la décision prise pour le premier"
+        );
+
+        settings.set_device_state(VID, PID, Some("XY02"), DeviceState::Ignored);
+        assert_eq!(settings.devices.len(), 2);
+        assert_eq!(
+            settings.device_state(VID, PID, Some("XY01")),
+            DeviceState::Adopted
+        );
+    }
+
+    /// L'autre sens : une énumération qui ne déclare pas de série — hidraw sans
+    /// règle udev — retrouve quand même l'appareil adopté. Reprendre la décision
+    /// à chaque branchement serait exactement la cérémonie qu'on supprime.
+    #[test]
+    fn une_enumeration_muette_retrouve_l_appareil_adopte() {
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+
+        assert_eq!(settings.device_state(VID, PID, None), DeviceState::Adopted);
+
+        // Et la série ne s'efface pas au passage, sans quoi le second
+        // exemplaire deviendrait indiscernable du premier.
+        settings.set_device_state(VID, PID, None, DeviceState::Adopted);
+        assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
+    }
+
+    /// Une décision prise sans série se complète dès qu'on l'apprend, plutôt
+    /// que de laisser une entrée large à côté d'une entrée précise.
+    #[test]
+    fn la_serie_complete_une_entree_qui_n_en_avait_pas() {
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, None, DeviceState::Adopted);
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+
+        assert_eq!(settings.devices.len(), 1);
+        assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
+    }
+
+    /// Le fichier d'une version antérieure ne connaît pas `devices`. Il doit
+    /// se relire, et surtout **ne rien perdre** quand on le réécrit.
+    #[test]
+    fn un_fichier_anterieur_se_relit_et_garde_ses_reglages() {
+        let (tmp, store) = store_temporaire();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{"activeEffect":"onde-radiale","brightness":90}"#,
+        )
+        .unwrap();
+
+        let mut settings = store.read_settings().unwrap();
+        assert!(settings.devices.is_empty());
+        settings.set_device_state(VID, PID, None, DeviceState::Adopted);
+        store.write_settings(&settings).unwrap();
+
+        let relu = store.read_settings().unwrap();
+        assert_eq!(relu.active_effect.as_deref(), Some("onde-radiale"));
+        assert_eq!(relu.brightness, 90);
+        assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
+    }
+
+    /// Les champs partent en camelCase, comme tous les DTO, et une entrée sans
+    /// série n'écrit pas de clé vide.
+    #[test]
+    fn les_appareils_se_serialisent_en_camel_case() {
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, None, DeviceState::Adopted);
+        let json = serde_json::to_string(&settings).unwrap();
+
+        assert!(json.contains(r#""devices":[{"vid":5426,"pid":658,"state":"adopted"}]"#));
+        assert!(json.contains(r#""activeEffect""#));
+        assert!(!json.contains("serial"), "clé vide écrite : {json}");
     }
 }

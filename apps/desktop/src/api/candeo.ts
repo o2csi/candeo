@@ -11,11 +11,34 @@ import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import type { DeviceInfo, Effect, LayoutInfo, Rgb } from './types'
 
-/** Liste les gabarits connus, branchés ou non. */
+/** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
   return invoke('list_devices')
 }
 
+/**
+ * Retient « piloté » pour cet appareil, et l'ouvre s'il est là.
+ *
+ * La décision est écrite **avant** l'ouverture et tient même si celle-ci
+ * échoue : les démarrages suivants la rejoueront. Rend le gabarit quand
+ * l'appareil a été ouvert, `null` quand il est adopté mais débranché — ce n'est
+ * pas une erreur.
+ */
+export function adoptDevice(vid: number, pid: number): Promise<LayoutInfo | null> {
+  return invoke('adopt_device', { vid, pid })
+}
+
+/** Retient « ignoré », et referme l'appareil s'il était ouvert. */
+export function ignoreDevice(vid: number, pid: number): Promise<void> {
+  return invoke('ignore_device', { vid, pid })
+}
+
+/**
+ * Ouverture ponctuelle, sans rien décider.
+ *
+ * Ne touche pas à `settings.json`, donc ne survit pas au redémarrage —
+ * contrairement à {@link adoptDevice}.
+ */
 export function connect(vid: number, pid: number): Promise<LayoutInfo> {
   return invoke('connect', { vid, pid })
 }
