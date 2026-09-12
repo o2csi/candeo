@@ -39,6 +39,7 @@ import {
   engineStatus,
   getDefaultLayout,
   installEffect,
+  listEffects,
   readEffectSource,
   setOutputToKeyboard,
   startEffect,
@@ -49,7 +50,7 @@ import CodeEditor from '../components/CodeEditor.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
-import { compile } from '../editor/effect'
+import { compile, renameInSource } from '../editor/effect'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
 import { useEngineFrames } from '../keyboard/engineFrames'
@@ -107,11 +108,37 @@ function message(e: unknown): string {
 
 // ---------------------------------------------------------------- ouverture
 
+/**
+ * Un effet **intégré** s'ouvre comme une copie.
+ *
+ * Son identifiant est réservé : l'installer sous le même nom est refusé, et le
+ * moteur chargerait de toute façon le code livré. Sans cette duplication, on
+ * modifiait un effet pendant de longues minutes pour se heurter au refus à la
+ * validation — le mur arrivait après le travail.
+ *
+ * Le nom est donc changé **dans la source**, à l'ouverture. Pas de « enregistrer
+ * sous » : une question posée au moment où l'on veut juste essayer, et à
+ * laquelle on répond une fois pour toutes. Ici la décision est déjà prise quand
+ * on arrive, et elle est lisible dans le code. Qui vient seulement lire ne
+ * valide pas, et rien ne s'est produit.
+ */
+const derivedFrom = ref<string | null>(null)
+
 async function open(): Promise<void> {
   loading.value = true
+  derivedFrom.value = null
   const draft = readDraft(id.value)
   try {
-    const disk = id.value === null ? NEW_EFFECT : await readEffectSource(id.value)
+    let disk = id.value === null ? NEW_EFFECT : await readEffectSource(id.value)
+
+    if (id.value !== null) {
+      const entry = (await listEffects()).find((e) => e.id === id.value)
+      if (entry?.kind === 'builtin') {
+        derivedFrom.value = entry.name
+        disk = await renameInSource(disk, `${entry.name} (copie)`)
+      }
+    }
+
     saved.value = disk
     restored.value = draft !== null && draft !== disk
     source.value = restored.value && draft !== null ? draft : disk
@@ -279,7 +306,9 @@ onBeforeUnmount(() => {
     <header class="head">
       <button class="ghost" @click="router.push('/')">Retour</button>
       <h1>Éditeur</h1>
-      <p class="what">{{ id ?? 'nouvel effet' }}</p>
+      <p class="what">
+        {{ derivedFrom ? `copie de ${derivedFrom}` : (id ?? 'nouvel effet') }}
+      </p>
 
       <span class="spacer" />
 
@@ -300,6 +329,16 @@ onBeforeUnmount(() => {
 
     <div class="split">
       <div class="pane code-pane">
+        <!--
+          Dit d'emblée ce qui vient de se passer. L'identifiant d'un effet
+          intégré est réservé : sans cette copie, on découvrirait le refus à la
+          validation, c'est-à-dire après le travail.
+        -->
+        <p v-if="derivedFrom" class="notice" role="status">
+          Copie de « {{ derivedFrom }} » — l'original reste intact. Le nom a été changé dans le
+          code ; modifiez-le à votre guise.
+        </p>
+
         <p v-if="restored" class="notice" role="status">
           Brouillon restauré — cette version n'a pas été validée.
           <button class="link" @click="discard">Revenir à la version enregistrée</button>

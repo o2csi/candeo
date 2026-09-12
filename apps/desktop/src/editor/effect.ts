@@ -57,6 +57,42 @@ export interface Compiled {
 }
 
 /**
+ * Renomme l'effet **dans sa source**.
+ *
+ * Sert à ouvrir un effet intégré comme une copie : l'utilisateur voit le
+ * nouveau nom dans son code, il n'a pas à le changer lui-même et rien ne lui
+ * est demandé.
+ *
+ * Le littéral est localisé par l'analyse et remplacé sur son étendue exacte.
+ * Un remplacement de texte se tromperait dès qu'une description reprend le
+ * nom — ce qui est le cas de plusieurs effets livrés.
+ */
+export async function renameInSource(source: string, name: string): Promise<string> {
+  const ts = await compiler()
+  const file = ts.createSourceFile(FILE, source, ts.ScriptTarget.ES2020, true)
+
+  // Renommer est un confort, jamais une condition pour ouvrir : une source que
+  // l'analyse ne reconnaît pas doit rester lisible et modifiable. On la rend
+  // telle quelle, et c'est la validation qui dira ce qui ne va pas.
+  let exported: TS.Expression
+  try {
+    exported = unwrap(ts, defaultExport(ts, file))
+  } catch {
+    return source
+  }
+
+  if (!ts.isObjectLiteralExpression(exported)) return source
+
+  const literal = member(ts, exported, 'name')
+  if (!literal || literal === 'méthode' || !ts.isStringLiteralLike(literal)) return source
+
+  // On conserve le guillemet d'origine plutôt que d'en imposer un.
+  const quote = source[literal.getStart(file)] ?? "'"
+  const replacement = `${quote}${name.replace(quote, `\\${quote}`)}${quote}`
+  return source.slice(0, literal.getStart(file)) + replacement + source.slice(literal.getEnd())
+}
+
+/**
  * Transpile et relève le manifeste.
  *
  * Lève une erreur au message lisible : il est affiché tel quel, comme ceux qui
