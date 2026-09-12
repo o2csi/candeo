@@ -6,10 +6,54 @@ Les types sérialisés vivent dans la couche Tauri, **pas** dans les crates :
 `candeo-protocol` et `candeo-device` restent ainsi sans dépendance à serde ni à
 Tauri, donc réutilisables hors application et testables en intégration continue.
 
-L'état est un `Mutex<Option<Keyboard>>` : un seul périphérique ouvert à la fois,
-ce qui suffit tant que l'interface n'en pilote qu'un. L'**état d'adoption**, lui,
-est déjà porté par appareil — c'est la décision qui est multiple, pas encore la
-poignée ouverte.
+L'état est une **table d'appareils ouverts**, indexée comme l'adoption les
+identifie. La décision, la poignée ouverte, la boucle de rendu, l'effet en cours
+et l'état d'erreur sont tous portés **par appareil** : plus rien n'est implicite,
+plus rien n'est unique.
+
+---
+
+## Désigner un appareil
+
+Toute commande qui agit sur un appareil en prend un, sous la forme d'un objet à
+deux champs :
+
+```ts
+type DeviceRef = { vid: number, pid: number }
+```
+
+**VID et PID, rien d'autre.** C'est ce qui identifie un appareil à l'adoption, et
+c'est la clé des trois tables : appareils ouverts, échecs d'ouverture, boucles de
+rendu. Le numéro de série départage deux exemplaires du même modèle dans
+`settings.json`, mais il ne peut pas servir de clé ici — une énumération muette
+(hidraw sans règle udev) n'en déclare aucun, et l'appareil deviendrait
+indésignable.
+
+Un objet plutôt que deux entiers côte à côte : la même forme part en argument et
+revient dans l'état que rend le moteur, et intervertir deux `number` ne se verrait
+qu'à l'exécution.
+
+> Les commandes d'adoption — `adopt_device`, `ignore_device`, `connect` — gardent
+> `vid` et `pid` séparés : elles désignent un **gabarit du catalogue**, pas un
+> appareil ouvert, et l'une d'elles est justement ce qui le fait exister.
+
+### L'ordre de prise des verrous
+
+Un interblocage a déjà été attrapé sur cette base : `list_devices` prenait le
+verrou du clavier puis celui des échecs, `ignore_device` l'inverse. Avec une table
+d'appareils et N boucles de rendu, la règle est explicite :
+
+> **Aucun code ne tient deux verrous en même temps.** Une table est verrouillée le
+> temps d'y lire ou d'y poser un pointeur partagé — jamais le temps d'une écriture
+> HID, d'un démarrage de boucle ni d'une attente de fin.
+
+Là où deux deviendraient inévitables, l'ordre est celui de la déclaration dans
+`AppState` : table des appareils → moteur → table des échecs → poignée d'un
+appareil → état partagé d'une boucle. Le fil de rendu, lui, ne connaît que les
+deux derniers : il n'a aucun moyen de prendre un verrou de l'application, donc
+aucun moyen d'en bloquer une commande. La seule attente tenue verrou en main est
+celle de `stop` — et ce verrou est **propre à l'appareil**, ce qui est exactement
+ce qui empêche l'arrêt de l'un de retenir les commandes visant les autres.
 
 ---
 
@@ -73,10 +117,15 @@ Rend le gabarit quand l'appareil a été ouvert, `null` quand il est adopté mai
 débranché : ce n'est pas une erreur, il sera ouvert au branchement suivant. Une
 ouverture qui échoue, elle, remonte son message — et le laisse dans `error`.
 
+Les autres appareils ouverts le restent : adopter celui-ci n'est pas un choix à
+leur place.
+
 ### `ignore_device(vid, pid)`
 
 Retient `ignored`, et **referme** l'appareil s'il était ouvert : on ne garde pas
-ouvert ce qu'on s'engage à ne plus toucher.
+ouvert ce qu'on s'engage à ne plus toucher. La poignée est vidée, pas retirée —
+la boucle qui l'alimentait en tient une copie, elle s'en aperçoit à l'image
+suivante et cesse d'écrire, sans que les autres appareils soient touchés.
 
 Ne passe pas par HID, volontairement — ignorer un appareil doit rester possible
 quand c'est justement l'accès HID qui pose problème.
@@ -94,13 +143,14 @@ sans s'engager ; `adopt_device` est ce qu'on veut pour ne plus avoir à le faire
 
 Échoue si aucun gabarit connu ne correspond, ou si l'ouverture HID échoue.
 
-### `disconnect()` · `is_connected() -> boolean`
+### `disconnect(device)` · `is_connected(device) -> boolean`
 
-Libération explicite, et interrogation de l'état.
+Libération explicite d'**un** appareil, et interrogation de son état. Les autres
+ne sont pas touchés.
 
 ### Au démarrage
 
-L'application ouvre elle-même les appareils `adopted` **et** présents, avant
+L'application ouvre elle-même **tous** les appareils `adopted` et présents, avant
 d'afficher la fenêtre. Chaque tentative est isolée : une ouverture qui échoue
 n'interrompt pas la boucle, laisse son message sur son appareil, et les suivants
 s'ouvrent normalement.
@@ -113,7 +163,9 @@ raison part sur la sortie d'erreur, la fenêtre s'affiche.
 
 ## Gabarit
 
-### `get_layout() -> LayoutInfo`
+### `get_layout(device) -> LayoutInfo`
+
+Échoue si cet appareil n'est pas ouvert.
 
 ```ts
 {
@@ -169,11 +221,14 @@ Un rendu qui suppose « une touche = une LED » se trompe donc dans les deux sen
 
 ## Éclairage
 
-### `set_brightness(level: number)`
+Les quatre commandes écrivent sur **un** appareil, qu'elles prennent en premier
+argument, et échouent s'il n'est pas ouvert.
+
+### `set_brightness(device, level: number)`
 
 `level` de 0 à 255.
 
-### `set_effect(effect: EffectDto)`
+### `set_effect(device, effect: EffectDto)`
 
 Étiquetage serde sur le champ `kind` :
 
@@ -188,7 +243,7 @@ Les trois premiers sont exécutés **par le micrologiciel** : coût processeur n
 et ils survivent à la fermeture de l'application. `custom` bascule le clavier en
 mode piloté par l'hôte, ce qui suppose une poussée d'images continue.
 
-### `present(frame: number[])`
+### `present(device, frame: number[])`
 
 Image complète : suite plate de triplets RGB, **`frameLen × 3` octets exactement**
 (396 pour le DeathStalker). Une taille différente est refusée avec un message
@@ -197,7 +252,7 @@ explicite plutôt que d'écrire partiellement.
 En interne : six transferts `0x0f`/`0x03`, un par rangée, puis une bascule en
 effet `custom`.
 
-### `write_row(row, col_start, colors: number[])`
+### `write_row(device, row, col_start, colors: number[])`
 
 Écrit un segment de rangée sans toucher au reste — l'écriture partielle est prise
 en charge par l'appareil, vérifié sur le matériel. Utile aux effets localisés,
@@ -459,28 +514,36 @@ devenir un code à traduire côté front.
 
 ## Moteur d'effets
 
-Un fil de rendu Rust, **indépendant de la fenêtre** : fermer l'application
-n'éteint pas l'effet. C'est le seul endroit où du code d'effet s'exécute — le
-front n'en exécute jamais, ce qui lui retire au passage tout accès au DOM et à
-l'API Tauri. Conception dans
+**Un fil de rendu Rust par appareil**, indépendants de la fenêtre : fermer
+l'application n'éteint pas les effets. C'est le seul endroit où du code d'effet
+s'exécute — le front n'en exécute jamais, ce qui lui retire au passage tout accès
+au DOM et à l'API Tauri. Conception dans
 [`../design/effects-runtime.md`](../design/effects-runtime.md) §4 et §5.
 
-### `start_effect(id, params)`
+**Un appareil, un effet.** Chacun porte sa boucle, donc sa cadence, ses
+paramètres, son état d'erreur et sa sortie. Rien n'est partagé entre deux
+appareils, et c'est ce qui fait qu'un appareil en panne n'en affecte aucun autre.
+
+### `start_effect(device, id, params)`
 
 Charge le JavaScript de l'effet — celui d'un intégré, sinon
-`effects/<id>/effect.js` — et démarre la boucle. Le moteur ne fait aucune
-différence entre les deux : un effet livré est un module chargé exactement
-comme celui qu'on vient d'écrire.
+`effects/<id>/effect.js` — et démarre la boucle **de cet appareil**. Le moteur ne
+fait aucune différence entre les deux : un effet livré est un module chargé
+exactement comme celui qu'on vient d'écrire.
 
-Remplace l'effet en cours, s'il y en avait un — l'arrêt précédent est
-**attendu**, sans quoi deux boucles écriraient un instant sur le même clavier.
+Remplace l'effet en cours **sur cet appareil**, s'il y en avait un — l'arrêt
+précédent est **attendu**, sans quoi deux boucles écriraient un instant sur le
+même appareil. Les autres appareils ne sont pas touchés, et l'attente ne les
+retient pas : le verrou attendu est propre à l'appareil visé.
 
 Une erreur de syntaxe ou un module mal formé est signalé **à l'appel**, pas
 découvert plus tard dans un état : l'appel attend le verdict du chargement.
 
-Le gabarit vient du périphérique connecté ; à défaut, du gabarit par défaut.
-Délibéré : on doit pouvoir écrire et prévisualiser un effet **sans posséder le
-clavier**.
+Le gabarit vient de **l'appareil visé**, ouvert ou non. Délibéré, et à double
+titre : le gabarit d'un appareil ne dépend pas de sa présence, et on doit pouvoir
+écrire et prévisualiser un effet **sans posséder le clavier**. Viser un appareil
+débranché lance donc l'effet, alimente le simulateur, et laisse
+`reachingKeyboard` à faux jusqu'à l'ouverture.
 
 #### Ce qu'un module d'effet doit exposer
 
@@ -501,35 +564,59 @@ Chaque image repart du noir. Un effet qui n'écrit qu'une partie du clavier
 n'hérite donc pas en silence de l'image précédente — une image est complète par
 définition.
 
-### `stop_effect()` · `set_effect_params(params)`
+### `stop_effect(device)` · `set_effect_params(device, params)`
 
 `set_effect_params` ajuste **à chaud** : la boucle relit les paramètres à chaque
-image, elle ne redémarre pas.
+image, elle ne redémarre pas. Les deux ne touchent qu'à l'appareil visé ; un
+appareil sur lequel rien n'a jamais été lancé les ignore silencieusement.
 
-### `set_output_to_keyboard(on)`
+### `set_output_to_keyboard(device, on)`
 
-Coupe ou rétablit l'écriture vers le clavier **sans toucher au simulateur**. Les
-deux sorties de la boucle sont indépendantes, et chacune peut être absente :
+Coupe ou rétablit l'écriture vers **cet** appareil, **sans toucher au
+simulateur** ni aux autres appareils. Les deux sorties d'une boucle sont
+indépendantes, et chacune peut être absente :
 
 - fenêtre fermée → seule l'écriture HID subsiste, aucune image n'est sérialisée ;
 - sortie clavier coupée → seul le simulateur est alimenté ;
 - les deux actives → l'aperçu montre exactement les octets envoyés.
 
-### `subscribe_frames(channel)` · `unsubscribe_frames()`
+### `subscribe_frames(device, channel)` · `unsubscribe_frames(device)`
 
 Une commande répond **une fois** ; un effet produit 60 images par seconde. La
 remontée passe donc par `tauri::ipc::Channel`, créé côté front et passé en
 argument. Les images y circulent en binaire (`InvokeResponseBody::Raw`) :
 396 octets, contre plus de 1,5 Ko sérialisées en tableau JSON d'entiers.
 
+Un canal **par appareil** : le simulateur suit celui qu'on a sélectionné, et
+changer de sélection ferme un canal pour en ouvrir un autre. Un abonnement laissé
+ouvert sur l'appareil précédent alimenterait le même simulateur en parallèle.
+
 Se désabonner arrête le flux **sans arrêter l'effet**, qui continue d'alimenter
 le clavier.
 
-### `engine_status() -> EngineStatus`
+### `engine_status() -> DeviceEngineStatus[]`
 
 ```ts
-{ running: boolean, effectId: string | null, error: string | null, toKeyboard: boolean }
+{
+  device: { vid: number, pid: number },
+  running: boolean,
+  effectId: string | null,
+  error: string | null,
+  deviceError: string | null,
+  reachingKeyboard: boolean,
+  toKeyboard: boolean
+}[]
 ```
+
+**Une entrée par appareil**, `reachingKeyboard` compris. Un état global
+obligerait à choisir lequel afficher, et le suivant effacerait le précédent —
+exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
+
+La liste couvre les appareils sur lesquels un effet a été lancé depuis le
+démarrage, pas seulement ceux qui en portent un en ce moment : un appareil arrêté
+garde sa ligne, `running` à faux. « Cet appareil ne fait rien » et « je ne sais
+rien de cet appareil » ne se disent pas pareil, et l'interface doit pouvoir les
+distinguer. L'ordre est stable, trié par VID puis PID.
 
 Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire à
 la réouverture, ce qu'un événement ponctuel ne permet pas.
@@ -537,4 +624,5 @@ la réouverture, ce qu'un événement ponctuel ne permet pas.
 Une exception dans un effet **ne fait pas tomber l'application** : elle est
 rattrapée par image, exposée ici, et effacée dès que l'effet se rétablit. Après
 trente images consécutives en échec, la boucle s'arrête — un effet qui lève à
-chaque image ne se rétablira pas tout seul.
+chaque image ne se rétablira pas tout seul. Et elle n'arrête que **sa** boucle :
+les autres appareils continuent.

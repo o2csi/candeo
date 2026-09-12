@@ -1,12 +1,41 @@
-//! Moteur d'effets : un fil de rendu, indépendant de la fenêtre.
+//! Moteur d'effets : **un fil de rendu par appareil**, indépendants de la fenêtre.
 //!
 //! C'est le seul endroit où du code d'effet s'exécute. Le front n'en exécute
 //! jamais : il envoie la source et reçoit les images. L'aperçu du simulateur
 //! est donc la production, par construction — et non une ressemblance obtenue
 //! en faisant tourner le même code dans un second moteur JavaScript.
 //!
+//! # Un appareil, un effet
+//!
+//! Chaque appareil porte sa boucle, donc sa cadence, ses paramètres, son état
+//! d'erreur et sa sortie. Rien n'est partagé entre deux appareils : c'est ce qui
+//! fait qu'un appareil en panne n'en affecte aucun autre — l'invariant de
+//! l'adoption (issue #25), tenu cette fois au niveau du moteur.
+//!
+//! Une boucle reçoit **un gabarit** et **une sortie**, jamais « un clavier ».
+//! Le jour où un gabarit couvrira plusieurs appareils, c'est [`DeviceOut`] qui
+//! répartira l'image, et le code des effets ne changera pas d'une ligne.
+//!
+//! # Ordre de prise des verrous
+//!
+//! Trois, et l'ordre est celui de la déclaration : **table des boucles → fil d'un
+//! appareil → état partagé d'une boucle**.
+//!
+//! La table n'est verrouillée que le temps d'y lire ou d'y poser un `Arc`, jamais
+//! pendant un démarrage ni une attente de fin. Les deux suivants sont pris
+//! ensemble, dans cet ordre, par [`DeviceLoop::start`] et [`DeviceLoop::stop`] —
+//! c'est ce qui sérialise démarrage et arrêt d'un appareil, et le verrou attendu
+//! est **le sien** : attendre la fin de l'un ne retient aucune commande visant
+//! les autres.
+//!
+//! Le fil de rendu, lui, ne prend que le dernier : il ne connaît que son
+//! [`Shared`] et sa sortie, jamais le moteur. Il n'a donc aucun moyen de retenir
+//! une commande, et il ne tient jamais la poignée d'un appareil et un verrou du
+//! moteur en même temps. Voir `crate::AppState`.
+//!
 //! Voir `docs/design/effects-runtime.md`.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -88,7 +117,7 @@ impl Default for Shared {
     }
 }
 
-/// État du moteur, tel que l'interface le lit.
+/// État du moteur pour **un** appareil, tel que l'interface le lit.
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineStatus {
@@ -103,18 +132,93 @@ pub struct EngineStatus {
     pub to_keyboard: bool,
 }
 
-#[derive(Default)]
-pub struct Engine {
-    shared: Mutex<Option<Arc<Shared>>>,
-    thread: Mutex<Option<JoinHandle<()>>>,
+/// L'état d'un appareil, et à qui il appartient.
+///
+/// `engine_status()` en rend une par appareil visé : un message global
+/// obligerait à choisir lequel afficher, et le suivant effacerait le précédent —
+/// exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceEngineStatus {
+    pub device: DeviceRef,
+    #[serde(flatten)]
+    pub status: EngineStatus,
 }
 
-impl Engine {
+// ---------------------------------------------------------------- sortie
+
+/// La sortie matérielle d'une boucle.
+///
+/// Un trait plutôt que le [`Keyboard`] lui-même, pour deux raisons qui comptent
+/// autant l'une que l'autre :
+///
+/// 1. **c'est le seul endroit où une boucle touche du matériel.** Le jour où un
+///    gabarit couvrira plusieurs appareils, c'est ici que l'image se répartira ;
+///    ni la boucle ni le code des effets n'auront à changer ;
+/// 2. **un test peut faire échouer un appareil.** Sans ce joint, « un appareil
+///    en panne n'en affecte aucun autre » ne serait vérifiable qu'avec deux
+///    claviers branchés, donc jamais.
+pub(crate) trait DeviceOut: Send {
+    /// Écrit une image.
+    ///
+    /// `None` quand aucun appareil n'est ouvert. Ce n'est pas un échec : on
+    /// écrit un effet sans posséder le clavier, et l'interface doit pouvoir le
+    /// dire autrement qu'en erreur.
+    fn present(&self, colors: &[Rgb]) -> Option<Result<(), String>>;
+}
+
+/// La poignée d'un appareil, partagée entre les commandes et sa boucle.
+///
+/// `Arc` parce que la boucle survit à la fenêtre : elle ne peut rien emprunter
+/// à l'état d'une commande. `Option` parce que refermer un appareil — ignoré,
+/// débranché — ne doit pas arrêter la boucle qui l'alimentait : elle s'en
+/// aperçoit à l'image suivante et le signale par `reachingKeyboard`.
+pub(crate) type Handle = Arc<Mutex<Option<Keyboard>>>;
+
+impl DeviceOut for Handle {
+    fn present(&self, colors: &[Rgb]) -> Option<Result<(), String>> {
+        // Le verrou de la poignée est rendu **avant** que le résultat ne soit
+        // consigné : une boucle ne tient jamais la poignée et un verrou du
+        // moteur en même temps.
+        let guard = self.lock().unwrap();
+        let kb = guard.as_ref()?;
+        Some(kb.present(colors).map_err(|e| e.to_string()))
+    }
+}
+
+// ---------------------------------------------------------------- moteur
+
+/// Les boucles en cours, une par appareil.
+///
+/// La table ne porte que des `Arc` : on la verrouille le temps d'une recherche,
+/// jamais le temps d'un démarrage ou d'une attente. Arrêter la boucle d'un
+/// appareil ne retient donc aucune commande visant les autres — sans quoi une
+/// écriture HID bloquée sur l'un gèlerait l'autre, et l'invariant de l'adoption
+/// ne survivrait pas au moteur.
+#[derive(Default)]
+pub struct Engine {
+    loops: Mutex<HashMap<DeviceRef, Arc<DeviceLoop>>>,
+}
+
+/// La boucle d'**un** appareil.
+///
+/// Deux verrous, et l'ordre entre eux est fixe : `thread` puis `shared`.
+/// `thread` sérialise démarrage et arrêt ; `shared` n'est pris que le temps de
+/// cloner ou de remplacer un `Arc`, jamais pendant une attente. C'est ce qui
+/// permet de lire l'état d'un appareil pendant qu'un autre démarre — et même
+/// pendant que celui-ci démarre.
+#[derive(Default)]
+struct DeviceLoop {
+    thread: Mutex<Option<JoinHandle<()>>>,
+    shared: Mutex<Option<Arc<Shared>>>,
+}
+
+impl DeviceLoop {
     fn current(&self) -> Option<Arc<Shared>> {
         self.shared.lock().unwrap().clone()
     }
 
-    pub fn status(&self) -> EngineStatus {
+    fn status(&self) -> EngineStatus {
         match self.current() {
             None => EngineStatus::default(),
             Some(s) => EngineStatus {
@@ -131,45 +235,38 @@ impl Engine {
     /// Arrête la boucle et **attend** sa fin.
     ///
     /// L'attente n'est pas un détail : sans elle, démarrer un effet juste après
-    /// en avoir arrêté un laisserait deux boucles écrire sur le même clavier le
-    /// temps que la première s'aperçoive qu'elle doit s'arrêter.
-    pub fn stop(&self) {
+    /// en avoir arrêté un laisserait deux boucles écrire sur le même appareil le
+    /// temps que la première s'aperçoive qu'elle doit s'arrêter. Le raisonnement
+    /// vaut par appareil, et le verrou attendu l'est aussi.
+    fn stop(&self) {
+        let mut thread = self.thread.lock().unwrap();
         if let Some(s) = self.shared.lock().unwrap().take() {
             s.stop.store(true, Ordering::Relaxed);
         }
-        if let Some(h) = self.thread.lock().unwrap().take() {
+        if let Some(h) = thread.take() {
             let _ = h.join();
         }
     }
 
-    pub fn set_params(&self, params: String) {
-        if let Some(s) = self.current() {
-            *s.params.lock().unwrap() = params;
-        }
-    }
-
-    pub fn set_to_keyboard(&self, on: bool) {
-        if let Some(s) = self.current() {
-            s.to_keyboard.store(on, Ordering::Relaxed);
-        }
-    }
-
-    pub fn set_channel(&self, channel: Option<Channel<InvokeResponseBody>>) {
-        if let Some(s) = self.current() {
-            *s.frames.lock().unwrap() = channel;
-        }
-    }
-
-    /// Démarre un effet. Remplace celui qui tournait, s'il y en avait un.
-    pub fn start(
+    /// Démarre un effet sur cet appareil. Remplace celui qui tournait.
+    fn start(
         &self,
         effect_id: String,
         js: String,
         params: String,
         layout: &'static Layout,
-        keyboard: Arc<Mutex<Option<Keyboard>>>,
+        out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
-        self.stop();
+        // Gardé du début à la fin : c'est ce verrou qui interdit à deux boucles
+        // de se chevaucher sur cet appareil. Il n'est pris qu'ici et dans
+        // [`Self::stop`], et le fil de rendu ne le connaît pas.
+        let mut thread = self.thread.lock().unwrap();
+        if let Some(s) = self.shared.lock().unwrap().take() {
+            s.stop.store(true, Ordering::Relaxed);
+        }
+        if let Some(h) = thread.take() {
+            let _ = h.join();
+        }
 
         let shared = Arc::new(Shared::default());
         *shared.params.lock().unwrap() = params;
@@ -183,7 +280,7 @@ impl Engine {
 
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
-            .spawn(move || render_loop(s, js, layout, keyboard, ready_tx))
+            .spawn(move || render_loop(s, js, layout, out, ready_tx))
             .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
 
         // On attend le verdict du chargement : une erreur de syntaxe doit
@@ -191,7 +288,7 @@ impl Engine {
         match ready_rx.recv() {
             Ok(Ok(())) => {
                 *self.shared.lock().unwrap() = Some(shared);
-                *self.thread.lock().unwrap() = Some(handle);
+                *thread = Some(handle);
                 Ok(())
             }
             Ok(Err(e)) => {
@@ -206,9 +303,106 @@ impl Engine {
     }
 }
 
+impl Engine {
+    /// La boucle de cet appareil, créée à l'arrêt si elle n'existait pas.
+    ///
+    /// Seul un démarrage en crée une. L'entrée n'est ensuite jamais retirée : un
+    /// appareil qui a porté un effet garde sa ligne dans `engine_status()`,
+    /// arrêté plutôt qu'absent. « Cet appareil ne fait rien » et « je ne sais
+    /// rien de cet appareil » ne se disent pas pareil.
+    fn device_loop(&self, device: DeviceRef) -> Arc<DeviceLoop> {
+        Arc::clone(self.loops.lock().unwrap().entry(device).or_default())
+    }
+
+    /// La boucle de cet appareil, **sans en créer une**.
+    ///
+    /// Régler ou arrêter un appareil qui n'a jamais rien lancé ne fait rien, et
+    /// ne doit surtout pas lui inventer une ligne d'état.
+    fn existing(&self, device: DeviceRef) -> Option<Arc<DeviceLoop>> {
+        self.loops.lock().unwrap().get(&device).map(Arc::clone)
+    }
+
+    /// Toutes les boucles, table déverrouillée.
+    ///
+    /// La copie n'est pas un détail : agir sur une boucle demande d'attendre la
+    /// fin d'un fil, ce qu'on refuse de faire le verrou de la table à la main.
+    fn all(&self) -> Vec<(DeviceRef, Arc<DeviceLoop>)> {
+        let mut all: Vec<_> = self
+            .loops
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(d, l)| (*d, Arc::clone(l)))
+            .collect();
+        // Une table de hachage n'ordonne rien, et une liste qui se réordonne à
+        // chaque interrogation est illisible dans l'interface.
+        all.sort_by_key(|(d, _)| (d.vid, d.pid));
+        all
+    }
+
+    /// État de chaque appareil visé depuis le démarrage de l'application.
+    pub fn status(&self) -> Vec<DeviceEngineStatus> {
+        self.all()
+            .into_iter()
+            .map(|(device, l)| DeviceEngineStatus {
+                device,
+                status: l.status(),
+            })
+            .collect()
+    }
+
+    /// L'état partagé de la boucle en cours sur cet appareil, s'il y en a une.
+    fn shared(&self, device: DeviceRef) -> Option<Arc<Shared>> {
+        self.existing(device).and_then(|l| l.current())
+    }
+
+    pub fn stop(&self, device: DeviceRef) {
+        if let Some(l) = self.existing(device) {
+            l.stop();
+        }
+    }
+
+    pub fn set_params(&self, device: DeviceRef, params: String) {
+        if let Some(s) = self.shared(device) {
+            *s.params.lock().unwrap() = params;
+        }
+    }
+
+    pub fn set_to_keyboard(&self, device: DeviceRef, on: bool) {
+        if let Some(s) = self.shared(device) {
+            s.to_keyboard.store(on, Ordering::Relaxed);
+        }
+    }
+
+    pub fn set_channel(&self, device: DeviceRef, channel: Option<Channel<InvokeResponseBody>>) {
+        if let Some(s) = self.shared(device) {
+            *s.frames.lock().unwrap() = channel;
+        }
+    }
+
+    /// Démarre un effet sur un appareil. Remplace celui qui y tournait.
+    ///
+    /// Les autres appareils ne sont pas touchés — ni leur boucle, ni leur
+    /// cadence, ni leur état d'erreur.
+    pub fn start(
+        &self,
+        device: DeviceRef,
+        effect_id: String,
+        js: String,
+        params: String,
+        layout: &'static Layout,
+        out: Box<dyn DeviceOut>,
+    ) -> Result<(), String> {
+        self.device_loop(device)
+            .start(effect_id, js, params, layout, out)
+    }
+}
+
 impl Drop for Engine {
     fn drop(&mut self) {
-        self.stop();
+        for (_, l) in self.all() {
+            l.stop();
+        }
     }
 }
 
@@ -217,7 +411,7 @@ fn render_loop(
     shared: Arc<Shared>,
     js: String,
     layout: &'static Layout,
-    keyboard: Arc<Mutex<Option<Keyboard>>>,
+    out: Box<dyn DeviceOut>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
     let frame_len = layout.led_count();
@@ -252,7 +446,7 @@ fn render_loop(
                 // L'effet s'est rétabli : on efface, sinon l'interface
                 // afficherait une erreur périmée indéfiniment.
                 *shared.error.lock().unwrap() = None;
-                emit(&shared, &keyboard, &bytes);
+                emit(&shared, out.as_ref(), &bytes);
             }
             Err(e) => {
                 consecutive_errors += 1;
@@ -367,41 +561,36 @@ fn render_once(
 }
 
 /// Les deux sorties, indépendantes : chacune peut être absente.
-fn emit(shared: &Shared, keyboard: &Mutex<Option<Keyboard>>, bytes: &[u8]) {
+fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
     if !shared.to_keyboard.load(Ordering::Relaxed) {
         // Sortie coupée volontairement : ce n'est pas un défaut, mais les
         // images n'atteignent aucun clavier et l'interface doit pouvoir le dire.
         shared.reaching.store(false, Ordering::Relaxed);
     } else {
-        let guard = keyboard.lock().unwrap();
-        let Some(kb) = guard.as_ref() else {
+        let colors: Vec<Rgb> = bytes
+            .chunks_exact(3)
+            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .collect();
+        // Un clavier débranché en cours de route n'arrête pas l'effet : le
+        // simulateur continue, et la reconnexion passe par les commandes
+        // existantes. Mais l'échec est **consigné**, pas avalé — le taire
+        // donnait une boucle qui se dit saine pendant qu'aucun octet n'atteint
+        // l'appareil. Et l'échec de celui-ci ne dit rien des autres : chaque
+        // boucle écrit dans son propre état.
+        match out.present(&colors) {
             // **Aucun périphérique ouvert.** Sans ce signalement, lancer un
             // effet sans clavier connecté ne produisait aucun signe : le
             // simulateur s'animait, la case « envoyer » restait cochée, et le
             // clavier gardait son image précédente. On lisait ça comme « seule
             // la première image est passée ».
-            shared.reaching.store(false, Ordering::Relaxed);
-            return;
-        };
-        {
-            let colors: Vec<Rgb> = bytes
-                .chunks_exact(3)
-                .map(|c| Rgb::new(c[0], c[1], c[2]))
-                .collect();
-            // Un clavier débranché en cours de route n'arrête pas l'effet : le
-            // simulateur continue, et la reconnexion passe par les commandes
-            // existantes. Mais l'échec est **consigné**, pas avalé — le taire
-            // donnait une boucle qui se dit saine pendant qu'aucun octet
-            // n'atteint l'appareil.
-            match kb.present(&colors) {
-                Ok(()) => {
-                    *shared.device_error.lock().unwrap() = None;
-                    shared.reaching.store(true, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    *shared.device_error.lock().unwrap() = Some(e.to_string());
-                    shared.reaching.store(false, Ordering::Relaxed);
-                }
+            None => shared.reaching.store(false, Ordering::Relaxed),
+            Some(Ok(())) => {
+                *shared.device_error.lock().unwrap() = None;
+                shared.reaching.store(true, Ordering::Relaxed);
+            }
+            Some(Err(e)) => {
+                *shared.device_error.lock().unwrap() = Some(e);
+                shared.reaching.store(false, Ordering::Relaxed);
             }
         }
     }
@@ -464,90 +653,107 @@ fn js_error(e: rquickjs::Error) -> String {
 
 // ---------------------------------------------------------------- commandes
 
-use crate::{AppState, CmdResult};
+use crate::{AppState, CmdResult, DeviceRef};
 use tauri::{AppHandle, State};
 
-/// Démarre un effet, intégré ou installé.
+/// Démarre un effet, intégré ou installé, **sur un appareil**.
 ///
 /// La résolution `identifiant → JavaScript` est celle de la bibliothèque, donc
 /// les intégrés d'abord : voir [`crate::storage`]. Le moteur, lui, ne fait
 /// aucune différence — un effet livré est un module chargé exactement comme
 /// celui qu'on vient d'écrire.
 ///
-/// Le gabarit vient du périphérique connecté ; à défaut, du gabarit par
-/// défaut. C'est délibéré : on doit pouvoir écrire et prévisualiser un effet
-/// **sans posséder le clavier**.
+/// Le gabarit vient de **l'appareil visé**, ouvert ou non. C'est délibéré : on
+/// doit pouvoir écrire et prévisualiser un effet **sans posséder le clavier**,
+/// et le gabarit d'un appareil ne dépend pas de sa présence. Viser un appareil
+/// débranché lance donc l'effet, alimente le simulateur, et `reachingKeyboard`
+/// reste faux jusqu'à l'ouverture.
 #[tauri::command]
 pub fn start_effect(
     app: AppHandle,
     state: State<'_, AppState>,
+    device: DeviceRef,
     id: String,
     params: serde_json::Value,
 ) -> CmdResult<()> {
+    let layout = crate::find_layout(device)?;
     let js = crate::storage::store(&app)?.effect_js(&id)?;
-
-    let layout = match state.keyboard.lock().unwrap().as_ref() {
-        Some(kb) => kb.layout(),
-        None => crate::default_layout(),
-    };
 
     let params = serde_json::to_string(&params)
         .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
 
-    state
-        .engine
-        .start(id, js, params, layout, Arc::clone(&state.keyboard))
+    // La poignée est partagée avec la boucle, pas copiée : refermer l'appareil
+    // plus tard — ignoré, débranché — se voit à l'image suivante.
+    let out = Box::new(state.handle(device));
+    state.engine.start(device, id, js, params, layout, out)
 }
 
 #[tauri::command]
-pub fn stop_effect(state: State<'_, AppState>) {
-    state.engine.stop();
+pub fn stop_effect(state: State<'_, AppState>, device: DeviceRef) {
+    state.engine.stop(device);
 }
 
 /// Ajuste les paramètres à chaud. La boucle ne redémarre pas : elle relit le
 /// JSON à chaque image.
 #[tauri::command]
-pub fn set_effect_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
+pub fn set_effect_params(
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    params: serde_json::Value,
+) -> CmdResult<()> {
     let params = serde_json::to_string(&params)
         .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
-    state.engine.set_params(params);
+    state.engine.set_params(device, params);
     Ok(())
 }
 
-/// Active ou coupe la sortie clavier, sans toucher au simulateur.
+/// Active ou coupe la sortie clavier d'un appareil, sans toucher au simulateur.
 #[tauri::command]
-pub fn set_output_to_keyboard(state: State<'_, AppState>, on: bool) {
-    state.engine.set_to_keyboard(on);
+pub fn set_output_to_keyboard(state: State<'_, AppState>, device: DeviceRef, on: bool) {
+    state.engine.set_to_keyboard(device, on);
 }
 
-/// Ouvre le flux d'images vers le simulateur.
+/// Ouvre le flux d'images d'**un appareil** vers le simulateur.
 ///
 /// Un canal, et non un événement global : la destination est connue, la portée
 /// est explicite, et le binaire passe brut. Libérer le canal côté front, ou
 /// appeler [`unsubscribe_frames`], arrête le flux **sans arrêter l'effet**, qui
 /// continue d'alimenter le clavier fenêtre fermée.
+///
+/// Le simulateur suit l'appareil sélectionné : changer de sélection, c'est se
+/// réabonner ailleurs, pas multiplexer un flux unique.
 #[tauri::command]
-pub fn subscribe_frames(state: State<'_, AppState>, channel: Channel<InvokeResponseBody>) {
-    state.engine.set_channel(Some(channel));
+pub fn subscribe_frames(
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    channel: Channel<InvokeResponseBody>,
+) {
+    state.engine.set_channel(device, Some(channel));
 }
 
 #[tauri::command]
-pub fn unsubscribe_frames(state: State<'_, AppState>) {
-    state.engine.set_channel(None);
+pub fn unsubscribe_frames(state: State<'_, AppState>, device: DeviceRef) {
+    state.engine.set_channel(device, None);
 }
 
-/// État du moteur, y compris la dernière erreur de l'effet.
+/// État du moteur **par appareil**, dernière erreur de l'effet comprise.
 ///
 /// Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit
 /// pouvoir être lue à la réouverture, ce qu'un événement ponctuel ne permet
 /// pas.
+///
+/// Une entrée par appareil visé depuis le démarrage — pas seulement par appareil
+/// ouvert, ni par boucle en cours : « cet appareil ne fait rien » et « je ne
+/// sais rien de cet appareil » ne se disent pas pareil.
 #[tauri::command]
-pub fn engine_status(state: State<'_, AppState>) -> EngineStatus {
+pub fn engine_status(state: State<'_, AppState>) -> Vec<DeviceEngineStatus> {
     state.engine.status()
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU32;
+
     use super::*;
 
     /// Un effet minimal, écrit comme l'utilisateur l'écrirait.
@@ -576,6 +782,195 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------------------ un appareil
+
+    /// Deux appareils inventés : le seul gabarit réel est unique, et tout ce qui
+    /// est « par appareil » n'a de sens qu'à partir de deux. Ils ne servent qu'à
+    /// être distingués — la géométrie, elle, reste celle du vrai gabarit, pour
+    /// que les effets rendent de vraies images.
+    const PREMIER: DeviceRef = DeviceRef {
+        vid: 0x1532,
+        pid: 0x1111,
+    };
+    const SECOND: DeviceRef = DeviceRef {
+        vid: 0x1532,
+        pid: 0x2222,
+    };
+
+    /// Au-delà, on considère que la condition attendue ne viendra pas.
+    ///
+    /// Généreux, et à dessein : à 60 images par seconde quelques images tiennent
+    /// dans quelques dizaines de millisecondes, mais la cadence d'un coureur
+    /// d'intégration continue n'est pas celle d'une machine de développement.
+    /// Un test qui dort une durée choisie serait soit lent, soit capricieux.
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    /// Une sortie d'appareil pilotée depuis le test.
+    ///
+    /// C'est tout l'intérêt de [`DeviceOut`] : faire échouer **un** appareil sans
+    /// en brancher aucun. Avec le `Keyboard` en dur, l'invariant « un appareil en
+    /// panne n'en affecte aucun autre » n'aurait été vérifiable qu'avec deux
+    /// claviers sur le bureau, donc jamais.
+    #[derive(Default)]
+    struct Sortie {
+        ecrites: AtomicU32,
+        en_panne: AtomicBool,
+    }
+
+    impl DeviceOut for Arc<Sortie> {
+        fn present(&self, _colors: &[Rgb]) -> Option<Result<(), String>> {
+            if self.en_panne.load(Ordering::Relaxed) {
+                return Some(Err("écriture refusée par l'appareil".into()));
+            }
+            self.ecrites.fetch_add(1, Ordering::Relaxed);
+            Some(Ok(()))
+        }
+    }
+
+    fn demarrer(engine: &Engine, device: DeviceRef, effect_id: &str, out: Arc<Sortie>) {
+        engine
+            .start(
+                device,
+                effect_id.into(),
+                EFFET.into(),
+                "{}".into(),
+                layout(),
+                Box::new(out),
+            )
+            .expect("démarrage");
+    }
+
+    /// L'état d'un appareil, extrait de la liste que rend le moteur.
+    fn etat(engine: &Engine, device: DeviceRef) -> EngineStatus {
+        engine
+            .status()
+            .into_iter()
+            .find(|s| s.device == device)
+            .unwrap_or_else(|| panic!("aucun état pour {device}"))
+            .status
+    }
+
+    /// Attend qu'une condition se réalise, ou échoue. Voir [`PATIENCE`].
+    fn attendre(quoi: &str, mut pret: impl FnMut() -> bool) {
+        let limite = Instant::now() + PATIENCE;
+        while Instant::now() < limite {
+            if pret() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("{quoi} : rien en {PATIENCE:?}");
+    }
+
+    /// **L'invariant de l'adoption, au niveau du moteur.**
+    ///
+    /// `un_appareil_en_echec_n_en_bloque_aucun_autre` le vérifie à l'ouverture ;
+    /// celui-ci le vérifie une fois les boucles lancées, là où l'appareil tombe
+    /// en marche. Un appareil dont toute écriture échoue ne doit rien retirer aux
+    /// autres : ni leur boucle, ni leurs images, ni leur état — et l'arrêter ne
+    /// doit pas les arrêter.
+    #[test]
+    fn un_appareil_en_panne_n_en_affecte_aucun_autre() {
+        let engine = Engine::default();
+        let panne = Arc::new(Sortie::default());
+        panne.en_panne.store(true, Ordering::Relaxed);
+        let sain = Arc::new(Sortie::default());
+
+        demarrer(&engine, PREMIER, "casse", Arc::clone(&panne));
+        demarrer(&engine, SECOND, "sain", Arc::clone(&sain));
+
+        attendre("le voisin sain n'écrit rien", || {
+            sain.ecrites.load(Ordering::Relaxed) >= 3
+        });
+
+        let casse = etat(&engine, PREMIER);
+        assert!(
+            casse.running,
+            "la boucle de l'appareil en panne s'est arrêtée"
+        );
+        assert!(
+            casse.device_error.is_some(),
+            "l'échec d'écriture n'a pas été consigné"
+        );
+        assert!(!casse.reaching_keyboard);
+        assert_eq!(panne.ecrites.load(Ordering::Relaxed), 0);
+
+        let ok = etat(&engine, SECOND);
+        assert!(ok.running, "la boucle du voisin s'est arrêtée");
+        assert_eq!(ok.device_error, None, "l'échec du voisin a débordé");
+        assert!(ok.reaching_keyboard, "le voisin n'est plus atteint");
+        assert_eq!(
+            ok.error, None,
+            "erreur d'effet sur le voisin : {:?}",
+            ok.error
+        );
+
+        // Arrêter l'appareil en panne laisse l'autre tourner : les boucles ne
+        // partagent ni fil, ni verrou, ni état.
+        let avant = sain.ecrites.load(Ordering::Relaxed);
+        engine.stop(PREMIER);
+        attendre("le voisin s'est arrêté avec son camarade", || {
+            sain.ecrites.load(Ordering::Relaxed) > avant
+        });
+        assert!(!etat(&engine, PREMIER).running);
+        assert!(etat(&engine, SECOND).running);
+
+        engine.stop(SECOND);
+    }
+
+    /// Chaque appareil porte son effet et sa sortie. Couper l'un ne coupe pas
+    /// l'autre — sans quoi « envoyer au clavier » serait une bascule globale
+    /// déguisée en réglage d'appareil.
+    #[test]
+    fn chaque_appareil_porte_son_effet_et_sa_sortie() {
+        let engine = Engine::default();
+        let a = Arc::new(Sortie::default());
+        let b = Arc::new(Sortie::default());
+
+        demarrer(&engine, PREMIER, "premier", Arc::clone(&a));
+        demarrer(&engine, SECOND, "second", Arc::clone(&b));
+
+        assert_eq!(etat(&engine, PREMIER).effect_id.as_deref(), Some("premier"));
+        assert_eq!(etat(&engine, SECOND).effect_id.as_deref(), Some("second"));
+
+        engine.set_to_keyboard(SECOND, false);
+        attendre("la sortie du second reste ouverte", || {
+            !etat(&engine, SECOND).reaching_keyboard
+        });
+
+        let fige = b.ecrites.load(Ordering::Relaxed);
+        let avant = a.ecrites.load(Ordering::Relaxed);
+        attendre("le premier n'écrit plus", || {
+            a.ecrites.load(Ordering::Relaxed) > avant + 2
+        });
+
+        assert!(etat(&engine, PREMIER).to_keyboard, "la coupure a débordé");
+        assert!(etat(&engine, PREMIER).reaching_keyboard);
+        assert_eq!(
+            b.ecrites.load(Ordering::Relaxed),
+            fige,
+            "la sortie coupée écrit encore"
+        );
+
+        engine.stop(PREMIER);
+        engine.stop(SECOND);
+    }
+
+    /// Un appareil arrêté garde sa ligne : « cet appareil ne fait rien » et « je
+    /// ne sais rien de cet appareil » ne se disent pas pareil, et l'interface
+    /// doit pouvoir les distinguer.
+    #[test]
+    fn un_appareil_arrete_garde_sa_ligne_d_etat() {
+        let engine = Engine::default();
+        demarrer(&engine, PREMIER, "premier", Arc::new(Sortie::default()));
+        engine.stop(PREMIER);
+
+        let s = etat(&engine, PREMIER);
+        assert!(!s.running);
+        assert_eq!(s.effect_id, None);
+        assert_eq!(engine.status().len(), 1);
+    }
+
     /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.
     ///
     /// `cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture`
@@ -590,28 +985,38 @@ mod tests {
         };
         println!("clavier ouvert : {}", l.name);
 
-        let keyboard = Arc::new(Mutex::new(Some(kb)));
+        let device = DeviceRef {
+            vid: l.vid,
+            pid: l.pid,
+        };
+        let handle: Handle = Arc::new(Mutex::new(Some(kb)));
         let engine = Engine::default();
         let js = crate::builtins::find("onde-radiale").expect("intégré").js;
 
         engine
             .start(
+                device,
                 "onde-radiale".into(),
                 js.to_string(),
                 "{}".into(),
                 l,
-                Arc::clone(&keyboard),
+                Box::new(Arc::clone(&handle)),
             )
             .expect("démarrage");
         println!("moteur démarré — 3 s d'onde radiale sur le clavier");
         std::thread::sleep(Duration::from_secs(3));
 
-        let s = engine.status();
+        let s = etat(&engine, device);
         println!("état : running={} erreur={:?}", s.running, s.error);
         assert!(s.running, "la boucle s'est arrêtée");
         assert!(s.error.is_none(), "erreur pendant le rendu : {:?}", s.error);
+        assert!(
+            s.reaching_keyboard,
+            "aucune image n'atteint le clavier : {:?}",
+            s.device_error
+        );
 
-        engine.stop();
+        engine.stop(device);
         println!("arrêté proprement");
     }
 

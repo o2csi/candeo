@@ -9,7 +9,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
-import type { DeviceInfo, Effect, LayoutInfo, Rgb } from './types'
+import type { DeviceInfo, DeviceRef, Effect, LayoutInfo, Rgb } from './types'
 
 /** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -43,16 +43,18 @@ export function connect(vid: number, pid: number): Promise<LayoutInfo> {
   return invoke('connect', { vid, pid })
 }
 
-export function disconnect(): Promise<void> {
-  return invoke('disconnect')
+/** Referme **un** appareil. Les autres ne sont pas touchés. */
+export function disconnect(device: DeviceRef): Promise<void> {
+  return invoke('disconnect', { device })
 }
 
-export function isConnected(): Promise<boolean> {
-  return invoke('is_connected')
+export function isConnected(device: DeviceRef): Promise<boolean> {
+  return invoke('is_connected', { device })
 }
 
-export function getLayout(): Promise<LayoutInfo> {
-  return invoke('get_layout')
+/** Gabarit d'un appareil ouvert. Échoue s'il ne l'est pas. */
+export function getLayout(device: DeviceRef): Promise<LayoutInfo> {
+  return invoke('get_layout', { device })
 }
 
 /**
@@ -68,18 +70,18 @@ export function getDefaultLayout(): Promise<LayoutInfo> {
 }
 
 /** `level` de 0 à 255. */
-export function setBrightness(level: number): Promise<void> {
-  return invoke('set_brightness', { level })
+export function setBrightness(device: DeviceRef, level: number): Promise<void> {
+  return invoke('set_brightness', { device, level })
 }
 
 /**
- * Bascule l'effet.
+ * Bascule l'effet matériel d'un appareil.
  *
  * Tout sauf `custom` est exécuté par le **micrologiciel** : coût processeur
  * nul, et l'effet survit à la fermeture de l'application.
  */
-export function setEffect(effect: Effect): Promise<void> {
-  return invoke('set_effect', { effect })
+export function setEffect(device: DeviceRef, effect: Effect): Promise<void> {
+  return invoke('set_effect', { device, effect })
 }
 
 /**
@@ -89,20 +91,25 @@ export function setEffect(effect: Effect): Promise<void> {
  * cases de la matrice, y compris celles sans LED. En envoyer moins laisse les
  * dernières rangées figées sur leur valeur précédente.
  */
-export function present(frame: readonly Rgb[]): Promise<void> {
+export function present(device: DeviceRef, frame: readonly Rgb[]): Promise<void> {
   const flat = new Array<number>(frame.length * 3)
   for (let i = 0; i < frame.length; i++) {
     flat[i * 3] = frame[i][0]
     flat[i * 3 + 1] = frame[i][1]
     flat[i * 3 + 2] = frame[i][2]
   }
-  return invoke('present', { frame: flat })
+  return invoke('present', { device, frame: flat })
 }
 
 /** Écrit un segment de rangée, sans toucher au reste. */
-export function writeRow(row: number, colStart: number, colors: readonly Rgb[]): Promise<void> {
+export function writeRow(
+  device: DeviceRef,
+  row: number,
+  colStart: number,
+  colors: readonly Rgb[],
+): Promise<void> {
   const flat = colors.flatMap((c) => [c[0], c[1], c[2]])
-  return invoke('write_row', { row, colStart, colors: flat })
+  return invoke('write_row', { device, row, colStart, colors: flat })
 }
 
 // ---------------------------------------------------------------- bibliothèque
@@ -218,60 +225,83 @@ export interface EngineStatus {
   toKeyboard: boolean
 }
 
-/**
- * Démarre un effet installé.
- *
- * Le moteur tourne dans un fil Rust indépendant de la fenêtre : fermer
- * l'application n'éteint pas l'effet.
- */
-export function startEffect(id: string, params: EffectParams = {}): Promise<void> {
-  return invoke('start_effect', { id, params })
+/** L'état d'un appareil, et à qui il appartient. */
+export interface DeviceEngineStatus extends EngineStatus {
+  device: DeviceRef
 }
 
-export function stopEffect(): Promise<void> {
-  return invoke('stop_effect')
+/**
+ * Démarre un effet installé **sur un appareil**.
+ *
+ * Le moteur tourne dans un fil Rust par appareil, indépendant de la fenêtre :
+ * fermer l'application n'éteint pas l'effet. Démarrer ici ne touche à aucun
+ * autre appareil — chacun porte son effet et ses réglages.
+ *
+ * Viser un appareil débranché n'est pas une erreur : la boucle tourne, le
+ * simulateur s'anime, et `reachingKeyboard` reste faux jusqu'à l'ouverture.
+ * C'est ce qui permet d'écrire un effet **sans posséder le clavier**.
+ */
+export function startEffect(
+  device: DeviceRef,
+  id: string,
+  params: EffectParams = {},
+): Promise<void> {
+  return invoke('start_effect', { device, id, params })
+}
+
+export function stopEffect(device: DeviceRef): Promise<void> {
+  return invoke('stop_effect', { device })
 }
 
 /** Ajuste les paramètres à chaud, sans redémarrer la boucle. */
-export function setEffectParams(params: EffectParams): Promise<void> {
-  return invoke('set_effect_params', { params })
+export function setEffectParams(device: DeviceRef, params: EffectParams): Promise<void> {
+  return invoke('set_effect_params', { device, params })
 }
 
 /**
- * Active ou coupe l'écriture vers le clavier, **sans** toucher au simulateur.
+ * Active ou coupe l'écriture vers un appareil, **sans** toucher au simulateur.
  *
- * C'est ce qui permet d'écrire un effet sans posséder le clavier.
+ * C'est ce qui permet d'écrire un effet sans posséder le clavier. La coupure
+ * est propre à l'appareil visé : les autres continuent d'être alimentés.
  */
-export function setOutputToKeyboard(on: boolean): Promise<void> {
-  return invoke('set_output_to_keyboard', { on })
+export function setOutputToKeyboard(device: DeviceRef, on: boolean): Promise<void> {
+  return invoke('set_output_to_keyboard', { device, on })
 }
 
 /**
- * Ouvre le flux d'images vers le simulateur.
+ * Ouvre le flux d'images d'**un appareil** vers le simulateur.
  *
  * Chaque message est une image brute : `frameLen × 3` octets, dans l'ordre RVB.
  * Un canal, et non un événement global — la portée est explicite et le binaire
  * passe sans détour par un tableau JSON d'entiers.
  *
- * Fermer le canal arrête le flux **sans arrêter l'effet**, qui continue
- * d'alimenter le clavier.
+ * Le simulateur suit l'appareil sélectionné : en changer, c'est fermer ce canal
+ * et s'abonner ailleurs. Fermer le canal arrête le flux **sans arrêter
+ * l'effet**, qui continue d'alimenter le clavier.
  */
-export function subscribeFrames(onFrame: (frame: Uint8Array) => void): Promise<() => void> {
+export function subscribeFrames(
+  device: DeviceRef,
+  onFrame: (frame: Uint8Array) => void,
+): Promise<() => void> {
   const channel = new Channel<ArrayBuffer | number[]>()
   channel.onmessage = (m) => {
     onFrame(m instanceof ArrayBuffer ? new Uint8Array(m) : Uint8Array.from(m))
   }
-  return invoke<void>('subscribe_frames', { channel }).then(
-    () => () => void invoke('unsubscribe_frames'),
+  return invoke<void>('subscribe_frames', { device, channel }).then(
+    () => () => void invoke('unsubscribe_frames', { device }),
   )
 }
 
 /**
- * État du moteur, erreur comprise.
+ * État du moteur **par appareil**, erreur comprise.
  *
  * Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire
  * à la réouverture, ce qu'un événement ponctuel ne permet pas.
+ *
+ * Une entrée par appareil visé depuis le démarrage, pas seulement par appareil
+ * ouvert : un appareil sans ligne est un appareil dont on ne sait rien, ce qui
+ * n'est pas la même chose qu'un appareil qui ne fait rien.
  */
-export function engineStatus(): Promise<EngineStatus> {
+export function engineStatus(): Promise<DeviceEngineStatus[]> {
   return invoke('engine_status')
 }

@@ -30,6 +30,14 @@
  * Fermer l'éditeur libère le canal, donc le flux d'images. La boucle, elle,
  * tourne dans un fil Rust indépendant de la fenêtre et continue d'alimenter le
  * clavier — y compris l'application fermée.
+ *
+ * ## Un effet se lance sur **un** appareil
+ *
+ * Le moteur porte une boucle par appareil : lancer, arrêter, régler et suivre
+ * les images désignent tous celui qui est visé. L'éditeur prend `current`, sans
+ * rien demander — un seul appareil reste le cas courant, et choisir en
+ * permanence serait une cérémonie de plus. L'écran à trois colonnes (issue #27)
+ * rendra le choix explicite.
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -44,8 +52,9 @@ import {
   setOutputToKeyboard,
   startEffect,
   stopEffect,
-  type EngineStatus,
+  type DeviceEngineStatus,
 } from '../api/candeo'
+import type { DeviceRef } from '../api/types'
 import CodeEditor from '../components/CodeEditor.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
@@ -63,7 +72,7 @@ const STATUS_PERIOD = 1000
 
 const route = useRoute()
 const router = useRouter()
-const { layout } = useDevice()
+const { layout, current, refresh } = useDevice()
 
 /** `/editor` sans identifiant = nouvel effet ; avec = effet installé. */
 const id = computed<string | null>(() => {
@@ -79,7 +88,23 @@ const restored = ref(false)
 const busy = ref(false)
 /** Ce qui a empêché de valider, côté fenêtre. Déjà lisible. */
 const problem = ref<string | null>(null)
-const status = ref<EngineStatus | null>(null)
+
+/**
+ * L'état du moteur, appareil par appareil — l'éditeur ne regarde que le sien.
+ *
+ * Tout est relu d'un coup plutôt qu'appareil par appareil : c'est un seul
+ * aller-retour par seconde, et l'écran à trois colonnes (issue #27) aura de
+ * toute façon besoin des autres lignes.
+ */
+const statuses = ref<DeviceEngineStatus[]>([])
+
+const status = computed(() => {
+  const device = current.value
+  if (!device) return null
+  return (
+    statuses.value.find((s) => s.device.vid === device.vid && s.device.pid === device.pid) ?? null
+  )
+})
 
 /**
  * Bascule « envoyer au clavier ». Par défaut : on envoie.
@@ -116,6 +141,20 @@ const silencieux = computed(
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
   return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * L'appareil visé, ou un refus lisible.
+ *
+ * Il n'y a plus d'appareil implicite côté Rust : chaque commande du moteur en
+ * désigne un. `null` ne se produit que si la liste des gabarits connus est vide,
+ * donc jamais en pratique — mais le dire vaut mieux qu'un `invoke` qui échoue en
+ * parlant de désérialisation.
+ */
+function target(): DeviceRef {
+  const device = current.value
+  if (!device) throw new Error('aucun appareil connu : impossible de lancer un effet')
+  return device
 }
 
 // ---------------------------------------------------------------- ouverture
@@ -225,9 +264,9 @@ watch(source, (value) => {
 
 // ---------------------------------------------------------------- moteur
 
-async function refresh(): Promise<void> {
+async function refreshStatus(): Promise<void> {
   try {
-    status.value = await engineStatus()
+    statuses.value = await engineStatus()
   } catch (e) {
     problem.value = message(e)
   }
@@ -264,14 +303,15 @@ async function store(run: boolean): Promise<void> {
     derivedFrom.value = null
 
     if (run) {
-      await startEffect(installedId, params)
+      const device = target()
+      await startEffect(device, installedId, params)
       // `start_effect` repart d'un état neuf, dont la sortie clavier est
       // active. Sans cette ligne, « ne pas envoyer » serait oublié à chaque
       // lancement.
-      if (!toKeyboard.value) await setOutputToKeyboard(false)
-      // Le canal vit dans l'état de la boucle : un nouveau départ, un nouvel
-      // abonnement.
-      await listen()
+      if (!toKeyboard.value) await setOutputToKeyboard(device, false)
+      // Le canal vit dans l'état de la boucle de cet appareil : un nouveau
+      // départ, un nouvel abonnement.
+      await listen(device)
     }
 
     // L'identifiant est dérivé du nom par le Rust. Le porter dans la route,
@@ -281,7 +321,7 @@ async function store(run: boolean): Promise<void> {
     problem.value = message(e)
   } finally {
     busy.value = false
-    await refresh()
+    await refreshStatus()
   }
 }
 
@@ -298,26 +338,26 @@ const validate = () => store(true)
 async function halt(): Promise<void> {
   busy.value = true
   try {
-    await stopEffect()
+    await stopEffect(target())
     stopFrames()
   } catch (e) {
     problem.value = message(e)
   } finally {
     busy.value = false
-    await refresh()
+    await refreshStatus()
   }
 }
 
 async function toggleOutput(): Promise<void> {
   toKeyboard.value = !toKeyboard.value
   try {
-    // Sans effet en cours, le moteur n'a nulle part où poser ce choix : il sera
-    // réappliqué au prochain lancement.
-    await setOutputToKeyboard(toKeyboard.value)
+    // Sans effet en cours sur cet appareil, le moteur n'a nulle part où poser ce
+    // choix : il sera réappliqué au prochain lancement.
+    await setOutputToKeyboard(target(), toKeyboard.value)
   } catch (e) {
     problem.value = message(e)
   }
-  await refresh()
+  await refreshStatus()
 }
 
 // ---------------------------------------------------------------- cycle de vie
@@ -331,20 +371,26 @@ onMounted(async () => {
     fallback.value = l
   })
 
-  await open()
+  // L'éditeur peut être la première vue affichée — un lien direct vers
+  // `/editor/:id`. Sans cette relecture, aucun appareil ne serait désigné et
+  // « Valider et lancer » n'aurait rien à viser.
   await refresh()
+  await open()
+  await refreshStatus()
 
-  // Un effet peut déjà tourner : lancé à la session précédente, ou depuis la
-  // galerie. On reprend alors son flux d'images et l'état réel de sa sortie.
-  if (status.value?.running === true) {
-    toKeyboard.value = status.value.toKeyboard
-    await listen()
+  // Un effet peut déjà tourner sur cet appareil : lancé à la session
+  // précédente, ou depuis la galerie. On reprend alors son flux d'images et
+  // l'état réel de sa sortie.
+  const encours = status.value
+  if (encours?.running === true) {
+    toKeyboard.value = encours.toKeyboard
+    await listen(encours.device)
   }
 
   // On a pu quitter l'écran entre-temps : poser l'interrogation périodique
   // maintenant la laisserait tourner pour personne, hors de portée du
   // nettoyage qui a déjà eu lieu.
-  if (alive) statusTimer = window.setInterval(() => void refresh(), STATUS_PERIOD)
+  if (alive) statusTimer = window.setInterval(() => void refreshStatus(), STATUS_PERIOD)
 })
 
 onBeforeUnmount(() => {

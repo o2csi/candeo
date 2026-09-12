@@ -130,21 +130,23 @@ et un autre code exécuté.
 
 ---
 
-## 4. Le moteur — une boucle, deux sorties
+## 4. Le moteur — une boucle par appareil, deux sorties chacune
 
-Un fil Rust, indépendant de toute fenêtre. Il instancie un contexte `rquickjs`,
-charge `effect.js`, et appelle sa fonction de rendu à cadence fixe.
+Un fil Rust par appareil, indépendant de toute fenêtre. Chacun instancie son
+contexte `rquickjs`, charge son `effect.js`, et appelle sa fonction de rendu à
+cadence fixe.
 
 ```
-        ┌──────────────────────────┐
-        │  rquickjs — render(ctx)  │  60 Hz
-        └────────────┬─────────────┘
-                     │  image : 132 triplets RGB
-          ┌──────────┴───────────┐
-          ▼                      ▼
+   appareil A                              appareil B
+        ┌──────────────────────────┐            ┌───────────────┐
+        │  rquickjs — render(ctx)  │  60 Hz     │  rquickjs — … │
+        └────────────┬─────────────┘            └───────┬───────┘
+                     │  image : 132 triplets RGB        │
+          ┌──────────┴───────────┐                      ▼
+          ▼                      ▼                   sortie A'
    écriture HID            canal → simulateur
-   (si connecté et         (si la fenêtre écoute)
-    « envoyer » actif)
+   (si ouvert et           (si la fenêtre écoute
+    « envoyer » actif)      **cet** appareil)
 ```
 
 Les deux sorties sont **indépendantes**, et chacune peut être absente :
@@ -154,8 +156,59 @@ Les deux sorties sont **indépendantes**, et chacune peut être absente :
   ce qui permet d'écrire un effet **sans posséder le clavier** ;
 - les deux actives → l'aperçu montre exactement les octets envoyés.
 
-C'est cette dernière propriété qui justifie le moteur unique : le simulateur
-n'interprète pas le code, il affiche le résultat.
+C'est cette dernière propriété qui justifie le moteur unique — au sens : un seul
+endroit où le code d'effet s'exécute. Le simulateur n'interprète pas le code, il
+affiche le résultat.
+
+### Un appareil, un effet
+
+Chaque appareil porte sa boucle, donc sa cadence, ses paramètres, son état
+d'erreur, sa sortie et son `reachingKeyboard`. **Rien n'est partagé entre deux
+appareils**, et c'est ce qui fait qu'un appareil en panne n'en affecte aucun
+autre — l'invariant de l'adoption (§7), tenu cette fois en marche et non
+seulement à l'ouverture.
+
+L'autre modèle — un effet couvrant plusieurs appareils, avec un gabarit
+composite — permettrait une vague traversant du clavier au tapis de souris. Il
+exige d'abord de décrire où les appareils se trouvent les uns par rapport aux
+autres, ce qu'on ne peut pas concevoir correctement avec un seul appareil sous la
+main.
+
+**Il n'est pas fermé pour autant.** Une boucle reçoit **un gabarit** et **une
+sortie**, jamais « un clavier » : le trait `DeviceOut` est le seul point où elle
+touche du matériel. Le jour où un gabarit couvrira plusieurs appareils, c'est là
+que l'image se répartira — ni la boucle, ni le code des effets n'auront à changer.
+
+C'est aussi ce joint qui rend l'invariant vérifiable : un test fait échouer
+**toutes** les écritures d'un appareil et constate que le voisin garde sa boucle,
+ses images, son état vierge — et qu'arrêter le premier n'arrête pas le second.
+Avec le `Keyboard` en dur, cela n'aurait été vérifiable qu'avec deux claviers sur
+le bureau, donc jamais.
+
+### L'ordre de prise des verrous
+
+Un interblocage a déjà été attrapé : `list_devices` prenait le verrou du clavier
+puis celui des échecs, `ignore_device` l'inverse. Avec une table d'appareils et N
+boucles, la règle est explicite :
+
+> **Aucun code ne tient deux verrous en même temps.** Une table est verrouillée le
+> temps d'y lire ou d'y poser un pointeur partagé — jamais le temps d'une écriture
+> HID, d'un démarrage de boucle ni d'une attente de fin.
+
+Là où deux deviendraient inévitables, l'ordre est celui de la déclaration dans
+`AppState` : table des appareils → moteur → table des échecs → poignée d'un
+appareil → état partagé d'une boucle.
+
+Deux conséquences, et elles ne sont pas cosmétiques :
+
+- **le fil de rendu ne connaît que les deux derniers.** Il n'a aucun moyen de
+  prendre un verrou de l'application, donc aucun moyen d'en bloquer une commande ;
+- **la seule attente tenue verrou en main est celle de `stop`, et ce verrou est
+  propre à l'appareil.** L'arrêt attend la fin de la boucle — sans quoi enchaîner
+  deux effets laisserait un instant deux boucles écrire sur le même appareil —
+  mais cette attente ne retient aucune commande visant les autres. Une écriture
+  HID bloquée sur l'un ne gèlerait pas l'autre, ce qu'un verrou global du moteur
+  aurait réintroduit par la bande.
 
 ### Résolution des imports
 
@@ -180,7 +233,9 @@ Tauri offre deux directions, et elles n'ont pas les mêmes primitives :
 
 Une commande ne peut pas « rendre » 60 images par seconde : elle répond une fois.
 La remontée passe donc par un canal — `tauri::ipc::Channel`, créé par le front et
-passé en argument d'une commande d'abonnement.
+passé en argument d'une commande d'abonnement, avec **l'appareil dont on veut les
+images**. Le simulateur suit celui qui est sélectionné ; changer de sélection
+ferme un canal et en ouvre un autre, plutôt que de multiplexer un flux unique.
 
 **Canal plutôt qu'événement global** (`emit` / `listen`) pour trois raisons :
 
@@ -371,12 +426,24 @@ En exploitation, ces messages vivent dans une table indexée par VID/PID, et
 `list_devices` rend à chacun le sien. Un champ unique obligerait à choisir lequel
 afficher, et le suivant effacerait le précédent.
 
-### Ce qui n'est pas fait ici
+**L'invariant vaut aussi en marche, pas seulement à l'ouverture.** Un appareil
+qu'on a réussi à ouvrir peut très bien refuser toute écriture ensuite — débranché,
+mis en veille, préempté par un pilote constructeur. `un_appareil_en_panne_n_en_affecte_aucun_autre`
+lance deux boucles réelles, fait échouer toutes les écritures de l'une, et vérifie
+que l'autre garde sa boucle, ses images et son état vierge — et qu'arrêter la
+première n'arrête pas la seconde. Voir §4.
 
-`AppState` ne porte toujours **qu'un** clavier ouvert (issue #26). L'adoption est
-donc multiple, la poignée ouverte ne l'est pas encore : le second appareil piloté
-et présent est laissé fermé, plutôt qu'ouvert puis relâché aussitôt — toucher un
-appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à éviter.
+### Ce que cela suppose de l'état
+
+`AppState` porte une **table** d'appareils ouverts, indexée comme l'adoption les
+identifie (issue #26). L'adoption est multiple, la poignée ouverte l'est aussi :
+tous les appareils pilotés et présents sont ouverts au démarrage, chacun avec sa
+boucle et son effet.
+
+Refermer un appareil — ignoré, débranché — vide sa poignée sans la retirer de la
+table. La boucle qui l'alimentait en tient une copie : elle s'en aperçoit à
+l'image suivante, cesse d'écrire, et le dit par `reachingKeyboard`. C'est ce qui
+permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne dessus.
 
 ---
 
@@ -392,6 +459,7 @@ appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à évit
 - [x] Règle udev, livrée par les paquets `deb` et `rpm`
 - [x] Compilation et empaquetage Linux vérifiés en intégration continue
 - [x] Adoption appareil par appareil, et ouverture des pilotés au démarrage
+- [x] Un effet par appareil : table d'appareils ouverts, une boucle chacun
 - [ ] Reprise de l'effet actif au démarrage
 - [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
       de fonctionnalité, filtrage par `interface_number`, chemins résolus par
@@ -430,6 +498,14 @@ appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à évit
   Le même effet échantillonné tourne dans le fil d'une commande : sans échéance,
   un `while (true)` empêcherait son installation d'aboutir. `prepare` accepte
   donc une échéance facultative, posée **avant** l'évaluation du module.
+- **Un appareil a une ligne d'état dès qu'il a porté un effet, et la garde.**
+  `engine_status()` rend une entrée par appareil visé, `running` à faux une fois
+  l'effet arrêté. Retirer la ligne rendrait « cet appareil ne fait rien »
+  indistinguable de « je ne sais rien de cet appareil ».
+- **L'arrêt attend la fin, par appareil.** Le verrou attendu est celui de
+  l'appareil visé, jamais celui du moteur : une écriture HID bloquée sur l'un ne
+  doit pas retenir les commandes visant les autres, sans quoi l'invariant de §7
+  serait perdu au niveau au-dessus.
 
 ### Le seul essai qui traverse toute la chaîne
 
@@ -442,8 +518,9 @@ cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture
 ```
 
 `bout_en_bout_sur_le_vrai_clavier` ouvre le périphérique, fait tourner un effet
-intégré trois secondes par le moteur, vérifie que la boucle tient et qu'aucune
-image n'a levé, puis s'arrête. Marqué `#[ignore]` : il exige un clavier branché,
-il n'a donc rien à faire en intégration continue.
+intégré trois secondes sur **cet appareil**, vérifie que la boucle tient, qu'aucune
+image n'a levé et que les images atteignent bien le clavier (`reachingKeyboard`),
+puis s'arrête. Marqué `#[ignore]` : il exige un clavier branché, il n'a donc rien
+à faire en intégration continue.
 
 **Il écrit vraiment sur le clavier** — c'est le but, et c'est visible.

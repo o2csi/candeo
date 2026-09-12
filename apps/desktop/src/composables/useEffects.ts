@@ -8,7 +8,7 @@
 import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
-import type { Effect } from '../api/types'
+import type { DeviceRef, Effect } from '../api/types'
 
 /**
  * Motif d'aperçu de la vignette. Purement visuel — il figure ce que fait
@@ -79,16 +79,18 @@ function message(e: unknown): string {
 
 export function useEffects() {
   /**
+   * Pose un effet matériel **sur un appareil**.
+   *
    * `applied` dit ce que **cette session** a posé, pas ce que le clavier
    * affiche : le protocole relevé sait écrire un effet, pas le relire. Rien
    * n'est donc marqué au lancement — une supposition serait pire que le vide,
    * puisqu'elle se tromperait silencieusement après un redémarrage.
    */
-  async function apply(e: HardwareEffect) {
+  async function apply(device: DeviceRef, e: HardwareEffect) {
     applying.value = e.id
     error.value = null
     try {
-      await api.setEffect(e.effect)
+      await api.setEffect(device, e.effect)
       applied.value = e.id
     } catch (err) {
       error.value = message(err)
