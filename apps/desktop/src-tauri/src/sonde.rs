@@ -22,7 +22,7 @@
 
 #![cfg(test)]
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use candeo_protocol::{checksum, REPORT_LEN};
 
@@ -359,6 +359,92 @@ fn sonde_descripteurs_eclairage() {
             );
         }
     }
+}
+
+/// **Quelle cadence l'appareil soutient-il réellement ?**
+///
+/// Répond au « débit maximal accepté avant décrochage » du §9, et tranche une
+/// question de conception : la boucle vise 60 images par seconde, or une mise à
+/// jour complète coûte **7 transferts de contrôle** — 6 rangées puis le passage
+/// en mode custom. À 60 Hz cela fait 420 transferts par seconde sur une seule
+/// interface.
+///
+/// L'enjeu n'est pas le confort : si l'appareil ne suit pas, la moitié de nos
+/// images est jetée par lui, et **le simulateur est alors plus fluide que le
+/// clavier** — ce qui contredit « l'aperçu EST la production ».
+#[test]
+#[ignore]
+fn sonde_cadence_soutenable() {
+    let dev = ouvrir();
+
+    // Une image complète : 6 rangées de 22 couleurs, puis le mode custom.
+    let image = |teinte: u8| -> Vec<[u8; REPORT_LEN + 1]> {
+        let mut trames = Vec::with_capacity(7);
+        for rangee in 0u8..6 {
+            let mut args = vec![0u8, 0, rangee, 0, 21];
+            for _ in 0..22 {
+                args.extend_from_slice(&[teinte, 0, 255 - teinte]);
+            }
+            trames.push(report(0x03, &args));
+        }
+        trames.push(report(0x02, &[0, 0, 0x08, 0, 0, 0]));
+        trames
+    };
+
+    // Chauffe : la première écriture après ouverture paie des frais qu'on ne
+    // veut pas compter comme du débit.
+    for t in image(0) {
+        let _ = dev.send_feature_report(&t);
+    }
+    std::thread::sleep(Duration::from_millis(100));
+
+    println!("\n>>> Coût d'une mise à jour complète (7 trames), au plus vite.");
+    const N: u32 = 120;
+    let mut echecs = 0u32;
+    let mut pire = Duration::ZERO;
+    let debut = Instant::now();
+
+    for i in 0..N {
+        let t0 = Instant::now();
+        for t in image((i * 2) as u8) {
+            if dev.send_feature_report(&t).is_err() {
+                echecs += 1;
+            }
+        }
+        let d = t0.elapsed();
+        if d > pire {
+            pire = d;
+        }
+    }
+
+    let total = debut.elapsed();
+    let moyenne = total / N;
+    println!("    {N} mises à jour en {total:?}");
+    println!("    moyenne {moyenne:?} · pire {pire:?} · écritures refusées : {echecs}");
+    println!(
+        "    soit {:.1} img/s au maximum, {:.1} img/s dans le pire cas",
+        1.0 / moyenne.as_secs_f64(),
+        1.0 / pire.as_secs_f64()
+    );
+    println!("    (période visée à 60 img/s : 16,7 ms · à 30 img/s : 33,3 ms)");
+
+    // L'appareil répond-il encore ? Une cadence « tenue » qui laisse le
+    // périphérique sourd ne vaudrait rien.
+    dev.send_feature_report(&report_classe(0x0f, 0x82, 0x03))
+        .ok();
+    std::thread::sleep(Duration::from_millis(60));
+    match lire(&dev) {
+        Some(r) => println!(
+            "    après la rafale : état 0x{:02x} ({}), effet relu 0x{:02x}",
+            r[0],
+            etat(r[0]),
+            r[10]
+        ),
+        None => println!("    après la rafale : PLUS DE RÉPONSE — décrochage"),
+    }
+
+    let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
+    println!(">>> remis sur Spectre.");
 }
 
 /// Ce que l'énumération HID donne **sans protocole**, sur chaque interface.
