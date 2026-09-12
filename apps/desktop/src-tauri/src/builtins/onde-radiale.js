@@ -3,9 +3,9 @@
 // L'effet emblématique, et le premier qu'on ouvre : il tient en six lignes de
 // rendu et se lit comme sa description.
 
-import { hsv } from '@candeo/effects-api'
+import { defineEffect, hsv } from '@candeo/effects-api'
 
-export default {
+export default defineEffect({
   name: 'Onde radiale',
   description: 'Une onde de teinte se propage depuis le centre du clavier',
   params: {
@@ -25,4 +25,4 @@ export default {
       frame.set(key, hsv(time * speed + d * scale, 1, 1))
     }
   },
-}
+})

@@ -177,10 +177,12 @@ précisément pour cela que **YAML ne convient pas** : on y décrirait une
 configuration, pas un comportement.
 
 ```ts
-import { hsv, type EffectModule } from '@candeo/effects-api'
+import { defineEffect, hsv } from '@candeo/effects-api'
 
 // Un export par défaut, et rien d'autre : c'est tout ce que le moteur cherche.
-export default {
+// `defineEffect` ne fait rien à l'exécution — elle donne un type contextuel,
+// ce qui type `layout`, `time`, `frame`, et `params` d'après sa déclaration.
+export default defineEffect({
   name: 'Onde',
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
@@ -191,10 +193,11 @@ export default {
     // `layout.keys` : les 106 positions éclairées, pas les 132 cases.
     for (const key of layout.keys) {
       const d = Math.hypot(key.col - cx, key.row - cy)
-      frame.set(key, hsv(time * Number(params.speed) + d * 18, 1, 1))
+      // `params.speed` est un `number`, déduit de sa déclaration ci-dessus.
+      frame.set(key, hsv(time * params.speed + d * 18, 1, 1))
     }
   },
-} satisfies EffectModule
+})
 ```
 
 Les quatre effets livrés avec l'application — onde radiale, respiration,

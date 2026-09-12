@@ -78,19 +78,35 @@ signalée. La chaîne entière est donc contrôlée, pas supposée.
 promettre ce que le moteur ne fournit pas, et l'erreur ne se verrait qu'à la
 première image.
 
-`strict` entier, `noImplicitAny` compris — et c'est **`satisfies EffectModule`
-qui fait partie du contrat**, pas le contrôle qui plie.
+`strict` entier, `noImplicitAny` compris. Ni le contrôle ne plie, ni l'auteur
+n'a d'incantation à écrire — c'est **`defineEffect` qui résout les deux**.
 
-Sans ce `satisfies`, un objet littéral n'a aucun type contextuel : `layout`,
-`time` et `frame` sont implicitement `any`. Désactiver `noImplicitAny` ferait
-alors passer l'effet — au prix de l'autocomplétion, disparue en silence, dans le
-seul cas où elle manque. Ce serait renoncer à la raison d'avoir choisi Monaco
-pour éviter un message d'erreur.
+Un objet littéral n'a aucun type contextuel : écrit nu, ses `render({ layout,
+time, frame, params })` sont implicitement `any`, et `strict` les refuse.
+Quatre erreurs, sur la façon la plus naturelle d'écrire un effet.
 
-Le modèle de départ porte donc le `satisfies`, et pas par recopie : il **est**
-l'effet de référence du paquet, lu tel quel. Vérifié au compilateur, `strict`
-complet, zéro diagnostic. Un auteur qui retire le `satisfies` voit une erreur
-explicite plutôt qu'un typage qui s'évapore.
+Deux mauvaises réponses ont été essayées avant la bonne :
+
+1. **Désactiver `noImplicitAny`.** L'effet passe, mais `layout` devient `any`
+   en silence : on supprime l'autocomplétion dans le seul cas où elle manque,
+   c'est-à-dire qu'on renonce à la raison d'avoir choisi Monaco pour éviter un
+   message d'erreur.
+2. **Exiger `satisfies EffectModule`.** Le typage est correct, mais c'est une
+   cérémonie que l'auteur doit connaître, et dont l'oubli produit un message
+   incompréhensible. Surtout, elle était **impossible** pour les effets
+   intégrés : ce sont des fichiers JavaScript que le moteur exécute tels quels,
+   où `satisfies` serait une erreur de syntaxe. Les ouvrir dans l'éditeur
+   donnait donc quatre erreurs, sans recours — le chemin « partir d'un effet
+   qui marche » était cassé d'origine.
+
+`defineEffect` est l'identité à l'exécution : elle ne coûte rien, reste du
+JavaScript valide, et donne le type contextuel. Mieux, elle **déduit le type de
+chaque paramètre de sa déclaration** — un paramètre `color` arrive en `Rgb`,
+un `number` en `number`, sans transtypage, ce qui serait de toute façon
+impossible dans un fichier exécuté tel quel.
+
+Vérifié avec le compilateur embarqué par Monaco : l'API, le modèle de départ et
+les quatre effets intégrés rendent **zéro diagnostic** en `strict` complet.
 
 ### Les ouvriers sont empaquetés, pas téléchargés
 

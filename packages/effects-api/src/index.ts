@@ -60,7 +60,7 @@ export interface Frame {
   fill(color: Rgb): void
 }
 
-export interface EffectContext {
+export interface EffectContext<P = undefined> {
   readonly layout: Layout
   /** Secondes écoulées depuis le démarrage de l'effet. */
   readonly time: number
@@ -75,7 +75,7 @@ export interface EffectContext {
    * paramétré par une couleur à passer par un transtypage, pour contourner une
    * déclaration fausse.
    */
-  readonly params: Record<string, ParamValue>
+  readonly params: ParamsOf<P>
 }
 
 /** Un effet rend une image à chaque appel. */
@@ -90,6 +90,33 @@ export type Effect = (ctx: EffectContext) => void
  */
 export type ParamValue = number | string | boolean | Rgb
 
+/**
+ * La valeur que porte un paramètre, déduite de sa déclaration.
+ *
+ * C'est ce qui évite d'écrire `params.couleur as Rgb` dans un effet — un
+ * transtypage serait de toute façon impossible dans un effet intégré, qui est
+ * du JavaScript exécuté tel quel par le moteur.
+ */
+type ValueOfSpec<S> = S extends { kind: 'number' }
+  ? number
+  : S extends { kind: 'color' }
+    ? Rgb
+    : S extends { kind: 'boolean' }
+      ? boolean
+      : S extends { kind: 'choice' }
+        ? string
+        : ParamValue
+
+/**
+ * Les paramètres tels que `render` les reçoit.
+ *
+ * Sans déclaration — un effet qui n'en a pas — on retombe sur la forme large,
+ * ce qui laisse l'effet fonctionner sans rien déclarer.
+ */
+export type ParamsOf<P> = P extends Record<string, ParamSpec>
+  ? { readonly [K in keyof P]: ValueOfSpec<P[K]> }
+  : Readonly<Record<string, ParamValue>>
+
 /** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
 export type ParamSpec =
   | { kind: 'number'; label: string; min: number; max: number; step?: number; default: number }
@@ -97,11 +124,38 @@ export type ParamSpec =
   | { kind: 'boolean'; label: string; default: boolean }
   | { kind: 'choice'; label: string; options: readonly string[]; default: string }
 
-export interface EffectModule {
+export interface EffectModule<P = undefined> {
   readonly name: string
   readonly description?: string
-  readonly params?: Readonly<Record<string, ParamSpec>>
-  readonly render: Effect
+  readonly params?: P
+  /** `ctx.params` est typé d'après `params` ci-dessus. */
+  readonly render: (ctx: EffectContext<P>) => void
+}
+
+/**
+ * Déclare un effet.
+ *
+ * Ne fait **rien** à l'exécution — elle rend son argument tel quel. Son seul
+ * rôle est de donner un type contextuel à l'objet littéral, ce qui type les
+ * paramètres de `render` :
+ *
+ * ```ts
+ * export default defineEffect({
+ *   name: 'Mon effet',
+ *   render({ layout, time, frame }) { … },   // typés, sans annotation
+ * })
+ * ```
+ *
+ * Sans cette enveloppe — ou sans `satisfies EffectModule` — un objet littéral
+ * n'a aucun type contextuel : `layout`, `time`, `frame` et `params` sont alors
+ * implicitement `any`, et `strict` les refuse. Quatre erreurs, sur la façon la
+ * plus naturelle d'écrire un effet ; c'est précisément ce que cette fonction
+ * évite.
+ */
+export function defineEffect<
+  const P extends Readonly<Record<string, ParamSpec>> | undefined = undefined,
+>(effect: EffectModule<P>): EffectModule<P> {
+  return effect
 }
 
 // ---------------------------------------------------------------- utilitaires

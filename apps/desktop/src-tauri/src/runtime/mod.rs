@@ -52,6 +52,20 @@ struct Shared {
     /// Dernière erreur de l'effet. Lisible même fenêtre fermée puis rouverte,
     /// ce qu'un événement ponctuel ne permettrait pas.
     error: Mutex<Option<String>>,
+    /// Dernier échec d'écriture vers le clavier.
+    ///
+    /// Distinct de l'erreur d'effet ci-dessus : ces deux pannes n'ont ni la
+    /// même cause ni le même remède, et les confondre enverrait chercher au
+    /// mauvais endroit. Un effet impeccable peut très bien n'atteindre aucune
+    /// LED.
+    device_error: Mutex<Option<String>>,
+    /// Vrai si la dernière image a réellement été écrite sur un périphérique.
+    ///
+    /// Sans cela, lancer un effet sans clavier connecté ne produisait **aucun
+    /// signe** : le simulateur s'animait, la case « envoyer » restait cochée,
+    /// et le clavier gardait son image précédente. Un silence qui se lit comme
+    /// une panne du moteur.
+    reaching: AtomicBool,
     /// Nom de l'effet en cours, pour que l'interface sache quoi mettre en
     /// avant après un redémarrage de la fenêtre.
     effect_id: Mutex<Option<String>>,
@@ -65,6 +79,8 @@ impl Default for Shared {
             to_keyboard: AtomicBool::new(true),
             frames: Mutex::new(None),
             error: Mutex::new(None),
+            device_error: Mutex::new(None),
+            reaching: AtomicBool::new(false),
             effect_id: Mutex::new(None),
         }
     }
@@ -76,8 +92,12 @@ impl Default for Shared {
 pub struct EngineStatus {
     pub running: bool,
     pub effect_id: Option<String>,
-    /// Message d'erreur, déjà lisible : il est affiché tel quel.
+    /// Erreur venant du code de l'effet, déjà lisible : affichée telle quelle.
     pub error: Option<String>,
+    /// Échec d'écriture vers le clavier — rien à voir avec le code de l'effet.
+    pub device_error: Option<String>,
+    /// Vrai si les images parviennent effectivement à un clavier.
+    pub reaching_keyboard: bool,
     pub to_keyboard: bool,
 }
 
@@ -99,6 +119,8 @@ impl Engine {
                 running: !s.stop.load(Ordering::Relaxed),
                 effect_id: s.effect_id.lock().unwrap().clone(),
                 error: s.error.lock().unwrap().clone(),
+                device_error: s.device_error.lock().unwrap().clone(),
+                reaching_keyboard: s.reaching.load(Ordering::Relaxed),
                 to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
             },
         }
@@ -325,16 +347,40 @@ fn render_once(
 
 /// Les deux sorties, indépendantes : chacune peut être absente.
 fn emit(shared: &Shared, keyboard: &Mutex<Option<Keyboard>>, bytes: &[u8]) {
-    if shared.to_keyboard.load(Ordering::Relaxed) {
-        if let Some(kb) = keyboard.lock().unwrap().as_ref() {
+    if !shared.to_keyboard.load(Ordering::Relaxed) {
+        // Sortie coupée volontairement : ce n'est pas un défaut, mais les
+        // images n'atteignent aucun clavier et l'interface doit pouvoir le dire.
+        shared.reaching.store(false, Ordering::Relaxed);
+    } else {
+        let guard = keyboard.lock().unwrap();
+        let Some(kb) = guard.as_ref() else {
+            // **Aucun périphérique ouvert.** Sans ce signalement, lancer un
+            // effet sans clavier connecté ne produisait aucun signe : le
+            // simulateur s'animait, la case « envoyer » restait cochée, et le
+            // clavier gardait son image précédente. On lisait ça comme « seule
+            // la première image est passée ».
+            shared.reaching.store(false, Ordering::Relaxed);
+            return;
+        };
+        {
             let colors: Vec<Rgb> = bytes
                 .chunks_exact(3)
                 .map(|c| Rgb::new(c[0], c[1], c[2]))
                 .collect();
-            if kb.present(&colors).is_err() {
-                // Un clavier débranché en cours de route n'est pas une erreur
-                // de l'effet : le simulateur doit continuer, et la reconnexion
-                // se fait par les commandes existantes.
+            // Un clavier débranché en cours de route n'arrête pas l'effet : le
+            // simulateur continue, et la reconnexion passe par les commandes
+            // existantes. Mais l'échec est **consigné**, pas avalé — le taire
+            // donnait une boucle qui se dit saine pendant qu'aucun octet
+            // n'atteint l'appareil.
+            match kb.present(&colors) {
+                Ok(()) => {
+                    *shared.device_error.lock().unwrap() = None;
+                    shared.reaching.store(true, Ordering::Relaxed);
+                }
+                Err(e) => {
+                    *shared.device_error.lock().unwrap() = Some(e.to_string());
+                    shared.reaching.store(false, Ordering::Relaxed);
+                }
             }
         }
     }
@@ -509,6 +555,45 @@ mod tests {
         }
     }
 
+    /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.
+    ///
+    /// `cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bout_en_bout_sur_le_vrai_clavier() {
+        let api = hidapi::HidApi::new().expect("HID");
+        let l = layout();
+        let kb = match Keyboard::open(&api, l) {
+            Ok(kb) => kb,
+            Err(e) => panic!("ouverture impossible : {e}"),
+        };
+        println!("clavier ouvert : {}", l.name);
+
+        let keyboard = Arc::new(Mutex::new(Some(kb)));
+        let engine = Engine::default();
+        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
+
+        engine
+            .start(
+                "onde-radiale".into(),
+                js.to_string(),
+                "{}".into(),
+                l,
+                Arc::clone(&keyboard),
+            )
+            .expect("démarrage");
+        println!("moteur démarré — 3 s d'onde radiale sur le clavier");
+        std::thread::sleep(Duration::from_secs(3));
+
+        let s = engine.status();
+        println!("état : running={} erreur={:?}", s.running, s.error);
+        assert!(s.running, "la boucle s'est arrêtée");
+        assert!(s.error.is_none(), "erreur pendant le rendu : {:?}", s.error);
+
+        engine.stop();
+        println!("arrêté proprement");
+    }
+
     #[test]
     fn un_effet_rend_une_image_complete() {
         let (_rt, ctx) = prepare(EFFET, layout()).expect("chargement");
@@ -586,7 +671,7 @@ mod tests {
             export default {
               name: 'X',
               render({ frame }) {
-                const manquants = ['rgb','hsv','mix','lerp','BLACK'].filter(n => api[n] === undefined)
+                const manquants = ['rgb','hsv','mix','lerp','BLACK','defineEffect'].filter(n => api[n] === undefined)
                 if (manquants.length) throw new Error('absents de api.js : ' + manquants.join(', '))
                 frame.fill(api.BLACK)
               },
