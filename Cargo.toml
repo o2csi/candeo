@@ -20,3 +20,19 @@ serde     = { version = "1", features = ["derive"] }
 lto = true
 codegen-units = 1
 strip = true
+
+# Les dépendances sont optimisées même en débogage. Notre code, lui, ne l'est
+# pas : on veut garder un débogueur utilisable là où l'on écrit.
+#
+# Le motif n'est pas le confort de compilation, c'est **la justesse de
+# l'aperçu**. QuickJS arrive par `rquickjs-sys`, qui compile du C au niveau
+# d'optimisation du profil courant : non optimisé, le même effet met 6,3 ms par
+# image au lieu de 0,23 ms — mesuré, un facteur 25. Or toute la conception
+# repose sur « l'aperçu EST la production » : un effet jugé fluide ou poussif
+# sous `tauri dev` doit se comporter pareil une fois installé. Sans cette ligne,
+# c'est faux, et ce qu'on juge en développement n'est pas ce qu'on livre.
+#
+# Le prix est une compilation initiale des dépendances plus longue, payée une
+# fois puis mise en cache. `hidapi` compile aussi du C et en profite.
+[profile.dev.package."*"]
+opt-level = 2
