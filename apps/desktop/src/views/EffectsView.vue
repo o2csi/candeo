@@ -7,9 +7,10 @@
  * fermeture de l'application, donc souvent le bon choix. Le reléguer en bas de
  * liste le ferait passer pour un mode dégradé.
  *
- * « À vous » liste ce que l'éditeur a installé. Les intégrés, eux, restent
- * affichés vides et dits comme tels : aucun n'est encore livré, et une liste
- * inventée serait plus trompeuse qu'une liste absente.
+ * Les deux autres natures viennent de `list_effects`, qui les rend dans une
+ * seule liste : `kind` les distingue, on ne fait que les répartir. Aucune
+ * n'est encore lançable d'ici — les vignettes animées, et le bouton qui va
+ * avec, sont l'objet de l'issue #11.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -24,21 +25,24 @@ const { layout, busy } = useDevice()
 const { applied, applying, error, apply } = useEffects()
 
 /**
- * Les effets écrits dans l'éditeur, relus sur disque.
+ * La bibliothèque, intégrés et effets écrits confondus.
  *
- * Ils sont listés ici parce que c'est le seul chemin pour les rouvrir :
- * `/editor/:id` relit la source par `read_effect_source`. Les lancer depuis la
- * galerie viendra avec les vignettes animées (issue #11) — poser un bouton
- * « Appliquer » sans aperçu n'apprendrait rien de plus que son nom.
+ * Elle est listée ici parce que c'est le seul chemin pour ouvrir un effet dans
+ * l'éditeur : `/editor/:id` en relit la source par `read_effect_source`. Les
+ * intégrés s'y ouvrent aussi — ils sont là pour être lus, et leur JavaScript
+ * *est* leur source.
  */
-const mine = ref<EffectEntry[]>([])
+const library = ref<EffectEntry[]>([])
 const listing = ref(true)
 /** Déjà lisible : les messages du Rust s'affichent tels quels. */
 const listError = ref<string | null>(null)
 
+const builtin = computed(() => library.value.filter((e) => e.kind === 'builtin'))
+const mine = computed(() => library.value.filter((e) => e.kind === 'user'))
+
 onMounted(async () => {
   try {
-    mine.value = (await listEffects()).filter((e) => e.kind === 'user')
+    library.value = await listEffects()
   } catch (e) {
     listError.value = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
   } finally {
@@ -82,6 +86,8 @@ const noDevice = computed(() => !connected.value && !busy.value)
     </p>
 
     <p v-if="error" class="failure" role="alert">{{ error }}</p>
+    <!-- Une seule alerte : la bibliothèque est lue d'un coup, elle échoue d'un coup. -->
+    <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
 
     <section class="group">
       <h2>Matériel</h2>
@@ -121,9 +127,20 @@ const noDevice = computed(() => !connected.value && !busy.value)
         Livrés avec l'application et exécutés par la boucle hôte : ils s'arrêtent quand
         l'application se ferme.
       </p>
-      <p class="pending">
-        Aucun pour l'instant — les effets livrés (issue&nbsp;#11) restent à écrire. Rien n'est
-        simulé ici : un effet affiché serait un effet qu'on ne peut pas lancer.
+      <ul v-if="builtin.length" class="rows">
+        <li v-for="e in builtin" :key="e.id">
+          <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <span class="row-name">{{ e.name }}</span>
+            <span class="row-sub">{{ e.description || 'Sans description' }}</span>
+            <span class="row-go" aria-hidden="true">Lire ›</span>
+          </button>
+        </li>
+      </ul>
+
+      <p class="hint">
+        Ils sont écrits en JavaScript, contre l'API publique : les ouvrir montre exactement ce
+        qu'on peut écrire soi-même. Les enregistrer sous leur nom est refusé — un identifiant
+        intégré est réservé.
       </p>
     </section>
 
@@ -134,9 +151,7 @@ const noDevice = computed(() => !connected.value && !busy.value)
         relancés au démarrage.
       </p>
 
-      <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
-
-      <ul v-else-if="mine.length" class="mine">
+      <ul v-if="mine.length" class="rows">
         <li v-for="e in mine" :key="e.id">
           <button class="row" @click="router.push(`/editor/${e.id}`)">
             <span class="row-name">{{ e.name }}</span>
@@ -255,7 +270,7 @@ const noDevice = computed(() => !connected.value && !busy.value)
   list-style: none;
 }
 
-.mine {
+.rows {
   display: flex;
   flex-direction: column;
   gap: var(--gap-2);

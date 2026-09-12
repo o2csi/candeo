@@ -22,7 +22,7 @@ bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 | `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
 | Commandes Tauri | 14 commandes câblées — voir [`docs/api/`](docs/api/commands.md) |
 | Interface Vue | conçue, pas encore écrite — voir [`docs/design/`](docs/design/studio.md) |
-| Moteur d'effets utilisateur | conçu : moteur unique `rquickjs` côté Rust ; stockage des effets et des réglages fait |
+| Moteur d'effets utilisateur | moteur unique `rquickjs` côté Rust ; stockage, réglages et **quatre effets livrés** faits |
 
 ---
 
@@ -143,7 +143,8 @@ configuration, pas un comportement.
 ```ts
 import { hsv, type EffectModule } from '@candeo/effects-api'
 
-export const ripple: EffectModule = {
+// Un export par défaut, et rien d'autre : c'est tout ce que le moteur cherche.
+export default {
   name: 'Onde',
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
@@ -151,13 +152,20 @@ export const ripple: EffectModule = {
   render({ layout, time, frame, params }) {
     const cx = (layout.cols - 1) / 2
     const cy = (layout.rows - 1) / 2
+    // `layout.keys` : les 106 positions éclairées, pas les 132 cases.
     for (const key of layout.keys) {
       const d = Math.hypot(key.col - cx, key.row - cy)
       frame.set(key, hsv(time * Number(params.speed) + d * 18, 1, 1))
     }
   },
-}
+} satisfies EffectModule
 ```
+
+Les quatre effets livrés avec l'application — onde radiale, respiration,
+balayage, dégradé fixe — sont écrits contre cette même API, dans
+[`apps/desktop/src-tauri/src/builtins/`](apps/desktop/src-tauri/src/builtins/).
+Ils sont compilés dans le binaire, pas écrits en Rust : le premier exemple qu'on
+ouvre doit être exactement ce qu'on peut écrire soi-même.
 
 ---
 
