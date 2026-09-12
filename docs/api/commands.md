@@ -46,7 +46,7 @@ Libération explicite, et interrogation de l'état.
   name: string,
   rows: number,          // 6
   cols: number,          // 22
-  frame_len: number,     // 132 — taille d'une image
+  frameLen: number,      // 132 — taille d'une image
   keys: {
     index: number,       // rang dans une image
     row: number, col: number,   // position dans la matrice logique
@@ -56,8 +56,12 @@ Libération explicite, et interrogation de l'état.
 }
 ```
 
-> **`frame_len` et `keys.length` diffèrent, et c'est voulu.**
-> `frame_len` vaut **132** — toutes les cases de la matrice, trous compris : c'est
+> Les DTO portent `#[serde(rename_all = "camelCase")]` : le champ Rust `frame_len`
+> arrive donc en `frameLen`. Le nommage Rust ne doit pas filtrer jusque dans
+> l'interface — c'est une fuite d'abstraction qui ne se verrait qu'à l'exécution.
+
+> **`frameLen` et `keys.length` diffèrent, et c'est voulu.**
+> `frameLen` vaut **132** — toutes les cases de la matrice, trous compris : c'est
 > ce qu'une image doit couvrir. `keys` n'en contient que **106**, celles portant
 > une LED physique : c'est ce que le simulateur dessine et ce qu'un effet itère.
 >

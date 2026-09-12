@@ -14,10 +14,25 @@ export interface DeviceInfo {
   present: boolean
 }
 
+/**
+ * Une touche, telle que le simulateur doit la dessiner.
+ *
+ * Deux systèmes de coordonnées cohabitent, et ils ne disent pas la même chose :
+ * `row`/`col` situent la LED dans la matrice, donc son rang dans une image ;
+ * `x`/`y`/`w`/`h` donnent le rectangle physique. Le second ne se déduit pas du
+ * premier — le périphérique ne déclare aucune dimension.
+ */
 export interface KeyInfo {
   index: number
   row: number
   col: number
+  /** Nom gravé, variante French (ISO). */
+  name: string
+  /** En unités de pas de clavier : 1 u = une touche alphabétique. */
+  x: number
+  y: number
+  w: number
+  h: number
 }
 
 export interface LayoutInfo {
@@ -35,6 +50,10 @@ export interface LayoutInfo {
    * `keys.length` et {@link frameLen} diffèrent, et c'est voulu : une image
    * doit couvrir `frameLen` positions, pas `keys.length`. En envoyer moins
    * laisse les dernières rangées figées sur leur valeur précédente.
+   *
+   * ⚠️ Une touche ≠ une LED, dans les deux sens : l'Entrée ISO apparaît **deux
+   * fois** sous le même `name` (index 57 et 79, les deux bras du L), et la barre
+   * d'espace une seule malgré ses 6,25 u.
    */
   keys: KeyInfo[]
 }
