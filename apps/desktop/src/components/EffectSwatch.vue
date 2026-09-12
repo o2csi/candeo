@@ -12,6 +12,8 @@
  * n'apporte rien à qui ne voit pas l'écran — le nom et la description, eux, sont
  * lus. Un lecteur d'écran n'aurait que « quatre couleurs » à annoncer.
  */
+import { computed } from 'vue'
+
 const props = defineProps<{
   /** Couleurs `#rrggbb`. Peut être vide : voir `EffectEntry.swatch`. */
   colors: string[]
@@ -22,15 +24,15 @@ const props = defineProps<{
  * l'échantillonnage s'installe quand même. On réserve alors la même place, en
  * neutre, plutôt que de décaler les lignes voisines.
  */
-const known = () => props.colors.length > 0
+const known = computed(() => props.colors.length > 0)
 </script>
 
 <template>
   <span
     class="swatch"
-    :class="{ unknown: !known() }"
+    :class="{ unknown: !known }"
     aria-hidden="true"
-    :title="known() ? 'Couleurs prélevées en exécutant l\'effet' : 'Repère indisponible'"
+    :title="known ? 'Couleurs prélevées en exécutant l\'effet' : 'Repère indisponible'"
   >
     <span v-for="(c, i) in colors" :key="i" :style="{ background: c }" />
   </span>
