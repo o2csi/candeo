@@ -384,6 +384,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "candeo-desktop"
+version = "0.1.0"
+dependencies = [
+ "candeo-device",
+ "candeo-protocol",
+ "hidapi",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+]
+
+[[package]]
 name = "candeo-device"
 version = "0.1.0"
 dependencies = [
@@ -739,17 +753,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "desktop"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
 ]
 
 [[package]]

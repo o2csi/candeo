@@ -16,6 +16,14 @@ Le protocole a été relevé par capture du bus USB, puis **validé en écriture
 directe** — couleurs unies, dégradé par rangée, écriture partielle de rangée et
 bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 
+| Couche | État |
+|---|---|
+| `candeo-protocol` — rapports et somme de contrôle | fait, testé contre une trame capturée |
+| `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
+| Commandes Tauri | 9 commandes câblées — voir [`docs/api/`](docs/api/commands.md) |
+| Interface Vue | conçue, pas encore écrite — voir [`docs/design/`](docs/design/studio.md) |
+| Moteur d'effets utilisateur | conçu : moteur unique `rquickjs` côté Rust |
+
 ---
 
 ## Origine du protocole
@@ -50,11 +58,56 @@ candeo/
 │       └── src-tauri/     liaison Rust, boucle de rendu
 ├── packages/
 │   └── effects-api/       types TypeScript pour l'écriture d'effets
-└── docs/protocol/         relevé du protocole et captures
+└── docs/
+    ├── protocol/          relevé du protocole et méthode de capture
+    ├── api/               commandes exposées au front
+    └── design/            décisions d'interface et d'exécution, prises avant code
 ```
 
 La séparation `protocol` / `device` est délibérée : la construction des rapports
 et la somme de contrôle se testent **sans matériel**, en intégration continue.
+
+---
+
+## Conception de l'interface
+
+Les décisions sont figées avant d'écrire du Vue, et documentées dans
+[`docs/design/studio.md`](docs/design/studio.md). Maquette de référence :
+non publiée
+
+Les trois partis pris qui structurent le reste :
+
+- **La galerie d'effets est l'écran d'accueil**, pas l'éditeur. Un « ＋ » entre en
+  édition ; la plupart des lancements servent à choisir, pas à écrire.
+- **Un seul moteur exécute les effets**, `rquickjs` côté Rust, dans un fil
+  indépendant de la fenêtre. Le front n'exécute jamais de code utilisateur : il
+  envoie la source et reçoit les images. L'aperçu **est** donc la production, et
+  un effet continue de tourner fenêtre fermée. Le motif n'a jamais été la
+  performance — 132 LED × 60 img/s = 7 920 couleurs/s, trivial.
+- **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
+  périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
+  écrite à la main.
+
+Le cycle de vie complet d'un effet — transpilation, stockage, boucle de rendu,
+remontée des images — est décrit dans
+[`docs/design/effects-runtime.md`](docs/design/effects-runtime.md).
+
+---
+
+## Portabilité
+
+Développé sous Windows, écrit pour ne pas s'y enfermer.
+
+- **Accès matériel.** `hidapi` couvre Windows, Linux, macOS et illumos ;
+  l'écriture de rapport de fonctionnalité est identique partout. Sous Linux,
+  `/dev/hidraw*` exige une règle udev, livrée avec le paquet.
+- **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
+  convention du système. Les effets vont dans `app_data_dir()`
+  (`%APPDATA%\com.oorabona.candeo` ou `~/.local/share/…`), les réglages dans
+  `app_config_dir()`. **Jamais dans `Program Files`** — lecture seule pour un
+  compte standard, et commun à tous les comptes.
+- **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
+  des octets, et ses tests tournent partout.
 
 ---
 
@@ -126,9 +179,10 @@ Windows 11).
 
 ## Pièges rencontrés, pour mémoire
 
-- L'image doit couvrir **toutes** les positions de la matrice (132 pour le
-  DeathStalker), pas seulement celles portant une LED. En envoyer moins laisse
-  les dernières rangées figées sur leur valeur précédente.
+- **132 et 106 ne sont pas la même chose.** La matrice fait 6 × 22 = **132**
+  cases, et c'est ce qu'une image doit couvrir ; **106** seulement portent une
+  touche. En envoyer 106 laisse les dernières rangées figées sur leur valeur
+  précédente — symptôme vécu : la rangée du bas restée blanche.
 - La chaîne de variante du périphérique **change avec le micrologiciel**
   (`v1.4 / Unkown Variant` → `v1.5 / Quartz`). Identifier sur VID / PID / série.
 - Le tampon `HidD_SetFeature` fait **91 octets** : identifiant de rapport, puis

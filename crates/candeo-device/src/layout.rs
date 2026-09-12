@@ -43,9 +43,12 @@ impl Layout {
 
 /// Razer DeathStalker V2 Pro, filaire.
 ///
-/// Matrice relevée par interrogation du périphérique : 6 × 22 = 132 positions,
-/// dont 106 portent une LED dans cette transcription (voir la note du test
-/// `lit_count_matches_transcribed_matrix` au sujet d'un écart d'une unité).
+/// Matrice relevée par interrogation du périphérique : 6 × 22 = **132**
+/// positions — la taille d'une image — dont **106** portent une LED.
+///
+/// Les deux chiffres ne sont pas interchangeables : en envoyer 106 laisse les
+/// dernières rangées figées sur leur valeur précédente. Voir
+/// `docs/protocol/deathstalker-v2-pro.md` §6.
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     name: "Razer DeathStalker V2 Pro (filaire)",
     vid: 0x1532,
@@ -77,16 +80,20 @@ mod tests {
         assert_eq!(l.led_count(), 132);
     }
 
-    /// La matrice transcrite contient 106 positions allumées.
+    /// Deux chiffres coexistent et ne désignent pas la même chose.
     ///
-    /// ⚠️ L'énumération faite côté périphérique lors du relevé en annonçait
-    /// **107**. L'écart d'une position n'est pas expliqué : il vient soit d'une
-    /// erreur de transcription, soit d'un index compté deux fois à la lecture.
-    /// Sans conséquence fonctionnelle — une image couvre de toute façon les 132
-    /// positions — mais à revérifier en réinterrogeant le matériel.
+    /// - **132** : les cases de la matrice 6×22, et le nombre de LED que la
+    ///   zone déclare. C'est la taille d'une image — en envoyer moins laisse
+    ///   les dernières rangées figées.
+    /// - **106** : les cases portant réellement une LED de touche.
+    ///
+    /// Confirmé par réinterrogation du matériel. Un relevé antérieur annonçait
+    /// 107 positions occupées : c'était un artefact de comptage, la valeur
+    /// sentinelle [`EMPTY`] ayant été comptée comme un index distinct.
     #[test]
-    fn lit_count_matches_transcribed_matrix() {
-        assert_eq!(DEATHSTALKER_V2_PRO.lit_count(), 106);
+    fn counts_match_device_report() {
+        assert_eq!(DEATHSTALKER_V2_PRO.led_count(), 132, "taille d'une image");
+        assert_eq!(DEATHSTALKER_V2_PRO.lit_count(), 106, "touches éclairées");
     }
 
     /// Aucun index de LED ne doit apparaître à deux positions.

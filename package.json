@@ -3,8 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "description": "Controle de l'eclairage clavier, par acces HID direct",
-  "packageManager": "pnpm@10.33.0",
-  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@12.4.1",
+  "engines": { "node": ">=22.12" },
   "scripts": {
     "dev": "pnpm --filter @candeo/desktop dev",
     "build": "pnpm --filter @candeo/desktop build",

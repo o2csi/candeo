@@ -1,0 +1,26 @@
+# Configuration de `cargo audit`.
+#
+# Toute entrée ici doit être justifiée et datée. Une exception non expliquée
+# est pire qu'un avertissement : elle se transmet en silence.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2024-0429 — glib < 0.20 : `Iterator` / `DoubleEndedIterator` non
+    # sûrs sur `VariantStrIter` (GHSA-wrw7-89jp-8q8g, sévérité modérée).
+    #
+    # Pourquoi ignoré, au 12/09/2026 :
+    #
+    # 1. Le code n'est jamais compilé. `glib` arrive par la pile GTK3, que
+    #    Tauri n'utilise que sous Linux ; `cargo tree --invert glib` est vide
+    #    sur la cible Windows et ne renvoie un résultat qu'avec `--target all`.
+    #    Nous ne produisons pour l'instant que des binaires Windows.
+    # 2. Aucune version corrigée n'est atteignable. Tauri 2.11.5 — la dernière —
+    #    épingle gtk 0.18 ; et gtk 0.19, la dernière publiée de gtk3-rs, reste
+    #    sur glib 0.19, donc toujours dans la plage vulnérable (< 0.20). Le
+    #    correctif vit dans la branche gtk4, où Tauri n'est pas.
+    # 3. Nous n'appelons pas `VariantStrIter`, ni directement ni indirectement.
+    #
+    # À rouvrir dès que l'une des trois cesse d'être vraie — en particulier au
+    # premier build Linux.
+    "RUSTSEC-2024-0429",
+]

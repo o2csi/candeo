@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      # La pile Tauri bouge d'un bloc : la mettre à jour morceau par morceau
+      # produit des combinaisons que personne n'a testées.
+      tauri:
+        patterns: ["tauri", "tauri-*", "wry", "tao"]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns: ["@tauri-apps/*"]
+      vue:
+        patterns: ["vue", "vue-*", "@vitejs/*", "vite"]
+    ignore:
+      # vue-tsc 3.3 charge `typescript/lib/tsc`, que la réécriture native de
+      # TypeScript 7 n'expose plus. Vérifié le 12/09/2026 :
+      # ERR_PACKAGE_PATH_NOT_EXPORTED au premier `vue-tsc --noEmit`.
+      # À lever quand vue-tsc prendra en charge TS 7.
+      - dependency-name: typescript
+        versions: [">=7"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
