@@ -400,7 +400,12 @@ fn js_error(e: rquickjs::Error) -> String {
 use crate::{AppState, CmdResult};
 use tauri::{AppHandle, State};
 
-/// Démarre un effet installé.
+/// Démarre un effet, intégré ou installé.
+///
+/// La résolution `identifiant → JavaScript` est celle de la bibliothèque, donc
+/// les intégrés d'abord : voir [`crate::storage`]. Le moteur, lui, ne fait
+/// aucune différence — un effet livré est un module chargé exactement comme
+/// celui qu'on vient d'écrire.
 ///
 /// Le gabarit vient du périphérique connecté ; à défaut, du gabarit par
 /// défaut. C'est délibéré : on doit pouvoir écrire et prévisualiser un effet
@@ -412,7 +417,7 @@ pub fn start_effect(
     id: String,
     params: serde_json::Value,
 ) -> CmdResult<()> {
-    let js = crate::storage::store(&app)?.read_effect_js(&id)?;
+    let js = crate::storage::store(&app)?.effect_js(&id)?;
 
     let layout = match state.keyboard.lock().unwrap().as_ref() {
         Some(kb) => kb.layout(),
@@ -589,5 +594,82 @@ mod tests {
         "#;
         let (_rt, ctx) = prepare(js, layout()).expect("chargement");
         render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+    }
+
+    // ------------------------------------------------------------ intégrés
+    //
+    // Les effets livrés passent par le même moteur que ceux de l'utilisateur,
+    // donc par les mêmes tests. Un effet intégré cassé ne doit pas se découvrir
+    // à l'exécution, chez celui qui l'ouvre en premier.
+
+    /// Instants d'échantillonnage. Plusieurs, et pas seulement zéro : une
+    /// division par la durée d'un cycle ou un dépassement de la dernière rangée
+    /// ne se voit qu'une fois l'animation commencée.
+    const INSTANTS: [f64; 4] = [0.0, 0.4, 1.3, 2.7];
+
+    #[test]
+    fn chaque_effet_integre_rend_une_image_complete() {
+        for b in &crate::builtins::ALL {
+            let (_rt, ctx) =
+                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+
+            for (i, time) in INSTANTS.iter().enumerate() {
+                let bytes = render_once(&ctx, *time, i as u32, "{}", layout().led_count())
+                    .unwrap_or_else(|e| panic!("« {} » à t={time} : {e}", b.id));
+
+                assert_eq!(bytes.len(), 132 * 3, "« {} » à t={time}", b.id);
+                // (0, 1) est un trou de la matrice. Un effet qui l'atteint
+                // n'itère pas `layout.keys` : il travaille sur les 132 cases au
+                // lieu des 106 positions éclairées.
+                assert_eq!(
+                    &bytes[3..6],
+                    &[0, 0, 0],
+                    "« {} » écrit sur une position sans LED",
+                    b.id
+                );
+            }
+        }
+    }
+
+    /// Un effet livré doit être visible dès sa première image : une image noire
+    /// au démarrage ressemble à un effet qui n'a pas démarré.
+    #[test]
+    fn chaque_effet_integre_allume_quelque_chose_des_la_premiere_image() {
+        for b in &crate::builtins::ALL {
+            let (_rt, ctx) =
+                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+            let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+
+            assert!(
+                bytes.iter().any(|&c| c != 0),
+                "« {} » rend une image entièrement noire",
+                b.id
+            );
+        }
+    }
+
+    /// Le manifeste annoncé en Rust et celui que le module déclare décrivent le
+    /// même effet. Sans ce test, la galerie pourrait promettre un paramètre que
+    /// le code ne lit pas — un réglage sans effet, que rien ne signale.
+    #[test]
+    fn les_manifestes_integres_correspondent_aux_modules() {
+        for b in &crate::builtins::ALL {
+            let (_rt, ctx) =
+                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+
+            let raw: String = ctx.with(|ctx| {
+                ctx.globals()
+                    .get("__candeo_manifest")
+                    .expect("manifeste déclaré")
+            });
+            let declare: serde_json::Value = serde_json::from_str(&raw).expect("manifeste JSON");
+
+            let annonce = serde_json::json!({
+                "name": b.name,
+                "description": b.description,
+                "params": serde_json::from_str::<serde_json::Value>(b.params).expect("params JSON"),
+            });
+            assert_eq!(declare, annonce, "« {} »", b.id);
+        }
     }
 }

@@ -188,18 +188,47 @@ tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
 ```
 
 Effets intégrés **et** installés, dans une seule liste : les intégrés sont
-compilés dans le binaire et n'ont pas de dossier, `kind` les distingue. Aucun
-n'est encore livré, le champ existe pour que l'interface n'ait pas à changer
-quand ce sera le cas.
+compilés dans le binaire et n'ont pas de dossier, `kind` les distingue. Ils
+viennent en tête, les installés ensuite, triés par `id`.
 
 Un dossier dont le manifeste est illisible est ignoré, pas propagé en erreur :
 une bibliothèque de vingt effets ne doit pas disparaître à cause d'un seul.
 L'ordre est stable — le système de fichiers n'en garantit aucun.
 
+### Les effets intégrés
+
+Quatre sont livrés, écrits en **JavaScript contre la même API** que les effets
+de l'utilisateur et chargés par le même moteur. Un effet intégré écrit en Rust
+natif serait plus rapide et ne prouverait rien : le premier exemple qu'on ouvre
+doit être exactement ce qu'on peut écrire soi-même. Ils vivent dans
+[`apps/desktop/src-tauri/src/builtins/`](../../apps/desktop/src-tauri/src/builtins/).
+
+| `id` | Nom | Ce qui le distingue |
+|---|---|---|
+| `onde-radiale` | Onde radiale | teinte en mouvement, propagée depuis le centre |
+| `respiration` | Respiration | une seule couleur, aucune variation dans l'espace |
+| `balayage` | Balayage | une rangée éclairée, le reste éteint |
+| `degrade-fixe` | Dégradé fixe | deux couleurs, immobile — son `render` ignore `time` |
+
+**Un identifiant intégré est réservé.** `install_effect` refuse un nom qui
+dérive vers l'un d'eux, en le disant. Et si un dossier portant un tel `id`
+apparaît malgré tout — copie manuelle, bibliothèque héritée —, c'est l'intégré
+qui est lu et affiché : une entrée marquée `builtin` exécute le code livré, et
+rien d'autre. Le dossier usurpateur n'est pas listé (la liste est indexée par
+`id`, elle ne peut pas en montrer deux) mais reste supprimable.
+
 ### `delete_effect(id)`
 
 Supprime le dossier. Un `id` hors de la liste blanche est refusé avant tout
-accès au disque.
+accès au disque. Un effet intégré n'a pas de dossier et ne se supprime pas ; le
+disque est consulté d'abord, ce qui laisse retirer un dossier qui usurperait un
+identifiant intégré.
+
+### `read_effect_source(id) -> string`
+
+La source, pour la rouvrir dans l'éditeur. Un effet intégré rend son JavaScript,
+qui **est** sa source : il n'y a pas de `.ts` à transpiler. C'est l'usage prévu —
+on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
 
 ---
 
@@ -244,9 +273,13 @@ l'API Tauri. Conception dans
 
 ### `start_effect(id, params)`
 
-Charge `effects/<id>/effect.js` et démarre la boucle. Remplace l'effet en cours,
-s'il y en avait un — l'arrêt précédent est **attendu**, sans quoi deux boucles
-écriraient un instant sur le même clavier.
+Charge le JavaScript de l'effet — celui d'un intégré, sinon
+`effects/<id>/effect.js` — et démarre la boucle. Le moteur ne fait aucune
+différence entre les deux : un effet livré est un module chargé exactement
+comme celui qu'on vient d'écrire.
+
+Remplace l'effet en cours, s'il y en avait un — l'arrêt précédent est
+**attendu**, sans quoi deux boucles écriraient un instant sur le même clavier.
 
 Une erreur de syntaxe ou un module mal formé est signalé **à l'appel**, pas
 découvert plus tard dans un état : l'appel attend le verdict du chargement.

@@ -15,6 +15,22 @@
 //! Toute la manipulation de fichiers vit dans [`Store`], qui reçoit ses chemins
 //! de base en argument ; les commandes Tauri ne font que les résoudre. C'est ce
 //! qui permet de tout tester dans un dossier temporaire, sans application.
+//!
+//! # Les effets intégrés font partie de la bibliothèque
+//!
+//! Ils n'ont pas de dossier — ils sont compilés dans le binaire, voir
+//! [`crate::builtins`] — mais l'appelant n'a pas à le savoir : lister, lire le
+//! JavaScript ou la source les trouve comme les autres.
+//!
+//! **En cas d'homonymie, l'intégré l'emporte**, et l'homonymie est de toute
+//! façon refusée à l'installation. Le sens de la priorité n'est pas arbitraire :
+//! une entrée marquée `builtin` dans la galerie doit exécuter le code livré, et
+//! rien d'autre. L'inverse laisserait un effet utilisateur se glisser sous un
+//! nom connu, avec le manifeste de l'intégré affiché à l'écran et un autre code
+//! exécuté — c'est exactement ce qu'on refuse. La réservation à l'installation
+//! rend la situation impossible ; la priorité à la lecture est la seconde
+//! barrière, pour un dossier arrivé par un autre chemin (copie manuelle,
+//! bibliothèque héritée d'une version où l'identifiant était libre).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,6 +38,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::builtins;
 use crate::CmdResult;
 
 /// Version de l'API d'effets fournie par cette version de l'application.
@@ -136,7 +153,7 @@ fn is_reserved(id: &str) -> bool {
 /// reste est refusé, ce qui écarte d'un coup `..`, les séparateurs de chemin,
 /// les deux-points d'un lecteur Windows et les caractères de contrôle — sans
 /// dépendre d'une liste noire qu'on oublierait de compléter.
-fn validate_id(id: &str) -> CmdResult<()> {
+pub(crate) fn validate_id(id: &str) -> CmdResult<()> {
     if id.is_empty() {
         return Err("identifiant d'effet vide".into());
     }
@@ -244,6 +261,16 @@ impl Store {
         }
 
         let id = derive_id(&manifest.name);
+        // Les identifiants intégrés sont réservés. Accepter l'homonymie
+        // obligerait à arbitrer ensuite, à chaque lecture, entre deux effets
+        // portant le même identifiant — et la bibliothèque en montrerait deux
+        // sous la même clé. Le refus est immédiat et se dit en une phrase.
+        if builtins::find(&id).is_some() {
+            return Err(format!(
+                "« {id} » est l'identifiant d'un effet intégré ; donnez un autre nom au vôtre"
+            ));
+        }
+
         let dir = self.effects_dir.join(&id);
         create_dir(&dir)?;
 
@@ -256,24 +283,37 @@ impl Store {
         Ok(id)
     }
 
-    /// Le JavaScript exécutable d'un effet installé.
+    /// Le JavaScript exécutable d'un effet, **intégré ou installé**.
     ///
-    /// C'est ce que le moteur charge, et la raison pour laquelle le `.js` est
-    /// écrit sur disque à l'installation : le lire ne demande ni l'éditeur, ni
-    /// la fenêtre.
-    pub fn read_effect_js(&self, id: &str) -> CmdResult<String> {
-        validate_id(id)?;
-        let path = self.effects_dir.join(id).join(JS_FILE);
-        fs::read_to_string(&path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => format!("aucun effet nommé « {id} »"),
-            _ => format!("lecture de {} impossible : {e}", path.display()),
-        })
+    /// C'est ce que le moteur charge. Les intégrés sont consultés d'abord :
+    /// voir la priorité justifiée en tête de module.
+    ///
+    /// Pour un effet utilisateur, c'est aussi la raison pour laquelle le `.js`
+    /// est écrit sur disque à l'installation — le lire ne demande ni l'éditeur,
+    /// ni la fenêtre.
+    pub fn effect_js(&self, id: &str) -> CmdResult<String> {
+        if let Some(b) = builtins::find(id) {
+            return Ok(b.js.to_string());
+        }
+        self.read_file(id, JS_FILE)
     }
 
-    /// La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur.
-    pub fn read_effect_source(&self, id: &str) -> CmdResult<String> {
+    /// La source d'un effet, pour la rouvrir dans l'éditeur.
+    ///
+    /// Un effet intégré n'a pas de `.ts` : son JavaScript **est** sa source. Le
+    /// rendre lisible depuis l'éditeur est tout l'intérêt de le livrer — on
+    /// part d'un effet qui marche, on le modifie, on l'enregistre sous un autre
+    /// nom (l'identifiant intégré, lui, est réservé).
+    pub fn effect_source(&self, id: &str) -> CmdResult<String> {
+        if let Some(b) = builtins::find(id) {
+            return Ok(b.js.to_string());
+        }
+        self.read_file(id, SOURCE_FILE)
+    }
+
+    fn read_file(&self, id: &str, file: &str) -> CmdResult<String> {
         validate_id(id)?;
-        let path = self.effects_dir.join(id).join(SOURCE_FILE);
+        let path = self.effects_dir.join(id).join(file);
         fs::read_to_string(&path).map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => format!("aucun effet nommé « {id} »"),
             _ => format!("lecture de {} impossible : {e}", path.display()),
@@ -314,6 +354,14 @@ impl Store {
             if validate_id(&id).is_err() {
                 continue;
             }
+            // Un dossier qui usurpe l'identifiant d'un intégré est écarté : la
+            // liste est indexée par identifiant, elle ne peut pas en contenir
+            // deux, et c'est l'intégré qui démarrerait de toute façon. L'y
+            // laisser afficherait un effet qui ne s'exécutera jamais. Il reste
+            // supprimable — `delete_effect` ne consulte que le disque.
+            if builtins::find(&id).is_some() {
+                continue;
+            }
             let Ok(raw) = fs::read_to_string(entry.path().join(MANIFEST_FILE)) else {
                 continue;
             };
@@ -335,10 +383,20 @@ impl Store {
     }
 
     /// Supprime `effects/<id>/`.
+    ///
+    /// Un effet intégré n'a pas de dossier, donc rien à supprimer — mais le
+    /// dossier est vérifié **avant** son cas : c'est ce qui laisse retirer un
+    /// dossier qui usurperait un identifiant intégré, invisible dans la liste
+    /// et inexécutable, mais bien présent sur disque.
     pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
         validate_id(id)?;
         let dir = self.effects_dir.join(id);
         if !dir.is_dir() {
+            if builtins::find(id).is_some() {
+                return Err(format!(
+                    "« {id} » est un effet intégré : il est livré avec l'application et ne peut pas être supprimé"
+                ));
+            }
             return Err(format!("aucun effet installé sous l'identifiant « {id} »"));
         }
         fs::remove_dir_all(&dir)
@@ -392,12 +450,27 @@ impl Store {
     }
 }
 
-/// Effets compilés dans le binaire.
+/// Effets compilés dans le binaire, sous la forme qu'attend la galerie.
 ///
-/// Aucun pour l'instant : la liste existe pour que l'interface et
-/// [`EffectKind`] n'aient pas à changer le jour où on en livrera.
+/// Le manifeste est reconstruit à chaque appel plutôt que gardé : quatre petits
+/// objets JSON, contre une initialisation paresseuse et son verrou. Un JSON de
+/// paramètres invalide donnerait ici un manifeste sans paramètres, ce que le
+/// test `les_parametres_integres_sont_du_json_valide` interdit — mieux vaut un
+/// test qui échoue qu'une panique au démarrage de l'application.
 fn builtin_effects() -> Vec<EffectEntry> {
-    Vec::new()
+    builtins::ALL
+        .iter()
+        .map(|b| EffectEntry {
+            id: b.id.to_string(),
+            kind: EffectKind::Builtin,
+            manifest: Manifest {
+                name: b.name.to_string(),
+                description: b.description.to_string(),
+                params: serde_json::from_str(b.params).unwrap_or_default(),
+                api_version: EFFECTS_API_VERSION,
+            },
+        })
+        .collect()
 }
 
 fn create_dir(path: &Path) -> CmdResult<()> {
@@ -447,14 +520,15 @@ pub fn delete_effect(app: AppHandle, id: String) -> CmdResult<()> {
     store(&app)?.delete_effect(&id)
 }
 
-/// Rend la source TypeScript d'un effet, pour la rouvrir dans l'éditeur.
+/// Rend la source d'un effet, pour la rouvrir dans l'éditeur.
 ///
 /// C'est la contrepartie d'`install_effect` : sans elle, un effet installé ne
 /// serait plus modifiable — c'est précisément pourquoi le `.ts` est écrit sur
-/// disque à côté du `.js`.
+/// disque à côté du `.js`. Un effet intégré rend son JavaScript, qui est sa
+/// source.
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
-    store(&app)?.read_effect_source(&id)
+    store(&app)?.effect_source(&id)
 }
 
 #[tauri::command]
@@ -479,6 +553,32 @@ mod tests {
         let tmp = tempfile::tempdir().expect("dossier temporaire");
         let store = Store::new(&tmp.path().join("data"), &tmp.path().join("config"));
         (tmp, store)
+    }
+
+    /// La part installée de la bibliothèque. Les intégrés y sont toujours
+    /// présents : les tests d'installation parlent des autres.
+    fn installes(store: &Store) -> Vec<EffectEntry> {
+        store
+            .list_effects()
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == EffectKind::User)
+            .collect()
+    }
+
+    /// Écrit un dossier d'effet à la main, sans passer par `install_effect`.
+    /// C'est la seule façon d'obtenir un identifiant réservé sur disque — et
+    /// donc de vérifier ce qui se passe alors.
+    fn poser_un_dossier(tmp: &tempfile::TempDir, id: &str, js: &str) {
+        let dir = tmp.path().join("data").join("effects").join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(JS_FILE), js).unwrap();
+        fs::write(dir.join(SOURCE_FILE), js).unwrap();
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            serde_json::to_string(&manifeste("Usurpateur")).unwrap(),
+        )
+        .unwrap();
     }
 
     fn manifeste(name: &str) -> Manifest {
@@ -520,11 +620,11 @@ mod tests {
             "le .js est un livrable, pas un cache : il doit être sur disque"
         );
 
-        let effects = store.list_effects().unwrap();
+        let effects = installes(&store);
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id, id);
-        assert_eq!(effects[0].kind, EffectKind::User);
         assert_eq!(effects[0].manifest, manifest);
+        assert_eq!(store.effect_js(&id).unwrap(), "export const x = 1");
     }
 
     #[test]
@@ -537,14 +637,30 @@ mod tests {
             .install_effect("v2", "v2", &manifeste("Onde"))
             .unwrap();
 
-        let effects = store.list_effects().unwrap();
-        assert_eq!(effects.len(), 1);
+        assert_eq!(installes(&store).len(), 1);
     }
 
     #[test]
-    fn la_bibliotheque_est_vide_avant_toute_installation() {
+    fn la_bibliotheque_ne_contient_que_les_integres_avant_installation() {
         let (_tmp, store) = store_temporaire();
-        assert!(store.list_effects().unwrap().is_empty());
+        let effects = store.list_effects().unwrap();
+
+        assert_eq!(effects.len(), builtins::ALL.len());
+        assert!(effects.iter().all(|e| e.kind == EffectKind::Builtin));
+        // La galerie n'est jamais vide au premier lancement : c'est tout
+        // l'objet des effets livrés.
+        assert!(!effects.is_empty());
+
+        for (entry, b) in effects.iter().zip(&builtins::ALL) {
+            assert_eq!(entry.id, b.id);
+            assert_eq!(entry.manifest.name, b.name);
+            assert_eq!(entry.manifest.api_version, EFFECTS_API_VERSION);
+            assert!(
+                !entry.manifest.params.is_empty(),
+                "« {} » : paramètres perdus à la lecture du JSON",
+                b.id
+            );
+        }
     }
 
     #[test]
@@ -554,10 +670,89 @@ mod tests {
 
         store.delete_effect(&id).unwrap();
         assert!(!tmp.path().join("data").join("effects").join(&id).exists());
-        assert!(store.list_effects().unwrap().is_empty());
+        assert!(installes(&store).is_empty());
 
         let err = store.delete_effect(&id).unwrap_err();
         assert!(err.contains("aucun effet installé"), "message : {err}");
+    }
+
+    // ------------------------------------------------------------ intégrés
+
+    /// Le moteur demande le JavaScript par identifiant : les intégrés doivent
+    /// donc se résoudre sans dossier, sinon ils ne démarreraient jamais.
+    #[test]
+    fn un_effet_integre_se_lit_sans_dossier() {
+        let (_tmp, store) = store_temporaire();
+
+        for b in &builtins::ALL {
+            assert_eq!(store.effect_js(b.id).unwrap(), b.js);
+            // La source aussi : un effet livré est là pour être lu et modifié,
+            // et son JavaScript *est* sa source.
+            assert_eq!(store.effect_source(b.id).unwrap(), b.js);
+        }
+    }
+
+    /// L'usurpation, dans les deux sens : par l'installation, puis par un
+    /// dossier posé à la main.
+    #[test]
+    fn un_effet_utilisateur_ne_peut_pas_usurper_un_identifiant_integre() {
+        let (tmp, store) = store_temporaire();
+
+        for integre in &builtins::ALL {
+            // Un nom qui dérive exactement vers l'identifiant visé : c'est ce
+            // que taperait quelqu'un qui a lu la galerie.
+            let err = store
+                .install_effect("", "", &manifeste(integre.id))
+                .unwrap_err();
+            assert!(err.contains("effet intégré"), "message : {err}");
+            assert!(
+                !tmp.path()
+                    .join("data")
+                    .join("effects")
+                    .join(integre.id)
+                    .exists(),
+                "« {} » : le refus est arrivé après l'écriture",
+                integre.id
+            );
+
+            // Le dossier posé à la main ne prend pas la main non plus : c'est
+            // toujours le code livré qui s'exécute, et la galerie n'affiche
+            // qu'une entrée sous cet identifiant — celle de l'intégré.
+            poser_un_dossier(&tmp, integre.id, "export default { render() {} }");
+            assert_eq!(store.effect_js(integre.id).unwrap(), integre.js);
+            assert_eq!(store.effect_source(integre.id).unwrap(), integre.js);
+
+            let entrees: Vec<_> = store
+                .list_effects()
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.id == integre.id)
+                .collect();
+            assert_eq!(
+                entrees.len(),
+                1,
+                "« {} » : deux fois dans la liste",
+                integre.id
+            );
+            assert_eq!(entrees[0].kind, EffectKind::Builtin);
+            assert_eq!(entrees[0].manifest.name, integre.name);
+        }
+    }
+
+    /// Un intégré ne se supprime pas — mais un dossier qui en usurpe
+    /// l'identifiant, si : sans quoi il resterait sur disque, invisible et
+    /// inamovible.
+    #[test]
+    fn un_effet_integre_ne_se_supprime_pas_mais_son_usurpateur_oui() {
+        let (tmp, store) = store_temporaire();
+        let id = builtins::ALL[0].id;
+
+        let err = store.delete_effect(id).unwrap_err();
+        assert!(err.contains("effet intégré"), "message : {err}");
+
+        poser_un_dossier(&tmp, id, "export default { render() {} }");
+        store.delete_effect(id).unwrap();
+        assert!(!tmp.path().join("data").join("effects").join(id).exists());
     }
 
     #[test]
