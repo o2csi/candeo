@@ -113,7 +113,9 @@ reste **supposé**.
   rien dans les trois crates ne dépend de Windows pour compiler.
 - **Empaquetage.** `.deb` et `.rpm` sont produits, et la règle udev est présente
   dans les deux à `/usr/lib/udev/rules.d/60-candeo.rules` — vérifié par lecture
-  des paquets, pas par relecture de la configuration.
+  des paquets, pas par relecture de la configuration. ⚠️ **Cette vérification ne
+  tourne plus sur les propositions de fusion**, seulement sur `main` et à la
+  demande : voir [Vérifier Linux en local](#vérifier-linux-en-local).
 - **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
   des octets, et ses tests tournent partout.
 - **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
@@ -129,6 +131,41 @@ branché sur une machine Linux : que l'écriture de rapport de fonctionnalité
 aboutisse par hidraw, que `interface_number` distingue les interfaces du
 composite comme sous Windows, et que les dossiers résolus par Tauri tombent bien
 dans `~/.local/share` et `~/.config`.
+
+### Vérifier Linux en local
+
+Le job `linux` de la CI coûte un quart d'heure, dont une dizaine de minutes à
+recompresser un `.rpm` de débogage. Il ne tourne donc **pas** sur les
+propositions de fusion : seulement sur `main`, et à la demande via
+**Actions → CI → Run workflow** en choisissant la branche.
+
+Entre-temps, WSL fait le même travail sans attendre un coureur :
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+  libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+  libudev-dev build-essential pkg-config file rpm
+
+cargo check --workspace --all-targets
+cargo test --workspace
+```
+
+Et si le changement touche l'empaquetage, les I/O HID ou les dépendances
+système, la vérification complète — c'est l'étape lente, à ne lancer que dans ce
+cas :
+
+```bash
+pnpm install --frozen-lockfile
+pnpm --filter @candeo/desktop exec tauri build --debug --bundles deb,rpm
+
+regle='usr/lib/udev/rules.d/60-candeo.rules'
+dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$regle"
+rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$regle"
+```
+
+Les deux `grep` sont la preuve : la règle est bien **dans les paquets**, et pas
+seulement déclarée dans `tauri.conf.json`.
 
 ### Règle udev
 
