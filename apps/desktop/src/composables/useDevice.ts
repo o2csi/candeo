@@ -9,10 +9,12 @@
  *
  * Côté Rust, chaque appareil porte sa poignée, sa boucle et son effet : toute
  * commande qui agit sur un appareil en prend un ([`DeviceRef`]). L'interface
- * doit donc toujours savoir lequel elle vise — d'où {@link current}, qui le
- * désigne sans rien demander tant qu'un seul appareil est en jeu. L'écran à
- * trois colonnes (issue #27) rendra ce choix explicite ; d'ici là, rien à
- * cliquer de plus.
+ * doit donc toujours savoir lequel elle vise — d'où {@link current}.
+ *
+ * La colonne des appareils le désigne explicitement, par {@link select} ; les
+ * écrans qui n'ont pas de colonne — l'éditeur — reprennent ce même choix. C'est
+ * ce qui fait qu'ouvrir l'éditeur depuis la troisième colonne travaille bien sur
+ * l'appareil qu'on regardait, sans que l'éditeur ait à poser la question.
  */
 
 import { computed, readonly, ref } from 'vue'
@@ -26,15 +28,33 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 
 /**
- * L'appareil sur lequel agissent les écrans qui n'en désignent pas un.
+ * Ce que la colonne des appareils a désigné. `null` tant que personne n'a choisi.
  *
- * Celui qui est ouvert ; à défaut le premier branché ; à défaut le premier
- * gabarit connu. Le dernier repli n'est pas un pis-aller : un effet se lance et
+ * Au niveau du module, comme le reste : passer à l'éditeur et revenir ne doit
+ * pas ramener la sélection au premier de la liste.
+ */
+const chosen = ref<DeviceRef | null>(null)
+
+const same = (a: DeviceRef, b: DeviceRef) => a.vid === b.vid && a.pid === b.pid
+
+/**
+ * L'appareil visé par les commandes du moteur.
+ *
+ * Le choix explicite d'abord — mais seulement s'il désigne encore un appareil
+ * connu : un gabarit peut disparaître de la liste entre deux relectures, et
+ * viser un appareil qui n'existe plus ferait échouer chaque commande sans que
+ * rien n'explique pourquoi.
+ *
+ * À défaut, celui qui est ouvert ; puis le premier branché ; puis le premier
+ * gabarit connu. Ce dernier repli n'est pas un pis-aller : un effet se lance et
  * se prévisualise sans clavier branché, et il faut bien un gabarit pour le
  * dessiner.
  */
 const current = computed<DeviceRef | null>(() => {
   const list = devices.value
+  const voulu = chosen.value
+  if (voulu && list.some((d) => same(d, voulu))) return voulu
+
   const choisi = list.find((d) => d.open) ?? list.find((d) => d.present) ?? list[0]
   return choisi ? { vid: choisi.vid, pid: choisi.pid } : null
 })
@@ -59,6 +79,16 @@ async function run<T>(task: () => Promise<T>): Promise<T | null> {
 
 export function useDevice() {
   /**
+   * Désigne l'appareil qu'on configure. C'est le geste de la première colonne.
+   *
+   * Ne touche à rien côté Rust : aucun appareil n'est ouvert ni refermé, on dit
+   * seulement lequel les écrans visent. Ouvrir, c'est `adopt`.
+   */
+  function select(device: DeviceRef | null) {
+    chosen.value = device
+  }
+
+  /**
    * Relit la liste, puis le gabarit de l'appareil ouvert.
    *
    * Le gabarit ne se déduit pas de la liste : il porte la géométrie des 106
@@ -69,13 +99,21 @@ export function useDevice() {
    * message d'erreur de chaque appareil viennent du Rust, qui seul sait ce que
    * l'ouverture a donné ; les rafistoler sur place inventerait une seconde
    * vérité.
+   *
+   * Le gabarit retenu est celui de l'appareil **désigné** quand il est ouvert,
+   * et à défaut celui du premier ouvert. Sans cette préférence, l'éditeur
+   * dessinerait un appareil pendant que les commandes en viseraient un autre : un
+   * seul gabarit est connu aujourd'hui, les deux se confondent, mais l'accord ne
+   * doit pas tenir à cette coïncidence.
    */
   async function refresh() {
     const list = await run(api.listDevices)
     if (!list) return
     devices.value = list
 
-    const ouvert = list.find((d) => d.open)
+    const voulu = chosen.value
+    const ouvert =
+      (voulu ? list.find((d) => same(d, voulu) && d.open) : undefined) ?? list.find((d) => d.open)
     if (!ouvert) {
       layout.value = null
       return
@@ -116,6 +154,7 @@ export function useDevice() {
   return {
     devices: readonly(devices),
     current,
+    select,
     layout: readonly(layout),
     busy: readonly(busy),
     error: readonly(error),

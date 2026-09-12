@@ -10,7 +10,8 @@ existe pour que l'implémentation ait une cible, pas pour décrire ce qui existe
 ## 1. La galerie est l'écran d'accueil
 
 L'application n'ouvre **pas** sur un éditeur. Elle ouvre sur la liste des effets
-disponibles, et un bouton « ＋ » entre en édition.
+disponibles, et un bouton « ＋ » entre en édition. Cette liste est devenue un
+écran à trois colonnes : voir le §8.
 
 Le motif : la plupart des lancements servent à choisir un effet, pas à en écrire
 un. Faire de l'éditeur l'écran d'accueil imposerait un outil de développement à
@@ -275,11 +276,13 @@ comme absent, pas l'omettre.
 - [x] Validation : `ts.transpileModule()` → commande `install_effect`
 - [x] Moteur `rquickjs` côté Rust : fil de rendu indépendant de la fenêtre,
       module interne `@candeo/effects-api`, canal d'images
-- [ ] Écran galerie — vignettes animées des effets, et lancement depuis la
-      galerie. Les effets écrits sont listés sous « À vous » et s'y rouvrent ;
-      il leur manque l'aperçu qui permettrait d'en choisir un sans le lancer.
-- [ ] Réglage des paramètres déclarés — ils partent aujourd'hui à leur valeur
-      par défaut, lue dans le manifeste
+- [x] Écran principal — trois colonnes, lancement d'un effet depuis la liste,
+      aperçu dans le panneau de droite (§8). Le repère de couleurs remplace la
+      vignette animée : il est prélevé sur le rendu de l'effet, il ne peut donc
+      pas décrire autre chose que ce que l'effet fait.
+- [ ] Réglage des paramètres déclarés — la colonne de droite les **affiche**
+      avec leur valeur de départ, lue dans le manifeste ; les ajuster à chaud
+      reste à faire
 
 Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hors
 `monaco-editor`.
@@ -303,3 +306,94 @@ Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hor
   le même simulateur.
 - **Quitter l'éditeur n'arrête pas l'effet.** Le canal libéré coupe le flux
   d'images ; la boucle continue d'alimenter le clavier, fenêtre fermée comprise.
+
+---
+
+## 8. L'écran principal est à trois colonnes
+
+**Appareils · Effets · Réglages.** La hiérarchie est celle dans laquelle on
+pense : on choisit un appareil, puis son effet, puis ses réglages.
+**L'affectation cesse d'être une case à cocher en bas de panneau — elle devient
+la structure de l'écran.**
+
+La grille de vignettes qui occupait cet écran a disparu avec elle : elle
+présentait des effets sans dire sur quoi ils s'appliqueraient, ce qui n'avait de
+sens que tant qu'il n'y avait qu'un appareil possible.
+
+### Les deux premières colonnes se replient, la troisième non
+
+Avec un seul appareil piloté, une colonne entière serait une bande morte
+permanente, et c'est l'aperçu qui a besoin de la largeur. La troisième ne se
+replie pas : c'est le contenu, il ne resterait rien.
+
+> **Le piège, et la forme qui y résiste.** Repliée, une entrée ne doit montrer
+> que son icône — ou son repère de couleurs. La façon naturelle de l'écrire,
+> énumérer ce qu'on cache (« cacher le nom, cacher l'effet »), a déjà produit ici
+> une collision de spécificité : une règle ajoutée ailleurs pour le nom
+> l'emportait sur le masquage, et le texte revenait déborder dans 40 px.
+>
+> La forme retenue est l'inverse : **masquer tous les enfants au sélecteur
+> universel, puis rétablir explicitement le seul qui reste**, et garder par
+> `:not(.shut)` toute règle qui pourrait les concurrencer — elle ne *s'applique
+> pas* en état replié, au lieu de gagner ou perdre un arbitrage. Un enfant ajouté
+> demain est donc masqué sans que personne ait à y penser. La même forme sert
+> deux fois : sur les enfants d'une entrée, et sur les enfants du corps de
+> colonne.
+>
+> Les largeurs repliées, elles, sont des **variables** et non des règles
+> concurrentes : chaque état écrit la sienne, et le point de rupture étroit
+> redéfinit la grille une bonne fois.
+
+### La colonne des appareils
+
+Elle liste les appareils **pilotés**. L'adoption reste dans la vue
+Périphériques : choisir ce qu'on configure et choisir ce que candeo a le droit de
+piloter sont deux gestes différents, et les fondre ferait d'un clic de sélection
+une prise de contrôle.
+
+Elle affiche le **nom du produit**, pas une catégorie — c'est ce qui distingue
+deux claviers de la même marque. Il passe à la ligne plutôt que d'être tronqué.
+En dessous, l'effet que l'appareil fait tourner.
+
+**Pas de logo de fabricant** : ce sont des marques protégées, elles n'aident pas
+à distinguer un clavier d'une souris, et le nom porte déjà l'information. Un
+pictogramme de type suffit — et il n'est pas deviné sur le nom : un seul gabarit
+est connu, c'est un clavier ; le jour où le Rust déclarera un type, il viendra de
+là.
+
+### Un seul effet « actif », celui de l'appareil sélectionné
+
+Marquer actifs les effets de tous les appareils dans une liste qui décrit ce que
+fait *un* appareil n'est pas une simplification, c'est une information fausse.
+Ce que cette session a posé est donc retenu **par appareil**, pas dans un champ
+global.
+
+### L'aperçu suit l'appareil
+
+Le simulateur est dans le panneau de droite : liste à gauche / rendu à droite
+ici, code à gauche / rendu à droite dans l'éditeur. Même grammaire, et **un seul
+dessin** — `KeyboardSimulator` est le même composant des deux côtés, il n'y a pas
+deux tracés à tenir d'accord. Le gabarit vient de l'appareil sélectionné :
+`get_layout` s'il est ouvert, `get_default_layout` sinon.
+
+Il suit **l'appareil**, pas la sélection : il montre les images que le moteur
+produit pour lui. Sélectionner un effet sans l'appliquer ne change donc rien au
+dessin, et la légende le dit. Lui faire montrer l'effet *sélectionné* exigerait
+de l'exécuter dans la fenêtre — un second moteur, exactement ce que le §3 refuse.
+
+### La pastille dit l'état, pas l'identité
+
+« 2 appareils pilotés », « aucun appareil piloté ». Le nom est dans la colonne ;
+le répéter serait un doublon, et il deviendrait faux au second appareil. Elle
+reste nécessaire, et c'est pourquoi elle est un composant et non un morceau de la
+barre : depuis l'éditeur, où cette colonne n'existe pas, c'est le seul endroit
+qui signale une perte. Un appareil adopté mais débranché y est compté **et** dit
+injoignable — fondre les deux rendrait « piloté mais absent » indicible.
+
+### Trois écarts assumés avec la maquette
+
+| Maquette | Ici | Pourquoi |
+|---|---|---|
+| Un dessin de souris | Le seul gabarit connu | La maquette l'utilise pour illustrer qu'un effet reçoit *un gabarit*, pas un clavier. Dessiner une souris qu'aucun relevé ne décrit serait inventer du matériel. |
+| Un repère de couleurs pour les effets matériels | Pastille sourde | Le repère est **prélevé en exécutant l'effet**. Le micrologiciel exécute ceux-là : l'application ne voit jamais leurs images, et quatre couleurs plausibles décriraient un effet qu'on n'a pas regardé. |
+| « L'aperçu tourne quand même » sans appareil | Aucun aperçu animé | L'aperçu est alimenté par la boucle du moteur, qui vise un appareil. Sans appareil piloté il n'y a pas de boucle — et en animer une sur un appareil que l'utilisateur n'a pas autorisé est exactement ce que l'adoption interdit. |

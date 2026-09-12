@@ -56,6 +56,7 @@ import {
 } from '../api/candeo'
 import type { DeviceRef } from '../api/types'
 import CodeEditor from '../components/CodeEditor.vue'
+import DevicePill from '../components/DevicePill.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
@@ -426,6 +427,13 @@ onBeforeUnmount(() => {
       </p>
 
       <span class="spacer" />
+
+      <!--
+        L'éditeur n'a pas de colonne des appareils : la pastille est ici le seul
+        endroit qui signale une perte. Même composant que dans la barre de
+        navigation — un seul libellé, pas deux à tenir d'accord.
+      -->
+      <DevicePill />
 
       <!--
         Une vraie case à cocher : elle se pilote au clavier et porte son état

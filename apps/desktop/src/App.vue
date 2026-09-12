@@ -2,10 +2,11 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
+import DevicePill from './components/DevicePill.vue'
 import { useDevice } from './composables/useDevice'
 
 const route = useRoute()
-const { layout, error, restore } = useDevice()
+const { error, restore } = useDevice()
 
 /** L'éditeur occupe toute la fenêtre : c'est un mode, pas un onglet. */
 const full = computed(() => route.meta.full === true)
@@ -25,10 +26,7 @@ onMounted(() => {
 
       <span class="spacer" />
 
-      <RouterLink to="/devices" class="state" :class="{ on: layout }">
-        <span class="dot" />
-        {{ layout ? layout.name : 'Aucun périphérique' }}
-      </RouterLink>
+      <DevicePill />
     </nav>
 
     <main class="body">
@@ -84,32 +82,6 @@ onMounted(() => {
 
 .spacer {
   flex: 1;
-}
-
-/* L'état de connexion est lisible sans couleur seule : la pastille est doublée
-   du nom du périphérique, ou de son absence dite en toutes lettres. */
-.state {
-  display: flex;
-  gap: var(--gap-2);
-  align-items: center;
-  color: var(--text-faint);
-  font-size: 12px;
-  text-decoration: none;
-}
-
-.state.on {
-  color: var(--text-muted);
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 99px;
-  background: var(--line-strong);
-}
-
-.state.on .dot {
-  background: var(--ok);
 }
 
 .body {
