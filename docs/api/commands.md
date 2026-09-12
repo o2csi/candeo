@@ -465,6 +465,12 @@ on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
     pid: number,
     serial?: string,             // absent quand le système n'en déclare pas
     state: 'detected' | 'adopted' | 'ignored'
+  }[],
+  effectParams: {
+    vid: number,
+    pid: number,
+    effect: string,              // identifiant de l'effet réglé
+    values: Record<string, ParamValue>
   }[]
 }
 ```
@@ -473,6 +479,43 @@ Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
 **défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
 version antérieure reprend lui aussi son défaut, plutôt que de rendre
 l'application muette au démarrage.
+
+### `remember_effect_params(device, effect, params)`
+
+Retient les réglages d'un effet **pour un appareil**, et rien d'autre du
+fichier. À ne pas confondre avec [`set_effect_params`](#stop_effectdevice--set_effect_paramsdevice-params),
+qui ajuste la boucle en cours : celle-ci écrit sur disque et ne change rien à ce
+qui tourne. Les deux n'ont ni la même cadence — des dizaines d'appels par seconde
+d'un côté, un seul quand le curseur s'arrête de l'autre — ni la même destination.
+
+Une commande dédiée plutôt qu'un `set_settings` depuis la fenêtre : la lecture,
+la modification et l'écriture se font côté Rust, d'un seul tenant. Un front qui
+relirait, modifierait puis réécrirait tout le fichier écraserait au passage une
+adoption décidée entre-temps — et ce n'est pas un cas d'école, `adopt_device`
+écrit `settings.json`.
+
+Une table `params` **vide** efface l'entrée : c'est « rétablir les valeurs
+déclarées ». L'effet repart alors de son manifeste, y compris si une version
+ultérieure en change les défauts.
+
+### La clé d'un réglage : l'appareil et l'effet, sans le numéro de série
+
+Le même effet n'a aucune raison de tourner à la même vitesse sur deux claviers,
+et deux effets du même clavier n'ont pas les mêmes paramètres : la clé est donc
+la paire. Changer d'effet puis revenir retrouve ses réglages, et l'écran les
+relit au démarrage suivant.
+
+**Sans la série, contrairement à `devices`.** Toutes les commandes du moteur
+visent un `DeviceRef`, c'est-à-dire un VID et un PID ; deux exemplaires du même
+modèle partagent déjà leur boucle de rendu. Les distinguer ici promettrait une
+séparation que le reste de l'application ne tient pas, et le réglage semblerait
+perdu une fois sur deux. L'adoption, elle, décide d'ouvrir un exemplaire précis :
+elle a besoin de la série, et c'est pourquoi elle la porte.
+
+Comme `devices`, `effectParams` ne contient que ce qui **diffère du défaut** :
+un paramètre laissé à sa valeur déclarée n'y figure pas, et suivra le manifeste
+si l'effet est réenregistré avec d'autres défauts. Une entrée n'apparaît donc que
+si quelqu'un a déplacé un curseur.
 
 ### L'identité d'un appareil : VID / PID / numéro de série
 
@@ -569,6 +612,20 @@ définition.
 `set_effect_params` ajuste **à chaud** : la boucle relit les paramètres à chaque
 image, elle ne redémarre pas. Les deux ne touchent qu'à l'appareil visé ; un
 appareil sur lequel rien n'a jamais été lancé les ignore silencieusement.
+
+`params` **remplace** la table entière, il ne la fusionne pas : l'appelant envoie
+l'état complet, pas le seul champ qu'il vient de changer.
+
+L'appel est bon marché mais pas gratuit, et un curseur en produit des dizaines
+par seconde. La fenêtre les ramène donc à **25 par seconde au plus, un seul en
+vol à la fois**, en écrasant les états intermédiaires : la boucle ne lit que le
+dernier, et une file d'attente ne ferait que le lui livrer en retard. Le dernier
+état demandé part toujours — c'est la seule garantie qui compte, puisque c'est
+celui qu'on voit.
+
+Retenir ces valeurs d'un lancement à l'autre est l'affaire de
+[`remember_effect_params`](#remember_effect_paramsdevice-effect-params), qui
+n'écrit que sur disque.
 
 ### `set_output_to_keyboard(device, on)`
 

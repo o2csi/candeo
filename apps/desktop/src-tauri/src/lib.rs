@@ -692,6 +692,7 @@ pub fn run() {
             storage::read_effect_source,
             storage::get_settings,
             storage::set_settings,
+            storage::remember_effect_params,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");
