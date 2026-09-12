@@ -27,6 +27,16 @@ if (typeof effect?.render !== 'function') {
   )
 }
 
+// Le manifeste tel que le module le déclare, posé une fois au chargement.
+// Les effets intégrés annoncent le leur en Rust, pour que lister la
+// bibliothèque n'instancie aucun moteur ; c'est par ici que le test vérifie que
+// les deux disent la même chose.
+globalThis.__candeo_manifest = JSON.stringify({
+  name: effect.name ?? '',
+  description: effect.description ?? '',
+  params: effect.params ?? {},
+})
+
 // Tampon réutilisé d'une image à l'autre : l'allouer 60 fois par seconde
 // ferait travailler le ramasse-miettes pour rien.
 const buf = new Array(FRAME_LEN * 3).fill(0)

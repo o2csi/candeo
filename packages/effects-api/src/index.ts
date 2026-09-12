@@ -67,8 +67,15 @@ export interface EffectContext {
   /** Numéro d'image, incrémenté à chaque rendu. */
   readonly frameIndex: number
   readonly frame: Frame
-  /** Paramètres déclarés par l'effet, tels que réglés dans l'interface. */
-  readonly params: Record<string, number | string | boolean>
+  /**
+   * Paramètres déclarés par l'effet, tels que réglés dans l'interface.
+   *
+   * `Rgb` fait partie de l'union parce qu'un {@link ParamSpec} de type `color`
+   * a pour valeur une couleur, pas un nombre : l'omettre obligerait tout effet
+   * paramétré par une couleur à passer par un transtypage, pour contourner une
+   * déclaration fausse.
+   */
+  readonly params: Record<string, number | string | boolean | Rgb>
 }
 
 /** Un effet rend une image à chaque appel. */
@@ -127,3 +134,8 @@ export function mix(a: Rgb, b: Rgb, t: number): Rgb {
 // L'exemple de référence vit dans `example.ts` : ce fichier décrit l'API, il
 // n'exporte pas d'effet. Un export par défaut ici ferait de la bibliothèque
 // elle-même un effet, ce qu'elle n'est pas.
+//
+// Les effets **livrés avec l'application** sont ailleurs encore, dans
+// `apps/desktop/src-tauri/src/builtins/` : ils sont compilés dans le binaire et
+// écrits en JavaScript, contre cette même API. C'est la meilleure lecture
+// disponible de ce qu'on peut écrire ici.

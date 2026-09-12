@@ -17,8 +17,15 @@ jobs:
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy -p candeo-protocol -p candeo-device --all-targets -- -D warnings
-      - run: cargo test -p candeo-protocol -p candeo-device
+      # Tout l'espace de travail, et non les deux seules crates sans Tauri :
+      # les effets livrés avec l'application sont du JavaScript compilé dans le
+      # binaire, et leurs tests — chargement, taille d'image, image non noire —
+      # vivent dans `candeo-desktop`. Les laisser hors de l'intégration continue
+      # reviendrait à découvrir un effet intégré cassé chez l'utilisateur qui
+      # l'ouvre en premier. Le job `build` compile cette crate mais n'exécute
+      # aucun test.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
 
   # Avis de sécurité des dépendances Rust. Séparé du job `rust` pour que
   # l'apparition d'un avis ne masque pas une régression de code.
