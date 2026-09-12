@@ -86,6 +86,15 @@ Les trois partis pris qui structurent le reste :
   envoie la source et reçoit les images. L'aperçu **est** donc la production, et
   un effet continue de tourner fenêtre fermée. Le motif n'a jamais été la
   performance — 132 LED × 60 img/s = 7 920 couleurs/s, trivial.
+- **Fermer la fenêtre replie candeo dans la zone de notification.** C'est la
+  seconde moitié de la phrase précédente, et elle n'était pas tenue jusqu'à
+  l'issue #46 : un fil indépendant de la fenêtre ne survit pas au processus, et
+  le processus s'arrêtait avec sa dernière fenêtre. L'icône le retient — elle
+  intercepte `RunEvent::ExitRequested` — et donne de quoi piloter sans la
+  fenêtre : effet courant et bibliothèque par appareil piloté, envoi au clavier
+  en bascule, extinction. **« Quitter candeo » y est la seule sortie franche**,
+  et quitter laisse l'éclairage tel quel. Voir
+  [`src/tray.rs`](apps/desktop/src-tauri/src/tray.rs).
 - **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
   périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
   écrite à la main.

@@ -402,6 +402,52 @@ impl Settings {
     }
 }
 
+/// Les valeurs sur lesquelles un effet doit démarrer : ce qu'il **déclare**,
+/// recouvert par ce qu'on a **retenu** pour cet appareil.
+///
+/// # Pourquoi ce calcul existe en Rust
+///
+/// La fenêtre le fait déjà, en deux morceaux — `startingParams` pour les défauts
+/// du manifeste, `merge` pour le recouvrement. Mais l'icône de zone de
+/// notification lance un effet **sans fenêtre** : elle ne peut rien emprunter au
+/// TypeScript, et lancer un effet avec un objet de paramètres vide ne donnerait
+/// pas le même éclairage que le même clic fait depuis la galerie. Voir
+/// [`crate::tray`].
+///
+/// Les deux écritures de la règle doivent donc rester d'accord. Ce qu'elles
+/// disent, et c'est la seule chose à retenir : **bornée aux paramètres
+/// déclarés**. Un réglage retenu pour un paramètre que l'effet n'a plus disparaît
+/// de lui-même, au lieu de voyager indéfiniment vers une boucle qui ne le lit
+/// plus — et un paramètre déclaré sans valeur retenue prend son défaut, jamais
+/// rien.
+///
+/// Un manifeste dont un paramètre ne déclare pas de `default` est laissé de
+/// côté : `params` est du JSON brut que le Rust n'interprète pas (voir
+/// [`Manifest::params`]), et inventer une valeur pour une sorte de paramètre
+/// qu'on ne connaît pas serait pire que de laisser l'effet appliquer la sienne.
+pub(crate) fn starting_params(
+    manifest: &Manifest,
+    retenus: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::new();
+    for (id, spec) in &manifest.params {
+        if let Some(defaut) = spec.get("default") {
+            out.insert(id.clone(), defaut.clone());
+        }
+    }
+    if let Some(retenus) = retenus {
+        for (id, valeur) in retenus {
+            // Seulement ce que le manifeste déclare encore : c'est le même
+            // bornage que côté fenêtre, et c'est lui qui fait disparaître un
+            // réglage devenu orphelin.
+            if manifest.params.contains_key(id) {
+                out.insert(id.clone(), valeur.clone());
+            }
+        }
+    }
+    out
+}
+
 // ---------------------------------------------------------------- identifiants
 
 /// Vrai si `id` est un nom de périphérique réservé par Windows.
@@ -1865,5 +1911,61 @@ mod tests {
             ),
             "sérialisation : {json}"
         );
+    }
+
+    // ------------------------------------------------- valeurs de départ
+
+    /// Un manifeste déclarant trois paramètres, dont un sans `default`.
+    fn declare() -> Manifest {
+        Manifest {
+            name: "Balayage".into(),
+            description: String::new(),
+            params: serde_json::json!({
+                "speed":  { "kind": "number",  "label": "Vitesse", "default": 120 },
+                "bounce": { "kind": "boolean", "label": "Rebond",  "default": false },
+                "muet":   { "kind": "number",  "label": "Sans défaut" }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            api_version: EFFECTS_API_VERSION,
+        }
+    }
+
+    /// **Le cas nominal de l'icône de zone de notification** : lancer un effet
+    /// sans fenêtre doit donner le même éclairage que le lancer depuis la
+    /// galerie — donc les défauts du manifeste, recouverts par ce qu'on a retenu.
+    #[test]
+    fn les_valeurs_de_depart_partent_du_manifeste_et_sont_recouvertes() {
+        let retenus = valeurs(&[("speed", serde_json::json!(40))]);
+        let depart = starting_params(&declare(), Some(&retenus));
+
+        assert_eq!(depart.get("speed"), Some(&serde_json::json!(40)));
+        assert_eq!(depart.get("bounce"), Some(&serde_json::json!(false)));
+    }
+
+    /// Sans rien de retenu, ce que l'effet déclare, et rien de plus : un
+    /// paramètre sans `default` est laissé à l'effet plutôt que deviné.
+    #[test]
+    fn un_parametre_sans_defaut_n_est_pas_invente() {
+        let depart = starting_params(&declare(), None);
+
+        assert_eq!(depart.len(), 2, "valeurs de départ : {depart:?}");
+        assert!(!depart.contains_key("muet"));
+    }
+
+    /// **Bornée aux paramètres déclarés**, comme côté fenêtre : un réglage
+    /// retenu pour un paramètre que l'effet n'a plus disparaît de lui-même, au
+    /// lieu de voyager vers une boucle qui ne le lit plus.
+    #[test]
+    fn un_reglage_orphelin_ne_part_pas_vers_la_boucle() {
+        let retenus = valeurs(&[
+            ("speed", serde_json::json!(40)),
+            ("disparu", serde_json::json!(7)),
+        ]);
+        let depart = starting_params(&declare(), Some(&retenus));
+
+        assert!(!depart.contains_key("disparu"));
+        assert_eq!(depart.get("speed"), Some(&serde_json::json!(40)));
     }
 }
