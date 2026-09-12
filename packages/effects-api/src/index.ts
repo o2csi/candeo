@@ -75,11 +75,20 @@ export interface EffectContext {
    * paramétré par une couleur à passer par un transtypage, pour contourner une
    * déclaration fausse.
    */
-  readonly params: Record<string, number | string | boolean | Rgb>
+  readonly params: Record<string, ParamValue>
 }
 
 /** Un effet rend une image à chaque appel. */
 export type Effect = (ctx: EffectContext) => void
+
+/**
+ * Ce que vaut un paramètre réglé dans l'interface.
+ *
+ * Exactement l'ensemble des `default` que {@link ParamSpec} peut porter. Nommé
+ * plutôt qu'écrit deux fois : l'éditeur s'en sert pour typer ce qu'il envoie à
+ * `start_effect`, et les deux unions ne doivent pas pouvoir diverger.
+ */
+export type ParamValue = number | string | boolean | Rgb
 
 /** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
 export type ParamSpec =

@@ -8,6 +8,16 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [vue()],
 
+  build: {
+    // Monaco embarque le compilateur TypeScript : son ouvrier pese pres de
+    // 7 Mo, et le compilateur charge a la validation 3,5 Mo de plus. Le seuil
+    // par defaut (500 ko) avertirait donc a chaque construction d'un poids
+    // choisi : l'application est empaquetee, rien n'est telecharge a l'usage,
+    // et ces morceaux ne sont lus qu'a l'ouverture de l'editeur.
+    // Voir `docs/design/studio.md` §2.
+    chunkSizeWarningLimit: 8000,
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

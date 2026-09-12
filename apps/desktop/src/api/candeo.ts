@@ -7,6 +7,7 @@
  */
 
 import { Channel, invoke } from '@tauri-apps/api/core'
+import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import type { DeviceInfo, Effect, LayoutInfo, Rgb } from './types'
 
@@ -81,9 +82,79 @@ export function writeRow(row: number, colStart: number, colors: readonly Rgb[]):
   return invoke('write_row', { row, colStart, colors: flat })
 }
 
+// ---------------------------------------------------------------- bibliothèque
+
+/**
+ * Version de l'API d'effets que cette application sait servir.
+ *
+ * Miroir de `EFFECTS_API_VERSION` dans `src-tauri/src/storage.rs`, au même
+ * titre que les types de `api/types.ts` le sont de `lib.rs`. La divergence n'est
+ * pas silencieuse : un manifeste qui annonce une version plus récente que celle
+ * du Rust est **refusé à l'installation**, avec un message qui le dit.
+ *
+ * Elle ne vient pas de `@candeo/effects-api` : ce module décrit l'API, il ne se
+ * numérote pas lui-même — et tout ce qu'il exporte doit exister dans le jumeau
+ * `src-tauri/src/runtime/api.js`, ce qu'une constante de version n'a aucune
+ * raison de faire.
+ */
+export const EFFECTS_API_VERSION = 1
+
+/**
+ * Ce qui est écrit dans `manifest.json`, à côté de l'effet.
+ *
+ * `params` garde la forme de `ParamSpec` telle que déclarée en TypeScript : le
+ * Rust ne les interprète pas, les retyper là-bas créerait une seconde source de
+ * vérité.
+ */
+export interface EffectManifest {
+  name: string
+  description?: string
+  params?: Record<string, ParamSpec>
+  apiVersion: number
+}
+
+/**
+ * Écrit `source.ts`, `effect.js` et `manifest.json`, et rend l'`id` retenu.
+ *
+ * Les deux sources partent ensemble : sans le `.ts` l'effet ne serait plus
+ * modifiable, sans le `.js` il ne pourrait plus démarrer sans ouvrir la fenêtre
+ * — le transpileur vit ici, dans l'éditeur.
+ *
+ * L'`id` est **dérivé du nom** par le Rust, jamais repris tel quel. Deux
+ * enregistrements sous le même nom mettent donc à jour le même effet.
+ */
+export function installEffect(
+  sourceTs: string,
+  js: string,
+  manifest: EffectManifest,
+): Promise<string> {
+  return invoke('install_effect', { sourceTs, js, manifest })
+}
+
+/** La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur. */
+export function readEffectSource(id: string): Promise<string> {
+  return invoke('read_effect_source', { id })
+}
+
+/**
+ * Un effet de la bibliothèque : son manifeste, plus ce qui n'en fait pas partie.
+ *
+ * Les intégrés sont compilés dans le binaire et n'ont pas de dossier ; `kind`
+ * les distingue, pour que l'interface n'ait qu'une liste à afficher.
+ */
+export interface EffectEntry extends EffectManifest {
+  id: string
+  kind: 'builtin' | 'user'
+}
+
+/** Effets intégrés **et** installés, dans une seule liste, d'ordre stable. */
+export function listEffects(): Promise<EffectEntry[]> {
+  return invoke('list_effects')
+}
+
 // ---------------------------------------------------------------- moteur
 
-export type EffectParams = Record<string, number | string | boolean>
+export type EffectParams = Record<string, ParamValue>
 
 export interface EngineStatus {
   running: boolean

@@ -48,6 +48,85 @@ pas un analyseur maison mais **le compilateur TypeScript lui-même**. Son
 de compilateur, déjà payés par l'éditeur. `ts.transpileModule()` est donc
 disponible sans rien ajouter.
 
+> L'import passe par le chemin direct de `typescriptServices` et non par
+> `ts.worker.js` : ce dernier pose `self.onmessage`, ce qu'un module chargé dans
+> la fenêtre n'a aucune raison de faire. Ses **types**, eux, viennent du paquet
+> `typescript`, déjà là pour `vue-tsc` — seules ses déclarations sont lues, il ne
+> pèse rien dans la construction.
+
+### Comment la déclaration parvient au service de langage
+
+`?raw` lit `packages/effects-api/src/index.ts` **à la construction** et l'inscrit
+dans le paquet sous forme de chaîne ; `addExtraLib` la dépose à
+`file:///node_modules/@candeo/effects-api/index.ts`, et `paths` y envoie le nom
+du paquet. Le fichier reste donc la **seule source** : ni copie, ni `.d.ts`
+généré, ni étape de construction à tenir à jour.
+
+Monaco n'exige d'ailleurs pas une déclaration — `addExtraLib` accepte n'importe
+quel TypeScript, et le service en tire la même chose. Corps des fonctions
+compris, ce qui vaut mieux : l'infobulle de `hsv` montre alors le code réel.
+
+Vérifié en reconstituant l'hôte de l'ouvrier avec le compilateur que Monaco
+embarque : sur le modèle de départ, **aucun diagnostic** ; l'infobulle sur `hsv`
+rend `(h: number, s: number, v: number): Rgb` ; une faute de frappe est
+signalée. La chaîne entière est donc contrôlée, pas supposée.
+
+### Ni DOM ni Node dans l'éditeur
+
+`lib: ['es2020']`, et rien d'autre. Un effet s'exécute dans QuickJS : il n'y a ni
+`document`, ni `fetch`, ni même `console`. Les proposer en autocomplétion serait
+promettre ce que le moteur ne fournit pas, et l'erreur ne se verrait qu'à la
+première image.
+
+`strict` entier, `noImplicitAny` compris — et c'est **`satisfies EffectModule`
+qui fait partie du contrat**, pas le contrôle qui plie.
+
+Sans ce `satisfies`, un objet littéral n'a aucun type contextuel : `layout`,
+`time` et `frame` sont implicitement `any`. Désactiver `noImplicitAny` ferait
+alors passer l'effet — au prix de l'autocomplétion, disparue en silence, dans le
+seul cas où elle manque. Ce serait renoncer à la raison d'avoir choisi Monaco
+pour éviter un message d'erreur.
+
+Le modèle de départ porte donc le `satisfies`, et pas par recopie : il **est**
+l'effet de référence du paquet, lu tel quel. Vérifié au compilateur, `strict`
+complet, zéro diagnostic. Un auteur qui retire le `satisfies` voit une erreur
+explicite plutôt qu'un typage qui s'évapore.
+
+### Les ouvriers sont empaquetés, pas téléchargés
+
+Monaco charge ses ouvriers par `new Worker(...)`. `?worker` de Vite en fait des
+actifs du projet, en développement comme dans l'application livrée. Aucun CDN :
+l'application s'ouvre hors ligne, ce qui est la moindre des choses pour une
+application de bureau.
+
+### Ce que Monaco pèse
+
+| | construction complète | morceau d'entrée |
+|---|---|---|
+| avant | 354 ko | 87,4 ko |
+| après | 14,5 Mo | 89,7 ko |
+
+L'essentiel du poids est l'ouvrier TypeScript (6,9 Mo) et le compilateur chargé
+à la validation (3,5 Mo). Mais **le morceau d'entrée ne bouge pas** : l'éditeur
+est derrière une route à chargement différé, la galerie ne paie rien. C'est le
+seul des deux chiffres qui compte — l'application est empaquetée, il n'y a pas
+de téléchargement à l'usage.
+
+### Un effet en cours d'écriture ne se perd pas
+
+Tant qu'il n'est pas validé, un effet n'existe nulle part : `install_effect` est
+le seul chemin vers le disque, et il demande du code qui compile. Or on quitte
+l'éditeur bien avant d'en être là. L'éditeur enregistre donc en continu dans le
+stockage local de la vue web, sous une clé par effet, et restaure à l'ouverture.
+
+Pas de boîte de dialogue « voulez-vous enregistrer ? » : elle pose une question
+à laquelle on peut répondre de travers, et une seule fois. Un brouillon restauré
+ne perd rien, ne demande rien, et se jette d'un bouton. Un texte identique à la
+version enregistrée n'est d'ailleurs pas un brouillon : il est effacé, sans quoi
+l'éditeur annoncerait une restauration qui ne restaure rien.
+
+La copie durable, elle, reste le `source.ts` écrit à l'installation.
+
 ### Le simulateur est permanent
 
 Une bascule « envoyer au clavier » sépare l'aperçu de l'écriture réelle. Itérer
@@ -174,13 +253,34 @@ comme absent, pas l'omettre.
 
 ## 7. Reste à faire pour la v1
 
-- [ ] Écran galerie — vignettes animées des effets
-- [ ] Écran de sélection du périphérique
-- [ ] Éditeur Monaco + `.d.ts` de `@candeo/effects-api`
-- [ ] Simulateur — tracé ISO pleine taille, alimenté par les images du moteur
-- [ ] Validation : `ts.transpileModule()` → commande `install_effect`
-- [ ] Moteur `rquickjs` côté Rust : fil de rendu indépendant de la fenêtre,
-      module interne `@candeo/effects-api`, émission de l'événement « frame »
+- [x] Écran de sélection du périphérique
+- [x] Éditeur Monaco + déclaration de `@candeo/effects-api`
+- [x] Simulateur — tracé ISO pleine taille, alimenté par les images du moteur
+- [x] Validation : `ts.transpileModule()` → commande `install_effect`
+- [x] Moteur `rquickjs` côté Rust : fil de rendu indépendant de la fenêtre,
+      module interne `@candeo/effects-api`, canal d'images
+- [ ] Écran galerie — vignettes animées des effets, et lancement depuis la
+      galerie. Les effets écrits sont listés sous « À vous » et s'y rouvrent ;
+      il leur manque l'aperçu qui permettrait d'en choisir un sans le lancer.
+- [ ] Réglage des paramètres déclarés — ils partent aujourd'hui à leur valeur
+      par défaut, lue dans le manifeste
 
 Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hors
 `monaco-editor`.
+
+### Ce que l'implémentation a précisé
+
+- **Le manifeste est lu, pas exécuté.** `name`, `description` et `params` sont
+  relevés dans l'arbre syntaxique, avec le compilateur déjà chargé. Les obtenir
+  en évaluant le module reviendrait à exécuter du code d'effet dans la fenêtre,
+  ce que le §3 s'interdit. Contrepartie explicite : ces trois champs doivent
+  être des **littéraux**, et un nom calculé est refusé avec un message qui le
+  dit.
+- **La bascule est réappliquée à chaque lancement.** `start_effect` repart d'un
+  état neuf, dont la sortie clavier est active ; sans cela, « ne pas envoyer »
+  serait oublié au démarrage suivant.
+- **Le canal d'images n'existe que pendant un effet.** Il est déposé dans l'état
+  de la boucle en cours, et chaque `start_effect` en crée un neuf : l'éditeur se
+  réabonne après chaque lancement, pas une fois pour toutes à l'ouverture.
+- **Quitter l'éditeur n'arrête pas l'effet.** Le canal libéré coupe le flux
+  d'images ; la boucle continue d'alimenter le clavier, fenêtre fermée comprise.

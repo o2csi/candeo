@@ -7,13 +7,15 @@
  * fermeture de l'application, donc souvent le bon choix. Le reléguer en bas de
  * liste le ferait passer pour un mode dégradé.
  *
- * Les deux autres dépendent d'un moteur qui n'existe pas encore. Elles sont
- * affichées vides et dites comme telles : une liste inventée serait plus
- * trompeuse qu'une liste absente.
+ * Les deux autres natures viennent de `list_effects`, qui les rend dans une
+ * seule liste : `kind` les distingue, on ne fait que les répartir. Aucune
+ * n'est encore lançable d'ici — les vignettes animées, et le bouton qui va
+ * avec, sont l'objet de l'issue #11.
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { listEffects, type EffectEntry } from '../api/candeo'
 import EffectCard from '../components/EffectCard.vue'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects } from '../composables/useEffects'
@@ -21,6 +23,32 @@ import { hardwareEffects, useEffects } from '../composables/useEffects'
 const router = useRouter()
 const { layout, busy } = useDevice()
 const { applied, applying, error, apply } = useEffects()
+
+/**
+ * La bibliothèque, intégrés et effets écrits confondus.
+ *
+ * Elle est listée ici parce que c'est le seul chemin pour ouvrir un effet dans
+ * l'éditeur : `/editor/:id` en relit la source par `read_effect_source`. Les
+ * intégrés s'y ouvrent aussi — ils sont là pour être lus, et leur JavaScript
+ * *est* leur source.
+ */
+const library = ref<EffectEntry[]>([])
+const listing = ref(true)
+/** Déjà lisible : les messages du Rust s'affichent tels quels. */
+const listError = ref<string | null>(null)
+
+const builtin = computed(() => library.value.filter((e) => e.kind === 'builtin'))
+const mine = computed(() => library.value.filter((e) => e.kind === 'user'))
+
+onMounted(async () => {
+  try {
+    library.value = await listEffects()
+  } catch (e) {
+    listError.value = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+  } finally {
+    listing.value = false
+  }
+})
 
 /** `layout` n'est renseigné qu'une fois un périphérique réellement ouvert. */
 const connected = computed(() => layout.value !== null)
@@ -58,6 +86,8 @@ const noDevice = computed(() => !connected.value && !busy.value)
     </p>
 
     <p v-if="error" class="failure" role="alert">{{ error }}</p>
+    <!-- Une seule alerte : la bibliothèque est lue d'un coup, elle échoue d'un coup. -->
+    <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
 
     <section class="group">
       <h2>Matériel</h2>
@@ -97,10 +127,20 @@ const noDevice = computed(() => !connected.value && !busy.value)
         Livrés avec l'application et exécutés par la boucle hôte : ils s'arrêtent quand
         l'application se ferme.
       </p>
-      <p class="pending">
-        Aucun pour l'instant — le fil de rendu (issue&nbsp;#6) et les effets livrés (issue&nbsp;#11)
-        restent à écrire. Rien n'est simulé ici : un effet affiché serait un effet qu'on ne peut
-        pas lancer.
+      <ul v-if="builtin.length" class="rows">
+        <li v-for="e in builtin" :key="e.id">
+          <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <span class="row-name">{{ e.name }}</span>
+            <span class="row-sub">{{ e.description || 'Sans description' }}</span>
+            <span class="row-go" aria-hidden="true">Lire ›</span>
+          </button>
+        </li>
+      </ul>
+
+      <p class="hint">
+        Ils sont écrits en JavaScript, contre l'API publique : les ouvrir montre exactement ce
+        qu'on peut écrire soi-même. Les enregistrer sous leur nom est refusé — un identifiant
+        intégré est réservé.
       </p>
     </section>
 
@@ -110,10 +150,25 @@ const noDevice = computed(() => !connected.value && !busy.value)
         Écrits dans l'éditeur. Même boucle hôte que les intégrés, mais conservés sur disque et
         relancés au démarrage.
       </p>
-      <p class="pending">
-        Aucun pour l'instant — ni l'éditeur (issue&nbsp;#10) ni le stockage (issue&nbsp;#4) ne sont
-        en place. Le bouton «&nbsp;＋&nbsp;» ouvre déjà l'éditeur, aujourd'hui un emplacement
-        réservé.
+
+      <ul v-if="mine.length" class="rows">
+        <li v-for="e in mine" :key="e.id">
+          <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <span class="row-name">{{ e.name }}</span>
+            <span class="row-sub">{{ e.description || 'Sans description' }}</span>
+            <span class="row-go" aria-hidden="true">Modifier ›</span>
+          </button>
+        </li>
+      </ul>
+
+      <p v-else-if="!listing" class="pending">
+        Aucun pour l'instant. «&nbsp;＋&nbsp;Nouvel effet&nbsp;» ouvre l'éditeur : valider y écrit
+        l'effet sur disque et le lance.
+      </p>
+
+      <p class="hint">
+        Les lancer d'ici, avec un aperçu animé, viendra avec la galerie (issue&nbsp;#11) : un
+        bouton sans vignette n'apprendrait rien de plus que le nom déjà écrit.
       </p>
     </section>
   </section>
@@ -213,6 +268,50 @@ const noDevice = computed(() => !connected.value && !busy.value)
   margin: var(--gap-2) 0 0;
   padding: 0;
   list-style: none;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  margin: var(--gap-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Une ligne entière cliquable plutôt qu'un lien au bout : la cible est plus
+   grande, et elle reste un seul arrêt au clavier. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-3);
+  width: 100%;
+  padding: var(--gap-3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+.row:hover {
+  border-color: var(--line-strong);
+}
+
+.row-name {
+  font-weight: 500;
+}
+
+.row-sub {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.row-go {
+  color: var(--accent);
+  font-size: 12px;
 }
 
 .hint,

@@ -10,10 +10,12 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@candeo/effects-api": "workspace:*",
     "@fontsource-variable/ibm-plex-sans": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-opener": "^2.5.5",
+    "monaco-editor": "^0.56.0",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"
   },

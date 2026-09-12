@@ -225,6 +225,11 @@ fonctionne.
 
 ### Ce que l'implémentation a précisé
 
+- **Le manifeste est relevé dans le code, pas en exécutant l'effet.** Le front
+  n'exécute jamais de code utilisateur : `name`, `description` et `params` sont
+  lus dans l'arbre syntaxique par le compilateur que Monaco embarque déjà. Ces
+  trois champs doivent donc être des littéraux, ce qui est refusé à la
+  validation plutôt que découvert à la première image.
 - **Un effet exporte par défaut.** La colle importe l'espace de noms plutôt que
   l'export par défaut : `import effect from 'effect'` échoue à la *liaison* du
   module quand il manque, avec un message de QuickJS qu'on ne peut relier à
