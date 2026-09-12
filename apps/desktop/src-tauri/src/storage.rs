@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::builtins;
+use crate::journal::LogLevel;
 use crate::runtime::swatch::{self, Swatch};
 use crate::{AppState, CmdResult, DeviceRef};
 
@@ -257,6 +258,21 @@ pub struct Settings {
     /// que d'écrire une copie des défauts que la prochaine version de l'effet
     /// contredirait.
     pub effect_params: Vec<EffectParamsRecord>,
+    /// Niveau du journal, quand quelqu'un l'a changé depuis l'application.
+    ///
+    /// `None` — donc absent du fichier — veut dire « le défaut », et non « pas de
+    /// journal » : écrire le défaut ferait croire à une décision là où il n'y en
+    /// a pas eu, et figerait au passage un choix que la prochaine version
+    /// pourrait vouloir revoir.
+    ///
+    /// **Il survit au redémarrage**, et c'est un arbitrage : le retour
+    /// automatique au défaut protégerait du disque plein, la persistance sert
+    /// celui qui traque un défaut **au démarrage** — l'adoption des appareils en
+    /// est un — à qui l'on ne peut pas demander de remonter le niveau après coup.
+    /// Le prix est payé par la mention qu'en fait l'interface. Voir
+    /// [`crate::journal`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_level: Option<LogLevel>,
 }
 
 impl Default for Settings {
@@ -269,6 +285,7 @@ impl Default for Settings {
             device: None,
             devices: Vec::new(),
             effect_params: Vec::new(),
+            log_level: None,
         }
     }
 }
@@ -943,11 +960,17 @@ pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
 ///
 /// Le magasin est résolu en premier, avant même l'arrêt : un dossier de
 /// configuration introuvable doit se dire sans avoir rien éteint.
+///
+/// Le niveau du journal repart au défaut avec le reste, **et tout de suite** : il
+/// vient d'être effacé du fichier, le laisser appliqué jusqu'au prochain
+/// lancement ferait mentir l'écran qui l'affiche.
 #[tauri::command]
 pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     let store = store(&app)?;
     crate::release_devices(&state);
-    store.reset_settings()
+    store.reset_settings()?;
+    crate::journal::revenir_au_defaut();
+    Ok(())
 }
 
 /// Retient les réglages d'un effet pour un appareil, sans toucher au reste.
@@ -1451,6 +1474,7 @@ mod tests {
                 effect: "respiration".into(),
                 values: valeurs(&[("period", serde_json::json!(12.5))]),
             }],
+            log_level: Some(LogLevel::Debug),
         };
 
         store.write_settings(&settings).unwrap();
@@ -1471,6 +1495,36 @@ mod tests {
         let settings = store.read_settings().unwrap();
         assert_eq!(settings.brightness, 10);
         assert_eq!(settings.active_effect, None);
+    }
+
+    /// Le niveau du journal **survit au redémarrage** — c'est l'arbitrage retenu
+    /// pour qui traque un défaut au démarrage — mais tant que personne ne l'a
+    /// changé, il n'apparaît pas dans le fichier : écrire le défaut ferait croire
+    /// à une décision là où il n'y en a pas eu.
+    #[test]
+    fn le_niveau_de_journal_se_retient_et_ne_s_ecrit_que_choisi() {
+        let (tmp, store) = store_temporaire();
+        let fichier = tmp.path().join("config").join("settings.json");
+
+        store.write_settings(&Settings::default()).unwrap();
+        let ecrit = fs::read_to_string(&fichier).unwrap();
+        assert!(
+            !ecrit.contains("logLevel"),
+            "le défaut a été écrit : {ecrit}"
+        );
+
+        let settings = Settings {
+            log_level: Some(LogLevel::Trace),
+            ..Settings::default()
+        };
+        store.write_settings(&settings).unwrap();
+        assert!(fs::read_to_string(&fichier)
+            .unwrap()
+            .contains(r#""logLevel": "trace""#));
+        assert_eq!(
+            store.read_settings().unwrap().log_level,
+            Some(LogLevel::Trace)
+        );
     }
 
     #[test]

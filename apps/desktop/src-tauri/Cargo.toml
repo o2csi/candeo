@@ -34,6 +34,24 @@ tauri-plugin-single-instance = "2"
 # module interne, sans bundler ni `node_modules`.
 rquickjs = { version = "0.13", features = ["loader"] }
 
+# Journal — voir `src/journal.rs`. `tracing` plutôt que `tauri-plugin-log`, qui
+# est première partie et réglerait l'essentiel en quelques lignes : il y a une
+# boucle de rendu par appareil, et « écriture refusée » ne sert à rien sans
+# savoir laquelle. Un *span* par boucle attache l'appareil et l'effet à tout ce
+# qui s'y journalise, sans trimballer un identifiant dans chaque appel.
+#
+# Ici seulement, et pas dans l'espace de travail : `candeo-protocol` et
+# `candeo-device` n'ont aucune dépendance, et c'est ce qui rend leurs tests
+# exécutables sans rien installer. Le jour où l'une d'elles voudrait journaliser,
+# `tracing` monterait dans `[workspace.dependencies]`.
+tracing = "0.1"
+# `env-filter` porte la directive et son analyse, `fmt` la mise en forme.
+# La recharge à chaud (`reload`) est dans le tronc, sans fonctionnalité à armer.
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# Rotation quotidienne et nombre de fichiers plafonné : une application
+# d'éclairage tourne des jours.
+tracing-appender = "0.2"
+
 [dev-dependencies]
 # Le stockage se teste dans un dossier temporaire, jamais dans celui de
 # l'utilisateur — et sans lancer Tauri.

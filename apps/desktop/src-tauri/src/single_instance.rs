@@ -57,7 +57,12 @@ pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
             // n'y a plus personne à qui refuser quoi que ce soit ; paniquer
             // emporterait l'instance survivante et les effets qu'elle fait
             // tourner, pour une fenêtre qui n'est pas venue au premier plan.
-            eprintln!("instance unique : {e}");
+            //
+            // `warn` : dégradé mais fonctionnel — l'exclusion a joué, seule la
+            // remontée de fenêtre a manqué. C'est la nuance que l'ancien
+            // `eprintln!` ne pouvait pas porter, faute d'être lisible en
+            // `release` : le binaire est compilé sans console.
+            tracing::warn!("instance unique : {e}");
         }
     })
 }

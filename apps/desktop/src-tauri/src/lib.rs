@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use storage::{DeviceState, Settings};
 
 mod builtins;
+mod journal;
 mod runtime;
 mod single_instance;
 /// Sondes matérielles, toutes `#[ignore]` — voir le module.
@@ -23,7 +24,11 @@ mod sonde;
 mod storage;
 
 /// Gabarits connus. Un seul pour l'instant.
-const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
+///
+/// Visible dans la crate : le diagnostic de [`journal`] énumère les mêmes
+/// appareils que [`list_devices`], et les recopier là-bas en ferait une seconde
+/// liste qui divergerait au premier gabarit ajouté.
+pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
 
 // ---------------------------------------------------------------- types exposés
 
@@ -51,7 +56,7 @@ pub struct DeviceRef {
 }
 
 impl DeviceRef {
-    fn of(layout: &Layout) -> Self {
+    pub(crate) fn of(layout: &Layout) -> Self {
         Self {
             vid: layout.vid,
             pid: layout.pid,
@@ -282,7 +287,7 @@ pub(crate) fn default_layout() -> &'static Layout {
 /// affiche telles quelles, elles doivent donc rester lisibles.
 type CmdResult<T> = Result<T, String>;
 
-fn hid() -> CmdResult<hidapi::HidApi> {
+pub(crate) fn hid() -> CmdResult<hidapi::HidApi> {
     hidapi::HidApi::new().map_err(|e| format!("initialisation HID impossible : {e}"))
 }
 
@@ -300,7 +305,7 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
 /// `None` veut dire **débranché**, `Some(None)` **branché sans série déclarée**.
 /// Le second n'est pas un cas dégénéré — c'est ce que rend hidraw sous Linux
 /// quand la règle udev n'accorde pas la lecture des attributs.
-fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
+pub(crate) fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
     api.device_list()
         .find(|d| {
             d.vendor_id() == layout.vid
@@ -377,14 +382,14 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
     let settings = match storage::store(app).and_then(|s| s.read_settings()) {
         Ok(settings) => settings,
         Err(e) => {
-            eprintln!("adoption : aucun appareil ouvert, {e}");
+            tracing::error!("adoption abandonnée, aucun appareil ouvert : {e}");
             return;
         }
     };
     let api = match hid() {
         Ok(api) => api,
         Err(e) => {
-            eprintln!("adoption : aucun appareil ouvert, {e}");
+            tracing::error!("adoption abandonnée, aucun appareil ouvert : {e}");
             return;
         }
     };
@@ -400,14 +405,24 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
     // ensemble. Rien d'autre n'a encore pu ouvrir quoi que ce soit — l'état vient
     // d'être construit et n'est pas encore confié au gestionnaire.
     for (layout, keyboard) in ouverts {
-        state.set_open(DeviceRef::of(layout), Some(keyboard));
+        let device = DeviceRef::of(layout);
+        // L'empreinte plutôt que la série : elle distingue deux exemplaires du
+        // même modèle sans divulguer lequel. Voir [`journal::empreinte`]. Le
+        // second `plugged` ne réénumère rien — il relit la liste que `api` tient
+        // déjà — et il évite de faire porter la série par [`OpenOutcome`], qui
+        // rend compte d'une tentative et n'a pas à décrire l'appareil.
+        let serie = journal::empreinte_de(plugged(&api, layout).flatten().as_deref());
+        tracing::info!(appareil = %device, serie, "appareil adopté ouvert");
+        state.set_open(device, Some(keyboard));
     }
 
     let mut failures = state.failures.lock().unwrap();
     for outcome in outcomes {
         match outcome.error {
             Some(e) => {
-                eprintln!("adoption : {} non ouvert — {e}", outcome.device);
+                // `error` et non `warn` : un appareil adopté qui ne s'ouvre pas,
+                // c'est l'éclairage de l'utilisateur qui ne s'allumera pas.
+                tracing::error!(appareil = %outcome.device, "appareil adopté non ouvert : {e}");
                 failures.insert(outcome.device, e);
             }
             None => {
@@ -485,6 +500,11 @@ fn adopt_device(
     }
     match Keyboard::open(&api, layout) {
         Ok(kb) => {
+            tracing::info!(
+                appareil = %device,
+                serie = journal::empreinte_de(serial.as_deref()),
+                "appareil piloté"
+            );
             // Les autres appareils ouverts le restent : adopter celui-ci n'est
             // pas un choix à la place des autres.
             state.set_open(device, Some(kb));
@@ -493,6 +513,7 @@ fn adopt_device(
         }
         Err(e) => {
             let message = e.to_string();
+            tracing::error!(appareil = %device, "appareil non ouvert : {message}");
             state
                 .failures
                 .lock()
@@ -518,6 +539,8 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
     let mut settings = store.read_settings()?;
     settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Ignored);
     store.write_settings(&settings)?;
+
+    tracing::info!(appareil = %device, "appareil ignoré et refermé");
 
     // « Laissé tranquille » : on ne garde pas ouvert ce qu'on s'engage à ne plus
     // toucher. La poignée est vidée, pas retirée : la boucle qui l'alimentait en
@@ -705,6 +728,16 @@ pub fn run() {
         .plugin(single_instance::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // **En tout premier**, et avant que le magasin ne soit résolu : un
+            // échec de résolution du dossier de configuration est exactement ce
+            // qu'on veut voir, et il arriverait sinon avant qu'il n'y ait de quoi
+            // l'écrire. C'est aussi le premier instant où `app_log_dir()` existe
+            // — tout ce qui précède, l'enregistrement des plugins, ne journalise
+            // pas. Le niveau retenu, lui, est relu juste après : on démarre au
+            // défaut puis on ajuste, jamais l'inverse.
+            journal::init(app.handle());
+            journal::relire_le_reglage(app.handle());
+
             let state = AppState::default();
             // Avant `manage` : l'état n'est plus accessible ensuite qu'à
             // travers le gestionnaire, et l'adoption n'a besoin que de lui.
@@ -740,6 +773,11 @@ pub fn run() {
             storage::set_settings,
             storage::reset_settings,
             storage::remember_effect_params,
+            journal::get_journal,
+            journal::set_log_level,
+            journal::open_log_dir,
+            journal::diagnostic,
+            journal::log_from_webview,
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");
