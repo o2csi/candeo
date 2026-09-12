@@ -7,7 +7,7 @@ use candeo_protocol::{Effect, Report, Rgb};
 
 pub mod layout;
 
-pub use layout::{Layout, DEATHSTALKER_V2_PRO};
+pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO};
 
 /// Identifiant fabricant Razer.
 pub const VID_RAZER: u16 = 0x1532;
