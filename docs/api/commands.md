@@ -130,10 +130,11 @@ suivante et cesse d'écrire, sans que les autres appareils soient touchés.
 Ne passe pas par HID, volontairement — ignorer un appareil doit rester possible
 quand c'est justement l'accès HID qui pose problème.
 
-> Il n'y a pas de commande pour revenir à `detected`. Les deux décisions qui
-> comptent sont « pilote-le » et « laisse-le tranquille » ; un troisième bouton
-> pour revenir à l'indécision ne répond à aucune question qu'on se pose devant
-> l'écran.
+> Il n'y a pas de commande pour ramener **un** appareil à `detected`. Les deux
+> décisions qui comptent sont « pilote-le » et « laisse-le tranquille » ; un
+> troisième bouton pour revenir à l'indécision ne répond à aucune question qu'on
+> se pose devant l'écran. `reset_settings` (§Réglages) les ramène **tous** à la
+> fois, et c'est une autre question : celle de repartir d'un état connu.
 
 ### `connect(vid, pid) -> LayoutInfo`
 
