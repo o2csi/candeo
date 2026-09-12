@@ -10,15 +10,18 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "vue": "^3.5.42",
+    "@fontsource-variable/ibm-plex-sans": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tauri-apps/api": "^2.11.1",
-    "@tauri-apps/plugin-opener": "^2.5.5"
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "vue": "^3.5.42",
+    "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@vitejs/plugin-vue": "^6.0.8",
     "typescript": "~6.0.3",
     "vite": "^8.3.0",
-    "vue-tsc": "^3.3.11",
-    "@tauri-apps/cli": "^2.11.4"
+    "vue-tsc": "^3.3.11"
   }
 }
