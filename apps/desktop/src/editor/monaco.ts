@@ -132,14 +132,17 @@ export function setupMonaco(): void {
     // rquickjs qui le résout vers le module interne de l'hôte.
     module: ModuleKind.ESNext,
     moduleResolution: ModuleResolutionKind.NodeJs,
+    // `strict` entier, `noImplicitAny` compris.
+    //
+    // Le désactiver rendrait `layout`, `time` et `frame` implicitement `any`
+    // dès que l'auteur retire le `satisfies EffectModule` du modèle — c'est-à-
+    // dire qu'il **supprimerait l'autocomplétion** dans le seul cas où elle
+    // manque, et sans rien dire. Or c'est elle qui justifie Monaco.
+    //
+    // `satisfies EffectModule` fait donc partie du contrat, et le modèle de
+    // départ comme la documentation l'écrivent. Un auteur qui l'enlève voit une
+    // erreur explicite plutôt qu'un typage qui s'évapore.
     strict: true,
-    // Seule exception à `strict`, et elle est nécessaire : la forme documentée
-    // d'un effet est `render({ layout, time, frame })`, sans annotation. Les
-    // paramètres n'y sont typés que si l'auteur écrit `satisfies EffectModule`
-    // — ce que fait le modèle de départ. Sans cette ligne, écrire l'effet
-    // documenté produirait trois « implicitly has an any type » et la
-    // validation le refuserait. Le contrôle reste entier partout ailleurs.
-    noImplicitAny: false,
     allowNonTsExtensions: true,
     // Ni DOM ni Node : un effet tourne dans QuickJS, côté Rust. Ni `document`,
     // ni `fetch`, ni même `console` n'y existent — les proposer en

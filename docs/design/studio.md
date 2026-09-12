@@ -78,12 +78,19 @@ signalée. La chaîne entière est donc contrôlée, pas supposée.
 promettre ce que le moteur ne fournit pas, et l'erreur ne se verrait qu'à la
 première image.
 
-`strict`, donc, à une exception près : `noImplicitAny` est désactivé. La forme
-documentée d'un effet est `render({ layout, time, frame })`, sans annotation ;
-ses paramètres ne sont typés que si l'auteur écrit `satisfies EffectModule` — ce
-que fait le modèle de départ. Laisser `noImplicitAny` ferait refuser l'effet
-**documenté** par l'éditeur lui-même. Le contrôle reste entier partout ailleurs,
-et quiconque garde le `satisfies` obtient tout : types, autocomplétion, erreurs.
+`strict` entier, `noImplicitAny` compris — et c'est **`satisfies EffectModule`
+qui fait partie du contrat**, pas le contrôle qui plie.
+
+Sans ce `satisfies`, un objet littéral n'a aucun type contextuel : `layout`,
+`time` et `frame` sont implicitement `any`. Désactiver `noImplicitAny` ferait
+alors passer l'effet — au prix de l'autocomplétion, disparue en silence, dans le
+seul cas où elle manque. Ce serait renoncer à la raison d'avoir choisi Monaco
+pour éviter un message d'erreur.
+
+Le modèle de départ porte donc le `satisfies`, et pas par recopie : il **est**
+l'effet de référence du paquet, lu tel quel. Vérifié au compilateur, `strict`
+complet, zéro diagnostic. Un auteur qui retire le `satisfies` voit une erreur
+explicite plutôt qu'un typage qui s'évapore.
 
 ### Les ouvriers sont empaquetés, pas téléchargés
 
