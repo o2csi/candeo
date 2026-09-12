@@ -67,6 +67,8 @@ use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+use crate::journal;
+
 pub mod swatch;
 
 /// Le module que l'hôte fournit, et que l'éditeur décrit par son `.d.ts`.
@@ -379,19 +381,31 @@ impl DeviceLoop {
     /// en avoir arrêté un laisserait deux boucles écrire sur le même appareil le
     /// temps que la première s'aperçoive qu'elle doit s'arrêter. Le raisonnement
     /// vaut par appareil, et le verrou attendu l'est aussi.
-    fn stop(&self) {
+    ///
+    /// `device` ne sert qu'au journal : une boucle ne connaît pas son appareil —
+    /// elle reçoit un gabarit et une sortie — et « effet arrêté » sans dire lequel
+    /// ne vaudrait rien avec deux claviers branchés.
+    fn stop(&self, device: DeviceRef) {
         let mut thread = self.thread.lock().unwrap();
-        if let Some(s) = self.shared.lock().unwrap().take() {
+        let tournait = self.shared.lock().unwrap().take().inspect(|s| {
             s.stop.store(true, Ordering::Relaxed);
-        }
+        });
         if let Some(h) = thread.take() {
             let _ = h.join();
+        }
+        // Seulement si quelque chose tournait : arrêter un appareil au repos est
+        // le geste le plus courant de tous — chaque suppression d'effet y passe —
+        // et n'apprend rien à personne.
+        if let Some(s) = tournait {
+            let effet = s.effect_id.lock().unwrap().clone();
+            tracing::info!(appareil = %device, effet, "effet arrêté");
         }
     }
 
     /// Démarre un effet sur cet appareil. Remplace celui qui tournait.
     fn start(
         &self,
+        device: DeviceRef,
         effect_id: String,
         js: String,
         params: String,
@@ -411,7 +425,7 @@ impl DeviceLoop {
 
         let shared = Arc::new(Shared::default());
         *shared.params.lock().unwrap() = params;
-        *shared.effect_id.lock().unwrap() = Some(effect_id);
+        *shared.effect_id.lock().unwrap() = Some(effect_id.clone());
 
         // Le contexte JavaScript est bâti **dans** le fil et n'en sort jamais :
         // les types de QuickJS ne traversent pas les fils, et les enfermer ici
@@ -419,26 +433,35 @@ impl DeviceLoop {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let s = Arc::clone(&shared);
 
+        let pour_le_fil = effect_id.clone();
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
-            .spawn(move || render_loop(s, js, layout, out, ready_tx))
+            .spawn(move || render_loop(device, pour_le_fil, s, js, layout, out, ready_tx))
             .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
 
         // On attend le verdict du chargement : une erreur de syntaxe doit
         // remonter à l'appel, pas se découvrir dans un état plus tard.
         match ready_rx.recv() {
             Ok(Ok(())) => {
+                tracing::info!(appareil = %device, effet = %effect_id, "effet démarré");
                 *self.shared.lock().unwrap() = Some(shared);
                 *thread = Some(handle);
                 Ok(())
             }
             Ok(Err(e)) => {
                 let _ = handle.join();
+                // `error` : l'effet demandé ne tournera pas, donc l'éclairage
+                // n'est pas celui qu'on a demandé. L'appelant reçoit le même
+                // message — le journal sert à qui lit après coup, et à qui n'a
+                // pas la fenêtre sous les yeux.
+                tracing::error!(appareil = %device, effet = %effect_id, "effet non démarré : {e}");
                 Err(e)
             }
             Err(_) => {
                 let _ = handle.join();
-                Err("le fil de rendu s'est arrêté avant d'avoir chargé l'effet".into())
+                let e = "le fil de rendu s'est arrêté avant d'avoir chargé l'effet".to_string();
+                tracing::error!(appareil = %device, effet = %effect_id, "{e}");
+                Err(e)
             }
         }
     }
@@ -499,7 +522,7 @@ impl Engine {
 
     pub fn stop(&self, device: DeviceRef) {
         if let Some(l) = self.existing(device) {
-            l.stop();
+            l.stop(device);
         }
     }
 
@@ -509,8 +532,8 @@ impl Engine {
     /// dans les deux cas on repart d'un état connu, et laisser tourner des
     /// boucles que plus rien ne désigne serait exactement le contraire.
     pub fn stop_all(&self) {
-        for (_, l) in self.all() {
-            l.stop();
+        for (device, l) in self.all() {
+            l.stop(device);
         }
     }
 
@@ -535,7 +558,7 @@ impl Engine {
             // Un arrêt attend la fin d'un fil, et on ne fait jamais attendre une
             // commande visant un autre appareil.
             if l.runs(effect) {
-                l.stop();
+                l.stop(device);
                 stopped.push(device);
             }
         }
@@ -574,7 +597,7 @@ impl Engine {
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
         self.device_loop(device)
-            .start(effect_id, js, params, layout, out)
+            .start(device, effect_id, js, params, layout, out)
     }
 }
 
@@ -586,12 +609,22 @@ impl Drop for Engine {
 
 /// Prépare le contexte QuickJS, puis tourne jusqu'à l'arrêt.
 fn render_loop(
+    device: DeviceRef,
+    effect_id: String,
     shared: Arc<Shared>,
     js: String,
     layout: &'static Layout,
     out: Box<dyn DeviceOut>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
+    // **Le span, et c'est la raison d'avoir choisi `tracing`.** Il y a une boucle
+    // par appareil : « écriture refusée » ne sert à rien sans savoir laquelle.
+    // Ouvert ici, il porte l'appareil et l'effet jusqu'à la fin du fil, et tout ce
+    // qui se journalise en dessous — y compris dans [`emit`] — les porte aussi,
+    // sans qu'un seul appel n'ait à les passer.
+    let span = tracing::info_span!("rendu", appareil = %device, effet = %effect_id);
+    let _entree = span.enter();
+
     let frame_len = layout.led_count();
 
     // Le budget naît ici et ne sort pas du fil : le gestionnaire d'interruption
@@ -642,7 +675,10 @@ fn render_loop(
                 consecutive_errors = 0;
                 // L'effet s'est rétabli : on efface, sinon l'interface
                 // afficherait une erreur périmée indéfiniment.
-                *shared.error.lock().unwrap() = None;
+                let avant = shared.error.lock().unwrap().take();
+                if journal::bascule(avant.as_deref(), None) == journal::Bascule::Retabli {
+                    tracing::info!("l'effet s'est rétabli");
+                }
                 emit(&shared, out.as_ref(), &bytes);
             }
             Err(e) => {
@@ -656,8 +692,19 @@ fn render_loop(
                     &format!("{} ms par image", BUDGET_IMAGE.as_millis()),
                 );
                 consecutive_errors += 1;
-                *shared.error.lock().unwrap() = Some(e);
+                // **Une ligne au début de la panne, pas une par image.** À 30
+                // images par seconde, journaliser chaque échec produirait trente
+                // lignes par seconde et enterrerait celle qui nomme la cause.
+                // C'est [`journal::bascule`] qui tient la règle.
+                let avant = shared.error.lock().unwrap().replace(e.clone());
+                if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
+                    tracing::warn!("l'effet a commencé à échouer : {e}");
+                }
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    tracing::error!(
+                        echecs = MAX_CONSECUTIVE_ERRORS,
+                        "effet arrêté après {MAX_CONSECUTIVE_ERRORS} échecs consécutifs : {e}"
+                    );
                     shared.stop.store(true, Ordering::Relaxed);
                     break;
                 }
@@ -906,13 +953,26 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
             // simulateur s'animait, la case « envoyer » restait cochée, et le
             // clavier gardait son image précédente. On lisait ça comme « seule
             // la première image est passée ».
+            // Rien à journaliser : écrire un effet **sans posséder le clavier**
+            // est un usage prévu, pas une panne. Le dire par image le noierait,
+            // et le dire une fois ferait passer pour un incident ce que
+            // `reachingKeyboard` rend déjà visible à l'écran.
             None => shared.reaching.store(false, Ordering::Relaxed),
             Some(Ok(())) => {
-                *shared.device_error.lock().unwrap() = None;
+                let avant = shared.device_error.lock().unwrap().take();
+                if journal::bascule(avant.as_deref(), None) == journal::Bascule::Retabli {
+                    tracing::info!("l'écriture vers l'appareil est rétablie");
+                }
                 shared.reaching.store(true, Ordering::Relaxed);
             }
             Some(Err(e)) => {
-                *shared.device_error.lock().unwrap() = Some(e);
+                // Même règle que pour l'erreur d'effet : le début de la panne,
+                // et rien d'autre. Un clavier débranché en cours de route
+                // échouerait à chaque image jusqu'à ce qu'on le rebranche.
+                let avant = shared.device_error.lock().unwrap().replace(e.clone());
+                if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
+                    tracing::warn!("l'écriture vers l'appareil a commencé à échouer : {e}");
+                }
                 shared.reaching.store(false, Ordering::Relaxed);
             }
         }

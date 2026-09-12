@@ -11,7 +11,16 @@
 
 import { onMounted, ref } from 'vue'
 
-import { resetSettings } from '../api/candeo'
+import {
+  diagnostic,
+  getJournal,
+  openLogDir,
+  resetSettings,
+  setLogLevel,
+  type JournalStatus,
+  type LogLevel,
+} from '../api/candeo'
+import { erreur } from '../api/journal'
 import type { DeviceState } from '../api/types'
 import { useDevice } from '../composables/useDevice'
 import { useEffectParams } from '../composables/useEffectParams'
@@ -70,12 +79,103 @@ async function reset(): Promise<void> {
     problem.value = message(e)
   } finally {
     working.value = false
-    // Tout a changé d'un coup : état de chaque appareil, ouverture, erreurs.
+    // Tout a changé d'un coup : état de chaque appareil, ouverture, erreurs —
+    // et le niveau du journal, que le Rust vient de ramener au défaut.
     await refresh()
+    await readJournal()
   }
 }
 
-onMounted(refresh)
+// ---------------------------------------------------------------- journal
+
+/**
+ * Les cinq niveaux, dits par ce qu'ils apportent et non par leur nom technique.
+ *
+ * Table plutôt que suite de ternaires, comme pour les états d'appareil :
+ * l'ajout d'un niveau ne doit pas pouvoir être oublié ici, le compilateur le
+ * réclame.
+ */
+const NIVEAUX: Record<LogLevel, string> = {
+  error: 'Erreurs seules',
+  warn: 'Avertissements',
+  info: 'Cycle de vie (défaut)',
+  debug: 'Détaillé — par image',
+  trace: 'Tout — par image',
+}
+
+const journal = ref<JournalStatus | null>(null)
+/** Ce qui a empêché d'agir sur le journal. */
+const journalProblem = ref<string | null>(null)
+/** Le diagnostic, une fois demandé. Montré même quand la copie a réussi. */
+const report = ref<string | null>(null)
+/** Ce que la copie a donné, à dire en une ligne. */
+const copied = ref<string | null>(null)
+
+async function readJournal(): Promise<void> {
+  try {
+    journal.value = await getJournal()
+  } catch (e) {
+    journalProblem.value = message(e)
+  }
+}
+
+/**
+ * Change le niveau, **sans redémarrer**.
+ *
+ * Le Rust rend l'état qui en résulte plutôt que de nous laisser le deviner :
+ * quand `CANDEO_LOG` impose le niveau, le réglage est écrit mais pas appliqué, et
+ * seul le Rust sait le dire.
+ */
+async function chooseLevel(event: Event): Promise<void> {
+  journalProblem.value = null
+  try {
+    journal.value = await setLogLevel((event.target as HTMLSelectElement).value as LogLevel)
+  } catch (e) {
+    journalProblem.value = message(e)
+    // Le menu affiche désormais un niveau qui n'a pas été retenu.
+    await readJournal()
+  }
+}
+
+async function showLogs(): Promise<void> {
+  journalProblem.value = null
+  try {
+    await openLogDir()
+  } catch (e) {
+    journalProblem.value = message(e)
+  }
+}
+
+/**
+ * Le diagnostic, copié **et** affiché.
+ *
+ * Les deux, parce que le presse-papiers peut refuser — le WebView le réserve aux
+ * contextes sûrs, et rien ici ne garantit qu'il le soit partout. Un texte affiché
+ * reste sélectionnable à la main ; un texte qu'on croit copié et qui ne l'est pas
+ * se découvre au moment de coller, dans le formulaire de rapport de bogue.
+ */
+async function copyDiagnostic(): Promise<void> {
+  journalProblem.value = null
+  copied.value = null
+  try {
+    const texte = await diagnostic()
+    report.value = texte
+    try {
+      await navigator.clipboard.writeText(texte)
+      copied.value = 'Copié dans le presse-papiers.'
+    } catch (e) {
+      copied.value = 'Copie refusée par le système — le texte est ci-dessous, à sélectionner.'
+      erreur('diagnostic', `presse-papiers indisponible : ${message(e)}`, e)
+    }
+  } catch (e) {
+    journalProblem.value = message(e)
+  }
+}
+
+onMounted(async () => {
+  await refresh()
+  await readJournal()
+})
 </script>
 
 <template>
@@ -151,6 +251,78 @@ onMounted(refresh)
       <div><dt>Taille d'une image</dt><dd class="num">{{ layout.frameLen }}</dd></div>
       <div><dt>Touches éclairées</dt><dd class="num">{{ layout.keys.length }}</dd></div>
     </dl>
+
+    <!--
+      Le journal. Ici plutôt qu'ailleurs parce que c'est le même moment : on
+      vient chercher pourquoi un clavier se comporte mal, on monte le niveau, on
+      ouvre le dossier, on copie le diagnostic. Les trois gestes se suivent.
+    -->
+    <section v-if="journal" class="journal" aria-labelledby="journal-title">
+      <h2 id="journal-title">Journal</h2>
+      <p class="note">
+        candeo écrit ce qu'il fait dans un fichier tournant, un par jour, sept au plus. C'est ce
+        qu'on lit quand quelque chose se passe mal sans que l'écran le dise.
+      </p>
+
+      <p v-if="journalProblem" class="err" role="alert">{{ journalProblem }}</p>
+
+      <div class="level">
+        <label for="log-level">Niveau</label>
+        <select
+          id="log-level"
+          :value="journal.setting ?? 'info'"
+          :disabled="busy"
+          @change="chooseLevel"
+        >
+          <option v-for="(libelle, niveau) in NIVEAUX" :key="niveau" :value="niveau">
+            {{ libelle }}
+          </option>
+        </select>
+        <span class="note">Appliqué tout de suite, sans relancer l'application.</span>
+      </div>
+
+      <!--
+        ⚠️ Rendre visible qu'un niveau élevé est actif. Il porte du par-image :
+        laissé en place et oublié, il remplit le disque en silence, et la
+        rotation plafonne le nombre de fichiers, pas la taille de celui du jour.
+        Il survit au redémarrage — c'est voulu, pour qui traque un défaut au
+        lancement — donc rien ne le désactivera tout seul.
+      -->
+      <p v-if="journal.verbose" class="warn" role="status">
+        Niveau détaillé actif : le journal enregistre chaque image et grossit vite. Il
+        <strong>reste actif après un redémarrage</strong> — le ramener à « cycle de vie » une fois
+        le relevé terminé.
+      </p>
+
+      <!--
+        La variable d'environnement l'emporte, toujours : c'est ce qui permet de
+        diagnostiquer une application qui ne va pas assez loin pour lire ses
+        réglages. Le dire, plutôt que de laisser croire qu'un réglage sans effet
+        a été pris en compte.
+      -->
+      <p v-if="journal.forcedByEnv" class="note" role="status">
+        CANDEO_LOG impose le niveau {{ journal.level ?? 'demandé' }} pour cette exécution. Le réglage
+        ci-dessus est retenu et s'appliquera au prochain lancement sans cette variable.
+      </p>
+
+      <div class="actions">
+        <button class="ghost" :disabled="!journal.dir" @click="showLogs">
+          Ouvrir le dossier des journaux
+        </button>
+        <button class="ghost" @click="copyDiagnostic">Copier le diagnostic</button>
+      </div>
+
+      <p v-if="journal.dir" class="mono path">{{ journal.dir }}</p>
+      <p v-else class="err">Aucun fichier : le journal n'a pas pu ouvrir son dossier.</p>
+
+      <p v-if="copied" class="note" role="status">{{ copied }}</p>
+      <!--
+        Affiché même quand la copie a réussi : un texte qu'on croit copié et qui
+        ne l'est pas se découvre au moment de coller, dans le formulaire de
+        rapport de bogue.
+      -->
+      <pre v-if="report" class="report">{{ report }}</pre>
+    </section>
 
     <!--
       La configuration, et elle seule. Le dire ici est ce qui empêche de
@@ -366,6 +538,74 @@ onMounted(refresh)
   margin: 0;
   padding-top: var(--gap-4);
   border-top: 1px solid var(--line);
+}
+
+.journal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--gap-2);
+  padding-top: var(--gap-4);
+  border-top: 1px solid var(--line);
+}
+
+.level {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+}
+
+.level select {
+  padding: 5px var(--gap-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+}
+
+/* Un avertissement, pas une erreur : rien n'est cassé, mais rien ne l'éteindra. */
+.warn {
+  margin: 0;
+  align-self: stretch;
+  padding: var(--gap-2) var(--gap-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  font-size: 13px;
+}
+
+.path {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Le diagnostic reste sélectionnable : c'est le repli quand le presse-papiers
+ * refuse, et la seule façon de vérifier ce qu'on s'apprête à publier.
+ */
+.report {
+  align-self: stretch;
+  max-height: 240px;
+  margin: 0;
+  padding: var(--gap-3);
+  overflow: auto;
+  background: var(--raised-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  user-select: text;
 }
 
 /* En dernier, et séparée : ce qui s'y trouve ne se reprend pas. */

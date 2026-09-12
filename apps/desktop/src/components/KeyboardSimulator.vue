@@ -34,6 +34,7 @@
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+import { erreur } from '../api/journal'
 import type { Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
 
@@ -209,8 +210,13 @@ if (import.meta.env.DEV) {
     () => {
       const problems = layoutProblems(props.layout, props.frame)
       if (problems.length) {
-        console.error(`Simulateur : ${problems.length} incohérence(s) gabarit ↔ image`)
-        for (const p of problems) console.error(`  · ${p}`)
+        // Une seule ligne, incohérences comprises : le journal est un fichier
+        // qu'on relit, et une panne éclatée sur N lignes se perd entre deux
+        // images. Le compte reste en tête — c'est ce qu'on cherche d'abord.
+        erreur(
+          'simulateur',
+          `${problems.length} incohérence(s) gabarit ↔ image : ${problems.join(' · ')}`,
+        )
       }
     },
     { immediate: true },

@@ -13,6 +13,8 @@
 
 import example from '@candeo/effects-api/src/example.ts?raw'
 
+import { erreur } from '../api/journal'
+
 const LOCAL = "'./index'"
 const PUBLIC = "'@candeo/effects-api'"
 
@@ -23,8 +25,9 @@ export const NEW_EFFECT = example.replace(LOCAL, PUBLIC)
 // n'arriverait qu'au démarrage de l'effet. `import.meta.env.DEV` est remplacé à
 // la compilation — rien de ceci ne subsiste dans l'application livrée.
 if (import.meta.env.DEV && !example.includes(LOCAL)) {
-  console.error(
-    `Modèle d'effet : ${LOCAL} est introuvable dans example.ts — le modèle importe ` +
-      'un module que le moteur ne saura pas résoudre.',
+  erreur(
+    'modèle',
+    `${LOCAL} est introuvable dans example.ts — le modèle importe un module que le ` +
+      'moteur ne saura pas résoudre.',
   )
 }

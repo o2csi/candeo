@@ -54,6 +54,7 @@ import {
   stopEffect,
   type DeviceEngineStatus,
 } from '../api/candeo'
+import { erreur } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 import CodeEditor from '../components/CodeEditor.vue'
 import DevicePill from '../components/DevicePill.vue'
@@ -320,6 +321,12 @@ async function store(run: boolean): Promise<void> {
     if (id.value !== installedId) await router.replace(`/editor/${installedId}`)
   } catch (e) {
     problem.value = message(e)
+    // **Le seul endroit où une erreur de compilation d'effet existe.** Le
+    // transpileur vit dans la fenêtre : sans cette ligne, le refus n'apparaît
+    // qu'à l'écran, et il a disparu quand on ouvre le journal. Le nom de
+    // l'effet accompagne le message — un journal relu une heure plus tard ne
+    // sait pas ce qui était affiché.
+    erreur('éditeur', `« ${id.value ?? 'nouvel effet'} » non validé : ${problem.value}`, e)
   } finally {
     busy.value = false
     await refreshStatus()

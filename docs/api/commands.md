@@ -494,7 +494,8 @@ on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
     pid: number,
     effect: string,              // identifiant de l'effet réglé
     values: Record<string, ParamValue>
-  }[]
+  }[],
+  logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace'
 }
 ```
 
@@ -641,6 +642,111 @@ sans l'autre.
 Toutes les commandes faillibles renvoient `Result<T, String>`. Le message est
 destiné à être **affiché tel quel** : il doit rester lisible par un humain, pas
 devenir un code à traduire côté front.
+
+---
+
+## Journal
+
+`tracing` + `tracing-subscriber` + `tracing-appender`, initialisés en tête du
+`setup` de l'application — **avant que le magasin ne soit résolu**, sinon un échec
+de résolution du dossier de configuration arriverait avant qu'il n'y ait de quoi
+l'écrire. Conception et arbitrages dans `src-tauri/src/journal.rs`.
+
+Le fichier tourne **par jour**, sept au plus, dans `app_log_dir()` — par l'API
+Tauri, jamais un chemin en dur : les journaux ne sont ni des données ni de la
+configuration, et sous Linux les trois dossiers diffèrent.
+
+| Niveau | Ce que ça veut dire |
+|---|---|
+| `error` | l'éclairage de l'utilisateur est cassé |
+| `warn` | dégradé mais fonctionnel — micrologiciel inattendu (#35), exclusion d'instance inopérante (#45) |
+| `info` | cycle de vie : appareil adopté, effet démarré, effet arrêté |
+| `debug` / `trace` | par image, **éteint par défaut** |
+
+**Les transitions, jamais les occurrences.** À 30 images par seconde, une écriture
+qui échoue produirait trente lignes par seconde et enterrerait la seule qui
+compte. Le journal suit exactement le modèle du moteur — « a commencé à échouer
+(raison) », « rétabli », « arrêté après 30 échecs » — et rien par image.
+
+**Un span par boucle de rendu**, portant l'appareil et l'effet. C'est la raison
+d'avoir pris `tracing` plutôt que `tauri-plugin-log` : il y a une boucle par
+appareil, et « écriture refusée » ne sert à rien sans savoir laquelle.
+
+**Le numéro de série ne figure nulle part.** Une empreinte stable (FNV-1a, 16
+chiffres hexadécimaux) le remplace : elle distingue deux exemplaires du même
+modèle sans divulguer lequel. Une énumération muette — hidraw sans règle udev —
+se dit `aucune`, ce qui n'est pas la même chose.
+
+### Priorité du niveau
+
+1. **`CANDEO_LOG` l'emporte**, toujours — c'est ce qui permet de diagnostiquer
+   une application qui ne va pas assez loin pour lire ses réglages. Elle accepte
+   un niveau seul (`debug`) ou une directive `EnvFilter` complète
+   (`candeo_desktop_lib::runtime=trace,warn`) ;
+2. sinon `settings.json`, champ `logLevel` ;
+3. sinon `info`.
+
+`CANDEO_LOG` et non `RUST_LOG` : cette dernière est partagée par tout l'outillage
+Rust, et quelqu'un qui l'a posée pour `cargo` changerait sans le vouloir le
+journal de l'application.
+
+### `get_journal() -> JournalStatus`
+
+```ts
+{
+  level: LogLevel | null,     // null : CANDEO_LOG porte une directive qu'aucun niveau ne résume
+  setting: LogLevel | null,   // ce que retient settings.json ; null = le défaut
+  forcedByEnv: boolean,
+  dir: string | null,         // null : le journal n'écrit pas sur disque
+  verbose: boolean            // le niveau actif porte du par-image
+}
+```
+
+### `set_log_level(level) -> JournalStatus`
+
+Change le niveau **sans redémarrer** (`tracing_subscriber::reload`), et le
+retient. Le défaut qu'on cherche peut ne pas survivre au redémarrage : un clavier
+qui décroche après deux heures, un appareil qui disparaît par intermittence —
+« relancez en mode détaillé » revient à demander de reproduire ce qu'on vient
+d'observer.
+
+**Il survit au redémarrage**, et c'est un arbitrage : le retour automatique au
+défaut protégerait du disque plein, la persistance sert celui qui traque un défaut
+au lancement. Le prix est payé par `verbose`, que l'interface affiche.
+
+Quand `CANDEO_LOG` est posée, le réglage est **écrit mais pas appliqué** — la
+priorité vaut pendant toute l'exécution, pas seulement au démarrage. Il vaudra au
+prochain lancement sans la variable, et `forcedByEnv` dit à l'interface de
+l'annoncer.
+
+`reset_settings()` ramène aussi le niveau au défaut, et tout de suite : il vient
+d'être effacé du fichier, le laisser appliqué ferait mentir l'écran.
+
+### `open_log_dir()`
+
+Ouvre le dossier des journaux dans le gestionnaire de fichiers du système. Un
+journal que personne ne sait trouver ne sert à rien, et le chemin dépend du
+système : le donner à lire ne suffit pas.
+
+### `diagnostic() -> string`
+
+Le texte à coller dans un rapport de bogue : version de l'application, système,
+appareils connus — branché, décision retenue, empreinte de série, gabarit — et
+état du moteur appareil par appareil. La version du micrologiciel y est annoncée
+comme non lue tant que #35 n'est pas fait, plutôt que passée sous silence.
+
+Ne peut pas échouer sur un appareil : ne pas pouvoir énumérer l'USB ou relire les
+réglages est exactement ce qu'un diagnostic doit **dire**, pas ce qui doit
+l'interrompre.
+
+### `log_from_webview(level, source, message)`
+
+Consigne dans le même fichier ce que voit la fenêtre : `app.config.errorHandler`
+et les refus de compilation d'effet, qui partaient jusqu'ici dans une console que
+personne n'ouvre — et qui n'existe pas en `release`, le binaire étant compilé
+`windows_subsystem = "windows"`. Cible `candeo_webview`, origine en champ.
+
+`level` exclut `trace` : le par-image vient du moteur, pas de la fenêtre.
 
 ---
 

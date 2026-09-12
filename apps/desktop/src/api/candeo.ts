@@ -430,3 +430,91 @@ export function subscribeFrames(
 export function engineStatus(): Promise<DeviceEngineStatus[]> {
   return invoke('engine_status')
 }
+
+// ---------------------------------------------------------------- journal
+
+/** Miroir de `LogLevel`, dans `src-tauri/src/journal.rs`. */
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace'
+
+/**
+ * Les niveaux que la fenêtre sait produire.
+ *
+ * Sans `trace` : le par-image vient du moteur, pas d'ici, et un niveau qu'on ne
+ * sait pas écrire n'a pas à être acceptable en argument.
+ */
+export type WebviewLevel = Exclude<LogLevel, 'trace'>
+
+/** Miroir de `JournalStatus`, dans `src-tauri/src/journal.rs`. */
+export interface JournalStatus {
+  /**
+   * Le niveau appliqué. `null` quand `CANDEO_LOG` porte une directive qu'aucun
+   * niveau ne résume — à afficher tel quel plutôt qu'en inventer un.
+   */
+  level: LogLevel | null
+  /** Le niveau retenu dans `settings.json`. `null` = le défaut. */
+  setting: LogLevel | null
+  /**
+   * Vrai si `CANDEO_LOG` impose le niveau. Le réglage est alors **écrit mais pas
+   * appliqué** : il vaudra au prochain lancement sans la variable.
+   */
+  forcedByEnv: boolean
+  /** Le dossier des journaux, `null` si le journal n'écrit pas sur disque. */
+  dir: string | null
+  /**
+   * Vrai si le niveau actif porte du **par-image**.
+   *
+   * ⚠️ C'est ce qui rend visible qu'un niveau élevé est actif : laissé en place
+   * et oublié, il remplit le disque en silence.
+   */
+  verbose: boolean
+}
+
+/** L'état du journal : niveau appliqué, niveau retenu, dossier. */
+export function getJournal(): Promise<JournalStatus> {
+  return invoke('get_journal')
+}
+
+/**
+ * Change le niveau **sans redémarrer**, et le retient.
+ *
+ * Le défaut qu'on cherche peut ne pas survivre au redémarrage — un clavier qui
+ * décroche après deux heures, un appareil qui disparaît par intermittence :
+ * « relancez en mode détaillé » revient à demander de reproduire ce qu'on vient
+ * d'observer.
+ *
+ * Il **survit au redémarrage**, et c'est un choix : un défaut qui ne se produit
+ * qu'au lancement existe. D'où `verbose`, qui sert à le dire.
+ */
+export function setLogLevel(level: LogLevel): Promise<JournalStatus> {
+  return invoke('set_log_level', { level })
+}
+
+/** Ouvre le dossier des journaux dans le gestionnaire de fichiers du système. */
+export function openLogDir(): Promise<void> {
+  return invoke('open_log_dir')
+}
+
+/**
+ * Le diagnostic, prêt à coller dans un rapport de bogue : version, système,
+ * appareils, état du moteur.
+ *
+ * Le numéro de série n'y figure pas — une empreinte stable le remplace, qui
+ * distingue deux exemplaires du même modèle sans divulguer lequel.
+ */
+export function diagnostic(): Promise<string> {
+  return invoke('diagnostic')
+}
+
+/**
+ * Consigne un enregistrement venu de la fenêtre dans le journal du Rust.
+ *
+ * À n'appeler que par la façade de `api/journal.ts` : elle seule sait qu'un
+ * échec de journalisation doit être avalé.
+ */
+export function logFromWebview(
+  level: WebviewLevel,
+  source: string,
+  message: string,
+): Promise<void> {
+  return invoke('log_from_webview', { level, source, message })
+}
