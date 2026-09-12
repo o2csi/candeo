@@ -11,6 +11,7 @@ use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
+mod builtins;
 mod runtime;
 mod storage;
 

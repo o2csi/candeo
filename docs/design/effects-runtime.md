@@ -83,6 +83,39 @@ Linux — et gratuite dans les deux cas.
 > Les effets **intégrés** ne sont pas sur disque : ils sont compilés dans le
 > binaire. Seuls les effets écrits par l'utilisateur ont un dossier.
 
+### Les effets intégrés sont du JavaScript, pas du Rust
+
+Ils vivent dans `apps/desktop/src-tauri/src/builtins/`, un fichier `.js` chacun,
+embarqués par `include_str!` et chargés par le moteur comme n'importe quel effet.
+
+Les écrire en Rust natif les rendrait plus rapides — et ne prouverait rien. Ils
+sont là pour être lus : le premier exemple qu'on ouvre doit être **exactement**
+ce qu'on peut écrire soi-même, même API, même `export default`. Un exemple qu'on
+ne peut pas reproduire n'est pas un exemple, c'est une démonstration.
+
+Conséquence assumée : ils n'ont pas de `.ts`. Leur JavaScript est leur source,
+donc rien à transpiler à la compilation, et `read_effect_source` les rend tels
+qu'ils s'exécutent.
+
+Le manifeste, lui, est écrit deux fois — en Rust pour que lister la bibliothèque
+n'instancie aucun moteur, et dans le module parce que c'est le contrat de l'API.
+Un test charge chaque effet et compare les deux ; le module fait foi.
+
+### Un identifiant intégré est réservé
+
+Les intégrés partagent l'espace de noms des effets utilisateur : même validation,
+même `id` dans `settings.json`. Deux garde-fous, dans cet ordre :
+
+1. `install_effect` **refuse** un nom qui dérive vers un identifiant intégré ;
+2. la résolution `id → JavaScript` consulte les intégrés **d'abord**.
+
+Le second n'est utile que si le premier a été contourné — un dossier copié à la
+main, une bibliothèque héritée d'une version où l'identifiant était libre. Le
+sens de la priorité découle de ce qu'on refuse : une entrée marquée `builtin`
+dans la galerie doit exécuter le code livré. La priorité inverse laisserait un
+effet utilisateur se glisser sous un nom connu, le manifeste de l'intégré affiché
+et un autre code exécuté.
+
 ---
 
 ## 4. Le moteur — une boucle, deux sorties
@@ -274,6 +307,7 @@ c'est le seul cas où le calcul changerait.
 - [x] Commande d'abonnement renvoyant les images par `Channel`
 - [x] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
 - [x] Lecture et écriture de `settings.json`
+- [x] Effets intégrés, écrits contre l'API publique
 - [x] Règle udev, livrée par les paquets `deb` et `rpm`
 - [x] Compilation et empaquetage Linux vérifiés en intégration continue
 - [ ] Reprise de l'effet actif au démarrage
