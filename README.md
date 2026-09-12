@@ -16,6 +16,14 @@ Le protocole a été relevé par capture du bus USB, puis **validé en écriture
 directe** — couleurs unies, dégradé par rangée, écriture partielle de rangée et
 bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 
+| Couche | État |
+|---|---|
+| `candeo-protocol` — rapports et somme de contrôle | fait, testé contre une trame capturée |
+| `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
+| Commandes Tauri | 9 commandes câblées — voir [`docs/api/`](docs/api/commands.md) |
+| Interface Vue | conçue, pas encore écrite — voir [`docs/design/`](docs/design/studio.md) |
+| Moteur d'effets utilisateur | conçu : `esbuild-wasm` → `rquickjs` |
+
 ---
 
 ## Origine du protocole
@@ -50,11 +58,34 @@ candeo/
 │       └── src-tauri/     liaison Rust, boucle de rendu
 ├── packages/
 │   └── effects-api/       types TypeScript pour l'écriture d'effets
-└── docs/protocol/         relevé du protocole et captures
+└── docs/
+    ├── protocol/          relevé du protocole et méthode de capture
+    ├── api/               commandes exposées au front
+    └── design/            décisions d'interface, validées avant code
 ```
 
 La séparation `protocol` / `device` est délibérée : la construction des rapports
 et la somme de contrôle se testent **sans matériel**, en intégration continue.
+
+---
+
+## Conception de l'interface
+
+Les décisions sont figées avant d'écrire du Vue, et documentées dans
+[`docs/design/studio.md`](docs/design/studio.md). Maquette de référence :
+non publiée
+
+Les trois partis pris qui structurent le reste :
+
+- **La galerie d'effets est l'écran d'accueil**, pas l'éditeur. Un « ＋ » entre en
+  édition ; la plupart des lancements servent à choisir, pas à écrire.
+- **Un effet utilisateur est validé, puis compilé** — TypeScript transpilé par
+  `esbuild-wasm`, exécuté par `rquickjs` côté Rust. Le motif n'est **pas** la
+  performance (132 LED × 60 img/s = 7 920 couleurs/s, trivial) : c'est qu'un effet
+  doit **tourner fenêtre fermée**.
+- **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
+  périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
+  écrite à la main.
 
 ---
 
@@ -126,9 +157,10 @@ Windows 11).
 
 ## Pièges rencontrés, pour mémoire
 
-- L'image doit couvrir **toutes** les positions de la matrice (132 pour le
-  DeathStalker), pas seulement celles portant une LED. En envoyer moins laisse
-  les dernières rangées figées sur leur valeur précédente.
+- **132 et 106 ne sont pas la même chose.** La matrice fait 6 × 22 = **132**
+  cases, et c'est ce qu'une image doit couvrir ; **106** seulement portent une
+  touche. En envoyer 106 laisse les dernières rangées figées sur leur valeur
+  précédente — symptôme vécu : la rangée du bas restée blanche.
 - La chaîne de variante du périphérique **change avec le micrologiciel**
   (`v1.4 / Unkown Variant` → `v1.5 / Quartz`). Identifier sur VID / PID / série.
 - Le tampon `HidD_SetFeature` fait **91 octets** : identifiant de rapport, puis
