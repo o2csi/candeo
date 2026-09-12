@@ -8,14 +8,8 @@
 > `HidD_SetFeature` / `HidD_GetFeature`.
 >
 > **Tout ce qui suit vaut pour le micrologiciel v1.5**, relevé les 11 et 12/09/2026.
-> Le journal du §11 date chaque fait. C'est cette provenance qui permet de
-> diagnostiquer un comportement inattendu — pas une déclaration d'origine.
->
-> Quelques points sont **repris d'une source publique plutôt que mesurés** : ils sont
-> signalés comme tels à l'endroit où ils apparaissent, et reconfirmés sur l'appareil
-> quand c'était possible — la disposition `fr_FR` recoupée avec notre propre table de
-> touches, les identifiants d'effet vérifiés un à un par relecture. Ce qui n'a pas pu
-> être vérifié est marqué **non vérifié**, et le reste au §10.
+> Le journal du §11 date chaque fait. Ce qui n'a pas pu être vérifié sur l'appareil
+> est marqué **non vérifié**, et le reste au §10.
 >
 > Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur relevé
 > aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du Code de la
