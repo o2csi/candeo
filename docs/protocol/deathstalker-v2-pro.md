@@ -2,18 +2,24 @@
 
 **Relevé des 11–12/09/2026 · validé en écriture directe**
 
-> **Origine des informations.** Établi **uniquement par observation du matériel** :
-> énumération PnP Windows, interrogation d'un serveur SDK par son protocole réseau,
-> capture du bus USB (USBPcap 1.5.4.0 + Wireshark 4.6.8), puis **écriture directe**
-> via `HidD_SetFeature`.
+> **Origine des informations.** Établi par observation du matériel : énumération PnP
+> Windows, interrogation d'un serveur SDK par son protocole réseau, capture du bus USB
+> (USBPcap 1.5.4.0 + Wireshark 4.6.8), puis **écriture et lecture directes** via
+> `HidD_SetFeature` / `HidD_GetFeature`.
 >
-> **Aucun code source tiers n'a été consulté.** Ni OpenRGB, ni openrazer, ni les
-> greffons SignalRGB.
+> **Tout ce qui suit vaut pour le micrologiciel v1.5**, relevé les 11 et 12/09/2026.
+> Le journal du §11 date chaque fait. C'est cette provenance qui permet de
+> diagnostiquer un comportement inattendu — pas une déclaration d'origine.
+>
+> Quelques points sont **repris d'une source publique plutôt que mesurés** : ils sont
+> signalés comme tels à l'endroit où ils apparaissent, et reconfirmés sur l'appareil
+> quand c'était possible — la disposition `fr_FR` recoupée avec notre propre table de
+> touches, les identifiants d'effet vérifiés un à un par relecture. Ce qui n'a pas pu
+> être vérifié est marqué **non vérifié**, et le reste au §10.
 >
 > Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur relevé
 > aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du Code de la
-> propriété intellectuelle** (directive 2009/24/CE, article 6). Ce document et son
-> implémentation ne sont **pas** une œuvre dérivée d'OpenRGB.
+> propriété intellectuelle** (directive 2009/24/CE, article 6).
 
 ---
 
@@ -355,8 +361,8 @@ Relevé le 12/09/2026 sur notre exemplaire, micrologiciel v1.5.
 | `0x87` | `01 05` | **inconnu** | inconnu d'OpenRazer, « valeurs de retour variables » |
 | `0x80`, `0x88`–`0x8f` | — | `0x05` non pris en charge | |
 
-Le numéro de série est **volontairement tronqué ici** : il identifie un exemplaire
-précis.
+La valeur rendue par `0x82` est exactement celle du §1 — c'est **la** source du
+numéro de série, et la seule.
 
 ⚠️ **Le descripteur USB ne porte aucun numéro de série** (`serial_number()` est
 vide sur les quatre interfaces) — seule cette commande en donne un. Et

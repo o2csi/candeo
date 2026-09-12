@@ -56,7 +56,9 @@ fn ouvrir() -> hidapi::HidDevice {
     let api = hidapi::HidApi::new().expect("HID");
     let info = api
         .device_list()
-        .find(|d| d.vendor_id() == VID && d.product_id() == PID && d.interface_number() == INTERFACE)
+        .find(|d| {
+            d.vendor_id() == VID && d.product_id() == PID && d.interface_number() == INTERFACE
+        })
         .expect("DeathStalker V2 Pro introuvable — branché ?");
     info.open_device(&api).expect("ouverture")
 }
@@ -238,8 +240,14 @@ fn sonde_etat_sur_commande_invalide() {
     let cas: [(&str, [u8; REPORT_LEN + 1]); 4] = [
         ("témoin — luminosité, valide", report(0x04, &[0, 0, 0x80])),
         ("classe inexistante 0xee", report_classe(0xee, 0x01, 0x02)),
-        ("classe éclairage, commande 0xee", report_classe(0x0f, 0xee, 0x02)),
-        ("taille aberrante sur commande valide", report_classe(0x0f, 0x04, 0x50)),
+        (
+            "classe éclairage, commande 0xee",
+            report_classe(0x0f, 0xee, 0x02),
+        ),
+        (
+            "taille aberrante sur commande valide",
+            report_classe(0x0f, 0x04, 0x50),
+        ),
     ];
 
     for (nom, mut trame) in cas {
@@ -313,7 +321,8 @@ fn sonde_relecture_eclairage() {
         dev.send_feature_report(&report(0x02, &args)).ok();
         std::thread::sleep(Duration::from_millis(150));
 
-        dev.send_feature_report(&report_classe(0x0f, 0x82, 0x03)).ok();
+        dev.send_feature_report(&report_classe(0x0f, 0x82, 0x03))
+            .ok();
         std::thread::sleep(Duration::from_millis(60));
         match lire(&dev) {
             Some(r) => println!(
@@ -357,7 +366,10 @@ fn sonde_descripteurs_eclairage() {
 #[ignore]
 fn sonde_descripteur_usb() {
     let api = hidapi::HidApi::new().expect("HID");
-    for d in api.device_list().filter(|d| d.vendor_id() == VID && d.product_id() == PID) {
+    for d in api
+        .device_list()
+        .filter(|d| d.vendor_id() == VID && d.product_id() == PID)
+    {
         let r = d.release_number();
         println!(
             "interface {:>2} | release_number = 0x{r:04x} (soit {}.{:02}) | série {:?} | produit {:?}",
