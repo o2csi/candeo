@@ -57,6 +57,30 @@ export interface Compiled {
 }
 
 /**
+ * Le nom déclaré par la source, sans rien exécuter.
+ *
+ * `null` quand la source n'est pas (encore) analysable — on écrit du code, il
+ * est incomplet la plupart du temps. L'appelant garde alors le dernier nom
+ * connu plutôt que de vider son champ à chaque frappe.
+ */
+export async function nameInSource(source: string): Promise<string | null> {
+  const ts = await compiler()
+  const file = ts.createSourceFile(FILE, source, ts.ScriptTarget.ES2020, true)
+
+  let exported: TS.Expression
+  try {
+    exported = unwrap(ts, defaultExport(ts, file))
+  } catch {
+    return null
+  }
+  if (!ts.isObjectLiteralExpression(exported)) return null
+
+  const literal = member(ts, exported, 'name')
+  if (!literal || literal === 'méthode' || !ts.isStringLiteralLike(literal)) return null
+  return literal.text
+}
+
+/**
  * Renomme l'effet **dans sa source**.
  *
  * Sert à ouvrir un effet intégré comme une copie : l'utilisateur voit le

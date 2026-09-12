@@ -50,7 +50,7 @@ import CodeEditor from '../components/CodeEditor.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
-import { compile, renameInSource } from '../editor/effect'
+import { compile, nameInSource, renameInSource } from '../editor/effect'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
 import { useEngineFrames } from '../keyboard/engineFrames'
@@ -151,6 +151,7 @@ async function open(): Promise<void> {
     restored.value = draft !== null
   } finally {
     loading.value = false
+    await refreshName()
   }
 }
 
@@ -159,6 +160,32 @@ function discard(): void {
   source.value = saved.value
   restored.value = false
   clearDraft(id.value)
+}
+
+// ---------------------------------------------------------------- nom
+
+/**
+ * Le nom, modifiable sans toucher au code.
+ *
+ * **La source reste la vérité** : le champ l'affiche et la réécrit, il ne
+ * double pas la donnée. C'est ce qui évite qu'un nom changé dans le code et un
+ * nom changé dans le champ finissent par se contredire — et c'est aussi le
+ * premier pas vers les métadonnées en formulaire.
+ *
+ * La réécriture a lieu à la validation du champ, pas à chaque touche : remplacer
+ * le contenu de Monaco pendant la frappe déplacerait le curseur.
+ */
+const name = ref('')
+
+async function refreshName(): Promise<void> {
+  const found = await nameInSource(source.value)
+  if (found !== null) name.value = found
+}
+
+async function rename(): Promise<void> {
+  const wanted = name.value.trim()
+  if (wanted === '' || wanted === (await nameInSource(source.value))) return
+  source.value = await renameInSource(source.value, wanted)
 }
 
 // ---------------------------------------------------------------- brouillon
@@ -179,6 +206,8 @@ watch(source, (value) => {
   draftTimer = window.setTimeout(() => {
     if (value === saved.value) clearDraft(id.value)
     else writeDraft(id.value, value)
+    // Le nom a pu changer dans le code : le champ suit.
+    void refreshName()
   }, DRAFT_DELAY)
 })
 
@@ -201,7 +230,7 @@ async function refresh(): Promise<void> {
  * un `apiVersion` que cette application ne connaît pas. Ce n'est qu'après que
  * le moteur charge le `.js` — qui doit donc être sur disque d'abord.
  */
-async function validate(): Promise<void> {
+async function store(run: boolean): Promise<void> {
   busy.value = true
   problem.value = null
   try {
@@ -218,14 +247,20 @@ async function validate(): Promise<void> {
     clearDraft(id.value)
     restored.value = false
     saved.value = source.value
+    // L'effet a désormais une existence propre : ce n'est plus la copie d'un
+    // intégré, c'est le sien.
+    derivedFrom.value = null
 
-    await startEffect(installedId, params)
-    // `start_effect` repart d'un état neuf, dont la sortie clavier est active.
-    // Sans cette ligne, « ne pas envoyer » serait oublié à chaque lancement.
-    if (!toKeyboard.value) await setOutputToKeyboard(false)
-    // Le canal vit dans l'état de la boucle : un nouveau départ, un nouvel
-    // abonnement.
-    await listen()
+    if (run) {
+      await startEffect(installedId, params)
+      // `start_effect` repart d'un état neuf, dont la sortie clavier est
+      // active. Sans cette ligne, « ne pas envoyer » serait oublié à chaque
+      // lancement.
+      if (!toKeyboard.value) await setOutputToKeyboard(false)
+      // Le canal vit dans l'état de la boucle : un nouveau départ, un nouvel
+      // abonnement.
+      await listen()
+    }
 
     // L'identifiant est dérivé du nom par le Rust. Le porter dans la route,
     // c'est ce qui fait que rouvrir cet écran relit bien cet effet.
@@ -237,6 +272,12 @@ async function validate(): Promise<void> {
     await refresh()
   }
 }
+
+/** Enregistre sans lancer — on met de côté un effet qu'on ne veut pas voir tourner. */
+const save = () => store(false)
+
+/** Enregistre puis lance. */
+const validate = () => store(true)
 
 /**
  * Arrête la boucle. La dernière image reste au simulateur comme elle reste sur
@@ -305,7 +346,23 @@ onBeforeUnmount(() => {
   <section class="page">
     <header class="head">
       <button class="ghost" @click="router.push('/')">Retour</button>
-      <h1>Éditeur</h1>
+
+      <!--
+        Le nom se change ici, sans toucher au code — mais la source reste la
+        vérité : ce champ la réécrit, il ne double pas la donnée.
+      -->
+      <label class="name">
+        <span class="sr-only">Nom de l'effet</span>
+        <input
+          v-model="name"
+          type="text"
+          :disabled="loading"
+          placeholder="Nom de l'effet"
+          @change="rename"
+          @keyup.enter="rename"
+        />
+      </label>
+
       <p class="what">
         {{ derivedFrom ? `copie de ${derivedFrom}` : (id ?? 'nouvel effet') }}
       </p>
@@ -322,6 +379,8 @@ onBeforeUnmount(() => {
       </label>
 
       <button class="ghost" :disabled="busy || !running" @click="halt">Arrêter</button>
+      <!-- Enregistrer sans lancer : on met de côté un effet en chantier. -->
+      <button class="ghost" :disabled="busy || loading" @click="save">Enregistrer</button>
       <button class="solid" :disabled="busy || loading" @click="validate">
         {{ busy ? 'Un instant…' : 'Valider et lancer' }}
       </button>
@@ -402,6 +461,30 @@ onBeforeUnmount(() => {
   gap: var(--gap-3);
   padding: var(--gap-3) var(--gap-4);
   border-bottom: 1px solid var(--line);
+}
+
+.name input {
+  padding: 4px var(--gap-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  /* Assez large pour un nom, sans pousser le reste de la barre. */
+  width: 22ch;
+}
+
+/* La bordure n'apparaît qu'au survol ou à la saisie : au repos, c'est un titre. */
+.name input:hover:not(:disabled),
+.name input:focus {
+  border-color: var(--line-strong);
+  background: var(--raised-2);
+}
+
+.name input::placeholder {
+  color: var(--text-faint);
+  font-weight: 400;
 }
 
 .what {
