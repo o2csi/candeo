@@ -24,6 +24,17 @@ jobs:
   # l'apparition d'un avis ne masque pas une régression de code.
   audit:
     runs-on: ubuntu-latest
+    # `rustsec/audit-check` publie son verdict dans un check run dès qu'il a
+    # quelque chose à signaler. Sans `checks: write` la création répond 403,
+    # et l'action se trompe de diagnostic : elle teste `GITHUB_HEAD_REF` pour
+    # savoir si elle tourne depuis un fork, or cette variable est renseignée
+    # pour *toute* pull request. Sur une PR elle retombait donc sur un message
+    # trompeur — « executed from the forked repository » — et sur un push vers
+    # `main`, où la variable est vide, elle relançait l'erreur et faisait
+    # échouer le job. C'est la cause des CI rouges sur `main`.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v7
       # 6 min 08 de job, dont 6 de compilation : `rustsec/audit-check` appelle
