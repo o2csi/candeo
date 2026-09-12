@@ -20,8 +20,8 @@ bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 |---|---|
 | `candeo-protocol` — rapports et somme de contrôle | fait, testé contre une trame capturée |
 | `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
-| Commandes Tauri | 14 commandes câblées — voir [`docs/api/`](docs/api/commands.md) |
-| Interface Vue | conçue, pas encore écrite — voir [`docs/design/`](docs/design/studio.md) |
+| Commandes Tauri | câblées et documentées — voir [`docs/api/`](docs/api/commands.md) |
+| Interface Vue | trois écrans — bibliothèque, périphériques, éditeur ; décisions dans [`docs/design/`](docs/design/studio.md) |
 | Moteur d'effets utilisateur | moteur unique `rquickjs` côté Rust ; stockage, réglages et **quatre effets livrés** faits |
 
 ---
