@@ -159,8 +159,24 @@ export type EffectParams = Record<string, ParamValue>
 export interface EngineStatus {
   running: boolean
   effectId: string | null
-  /** Déjà lisible : à afficher tel quel. */
+  /** Erreur venant du code de l'effet. Déjà lisible : à afficher telle quelle. */
   error: string | null
+  /**
+   * Échec d'écriture vers le clavier — sans rapport avec le code de l'effet.
+   *
+   * Les deux sont distincts parce qu'ils n'ont ni la même cause ni le même
+   * remède : un effet impeccable peut n'atteindre aucune LED.
+   */
+  deviceError: string | null
+  /**
+   * Vrai si les images parviennent effectivement à un clavier.
+   *
+   * Faux avec la sortie coupée, mais aussi — et c'est le cas piégeux —
+   * quand aucun périphérique n'est connecté : le simulateur s'anime, la case
+   * « envoyer » reste cochée, et le clavier garde son image. On lit ça comme
+   * « seule la première image est passée ».
+   */
+  reachingKeyboard: boolean
   toKeyboard: boolean
 }
 

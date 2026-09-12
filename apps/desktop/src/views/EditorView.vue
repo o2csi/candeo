@@ -101,6 +101,18 @@ const { frame, listen, stop: stopFrames } = useEngineFrames(() => board.value)
 
 const running = computed(() => status.value?.running === true)
 
+/**
+ * L'effet tourne, on veut l'envoyer, et rien n'arrive au clavier.
+ *
+ * Le cas se produit surtout sans périphérique connecté — et il ne se signalait
+ * d'aucune façon : le simulateur s'animait, la case restait cochée, le clavier
+ * gardait son image. Symptôme rapporté tel quel : « comme s'il n'y avait que la
+ * première image ».
+ */
+const silencieux = computed(
+  () => running.value && toKeyboard.value && status.value?.reachingKeyboard === false,
+)
+
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
   return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
@@ -393,6 +405,21 @@ onBeforeUnmount(() => {
           intégré est réservé : sans cette copie, on découvrirait le refus à la
           validation, c'est-à-dire après le travail.
         -->
+        <!--
+          Dire que rien n'atteint le clavier, plutôt que de laisser la case
+          cochée le sous-entendre. `alert` et non `status` : c'est un écart
+          entre ce qu'on a demandé et ce qui se passe.
+        -->
+        <p v-if="silencieux" class="notice warn" role="alert">
+          L'effet tourne, mais <strong>aucune image n'atteint le clavier</strong> — il n'y en a
+          probablement aucun de connecté.
+          <button class="link" @click="router.push('/devices')">Choisir un périphérique</button>
+        </p>
+
+        <p v-if="status?.deviceError" class="notice warn" role="alert">
+          Écriture vers le clavier impossible : {{ status.deviceError }}
+        </p>
+
         <p v-if="derivedFrom" class="notice" role="status">
           Copie de « {{ derivedFrom }} » — l'original reste intact. Le nom a été changé dans le
           code ; modifiez-le à votre guise.
@@ -605,6 +632,16 @@ onBeforeUnmount(() => {
   background: var(--raised);
   border-bottom: 1px solid var(--line);
   color: var(--text-muted);
+}
+
+/*
+ * Un écart entre ce qu'on a demandé et ce qui se passe — pas une simple
+ * information. La couleur ne porte pas seule : le texte le dit aussi.
+ */
+.notice.warn {
+  background: color-mix(in srgb, var(--warn) 12%, var(--raised));
+  border-bottom-color: var(--warn);
+  color: var(--text);
 }
 
 .link {
