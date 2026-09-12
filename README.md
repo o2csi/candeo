@@ -22,7 +22,7 @@ bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 | `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
 | Commandes Tauri | 9 commandes câblées — voir [`docs/api/`](docs/api/commands.md) |
 | Interface Vue | conçue, pas encore écrite — voir [`docs/design/`](docs/design/studio.md) |
-| Moteur d'effets utilisateur | conçu : `esbuild-wasm` → `rquickjs` |
+| Moteur d'effets utilisateur | conçu : moteur unique `rquickjs` côté Rust |
 
 ---
 
@@ -79,10 +79,11 @@ Les trois partis pris qui structurent le reste :
 
 - **La galerie d'effets est l'écran d'accueil**, pas l'éditeur. Un « ＋ » entre en
   édition ; la plupart des lancements servent à choisir, pas à écrire.
-- **Un effet utilisateur est validé, puis compilé** — TypeScript transpilé par
-  `esbuild-wasm`, exécuté par `rquickjs` côté Rust. Le motif n'est **pas** la
-  performance (132 LED × 60 img/s = 7 920 couleurs/s, trivial) : c'est qu'un effet
-  doit **tourner fenêtre fermée**.
+- **Un seul moteur exécute les effets**, `rquickjs` côté Rust, dans un fil
+  indépendant de la fenêtre. Le front n'exécute jamais de code utilisateur : il
+  envoie la source et reçoit les images. L'aperçu **est** donc la production, et
+  un effet continue de tourner fenêtre fermée. Le motif n'a jamais été la
+  performance — 132 LED × 60 img/s = 7 920 couleurs/s, trivial.
 - **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
   périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
   écrite à la main.

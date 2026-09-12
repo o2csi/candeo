@@ -42,6 +42,12 @@ Choisi pour son **service de langage TypeScript** : en chargeant le `.d.ts` de
 rien écrire de spécifique. Le poids n'entre pas en compte — l'application est
 empaquetée, il n'y a pas de téléchargement à l'usage.
 
+Second bénéfice, découvert après coup et décisif pour le §3 : Monaco n'embarque
+pas un analyseur maison mais **le compilateur TypeScript lui-même**. Son
+`ts.worker.js` réexporte `typescriptServices` sous le nom `ts` — 6,6 Mo minifiés
+de compilateur, déjà payés par l'éditeur. `ts.transpileModule()` est donc
+disponible sans rien ajouter.
+
 ### Le simulateur est permanent
 
 Une bascule « envoyer au clavier » sépare l'aperçu de l'écriture réelle. Itérer
@@ -50,35 +56,79 @@ sur un effet ne doit pas exiger de regarder le vrai clavier, ni d'en posséder u
 Le rendu du simulateur utilise le **dessin physique** des touches (voir §4), pas
 la grille logique : un effet spatial ne se juge pas sur une grille régulière.
 
+Mais le simulateur ne **calcule** rien : il reçoit des images déjà produites par
+le moteur d'exécution, exactement celles qui partent vers le clavier. C'est tout
+l'objet du §3.
+
 ---
 
-## 3. « Commit » : pourquoi compiler, et pourquoi pas
+## 3. Un seul moteur d'exécution, côté Rust
 
-La question posée était : TypeScript à l'exécution tiendra-t-il la charge ?
+### La question de départ n'était pas la bonne
+
+Elle était : TypeScript à l'exécution tiendra-t-il la charge ?
 
 **Oui, largement.** 132 LED × 60 images/s = **7 920 couleurs par seconde**. C'est
 trivial pour n'importe quel moteur JavaScript, et le franchissement IPC par image
-l'est tout autant. La performance n'est donc **pas** le motif.
+l'est tout autant. La performance n'est **pas** un sujet, et ne l'a jamais été.
 
-Le vrai motif est ailleurs : **un effet doit tourner fenêtre fermée.** Tant que
-le rendu vit dans le WebView, fermer la fenêtre éteint le clavier. Il faut donc
-que l'effet, une fois validé, quitte le front et vive côté Rust.
+Deux contraintes réelles, elles, commandent tout :
 
-### Chaîne retenue
+1. **Un effet doit tourner fenêtre fermée.** Tant que le rendu vit dans le
+   WebView, fermer la fenêtre éteint le clavier.
+2. **L'aperçu doit être la production, pas sa ressemblance.**
+
+### La version écartée, et pourquoi
+
+La première rédaction de ce document proposait ceci :
 
 ```
-éditeur Monaco  ──esbuild-wasm──▶  JavaScript  ──rquickjs──▶  boucle Rust
-   TypeScript                        (module)                 (sans interface)
+Monaco (TS) ─esbuild-wasm─▶ JS ─┬─▶ exécuté dans le WebView  ─▶ simulateur
+                                └─▶ IPC ─▶ rquickjs (Rust)   ─▶ clavier
 ```
 
-- **`esbuild-wasm`** transpile dans le front, à la validation. Pas de service de
-  compilation, pas de dépendance réseau.
-- **`rquickjs`** exécute le JavaScript côté Rust. Léger, embarquable, isolable.
+**Deux moteurs JavaScript différents exécutent le même effet** — V8 dans le
+WebView pour l'aperçu, QuickJS en production. Le simulateur ne montre alors pas
+ce que fait le clavier : il montre ce qu'un autre moteur ferait du même code.
+L'écart se découvre tard, sur un effet précis, et il est pénible à diagnostiquer.
 
-**AssemblyScript / WASM écarté** : ce n'est pas TypeScript mais un sous-ensemble,
-et l'utilisateur découvre les limites trop tard — après avoir écrit son effet.
-Le coût d'apprentissage n'est pas compensé par un gain de performance dont on n'a
-pas besoin.
+Ajouter `esbuild-wasm` pour servir ce schéma, c'était payer un transpileur
+supplémentaire pour obtenir un défaut.
+
+### Ce qu'on fait à la place
+
+```
+Monaco (TS)
+   │  ts.transpileModule()          ← déjà embarqué dans Monaco, rien à ajouter
+   ▼
+  JS ──── IPC install_effect ────▶  rquickjs (Rust)   ← moteur unique
+                                          │
+                         ┌────────────────┴────────────────┐
+                         ▼                                 ▼
+              événement « frame » → simulateur      écriture HID → clavier
+```
+
+- **La transpilation est gratuite.** `ts.transpileModule()` retire les types,
+  rien de plus ; c'est une fonction de texte vers texte, déterministe, sans
+  sémantique d'exécution. Peu importe donc où elle a lieu — et Monaco la fournit
+  déjà. **Ni `esbuild-wasm`, ni `oxc`, ni `swc` : aucun des trois n'est requis.**
+- **`rquickjs`** exécute le JavaScript côté Rust, dans un fil indépendant de la
+  fenêtre. Un seul moteur, donc l'aperçu **est** la production, par construction.
+- **Le front n'exécute jamais de code utilisateur.** Bénéfice de sûreté qui vient
+  gratuitement : un effet ne peut toucher ni le DOM ni l'API Tauri.
+- Les imports depuis `@candeo/effects-api` (`hsv`, `mix`…) sont résolus par le
+  chargeur de modules de `rquickjs` vers un module interne. **Pas de bundler.**
+
+Le simulateur coûte un événement IPC par image : 396 octets, 60 fois par seconde.
+C'est le chiffre déjà jugé trivial plus haut — on ne va pas le craindre ici.
+
+> `boa_engine` (pur Rust, sans C) serait plus simple à embarquer, mais QuickJS
+> est nettement plus rapide et plus complet. Pour du code utilisateur arbitraire,
+> la couverture du langage compte davantage que l'absence de FFI.
+
+**AssemblyScript / WASM reste écarté** : ce n'est pas TypeScript mais un
+sous-ensemble, et l'utilisateur en découvre les limites après avoir écrit son
+effet. Le coût d'apprentissage n'est compensé par aucun gain dont on ait besoin.
 
 ---
 
@@ -120,6 +170,10 @@ comme absent, pas l'omettre.
 - [ ] Écran galerie — vignettes animées des effets
 - [ ] Écran de sélection du périphérique
 - [ ] Éditeur Monaco + `.d.ts` de `@candeo/effects-api`
-- [ ] Simulateur — tracé ISO pleine taille
-- [ ] Validation : `esbuild-wasm` → stockage de l'effet
-- [ ] Exécution `rquickjs` côté Rust, indépendante de la fenêtre
+- [ ] Simulateur — tracé ISO pleine taille, alimenté par les images du moteur
+- [ ] Validation : `ts.transpileModule()` → commande `install_effect`
+- [ ] Moteur `rquickjs` côté Rust : fil de rendu indépendant de la fenêtre,
+      module interne `@candeo/effects-api`, émission de l'événement « frame »
+
+Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hors
+`monaco-editor`.
