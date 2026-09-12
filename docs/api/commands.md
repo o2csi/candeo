@@ -46,18 +46,50 @@ Libération explicite, et interrogation de l'état.
   name: string,
   rows: number,          // 6
   cols: number,          // 22
-  frame_len: number,     // 132 — taille d'une image
-  keys: { index: number, row: number, col: number }[]   // 106 entrées
+  frameLen: number,      // 132 — taille d'une image
+  keys: {
+    index: number,       // rang dans une image
+    row: number, col: number,   // position dans la matrice logique
+    name: string,        // « Échap », « Maj gauche », « Pavé + »…
+    x: number, y: number, w: number, h: number   // rectangle physique
+  }[]                    // 106 entrées
 }
 ```
 
-> **`frame_len` et `keys.length` diffèrent, et c'est voulu.**
-> `frame_len` vaut **132** — toutes les cases de la matrice, trous compris : c'est
+> Les DTO portent `#[serde(rename_all = "camelCase")]` : le champ Rust `frame_len`
+> arrive donc en `frameLen`. Le nommage Rust ne doit pas filtrer jusque dans
+> l'interface — c'est une fuite d'abstraction qui ne se verrait qu'à l'exécution.
+
+> **`frameLen` et `keys.length` diffèrent, et c'est voulu.**
+> `frameLen` vaut **132** — toutes les cases de la matrice, trous compris : c'est
 > ce qu'une image doit couvrir. `keys` n'en contient que **106**, celles portant
 > une LED physique : c'est ce que le simulateur dessine et ce qu'un effet itère.
 >
 > Confondre les deux est le piège de ce matériel. Voir
 > [`../protocol/deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §6.
+
+### La géométrie n'est pas une lecture du périphérique
+
+`x` / `y` / `w` / `h` sont en **unités de pas de clavier** — 1 u = la largeur
+d'une touche alphabétique — origine en haut à gauche, `y` vers le bas. Le dessin
+complet fait 22,5 u × 6,5 u.
+
+Ces rectangles **ne viennent pas du matériel** : celui-ci n'expose que la grille
+6 × 22 et ne déclare aucune dimension. Ils sont une transcription à la main de la
+disposition ISO pleine taille, écrite dans
+[`crates/candeo-device/src/layout.rs`](../../crates/candeo-device/src/layout.rs).
+Une erreur de dessin ne casse aucun test de cohérence : elle ne se voit qu'à
+l'œil, sur le simulateur.
+
+Deux singularités du matériel affleurent ici :
+
+- **L'Entrée ISO porte deux LED** (index 57 et 79) et apparaît donc dans `keys`
+  **deux fois**, sous le même `name`. Les deux rectangles sont les deux bras
+  jointifs du L — ils ne se recouvrent pas, et un rendu qui les peint séparément
+  reproduit le dégradé vertical visible sur l'appareil.
+- **La barre d'espace n'en porte qu'une** (index 116), pour 6,25 u de large.
+
+Un rendu qui suppose « une touche = une LED » se trompe donc dans les deux sens.
 
 ---
 

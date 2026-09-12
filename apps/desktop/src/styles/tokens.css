@@ -1,0 +1,104 @@
+/*
+ * Jetons de style.
+ *
+ * L'application est **sombre par défaut**, et ce n'est pas une question de
+ * mode : elle sert à juger des couleurs sur un clavier éclairé, souvent dans
+ * une pièce peu lumineuse. Une interface claire à côté délaverait le jugement.
+ * Le thème clair reste fourni pour qui préfère suivre son système.
+ *
+ * Les neutres portent une légère dominante violette — celle d'une pièce sombre
+ * — plutôt qu'un gris pur, qui sonne comme un défaut non choisi. L'accent est
+ * ambré : *candela*, l'incandescence. Aucune couleur d'accent n'emprunte au
+ * spectre RVB, réservé à ce que le clavier affiche réellement.
+ */
+
+:root {
+  color-scheme: dark;
+
+  --ground: #14131a;
+  --raised: #1d1c26;
+  --raised-2: #262533;
+  --line: #33313f;
+  --line-strong: #454355;
+
+  --text: #eceaf2;
+  --text-muted: #9691a6;
+  --text-faint: #6b6778;
+
+  --accent: #f2a33c;
+  --accent-ink: #14131a;
+  --accent-soft: rgb(242 163 60 / 14%);
+
+  --ok: #4ec9a0;
+  --warn: #f2a33c;
+  --bad: #f2606a;
+
+  --font-ui: "IBM Plex Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "Cascadia Mono", ui-monospace, monospace;
+
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 20px;
+  --gap-5: 32px;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 28%);
+}
+
+/*
+ * Thème clair. Les rôles sont redéfinis, jamais inversés mécaniquement :
+ * l'ambre est assombri, sans quoi il deviendrait illisible sur fond pâle.
+ */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+
+    --ground: #faf9fb;
+    --raised: #fff;
+    --raised-2: #f1eff5;
+    --line: #e2dfe8;
+    --line-strong: #cdc8d6;
+
+    --text: #1a1822;
+    --text-muted: #645e72;
+    --text-faint: #8b8599;
+
+    --accent: #a7650a;
+    --accent-ink: #fff;
+    --accent-soft: rgb(167 101 10 / 10%);
+
+    --ok: #10795c;
+    --warn: #9a5f06;
+    --bad: #c02b3a;
+
+    --shadow: 0 1px 2px rgb(26 24 34 / 8%), 0 8px 24px rgb(26 24 34 / 8%);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ground: #faf9fb;
+  --raised: #fff;
+  --raised-2: #f1eff5;
+  --line: #e2dfe8;
+  --line-strong: #cdc8d6;
+
+  --text: #1a1822;
+  --text-muted: #645e72;
+  --text-faint: #8b8599;
+
+  --accent: #a7650a;
+  --accent-ink: #fff;
+  --accent-soft: rgb(167 101 10 / 10%);
+
+  --ok: #10795c;
+  --warn: #9a5f06;
+  --bad: #c02b3a;
+
+  --shadow: 0 1px 2px rgb(26 24 34 / 8%), 0 8px 24px rgb(26 24 34 / 8%);
+}
