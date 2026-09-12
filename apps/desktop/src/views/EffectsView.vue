@@ -7,13 +7,14 @@
  * fermeture de l'application, donc souvent le bon choix. Le reléguer en bas de
  * liste le ferait passer pour un mode dégradé.
  *
- * Les deux autres dépendent d'un moteur qui n'existe pas encore. Elles sont
- * affichées vides et dites comme telles : une liste inventée serait plus
- * trompeuse qu'une liste absente.
+ * « À vous » liste ce que l'éditeur a installé. Les intégrés, eux, restent
+ * affichés vides et dits comme tels : aucun n'est encore livré, et une liste
+ * inventée serait plus trompeuse qu'une liste absente.
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { listEffects, type EffectEntry } from '../api/candeo'
 import EffectCard from '../components/EffectCard.vue'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects } from '../composables/useEffects'
@@ -21,6 +22,29 @@ import { hardwareEffects, useEffects } from '../composables/useEffects'
 const router = useRouter()
 const { layout, busy } = useDevice()
 const { applied, applying, error, apply } = useEffects()
+
+/**
+ * Les effets écrits dans l'éditeur, relus sur disque.
+ *
+ * Ils sont listés ici parce que c'est le seul chemin pour les rouvrir :
+ * `/editor/:id` relit la source par `read_effect_source`. Les lancer depuis la
+ * galerie viendra avec les vignettes animées (issue #11) — poser un bouton
+ * « Appliquer » sans aperçu n'apprendrait rien de plus que son nom.
+ */
+const mine = ref<EffectEntry[]>([])
+const listing = ref(true)
+/** Déjà lisible : les messages du Rust s'affichent tels quels. */
+const listError = ref<string | null>(null)
+
+onMounted(async () => {
+  try {
+    mine.value = (await listEffects()).filter((e) => e.kind === 'user')
+  } catch (e) {
+    listError.value = typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
+  } finally {
+    listing.value = false
+  }
+})
 
 /** `layout` n'est renseigné qu'une fois un périphérique réellement ouvert. */
 const connected = computed(() => layout.value !== null)
@@ -98,9 +122,8 @@ const noDevice = computed(() => !connected.value && !busy.value)
         l'application se ferme.
       </p>
       <p class="pending">
-        Aucun pour l'instant — le fil de rendu (issue&nbsp;#6) et les effets livrés (issue&nbsp;#11)
-        restent à écrire. Rien n'est simulé ici : un effet affiché serait un effet qu'on ne peut
-        pas lancer.
+        Aucun pour l'instant — les effets livrés (issue&nbsp;#11) restent à écrire. Rien n'est
+        simulé ici : un effet affiché serait un effet qu'on ne peut pas lancer.
       </p>
     </section>
 
@@ -110,10 +133,27 @@ const noDevice = computed(() => !connected.value && !busy.value)
         Écrits dans l'éditeur. Même boucle hôte que les intégrés, mais conservés sur disque et
         relancés au démarrage.
       </p>
-      <p class="pending">
-        Aucun pour l'instant — ni l'éditeur (issue&nbsp;#10) ni le stockage (issue&nbsp;#4) ne sont
-        en place. Le bouton «&nbsp;＋&nbsp;» ouvre déjà l'éditeur, aujourd'hui un emplacement
-        réservé.
+
+      <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
+
+      <ul v-else-if="mine.length" class="mine">
+        <li v-for="e in mine" :key="e.id">
+          <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <span class="row-name">{{ e.name }}</span>
+            <span class="row-sub">{{ e.description || 'Sans description' }}</span>
+            <span class="row-go" aria-hidden="true">Modifier ›</span>
+          </button>
+        </li>
+      </ul>
+
+      <p v-else-if="!listing" class="pending">
+        Aucun pour l'instant. «&nbsp;＋&nbsp;Nouvel effet&nbsp;» ouvre l'éditeur : valider y écrit
+        l'effet sur disque et le lance.
+      </p>
+
+      <p class="hint">
+        Les lancer d'ici, avec un aperçu animé, viendra avec la galerie (issue&nbsp;#11) : un
+        bouton sans vignette n'apprendrait rien de plus que le nom déjà écrit.
       </p>
     </section>
   </section>
@@ -213,6 +253,50 @@ const noDevice = computed(() => !connected.value && !busy.value)
   margin: var(--gap-2) 0 0;
   padding: 0;
   list-style: none;
+}
+
+.mine {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  margin: var(--gap-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Une ligne entière cliquable plutôt qu'un lien au bout : la cible est plus
+   grande, et elle reste un seul arrêt au clavier. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-3);
+  width: 100%;
+  padding: var(--gap-3);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  text-align: left;
+}
+
+.row:hover {
+  border-color: var(--line-strong);
+}
+
+.row-name {
+  font-weight: 500;
+}
+
+.row-sub {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.row-go {
+  color: var(--accent);
+  font-size: 12px;
 }
 
 .hint,

@@ -68,11 +68,21 @@ export interface EffectContext {
   readonly frameIndex: number
   readonly frame: Frame
   /** Paramètres déclarés par l'effet, tels que réglés dans l'interface. */
-  readonly params: Record<string, number | string | boolean>
+  readonly params: Readonly<Record<string, ParamValue>>
 }
 
 /** Un effet rend une image à chaque appel. */
 export type Effect = (ctx: EffectContext) => void
+
+/**
+ * Ce que vaut un paramètre réglé dans l'interface.
+ *
+ * Exactement l'ensemble des `default` que {@link ParamSpec} peut porter, `Rgb`
+ * compris : un paramètre de couleur arrive dans `params` sous forme d'objet,
+ * pas de nombre. Sans ce cas, l'éditeur promettrait un type que le moteur ne
+ * livre pas — l'écart ne se verrait qu'à la première image.
+ */
+export type ParamValue = number | string | boolean | Rgb
 
 /** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
 export type ParamSpec =
