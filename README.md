@@ -28,18 +28,23 @@ bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 
 ## Origine du protocole
 
-Le protocole implémenté ici a été établi **uniquement par observation du
-matériel** : énumération PnP Windows, interrogation d'un serveur SDK par son
-protocole réseau, et capture du bus USB avec USBPcap et Wireshark.
+Le protocole a été établi **par observation du matériel** : énumération PnP
+Windows, interrogation d'un serveur SDK par son protocole réseau, capture du bus
+USB avec USBPcap et Wireshark, puis écriture et lecture directes via l'API HID.
 
-**Aucun code source tiers n'a été consulté.** Ni OpenRGB, ni openrazer, ni les
-greffons SignalRGB.
+Ce qui compte pour qui relit ce relevé, ce n'est pas une profession de foi, c'est
+la **provenance d'ingénierie** : chaque fait porte la date où il a été établi et
+**la version de micrologiciel contre laquelle il l'a été** — v1.5, les 11 et
+12/09/2026. Un comportement inattendu se diagnostique avec ça, pas sans.
+
+Le relevé signale explicitement les rares points **repris d'une source publique
+plutôt que mesurés** — et ceux-là ont été reconfirmés sur l'appareil quand c'était
+possible. Ce qui n'a pas pu l'être est marqué comme non vérifié.
 
 Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur
 relevé aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du
 Code de la propriété intellectuelle** (transposition de la directive 2009/24/CE,
-article 6). Ce projet n'est donc **pas** une œuvre dérivée d'OpenRGB et n'est pas
-soumis à sa licence GPL-2.0-or-later.
+article 6).
 
 La documentation complète du protocole, avec les trames commentées et la méthode
 de capture reproductible, est dans [`docs/protocol/`](docs/protocol/).
