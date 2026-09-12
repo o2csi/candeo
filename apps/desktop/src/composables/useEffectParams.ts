@@ -62,6 +62,19 @@ const HOT_PERIOD = 40
  */
 const DISK_DELAY = 600
 
+/**
+ * Écart minimal entre deux écritures d'une même paire, en millisecondes.
+ *
+ * La fin du geste n'est pas toujours rare : une flèche du clavier maintenue
+ * enfoncée sur un curseur émet `change` **à chaque répétition**, soit une
+ * trentaine par seconde. Écrire sans condition ferait donc trente écritures
+ * disque par seconde, exactement ce que la temporisation évitait.
+ *
+ * Passé ce délai, la temporisation reprend la main et écrit le dernier état à la
+ * relâche — on ne perd rien, on décale.
+ */
+const DISK_PERIOD = 250
+
 /** Ce qui diffère du manifeste, par appareil et par effet. Clé `vid:pid/effet`. */
 const remembered = ref<Record<string, EffectParams>>({})
 
@@ -219,6 +232,9 @@ interface Write {
 
 const writes = new Map<string, Write>()
 
+/** Date de la dernière écriture partie, par paire. Voir {@link DISK_PERIOD}. */
+const written = new Map<string, number>()
+
 /**
  * Écrit au plus tard après {@link DISK_DELAY} sans mouvement.
  *
@@ -234,6 +250,7 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
 
   const run = () => {
     writes.delete(k)
+    written.set(k, Date.now())
     api.rememberEffectParams(device, effect, values).catch((e: unknown) => {
       error.value = message(e)
     })
@@ -241,10 +258,19 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
   writes.set(k, { timer: window.setTimeout(run, DISK_DELAY), run })
 }
 
-/** Déclenche tout de suite l'écriture en attente pour cette paire, s'il y en a une. */
+/**
+ * Déclenche l'écriture en attente pour cette paire, si elle peut partir.
+ *
+ * Trop tôt après la précédente, on ne fait rien : la temporisation armée par
+ * `persist` est toujours là et écrira le dernier état. Rien ne se perd, l'ordre
+ * est seulement décalé — voir {@link DISK_PERIOD}.
+ */
 function settleOne(device: DeviceRef, effect: string): void {
-  const w = writes.get(key(device, effect))
+  const k = key(device, effect)
+  const w = writes.get(k)
   if (!w) return
+  if (Date.now() - (written.get(k) ?? 0) < DISK_PERIOD) return
+
   window.clearTimeout(w.timer)
   w.run()
 }

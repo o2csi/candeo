@@ -457,6 +457,12 @@ continue de tourner fenêtre fermée. La temporisation reste, en filet pour les 
 où `change` n'arrive pas, doublée d'un `pagehide` ; mais aucun des deux n'est le
 chemin nominal, et aucun des deux ne pouvait l'être.
 
+La fin d'un geste n'est d'ailleurs pas toujours rare : une flèche du clavier
+maintenue enfoncée sur un curseur émet `change` **à chaque répétition**. Deux
+écritures d'une même paire restent donc séparées d'au moins 250 ms ; au-delà, la
+temporisation reprend la main et écrit le dernier état à la relâche. On ne perd
+rien, on décale.
+
 ### Pourquoi le disque, et pas la seule session
 
 Retenir les réglages en mémoire suffirait à la lettre de l'issue — changer
