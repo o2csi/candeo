@@ -104,3 +104,43 @@ qui évitent ainsi de réémettre les 132 positions.
 Toutes les commandes faillibles renvoient `Result<T, String>`. Le message est
 destiné à être **affiché tel quel** : il doit rester lisible par un humain, pas
 devenir un code à traduire côté front.
+
+---
+
+## Surface prévue — effets utilisateur
+
+Rien de ce qui suit n'est encore implémenté. La conception est figée dans
+[`../design/effects-runtime.md`](../design/effects-runtime.md) ; c'est ici que
+la forme des commandes sera consignée au fur et à mesure.
+
+### Bibliothèque
+
+| Commande | Rôle |
+|---|---|
+| `install_effect(source_ts, js, manifest)` | écrit `effects/<id>/` et renvoie l'`id` |
+| `list_effects()` | effets intégrés **et** utilisateur, avec leur nature |
+| `delete_effect(id)` | supprime le dossier |
+
+Le front envoie le JavaScript déjà transpilé : le transpileur est celui de
+Monaco. Il envoie **aussi** la source TypeScript, sans quoi l'effet ne serait
+plus modifiable.
+
+### Exécution
+
+| Commande | Rôle |
+|---|---|
+| `start_effect(id, params)` | démarre le fil de rendu |
+| `stop_effect()` | l'arrête |
+| `set_effect_params(params)` | ajuste à chaud, sans redémarrer |
+| `subscribe_frames(channel)` | ouvre le flux d'images vers le simulateur |
+
+### Le flux d'images ne passe pas par une commande
+
+Une commande répond **une fois** ; un effet produit 60 images par seconde. La
+remontée se fait donc par `tauri::ipc::Channel`, créé côté front et passé en
+argument de `subscribe_frames`. Les images y circulent en binaire
+(`InvokeResponseBody::Raw`) : 396 octets, contre plus de 1,5 Ko si on les
+sérialisait en tableau JSON d'entiers.
+
+Libérer le canal suffit à arrêter le flux — sans arrêter l'effet, qui continue
+d'alimenter le clavier fenêtre fermée.

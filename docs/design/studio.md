@@ -64,6 +64,10 @@ l'objet du §3.
 
 ## 3. Un seul moteur d'exécution, côté Rust
 
+> Cette section dit **pourquoi**. Le cycle de vie détaillé — stockage sur disque,
+> boucle de rendu, remontée des images — est dans
+> [`effects-runtime.md`](effects-runtime.md).
+
 ### La question de départ n'était pas la bonne
 
 Elle était : TypeScript à l'exécution tiendra-t-il la charge ?
@@ -119,8 +123,11 @@ Monaco (TS)
 - Les imports depuis `@candeo/effects-api` (`hsv`, `mix`…) sont résolus par le
   chargeur de modules de `rquickjs` vers un module interne. **Pas de bundler.**
 
-Le simulateur coûte un événement IPC par image : 396 octets, 60 fois par seconde.
-C'est le chiffre déjà jugé trivial plus haut — on ne va pas le craindre ici.
+Le simulateur coûte 396 octets par image, 60 fois par seconde — le chiffre déjà
+jugé trivial plus haut. Il transite par un **canal** `tauri::ipc::Channel` et non
+par un événement global : la portée est explicite et le binaire passe brut, sans
+détour par un tableau JSON d'entiers. Détails dans
+[`effects-runtime.md`](effects-runtime.md) §5.
 
 > `boa_engine` (pur Rust, sans C) serait plus simple à embarquer, mais QuickJS
 > est nettement plus rapide et plus complet. Pour du code utilisateur arbitraire,

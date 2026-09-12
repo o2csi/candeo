@@ -61,7 +61,7 @@ candeo/
 └── docs/
     ├── protocol/          relevé du protocole et méthode de capture
     ├── api/               commandes exposées au front
-    └── design/            décisions d'interface, validées avant code
+    └── design/            décisions d'interface et d'exécution, prises avant code
 ```
 
 La séparation `protocol` / `device` est délibérée : la construction des rapports
@@ -87,6 +87,27 @@ Les trois partis pris qui structurent le reste :
 - **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
   périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
   écrite à la main.
+
+Le cycle de vie complet d'un effet — transpilation, stockage, boucle de rendu,
+remontée des images — est décrit dans
+[`docs/design/effects-runtime.md`](docs/design/effects-runtime.md).
+
+---
+
+## Portabilité
+
+Développé sous Windows, écrit pour ne pas s'y enfermer.
+
+- **Accès matériel.** `hidapi` couvre Windows, Linux, macOS et illumos ;
+  l'écriture de rapport de fonctionnalité est identique partout. Sous Linux,
+  `/dev/hidraw*` exige une règle udev, livrée avec le paquet.
+- **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
+  convention du système. Les effets vont dans `app_data_dir()`
+  (`%APPDATA%\com.oorabona.candeo` ou `~/.local/share/…`), les réglages dans
+  `app_config_dir()`. **Jamais dans `Program Files`** — lecture seule pour un
+  compte standard, et commun à tous les comptes.
+- **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
+  des octets, et ses tests tournent partout.
 
 ---
 
