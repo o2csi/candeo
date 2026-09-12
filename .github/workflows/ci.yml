@@ -24,8 +24,28 @@ jobs:
   # l'apparition d'un avis ne masque pas une régression de code.
   audit:
     runs-on: ubuntu-latest
+    # `rustsec/audit-check` publie son verdict dans un check run dès qu'il a
+    # quelque chose à signaler. Sans `checks: write` la création répond 403,
+    # et l'action se trompe de diagnostic : elle teste `GITHUB_HEAD_REF` pour
+    # savoir si elle tourne depuis un fork, or cette variable est renseignée
+    # pour *toute* pull request. Sur une PR elle retombait donc sur un message
+    # trompeur — « executed from the forked repository » — et sur un push vers
+    # `main`, où la variable est vide, elle relançait l'erreur et faisait
+    # échouer le job. C'est la cause des CI rouges sur `main`.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v7
+      # 6 min 08 de job, dont 6 de compilation : `rustsec/audit-check` appelle
+      # `findOrInstall("cargo-audit")`, qui cherche d'abord le binaire dans le
+      # PATH et ne lance `cargo install` qu'à défaut. On le lui fournit donc
+      # déjà installé, depuis les binaires officiels publiés par RustSec —
+      # quelques secondes, somme de contrôle vérifiée. Rien n'est affaibli :
+      # même outil, même `.cargo/audit.toml`, et la base d'avis est de toute
+      # façon retéléchargée à chaque exécution.
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-audit }
       - uses: rustsec/audit-check@v2.0.0
         with: { token: "${{ secrets.GITHUB_TOKEN }}" }
 
@@ -40,3 +60,37 @@ jobs:
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @candeo/desktop exec vue-tsc --noEmit
+
+  # Seul job qui construit réellement l'application. `fmt`, `clippy`, les tests
+  # et `vue-tsc` ne compilent jamais `candeo-desktop` : une rupture de la
+  # liaison Tauri — commande renommée, `invoke` sans destinataire, plugin mal
+  # déclaré — ne se voyait donc qu'à la main.
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # Cache distinct de celui du job `rust` : le profil `release` (lto,
+      # codegen-units = 1) ne partage aucun artefact avec les tests en debug.
+      # L'écriture est réservée à `main` : une branche ne peut relire que le
+      # cache de sa base, et les caches de PR ne feraient qu'évincer celui dont
+      # tout le monde repart.
+      - uses: Swatinem/rust-cache@v2
+        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: 24, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # `tauri build` enchaîne `beforeBuildCommand` (vue-tsc puis vite build),
+      # la compilation Rust en release, et l'empaquetage MSI et NSIS.
+      - run: pnpm --filter @candeo/desktop exec tauri build
+      # Le binaire nu pour un essai immédiat, les installeurs pour une
+      # installation complète. `error` plutôt que le défaut `warn` : un
+      # empaquetage qui ne produit rien est un échec, pas un avertissement.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: candeo-windows
+          path: |
+            target/release/*.exe
+            target/release/bundle/**
+          if-no-files-found: error
