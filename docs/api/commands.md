@@ -139,13 +139,14 @@ chemin n'est écrit en dur : `app_data_dir()` porte le contenu, `app_config_dir(
 la configuration — identiques sous Windows, distincts sous Linux.
 
 ```
-app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json
+app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
 app_config_dir()/settings.json
 ```
 
 ### `install_effect(source_ts, js, manifest) -> string`
 
-Écrit les trois fichiers et renvoie l'`id` retenu.
+Écrit les trois fichiers, prélève le repère de couleurs dans un quatrième, et
+renvoie l'`id` retenu.
 
 ```ts
 manifest: {
@@ -180,6 +181,7 @@ tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
 {
   id: string,
   kind: 'builtin' | 'user',
+  swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
   description: string,
   params: Record<string, ParamSpec>,
@@ -191,9 +193,97 @@ Effets intégrés **et** installés, dans une seule liste : les intégrés sont
 compilés dans le binaire et n'ont pas de dossier, `kind` les distingue. Ils
 viennent en tête, les installés ensuite, triés par `id`.
 
+Le repère voyage avec l'entrée, et non derrière un second appel : sinon une
+bibliothèque de vingt effets demanderait vingt allers-retours pour afficher
+vingt vignettes.
+
 Un dossier dont le manifeste est illisible est ignoré, pas propagé en erreur :
 une bibliothèque de vingt effets ne doit pas disparaître à cause d'un seul.
 L'ordre est stable — le système de fichiers n'en garantit aucun.
+
+### Le repère de couleurs
+
+Chaque entrée porte quelques couleurs qui aident à retrouver un effet sans le
+lancer. **Elles sont obtenues en exécutant l'effet**, jamais déclarées dans le
+manifeste ni dessinées à la main.
+
+Deux raisons, et la seconde pèse plus que la première. L'auteur n'a rien à
+fournir : on écrit son effet, il a son repère — aucun champ, aucun mode avancé.
+Et surtout, **le repère ne peut pas mentir**. Déclaré, il dériverait dès la
+première modification du code, et un effet devenu bleu garderait sa vignette
+rouge.
+
+#### Comment il est prélevé
+
+Quatre images sont rendues par le moteur, sans toucher au matériel, à quatre
+instants : 0 s, 0,37 s, 1,13 s et 2,61 s. L'effet tourne avec les **valeurs par
+défaut que son module déclare** — celles avec lesquelles la galerie le lancerait,
+et non un objet vide, qui donnerait du noir à tout effet ne se repliant sur rien.
+Le gabarit est celui **par défaut**, jamais celui du clavier branché : un repère
+qui dépendrait du matériel présent à l'installation ne serait comparable ni d'un
+effet à l'autre, ni d'une machine à l'autre.
+
+De chaque image on tire **une** couleur : la moyenne d'une bande diagonale du
+clavier, la bande avançant d'une image à la suivante. Trois choix, trois raisons :
+
+| Choix | Pourquoi pas autrement |
+|---|---|
+| des instants **irrégulièrement espacés** | régulièrement espacés, ils se caleraient sur la période d'un effet cyclique et rendraient quatre fois la même couleur |
+| une bande **diagonale** | un dégradé horizontal ne varie que selon la colonne, un balayage vertical que selon la rangée : découper selon l'une des deux rendrait l'autre parfaitement uniforme |
+| une **bande**, et non une touche | un effet peut laisser presque tout le clavier éteint — `balayage` est exactement cela — et une touche isolée tomberait sur du noir par hasard |
+
+Le résultat : un effet uniforme rend quatre fois sa couleur, un dégradé rend
+quatre couleurs échelonnées, un effet majoritairement sombre rend un repère
+sombre. Un effet spatial et un effet uniforme ne peuvent pas se ressembler.
+
+Les quatre effets livrés, tels que le moteur les rend :
+
+| `id` | Repère |
+|---|---|
+| `onde-radiale` | `#58f14a` `#38dc5b` `#3e71df` `#b4a209` |
+| `respiration` | `#803000` `#b94600` `#fe5f00` `#6e2900` |
+| `balayage` | `#0072a2` `#005072` `#004f6f` `#002332` |
+| `degrade-fixe` | `#c51c9c` `#a02faf` `#833dbd` `#475bdb` |
+
+#### Quand il est calculé, et où il est rangé
+
+**Une fois à l'installation**, dans `effects/<id>/swatch.json`, à côté du
+manifeste — jamais à l'affichage de la liste, qui reste une lecture de disque :
+échantillonner là ferait dépendre l'ouverture de la galerie du comportement de
+tous les effets installés, pour des vignettes qui ne bougent pas. Réenregistrer
+un effet repasse par `install_effect`, donc le recalcule.
+
+Les effets **intégrés** n'ont pas de dossier : leur repère vit **en mémoire**,
+calculé à la première lecture de la bibliothèque et retenu pour la durée du
+processus. Il est une propriété du binaire et non de la bibliothèque de
+l'utilisateur : l'écrire dans le dossier de données créerait un cache à invalider
+à chaque mise à jour de l'application — une version à comparer, un fichier à
+réécrire, et une occasion de montrer le repère de la version précédente — pour
+quatre effets dont l'échantillonnage coûte quelques millisecondes. L'écrire à la
+main dans le Rust est exclu par le principe même du repère.
+
+Un effet installé par une version antérieure n'a donc pas de repère tant qu'il
+n'est pas réenregistré. C'est le prix de cette règle, et il se paie en pastille
+neutre, pas en erreur.
+
+#### Ce qui peut mal se passer
+
+C'est du code utilisateur : il peut lever, ne pas charger, ou boucler sans fin.
+Un repère qu'on n'arrive pas à calculer **n'empêche jamais l'installation** —
+`swatch` est alors un tableau vide et l'interface montre une pastille neutre.
+L'échantillonnage est borné dans le temps, sans quoi un `while (true)`
+empêcherait un effet de s'installer pour toujours. Et un repère précédent est
+**effacé** plutôt que conservé : montrer les couleurs d'une version qui n'existe
+plus serait pire que n'en montrer aucune.
+
+Un effet qui rend du noir partout, lui, n'est pas un échec : son repère est noir,
+et c'est la vérité sur ce qu'il fait.
+
+#### Ce que le format ne fige pas
+
+`swatch` est une **liste**, pas un quadruplet, et rien dans le stockage n'en fixe
+la longueur. Le jour où la galerie voudra des vignettes animées, il suffira de ne
+pas s'arrêter à quatre images : ni le fichier ni le type exposé n'ont à changer.
 
 ### Les effets intégrés
 

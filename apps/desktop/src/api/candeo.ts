@@ -145,6 +145,21 @@ export function readEffectSource(id: string): Promise<string> {
 export interface EffectEntry extends EffectManifest {
   id: string
   kind: 'builtin' | 'user'
+  /**
+   * Repère de couleurs, **prélevé en exécutant l'effet** — jamais déclaré.
+   *
+   * Quelques couleurs `#rrggbb`, rendues à des instants différents et à des
+   * endroits différents du clavier : un effet uniforme et un effet spatial ne
+   * peuvent donc pas se ressembler. Le Rust les calcule à l'installation et les
+   * range à côté du manifeste ; elles arrivent avec la liste, sans second appel.
+   *
+   * **Le tableau peut être vide** — un effet qui lève pendant l'échantillonnage
+   * s'installe quand même. L'interface montre alors une pastille neutre.
+   *
+   * Sa longueur n'est pas garantie : le jour où la galerie voudra des vignettes
+   * animées, ce sera le même champ, avec plus d'images.
+   */
+  swatch: string[]
 }
 
 /** Effets intégrés **et** installés, dans une seule liste, d'ordre stable. */
