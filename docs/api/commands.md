@@ -116,7 +116,7 @@ mode piloté par l'hôte, ce qui suppose une poussée d'images continue.
 
 ### `present(frame: number[])`
 
-Image complète : suite plate de triplets RGB, **`frame_len × 3` octets exactement**
+Image complète : suite plate de triplets RGB, **`frameLen × 3` octets exactement**
 (396 pour le DeathStalker). Une taille différente est refusée avec un message
 explicite plutôt que d'écrire partiellement.
 
@@ -152,7 +152,7 @@ manifest: {
   name: string,
   description?: string,
   params?: Record<string, ParamSpec>,   // tel que déclaré côté TypeScript
-  api_version: number                   // version de l'API d'effets à l'écriture
+  apiVersion: number                   // version de l'API d'effets à l'écriture
 }
 ```
 
@@ -160,7 +160,7 @@ Les paramètres sont stockés **tels quels** : leur forme est celle de `ParamSpe
 dans `@candeo/effects-api`, elle évolue avec l'éditeur, et le Rust ne les
 interprète pas. Les retyper en Rust créerait une seconde source de vérité.
 
-`api_version` est obligatoire. Un effet écrit pour une version que cette
+`apiVersion` est obligatoire. Un effet écrit pour une version que cette
 application ne connaît pas est refusé à l'installation, avec un message qui le
 dit — plutôt que d'échouer plus tard à la première image.
 
@@ -183,7 +183,7 @@ tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
   name: string,
   description: string,
   params: Record<string, ParamSpec>,
-  api_version: number
+  apiVersion: number
 }
 ```
 
@@ -209,7 +209,7 @@ accès au disque.
 
 ```ts
 {
-  active_effect: string | null,   // id à reprendre au démarrage
+  activeEffect: string | null,   // id à reprendre au démarrage
   brightness: number,             // 0-255
   device: { vid: number, pid: number } | null
 }

@@ -48,7 +48,12 @@ const RESERVED_NAMES: &[&str] = &[
 // ---------------------------------------------------------------- types exposés
 
 /// Manifeste d'un effet, écrit tel quel dans `manifest.json`.
+///
+/// camelCase comme les autres types exposés : le manifeste vient de l'éditeur
+/// et y retourne, et `params` contient déjà du JSON écrit côté TypeScript. Un
+/// seul champ en snake_case au milieu ne se verrait qu'à l'exécution.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub name: String,
     #[serde(default)]
@@ -76,6 +81,7 @@ pub enum EffectKind {
 
 /// Entrée de la bibliothèque : le manifeste, plus ce qui n'en fait pas partie.
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct EffectEntry {
     pub id: String,
     pub kind: EffectKind,
@@ -96,7 +102,7 @@ pub struct DeviceSelection {
 /// une version antérieure, à qui il manque un champ ajouté depuis, se relit
 /// sans erreur au lieu de rendre l'application muette au démarrage.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     /// Identifiant de l'effet à reprendre au démarrage.
     pub active_effect: Option<String>,
