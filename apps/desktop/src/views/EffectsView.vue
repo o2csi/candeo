@@ -89,6 +89,7 @@ const {
   load: loadParams,
   valuesFor,
   adjust,
+  settle,
   forget,
   flush: flushParams,
   error: paramsError,
@@ -500,6 +501,14 @@ function onParamChange(id: string, value: ParamValue): void {
   adjust({ vid: d.vid, pid: d.pid }, c.id, specs.value, id, value)
 }
 
+/** Le geste est fini — curseur relâché, case cochée : on écrit maintenant. */
+function onParamCommit(): void {
+  const d = selectedDevice.value
+  const c = selectedEffect.value
+  if (!d || !c) return
+  settle({ vid: d.vid, pid: d.pid }, c.id)
+}
+
 function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
@@ -720,6 +729,7 @@ onBeforeUnmount(() => {
           :frozen="frozen"
           :empty="noParams"
           @change="onParamChange"
+          @commit="onParamCommit"
           @reset="onParamReset"
         />
 

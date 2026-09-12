@@ -55,7 +55,17 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  /** La valeur bouge — en continu pendant qu'on glisse un curseur. */
   change: [id: string, value: ParamValue]
+  /**
+   * Le geste est terminé : curseur relâché, case cochée, option choisie.
+   *
+   * Séparé de `change` parce que les deux ne s'adressent pas au même endroit :
+   * `change` alimente la boucle de rendu à la volée, `commit` dit qu'il est
+   * temps d'écrire sur disque. Sans lui, la seule garantie serait une minuterie
+   * que fermer la fenêtre emporterait.
+   */
+  commit: []
   reset: []
 }>()
 
@@ -171,12 +181,16 @@ function onColor(id: string, e: Event) {
   emit('change', id, fromHex(input(e).value))
 }
 
+// Une case et une liste n'ont pas d'état intermédiaire : leur `change` est à la
+// fois le mouvement et la fin du geste.
 function onBoolean(id: string, e: Event) {
   emit('change', id, input(e).checked)
+  emit('commit')
 }
 
 function onChoice(id: string, e: Event) {
   emit('change', id, (e.target as HTMLSelectElement).value)
+  emit('commit')
 }
 </script>
 
@@ -192,9 +206,22 @@ function onChoice(id: string, e: Event) {
     <p v-if="!fields.length" class="hint">{{ empty }}</p>
 
     <template v-else>
-      <!-- `role="status"` : la phrase apparaît et disparaît au gré de ce qui
-           tourne sur l'appareil, elle n'est pas là au chargement de l'écran. -->
-      <p v-if="frozen" class="hint frozen" role="status">{{ frozen }}</p>
+      <!--
+        La phrase visible, et rien de plus : `aria-hidden` parce que la région
+        d'annonce ci-dessous porte déjà le même texte, et qu'il serait lu deux
+        fois.
+      -->
+      <p v-if="frozen" class="hint frozen" aria-hidden="true">{{ frozen }}</p>
+
+      <!--
+        La région d'annonce, **montée en permanence**.
+        Un lecteur d'écran n'annonce de façon fiable qu'une région vivante déjà
+        présente dans le document, dont le contenu change ; insérée en même temps
+        que son texte, elle reste souvent muette. Elle est hors flux — `.sr-only`
+        est en `position: absolute`, donc elle n'est même pas un élément flexible
+        et n'ajoute aucun espacement.
+      -->
+      <p class="sr-only" role="status">{{ frozen ?? '' }}</p>
 
       <fieldset class="fields" :disabled="frozen !== null">
         <div v-for="f in fields" :key="f.id" class="field">
@@ -206,6 +233,10 @@ function onChoice(id: string, e: Event) {
             <span class="num shown">{{ f.shown }}</span>
           </div>
 
+          <!--
+            `input` pendant le glissement, `change` au relâchement : le premier
+            alimente la boucle de rendu, le second déclenche l'écriture disque.
+          -->
           <input
             v-if="f.kind === 'number'"
             :id="`${uid}-${f.id}`"
@@ -216,6 +247,7 @@ function onChoice(id: string, e: Event) {
             :step="f.step"
             :value="f.value"
             @input="onNumber(f.id, $event)"
+            @change="emit('commit')"
           />
 
           <!--
@@ -229,6 +261,7 @@ function onChoice(id: string, e: Event) {
             type="color"
             :value="f.hex"
             @input="onColor(f.id, $event)"
+            @change="emit('commit')"
           />
 
           <input
@@ -240,9 +273,20 @@ function onChoice(id: string, e: Event) {
             @change="onBoolean(f.id, $event)"
           />
 
+          <!--
+            La clé porte les options, et c'est elle qui corrige un piège réel :
+            deux effets peuvent déclarer un `choice` de même identifiant avec des
+            options différentes. Le `v-for` réutiliserait alors le même `<select>`
+            et, la valeur courante n'ayant pas changé, Vue ne réécrirait pas
+            `el.value` — les `<option>` seraient remplacés et le navigateur
+            retomberait sur le premier, affichant une sélection que rien dans
+            l'état ne dit. Une clé qui change force un élément neuf, dont la
+            valeur est posée après ses enfants.
+          -->
           <select
             v-else
             :id="`${uid}-${f.id}`"
+            :key="f.options.join(' ')"
             class="choice"
             :value="f.value"
             @change="onChoice(f.id, $event)"
@@ -311,11 +355,16 @@ function onChoice(id: string, e: Event) {
   border: 0;
 }
 
+/*
+ * Pas de `min-width: 0` sur les enfants d'une colonne flexible : la largeur y
+ * est l'axe secondaire, où `min-width: auto` vaut déjà zéro. Seuls le `fieldset`
+ * — qui porte sa propre largeur minimale — et le libellé, élément flexible d'une
+ * ligne, en ont besoin.
+ */
 .field {
   display: flex;
   flex-direction: column;
   gap: var(--gap-1);
-  min-width: 0;
 }
 
 /*
@@ -330,7 +379,6 @@ function onChoice(id: string, e: Event) {
   gap: var(--gap-1) var(--gap-2);
   align-items: baseline;
   justify-content: space-between;
-  min-width: 0;
 }
 
 label {
@@ -340,10 +388,18 @@ label {
   overflow-wrap: anywhere;
 }
 
+/*
+ * Même traitement que le libellé, et pour la même raison : sur un `choice`, la
+ * valeur affichée est l'option **telle que l'effet la déclare**. Une option d'un
+ * seul tenant un peu longue pousserait sinon la ligne hors de la colonne, et
+ * `.detail` gagnerait une barre de défilement horizontale.
+ */
 .shown {
-  flex: none;
+  min-width: 0;
   color: var(--text);
   font-size: 12px;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 /* Les contrôles suivent l'accent, comme le reste de l'application : c'est le
@@ -353,12 +409,11 @@ label {
   accent-color: var(--accent);
 }
 
+/* `width: 100%` et non la largeur intrinsèque d'un `input`, qui vaut environ
+   150 px : c'est ce qui laisse le curseur suivre la colonne quand elle se
+   resserre. */
 .slider {
   width: 100%;
-
-  /* Un `input` a une largeur intrinsèque : sans cela il refuse de descendre
-     sous ~150 px et pousse la colonne. */
-  min-width: 0;
   margin: 0;
 }
 
@@ -380,7 +435,6 @@ label {
 
 .choice {
   width: 100%;
-  min-width: 0;
   padding: 5px var(--gap-2);
   background: var(--raised);
   border: 1px solid var(--line-strong);

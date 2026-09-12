@@ -434,7 +434,7 @@ durée de vie :
 |---|---|---|
 | mémoire de la fenêtre | immédiat | ce que le formulaire affiche |
 | boucle de rendu | 25 fois par seconde au plus | `set_effect_params`, à chaud |
-| `settings.json` | 600 ms après le dernier mouvement | `remember_effect_params` |
+| `settings.json` | **à la fin du geste** | `remember_effect_params` |
 
 **Le débit vers le moteur est borné, et les états intermédiaires sont écrasés.**
 Un glissement de souris produit des dizaines d'événements par seconde ; la boucle
@@ -443,11 +443,19 @@ vite qu'elle ne lit, c'est remplacer un JSON que personne n'a encore regardé. U
 seul envoi est en vol à la fois, et le dernier état demandé repart toujours — ce
 qu'on voit à l'écran est le seul qui compte, et il n'est jamais perdu.
 
-L'écriture disque, elle, attend le repos : `settings.json` s'écrit par fichier
-temporaire puis renommage, c'est un geste complet. Un glissement de deux secondes
-produit **une** écriture, celle de la valeur à laquelle on s'arrête. Quitter
-l'écran la déclenche sans attendre : le dernier mouvement d'un curseur ne doit
-pas dépendre du fait qu'on soit resté devant.
+**L'écriture disque part à la fin du geste, pas après un repos.** Un curseur
+émet `input` pendant qu'on le glisse et `change` quand on le relâche : le premier
+alimente la boucle, le second écrit. Un glissement de deux secondes produit donc
+**une** écriture, celle de la valeur à laquelle on s'arrête — `settings.json`
+s'écrit par fichier temporaire puis renommage, c'est un geste complet.
+
+La distinction n'est pas cosmétique. Une simple temporisation — « 600 ms sans
+mouvement » — perdrait le dernier réglage à chaque fois qu'on **ferme la
+fenêtre** dans la foulée : fermer détruit la vue web sans passer par les crochets
+de Vue, et c'est le mode d'emploi de l'application, pas un cas limite — un effet
+continue de tourner fenêtre fermée. La temporisation reste, en filet pour les cas
+où `change` n'arrive pas, doublée d'un `pagehide` ; mais aucun des deux n'est le
+chemin nominal, et aucun des deux ne pouvait l'être.
 
 ### Pourquoi le disque, et pas la seule session
 

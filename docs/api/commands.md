@@ -443,6 +443,10 @@ accès au disque. Un effet intégré n'a pas de dossier et ne se supprime pas ; 
 disque est consulté d'abord, ce qui laisse retirer un dossier qui usurperait un
 identifiant intégré.
 
+Emporte aussi les **réglages retenus** pour cet effet, sur tous les appareils
+(voir §Réglages). L'oubli vient après la suppression : si celle-ci échoue,
+l'effet est toujours là et ses réglages doivent l'être aussi.
+
 ### `read_effect_source(id) -> string`
 
 La source, pour la rouvrir dans l'éditeur. Un effet intégré rend son JavaScript,
@@ -496,6 +500,16 @@ adoption décidée entre-temps — et ce n'est pas un cas d'école, `adopt_devic
 Une table `params` **vide** efface l'entrée : c'est « rétablir les valeurs
 déclarées ». L'effet repart alors de son manifeste, y compris si une version
 ultérieure en change les défauts.
+
+Elle est appelée **à la fin du geste** — curseur relâché, case cochée — et non
+après une temporisation : fermer la fenêtre détruit la vue web sans exécuter ses
+crochets de sortie, or fermer la fenêtre pendant qu'un effet tourne est le mode
+d'emploi de l'application. Une minuterie ne serait donc jamais qu'un filet.
+
+`delete_effect` emporte les réglages retenus pour l'effet supprimé, sur tous les
+appareils. Sans quoi le fichier garderait des entrées désignant un identifiant
+que plus rien ne nomme, et un effet réinstallé sous le même nom hériterait en
+silence des réglages de son homonyme disparu.
 
 ### La clé d'un réglage : l'appareil et l'effet, sans le numéro de série
 

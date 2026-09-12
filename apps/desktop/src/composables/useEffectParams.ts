@@ -53,7 +53,13 @@ import type { DeviceRef } from '../api/types'
  */
 const HOT_PERIOD = 40
 
-/** Repos du curseur avant l'écriture disque, en millisecondes. */
+/**
+ * Repos du curseur avant l'écriture disque, en millisecondes.
+ *
+ * C'est un filet, pas le chemin nominal : l'écriture part normalement à la **fin
+ * du geste** — `change` sur un curseur, c'est-à-dire au relâchement — et ce
+ * repos ne sert qu'aux cas où cet événement n'arrive pas.
+ */
 const DISK_DELAY = 600
 
 /** Ce qui diffère du manifeste, par appareil et par effet. Clé `vid:pid/effet`. */
@@ -214,7 +220,7 @@ interface Write {
 const writes = new Map<string, Write>()
 
 /**
- * Écrit après {@link DISK_DELAY} sans mouvement.
+ * Écrit au plus tard après {@link DISK_DELAY} sans mouvement.
  *
  * Chaque nouvelle valeur remplace la précédente : un glissement de deux
  * secondes ne produit qu'une écriture, celle de la valeur à laquelle on
@@ -234,6 +240,41 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
   }
   writes.set(k, { timer: window.setTimeout(run, DISK_DELAY), run })
 }
+
+/** Déclenche tout de suite l'écriture en attente pour cette paire, s'il y en a une. */
+function settleOne(device: DeviceRef, effect: string): void {
+  const w = writes.get(key(device, effect))
+  if (!w) return
+  window.clearTimeout(w.timer)
+  w.run()
+}
+
+/**
+ * Déclenche toutes les écritures en attente sans attendre le repos.
+ *
+ * L'itération porte sur un instantané : `run` se retire lui-même de la table.
+ */
+function flushAll(): void {
+  for (const w of [...writes.values()]) {
+    window.clearTimeout(w.timer)
+    w.run()
+  }
+}
+
+/**
+ * Dernier filet : fermer la fenêtre détruit la vue web **sans passer par les
+ * crochets de Vue**.
+ *
+ * `onBeforeUnmount` ne couvre que le changement d'écran ; or on ferme la fenêtre
+ * pendant qu'un effet tourne, c'est même le mode d'emploi. Une minuterie de
+ * 600 ms n'y survivrait pas.
+ *
+ * Ce n'est qu'un filet, et volontairement : rien ne garantit qu'un aller-retour
+ * vers le Rust aboutisse pendant que la vue web s'éteint. Le chemin sûr est
+ * ailleurs — l'écriture part **à la fin du geste**, au relâchement du curseur,
+ * donc bien avant qu'on approche de la croix de fermeture.
+ */
+window.addEventListener('pagehide', flushAll)
 
 export function useEffectParams() {
   /**
@@ -302,28 +343,31 @@ export function useEffectParams() {
   }
 
   /**
+   * Le geste est terminé — relâchement d'un curseur, case cochée, option
+   * choisie : on écrit maintenant.
+   *
+   * C'est **le** chemin nominal vers le disque. Sans lui, la seule garantie
+   * serait une minuterie de 600 ms, que fermer la fenêtre emporterait — or on
+   * ferme la fenêtre pendant qu'un effet tourne, c'est le mode d'emploi.
+   */
+  function settle(device: DeviceRef, effect: string): void {
+    settleOne(device, effect)
+  }
+
+  /**
    * Rétablit ce que l'effet déclare, et **oublie** — l'entrée disparaît de
    * `settings.json` au lieu d'y garder une copie des défauts.
+   *
+   * Écrit sans attendre : c'est un clic, pas un glissement, il n'y a rien à
+   * regrouper.
    */
   function forget(device: DeviceRef, effect: string, specs: Record<string, ParamSpec>): void {
     error.value = null
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
     hot(device, merge(specs, {}))
     persist(device, effect, {})
+    settleOne(device, effect)
   }
 
-  /**
-   * Déclenche les écritures en attente sans attendre le repos.
-   *
-   * Appelée en quittant l'écran : le dernier mouvement d'un curseur ne doit pas
-   * dépendre du fait qu'on soit resté 600 ms de plus devant.
-   */
-  function flush(): void {
-    for (const w of [...writes.values()]) {
-      window.clearTimeout(w.timer)
-      w.run()
-    }
-  }
-
-  return { load, valuesFor, adjust, forget, flush, error: readonly(error) }
+  return { load, valuesFor, adjust, settle, forget, flush: flushAll, error: readonly(error) }
 }

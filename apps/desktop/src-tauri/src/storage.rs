@@ -52,6 +52,9 @@ pub const EFFECTS_API_VERSION: u32 = 1;
 /// Longueur maximale d'un identifiant d'effet, donc d'un nom de dossier.
 const MAX_ID_LEN: usize = 64;
 
+/// Distingue deux fichiers temporaires de réglages écrits en même temps.
+static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 const SOURCE_FILE: &str = "source.ts";
 const JS_FILE: &str = "effect.js";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -371,6 +374,18 @@ impl Settings {
             }),
         }
     }
+
+    /// Oublie les réglages d'un effet, **sur tous les appareils**.
+    ///
+    /// Appelée quand l'effet est supprimé : sans cela ses réglages resteraient
+    /// dans `settings.json` pour un identifiant que plus rien ne désigne, et le
+    /// fichier ne ferait que grossir. Rend vrai si quelque chose a été retiré,
+    /// pour qu'on ne réécrive pas le fichier quand il n'y a rien à y changer.
+    pub fn forget_effect(&mut self, effect: &str) -> bool {
+        let avant = self.effect_params.len();
+        self.effect_params.retain(|r| r.effect != effect);
+        self.effect_params.len() != avant
+    }
 }
 
 // ---------------------------------------------------------------- identifiants
@@ -671,6 +686,12 @@ impl Store {
     /// Passage par un fichier temporaire puis renommage : une coupure en cours
     /// d'écriture laisserait sinon des réglages tronqués, donc une application
     /// qui ne démarre plus.
+    ///
+    /// Le nom du temporaire est **unique**, et non `settings.json.tmp` : deux
+    /// écritures qui se chevauchent — un réglage retenu pendant qu'une adoption
+    /// se décide — écriraient sinon dans le même fichier, et le renommage du
+    /// second publierait un mélange des deux. Le renommage, lui, reste atomique :
+    /// le dernier arrivé gagne, ce qui est le pire cas acceptable.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
             return Err("chemin de réglages sans dossier parent".into());
@@ -679,7 +700,10 @@ impl Store {
 
         let json = serde_json::to_string_pretty(settings)
             .map_err(|e| format!("réglages non sérialisables : {e}"))?;
-        let tmp = self.settings_file.with_extension("json.tmp");
+        let rang = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = self
+            .settings_file
+            .with_extension(format!("json.{}.{rang}.tmp", std::process::id()));
         write(&tmp, &json)?;
         fs::rename(&tmp, &self.settings_file).map_err(|e| {
             format!(
@@ -804,9 +828,25 @@ pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
 }
 
+/// Supprime un effet, **et les réglages qu'on avait retenus pour lui**.
+///
+/// Les deux vont ensemble : laisser les réglages derrière ferait grossir
+/// `settings.json` d'entrées désignant un identifiant que plus rien ne nomme, et
+/// un effet réinstallé plus tard sous le même nom hériterait en silence des
+/// réglages de son homonyme disparu.
+///
+/// L'oubli vient **après** la suppression : si celle-ci échoue, l'effet est
+/// toujours là et ses réglages doivent l'être aussi.
 #[tauri::command]
 pub fn delete_effect(app: AppHandle, id: String) -> CmdResult<()> {
-    store(&app)?.delete_effect(&id)
+    let store = store(&app)?;
+    store.delete_effect(&id)?;
+
+    let mut settings = store.read_settings()?;
+    if settings.forget_effect(&id) {
+        store.write_settings(&settings)?;
+    }
+    Ok(())
 }
 
 /// Rend la source d'un effet, pour la rouvrir dans l'éditeur.
@@ -1587,6 +1627,28 @@ mod tests {
                 .effect_params(VID, PID, "balayage"),
             Some(&reglages)
         );
+    }
+
+    /// Supprimer un effet emporte ses réglages, sur tous les appareils, et
+    /// n'emporte que les siens. Sans quoi `settings.json` garderait des entrées
+    /// pour un identifiant que plus rien ne désigne — et un effet réinstallé
+    /// plus tard sous le même nom hériterait des réglages de son homonyme.
+    #[test]
+    fn oublier_un_effet_retire_ses_reglages_partout() {
+        let mut settings = Settings::default();
+        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID + 1, "balayage", valeurs(&[("speed", 9.into())]));
+        settings.set_effect_params(VID, PID, "respiration", valeurs(&[("period", 12.into())]));
+
+        assert!(settings.forget_effect("balayage"));
+        assert_eq!(settings.effect_params.len(), 1);
+        assert_eq!(settings.effect_params(VID, PID, "balayage"), None);
+        assert_eq!(settings.effect_params(VID, PID + 1, "balayage"), None);
+        assert!(settings.effect_params(VID, PID, "respiration").is_some());
+
+        // Rien à retirer : le fichier n'a aucune raison d'être réécrit.
+        assert!(!settings.forget_effect("balayage"));
+        assert!(!settings.forget_effect("jamais-regle"));
     }
 
     /// Les réglages d'effet partent en camelCase comme le reste des DTO.
