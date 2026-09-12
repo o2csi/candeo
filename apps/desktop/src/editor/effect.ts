@@ -28,7 +28,12 @@
 
 import type * as TS from 'typescript'
 
-import { EFFECTS_API_VERSION, type EffectManifest, type EffectParams } from '../api/candeo'
+import {
+  EFFECTS_API_VERSION,
+  startingParams,
+  type EffectManifest,
+  type EffectParams,
+} from '../api/candeo'
 
 /** Nom de fichier donné au compilateur : il n'apparaît que dans les messages. */
 const FILE = 'effet.ts'
@@ -175,13 +180,6 @@ function readManifest(ts: typeof TS, source: string): EffectManifest {
     ...(declared === undefined ? {} : { params: params(ts, file, declared) }),
     apiVersion: EFFECTS_API_VERSION,
   }
-}
-
-/** Valeurs de départ : le `default` de chaque paramètre déclaré. */
-function startingParams(manifest: EffectManifest): EffectParams {
-  const out: EffectParams = {}
-  for (const [key, spec] of Object.entries(manifest.params ?? {})) out[key] = spec.default
-  return out
 }
 
 function defaultExport(ts: typeof TS, file: TS.SourceFile): TS.Expression {

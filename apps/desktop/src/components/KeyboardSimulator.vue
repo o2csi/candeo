@@ -108,10 +108,10 @@ function byte(v: number): number {
 /**
  * Couleur émise, écrite en clair.
  *
- * Seule entorse admise aux jetons de style, et la même que dans
- * `EffectCard.vue` : ce n'est pas de l'interface, c'est ce que le clavier
- * éclaire. Aucun thème ne s'y applique — un clavier éteint est noir sous un
- * thème clair aussi.
+ * Seule entorse admise aux jetons de style : ce n'est pas de l'interface, c'est
+ * ce que le clavier éclaire. Aucun thème ne s'y applique — un clavier éteint est
+ * noir sous un thème clair aussi. Le repère de couleurs d'`EffectSwatch` relève
+ * de la même exception, mais lui n'écrit rien : il reçoit ses couleurs du Rust.
  */
 function css(c: Rgb): string {
   return `#${((1 << 24) | (byte(c[0]) << 16) | (byte(c[1]) << 8) | byte(c[2])).toString(16).slice(1)}`

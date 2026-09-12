@@ -10,18 +10,11 @@ import { readonly, ref } from 'vue'
 import * as api from '../api/candeo'
 import type { DeviceRef, Effect } from '../api/types'
 
-/**
- * Motif d'aperçu de la vignette. Purement visuel — il figure ce que fait
- * l'effet, il ne le calcule pas.
- */
-export type Preview = 'cycle' | 'wave' | 'off'
-
 export interface HardwareEffect {
   id: string
   name: string
   /** Ce que l'effet fait, en une phrase. */
   summary: string
-  preview: Preview
   effect: Effect
 }
 
@@ -49,28 +42,34 @@ export const hardwareEffects: readonly HardwareEffect[] = [
     id: 'spectrumCycle',
     name: 'Spectrum Cycle',
     summary: 'Tout le clavier change de teinte ensemble, sans fin.',
-    preview: 'cycle',
     effect: { kind: 'spectrumCycle' },
   },
   {
     id: 'wave',
     name: 'Wave',
     summary: 'Un dégradé traverse le clavier de part en part.',
-    preview: 'wave',
     effect: { kind: 'wave', direction: WAVE_DIRECTION, speed: WAVE_SPEED },
   },
   {
     id: 'off',
     name: 'Éteint',
     summary: 'Rétroéclairage coupé, sans débrancher quoi que ce soit.',
-    preview: 'off',
     effect: { kind: 'off' },
   },
 ]
 
-const applied = ref<string | null>(null)
+/**
+ * Ce que cette session a posé, **appareil par appareil**, clé « vid:pid ».
+ *
+ * Un seul champ global marquerait le même effet actif sur tous les appareils,
+ * dans une liste qui décrit ce que fait **un** appareil : ce n'est pas une
+ * simplification, c'est une information fausse dès le second clavier.
+ */
+const posed = ref<Record<string, string>>({})
 const applying = ref<string | null>(null)
 const error = ref<string | null>(null)
+
+const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
@@ -81,7 +80,7 @@ export function useEffects() {
   /**
    * Pose un effet matériel **sur un appareil**.
    *
-   * `applied` dit ce que **cette session** a posé, pas ce que le clavier
+   * Ce qu'on retient dit ce que **cette session** a posé, pas ce que le clavier
    * affiche : le protocole relevé sait écrire un effet, pas le relire. Rien
    * n'est donc marqué au lancement — une supposition serait pire que le vide,
    * puisqu'elle se tromperait silencieusement après un redémarrage.
@@ -91,7 +90,9 @@ export function useEffects() {
     error.value = null
     try {
       await api.setEffect(device, e.effect)
-      applied.value = e.id
+      // Remplacement plutôt que mutation : `readonly()` interdit d'écrire dans
+      // l'objet exposé, et la réactivité ne dépend plus de la clé déjà présente.
+      posed.value = { ...posed.value, [key(device)]: e.id }
     } catch (err) {
       error.value = message(err)
     } finally {
@@ -99,8 +100,13 @@ export function useEffects() {
     }
   }
 
+  /** L'effet matériel que cette session a posé sur cet appareil, s'il y en a un. */
+  function appliedOn(device: DeviceRef | null): string | null {
+    return device ? (posed.value[key(device)] ?? null) : null
+  }
+
   return {
-    applied: readonly(applied),
+    appliedOn,
     applying: readonly(applying),
     error: readonly(error),
     apply,

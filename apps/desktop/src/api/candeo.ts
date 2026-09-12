@@ -197,6 +197,19 @@ export function listEffects(): Promise<EffectEntry[]> {
   return invoke('list_effects')
 }
 
+/**
+ * Valeurs de départ d'un effet : le `default` de chaque paramètre déclaré.
+ *
+ * Ici, avec le manifeste qui les porte, et non dans l'éditeur : la galerie lance
+ * désormais un effet, et elle n'a aucune raison de charger le module d'analyse
+ * syntaxique pour recopier quatre valeurs par défaut.
+ */
+export function startingParams(declaring: Pick<EffectManifest, 'params'>): EffectParams {
+  const out: EffectParams = {}
+  for (const [key, spec] of Object.entries(declaring.params ?? {})) out[key] = spec.default
+  return out
+}
+
 // ---------------------------------------------------------------- moteur
 
 export type EffectParams = Record<string, ParamValue>
