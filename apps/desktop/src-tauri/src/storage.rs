@@ -256,6 +256,30 @@ impl Store {
         Ok(id)
     }
 
+    /// Le JavaScript exécutable d'un effet installé.
+    ///
+    /// C'est ce que le moteur charge, et la raison pour laquelle le `.js` est
+    /// écrit sur disque à l'installation : le lire ne demande ni l'éditeur, ni
+    /// la fenêtre.
+    pub fn read_effect_js(&self, id: &str) -> CmdResult<String> {
+        validate_id(id)?;
+        let path = self.effects_dir.join(id).join(JS_FILE);
+        fs::read_to_string(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => format!("aucun effet nommé « {id} »"),
+            _ => format!("lecture de {} impossible : {e}", path.display()),
+        })
+    }
+
+    /// La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur.
+    pub fn read_effect_source(&self, id: &str) -> CmdResult<String> {
+        validate_id(id)?;
+        let path = self.effects_dir.join(id).join(SOURCE_FILE);
+        fs::read_to_string(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => format!("aucun effet nommé « {id} »"),
+            _ => format!("lecture de {} impossible : {e}", path.display()),
+        })
+    }
+
     /// Bibliothèque complète : effets intégrés **et** effets utilisateur.
     ///
     /// Les intégrés sont compilés dans le binaire et n'ont pas de dossier ;
@@ -389,7 +413,7 @@ fn write(path: &Path, contents: &str) -> CmdResult<()> {
 
 /// Résout les emplacements du système. Aucun chemin n'est écrit en dur : sous
 /// Windows les deux appels renvoient le même dossier, sous Linux non.
-fn store(app: &AppHandle) -> CmdResult<Store> {
+pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     let data = app
         .path()
         .app_data_dir()
@@ -421,6 +445,16 @@ pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
 #[tauri::command]
 pub fn delete_effect(app: AppHandle, id: String) -> CmdResult<()> {
     store(&app)?.delete_effect(&id)
+}
+
+/// Rend la source TypeScript d'un effet, pour la rouvrir dans l'éditeur.
+///
+/// C'est la contrepartie d'`install_effect` : sans elle, un effet installé ne
+/// serait plus modifiable — c'est précisément pourquoi le `.ts` est écrit sur
+/// disque à côté du `.js`.
+#[tauri::command]
+pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
+    store(&app)?.read_effect_source(&id)
 }
 
 #[tauri::command]
