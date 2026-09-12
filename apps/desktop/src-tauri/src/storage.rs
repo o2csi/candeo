@@ -36,11 +36,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::builtins;
 use crate::runtime::swatch::{self, Swatch};
-use crate::{CmdResult, DeviceRef};
+use crate::{AppState, CmdResult, DeviceRef};
 
 /// Version de l'API d'effets fournie par cette version de l'application.
 ///
@@ -634,23 +634,37 @@ impl Store {
         Ok(effects)
     }
 
-    /// Supprime `effects/<id>/`.
+    /// Dit si cet effet peut être supprimé, **sans rien supprimer**.
     ///
-    /// Un effet intégré n'a pas de dossier, donc rien à supprimer — mais le
-    /// dossier est vérifié **avant** son cas : c'est ce qui laisse retirer un
-    /// dossier qui usurperait un identifiant intégré, invisible dans la liste
-    /// et inexécutable, mais bien présent sur disque.
-    pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
+    /// Le dossier est consulté **avant** le cas des intégrés : c'est ce qui laisse
+    /// retirer un dossier qui usurperait un identifiant intégré, invisible dans la
+    /// liste et inexécutable, mais bien présent sur disque. L'ordre est l'inverse
+    /// de celui de la résolution à l'exécution ([`Self::effect_js`]), qui consulte
+    /// les intégrés d'abord pour qu'un effet livré ne puisse pas être usurpé. Les
+    /// deux asymétries servent le même but et ne doivent pas être alignées.
+    ///
+    /// Séparé de [`Self::delete_effect`] parce que la commande arrête les boucles
+    /// **entre** le refus et l'effacement : refuser après coup ferait payer à un
+    /// effet intégré qui tourne le prix d'un arrêt qu'on ne lui devait pas.
+    pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
         validate_id(id)?;
-        let dir = self.effects_dir.join(id);
-        if !dir.is_dir() {
-            if builtins::find(id).is_some() {
-                return Err(format!(
-                    "« {id} » est un effet intégré : il est livré avec l'application et ne peut pas être supprimé"
-                ));
-            }
-            return Err(format!("aucun effet installé sous l'identifiant « {id} »"));
+        if self.effects_dir.join(id).is_dir() {
+            return Ok(());
         }
+        if builtins::find(id).is_some() {
+            return Err(format!(
+                "« {id} » est un effet intégré : il est livré avec l'application et ne peut pas être supprimé"
+            ));
+        }
+        Err(format!("aucun effet installé sous l'identifiant « {id} »"))
+    }
+
+    /// Supprime `effects/<id>/`.
+    pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
+        // Revérifié plutôt que supposé : entre le refus de la commande et cet
+        // appel, le dossier a pu disparaître — et c'est ici qu'on le dit.
+        self.check_deletable(id)?;
+        let dir = self.effects_dir.join(id);
         fs::remove_dir_all(&dir)
             .map_err(|e| format!("suppression de {} impossible : {e}", dir.display()))
     }
@@ -706,6 +720,22 @@ impl Store {
                 self.settings_file.display()
             )
         })
+    }
+
+    /// Réécrit `settings.json` avec les valeurs par défaut.
+    ///
+    /// **Ne touche à aucun effet**, et ne saurait pas le faire : elle n'écrit que
+    /// dans `settings_file`. C'est la distinction que porte tout ce module — un
+    /// effet est du contenu, le choix de l'effet actif est de la configuration —
+    /// et c'est ici qu'elle protège quelque chose : celui qui veut seulement
+    /// désadopter un clavier ne doit pas perdre du code écrit à la main.
+    ///
+    /// Le fichier est réécrit plutôt qu'effacé. Les deux se relisent pareil —
+    /// [`Self::read_settings`] rend les défauts quand il n'y a pas de fichier —
+    /// mais un fichier qui disparaît ressemble à un dégât, là où un fichier remis
+    /// à plat se lit et se compare.
+    pub fn reset_settings(&self) -> CmdResult<()> {
+        self.write_settings(&Settings::default())
     }
 }
 
@@ -832,9 +862,25 @@ pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
 ///
 /// L'oubli vient **après** la suppression : si celle-ci échoue, l'effet est
 /// toujours là et ses réglages doivent l'être aussi.
+///
+/// # Trois temps, dans cet ordre
+///
+/// 1. **le refus**, avant tout le reste : un effet intégré ou un identifiant qui
+///    ne désigne rien s'entend dire non sans que rien n'ait été arrêté ;
+/// 2. **l'arrêt des boucles**, sur tous les appareils où l'effet tourne, et
+///    avant l'effacement : le moteur exécute un `effect.js` lu au démarrage et
+///    gardé en mémoire, il continuerait donc sans erreur visible sur un dossier
+///    disparu ;
+/// 3. **l'effacement**, puis l'oubli des réglages.
+///
+/// L'arrêt côté Rust plutôt que dans la fenêtre : c'est le seul endroit qui le
+/// garantisse quel que soit l'appelant, et l'invariant — aucune boucle ne fait
+/// tourner un effet supprimé — ne tient que s'il tient partout.
 #[tauri::command]
-pub fn delete_effect(app: AppHandle, id: String) -> CmdResult<()> {
+pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let store = store(&app)?;
+    store.check_deletable(&id)?;
+    state.engine.stop_everywhere(&id);
     store.delete_effect(&id)?;
 
     let mut settings = store.read_settings()?;
@@ -863,6 +909,36 @@ pub fn get_settings(app: AppHandle) -> CmdResult<Settings> {
 #[tauri::command]
 pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
     store(&app)?.write_settings(&settings)
+}
+
+/// Remet la configuration au défaut, et repose les appareils.
+///
+/// # Ce que ça ne fait pas
+///
+/// **Aucun effet n'est touché.** Les effets écrits vivent dans
+/// `app_data_dir()/effects/`, la configuration dans `settings.json` : deux
+/// emplacements, deux gestes. Retirer un effet est une autre commande,
+/// [`delete_effect`], une par effet — confondre les deux ferait perdre du code
+/// écrit à la main à qui voulait seulement désadopter un clavier.
+///
+/// Ce n'est pas non plus un endroit où libérer des ressources côté effets :
+/// chaque boucle porte son `Runtime` et son `Context` QuickJS, et les deux sont
+/// détruits avec elle — tout le tas JavaScript part avec.
+///
+/// # L'ordre
+///
+/// Les appareils sont reposés **avant** l'écriture : remettre la table des
+/// appareils à zéro pendant qu'un effet tourne laisserait des boucles que plus
+/// aucune décision ne désigne. Voir [`crate::release_devices`] pour le détail de
+/// ce que « reposer » veut dire.
+///
+/// Le magasin est résolu en premier, avant même l'arrêt : un dossier de
+/// configuration introuvable doit se dire sans avoir rien éteint.
+#[tauri::command]
+pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    let store = store(&app)?;
+    crate::release_devices(&state);
+    store.reset_settings()
 }
 
 /// Retient les réglages d'un effet pour un appareil, sans toucher au reste.
@@ -1146,6 +1222,29 @@ mod tests {
         assert!(err.contains("aucun effet installé"), "message : {err}");
     }
 
+    /// Le refus doit s'obtenir **sans rien supprimer**.
+    ///
+    /// C'est ce qui permet à la commande d'arrêter les boucles entre le refus et
+    /// l'effacement : un effet intégré qui tourne s'entend dire non sans avoir
+    /// payé l'arrêt de sa boucle au passage.
+    #[test]
+    fn le_refus_de_suppression_s_obtient_sans_rien_supprimer() {
+        let (tmp, store) = store_temporaire();
+        let id = store.install_effect("", "", &manifeste("Onde")).unwrap();
+
+        store.check_deletable(&id).unwrap();
+        assert!(
+            tmp.path().join("data").join("effects").join(&id).is_dir(),
+            "la vérification a emporté le dossier"
+        );
+
+        let err = store.check_deletable(builtins::ALL[0].id).unwrap_err();
+        assert!(err.contains("effet intégré"), "message : {err}");
+
+        let err = store.check_deletable("jamais-installe").unwrap_err();
+        assert!(err.contains("aucun effet installé"), "message : {err}");
+    }
+
     // ------------------------------------------------------------ intégrés
 
     /// Le moteur demande le JavaScript par identifiant : les intégrés doivent
@@ -1221,6 +1320,10 @@ mod tests {
         assert!(err.contains("effet intégré"), "message : {err}");
 
         poser_un_dossier(&tmp, id, "export default { render() {} }");
+        // Le disque d'abord, y compris pour le refus préalable de la commande :
+        // s'il consultait les intégrés en premier, l'usurpateur serait refusé
+        // avant même d'arriver à la suppression.
+        store.check_deletable(id).unwrap();
         store.delete_effect(id).unwrap();
         assert!(!tmp.path().join("data").join("effects").join(id).exists());
     }
@@ -1370,6 +1473,40 @@ mod tests {
 
         let err = store.read_settings().unwrap_err();
         assert!(err.contains("réglages illisibles"), "message : {err}");
+    }
+
+    /// **La distinction que tout ce module tient**, vérifiée là où elle coûte le
+    /// plus cher à perdre : remettre la configuration au défaut ne vide pas la
+    /// bibliothèque. Qui veut seulement désadopter un clavier ne doit pas y
+    /// laisser du code écrit à la main.
+    #[test]
+    fn la_remise_a_zero_oublie_la_configuration_et_garde_les_effets() {
+        let (tmp, store) = store_temporaire();
+        let id = store
+            .install_effect("la source", "le js", &manifeste("Onde"))
+            .unwrap();
+
+        let mut settings = Settings {
+            brightness: 12,
+            ..Settings::default()
+        };
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+        settings.set_effect_params(VID, PID, &id, valeurs(&[("speed", serde_json::json!(3))]));
+        store.write_settings(&settings).unwrap();
+
+        store.reset_settings().unwrap();
+
+        assert_eq!(store.read_settings().unwrap(), Settings::default());
+        assert!(
+            tmp.path().join("config").join("settings.json").is_file(),
+            "le fichier a disparu au lieu d'être remis à plat"
+        );
+
+        // Et la bibliothèque est intacte, source comprise : c'est elle qu'on ne
+        // peut pas réinstaller.
+        assert_eq!(installes(&store).len(), 1);
+        assert_eq!(store.effect_source(&id).unwrap(), "la source");
+        assert_eq!(store.effect_js(&id).unwrap(), "le js");
     }
 
     // ------------------------------------------------------- adoption

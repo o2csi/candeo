@@ -527,6 +527,44 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
     Ok(())
 }
 
+/// Ramène **tous** les appareils à un état connu : rien ne tourne, rien n'est
+/// allumé, rien n'est ouvert.
+///
+/// Le pendant de [`apply_adoptions`], et ce qui permet à
+/// [`storage::reset_settings`] de tenir sa promesse : après elle, plus aucune
+/// boucle ni aucune poignée ne dépend de décisions que le fichier ne porte plus.
+///
+/// Trois temps, et l'ordre n'est pas indifférent :
+///
+/// 1. les boucles s'arrêtent, et l'arrêt est **attendu** — l'image suivante
+///    rallumerait ce qu'on est sur le point d'éteindre ;
+/// 2. le rétroéclairage s'éteint. Arrêter une boucle laisse le clavier sur sa
+///    dernière image, et une image figée ressemble à un effet qui tourne encore ;
+///    `Effect::Off` laisse l'appareil dans un état qui se lit, pour un coût nul —
+///    c'est le micrologiciel qui l'exécute ;
+/// 3. les poignées sont vidées, comme le fait [`ignore_device`] : on ne garde pas
+///    ouvert un appareil que plus aucune décision ne désigne.
+///
+/// Les échecs d'ouverture partent avec : ils rendaient compte de tentatives
+/// faites pour des adoptions qui n'existent plus, et les garder afficherait une
+/// erreur rouge sur un appareil dont personne n'a plus rien demandé.
+///
+/// Rien ne remonte, et c'est délibéré : un clavier qui refuse de s'éteindre —
+/// débranché entre-temps, accès perdu — ne doit pas empêcher la remise à zéro.
+/// L'extinction est un agrément, pas le geste.
+pub(crate) fn release_devices(state: &AppState) {
+    state.engine.stop_all();
+
+    for device in state.open_handles() {
+        let _ = with_keyboard(state, device, |kb| {
+            kb.set_effect(Effect::Off).map_err(|e| e.to_string())
+        });
+        state.set_open(device, None);
+    }
+
+    state.failures.lock().unwrap().clear();
+}
+
 /// Ouverture ponctuelle, sans rien décider.
 ///
 /// Distincte d'[`adopt_device`] : elle ne touche pas à `settings.json`, donc
@@ -695,6 +733,7 @@ pub fn run() {
             storage::read_effect_source,
             storage::get_settings,
             storage::set_settings,
+            storage::reset_settings,
             storage::remember_effect_params,
         ])
         .run(tauri::generate_context!())

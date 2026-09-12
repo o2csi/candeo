@@ -167,6 +167,26 @@ export function readEffectSource(id: string): Promise<string> {
 }
 
 /**
+ * Supprime un effet écrit : son dossier, sa source, et les réglages retenus pour
+ * lui sur tous les appareils.
+ *
+ * **Sans retour possible.** La source part avec : c'est du code écrit à la main,
+ * et rien ne le réinstalle — l'appelant demande confirmation.
+ *
+ * Un effet **intégré** est refusé : il est compilé dans le binaire, il n'y a pas
+ * de dossier à retirer. L'interface ne propose donc pas le geste plutôt que de
+ * le laisser échouer après coup.
+ *
+ * Le Rust **arrête les boucles** qui font tourner cet effet, sur quelque appareil
+ * que ce soit, avant d'effacer quoi que ce soit : rien à faire ici. Une boucle
+ * oubliée continuerait d'exécuter un `effect.js` chargé en mémoire, sans erreur
+ * visible, alors que son dossier n'existe plus.
+ */
+export function deleteEffect(id: string): Promise<void> {
+  return invoke('delete_effect', { id })
+}
+
+/**
  * Un effet de la bibliothèque : son manifeste, plus ce qui n'en fait pas partie.
  *
  * Les intégrés sont compilés dans le binaire et n'ont pas de dossier ; `kind`
@@ -259,6 +279,28 @@ export interface Settings {
  */
 export function getSettings(): Promise<Settings> {
   return invoke('get_settings')
+}
+
+/**
+ * Remet `settings.json` au défaut, et repose les appareils.
+ *
+ * Ce qui part : les décisions d'adoption — tout repasse en `detected` — et les
+ * réglages retenus par paire appareil / effet. Le Rust arrête d'abord les
+ * boucles en cours, éteint le rétroéclairage et referme les appareils : remettre
+ * la table des appareils à zéro pendant qu'un effet tourne laisserait des
+ * boucles que plus aucune décision ne désigne.
+ *
+ * **Aucun effet n'est touché.** Les effets écrits vivent dans le dossier de
+ * données, pas dans `settings.json` ; les retirer est une autre action, une par
+ * effet ({@link deleteEffect}). Les confondre ferait perdre du code écrit à la
+ * main à qui voulait seulement désadopter un clavier.
+ *
+ * La fenêtre garde, elle, ce qu'elle avait lu : c'est à l'appelant d'oublier les
+ * réglages tenus en mémoire, sans quoi le premier mouvement de curseur les
+ * réécrirait.
+ */
+export function resetSettings(): Promise<void> {
+  return invoke('reset_settings')
 }
 
 /**
