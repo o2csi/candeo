@@ -62,9 +62,28 @@ export interface Frame {
 
 export interface EffectContext<P = undefined> {
   readonly layout: Layout
-  /** Secondes écoulées depuis le démarrage de l'effet. */
+  /**
+   * Secondes écoulées depuis le démarrage de l'effet.
+   *
+   * **C'est l'horloge, et la seule.** Elle est prise sur le temps réel, pas
+   * comptée en images : une image sautée ne ralentit donc pas l'animation, elle
+   * l'échantillonne moins souvent. Animer sur `time` garde la même vitesse
+   * quelle que soit la charge de la machine.
+   */
   readonly time: number
-  /** Numéro d'image, incrémenté à chaque rendu. */
+  /**
+   * Numéro d'image, incrémenté à chaque rendu.
+   *
+   * ⚠️ **Ce n'est pas une horloge.** La boucle vise 60 images par seconde mais
+   * ne les garantit pas : une machine chargée en fait moins, et les images
+   * manquées ne sont **pas** rattrapées. `frameIndex * 0.016` n'est donc pas
+   * une durée, et un effet animé dessus **ralentit** au lieu de sauter — sans
+   * rien signaler.
+   *
+   * Il sert à ce qui se compte en images et non en secondes : alterner une
+   * image sur deux, semer un générateur pseudo-aléatoire, espacer un
+   * rafraîchissement coûteux. Pour tout mouvement, c'est {@link time}.
+   */
   readonly frameIndex: number
   readonly frame: Frame
   /**
