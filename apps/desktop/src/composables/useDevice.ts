@@ -46,6 +46,29 @@ export function useDevice() {
     return info
   }
 
+  /**
+   * Décide de piloter cet appareil — une fois, et pour les fois suivantes.
+   *
+   * La liste est relue ensuite plutôt que rafistolée sur place : l'état et le
+   * message d'erreur de chaque appareil viennent du Rust, qui seul sait ce que
+   * l'ouverture a donné.
+   */
+  async function adopt(device: DeviceInfo) {
+    const info = await run(() => api.adoptDevice(device.vid, device.pid))
+    // `null` : adopté mais débranché. Le gabarit courant ne change pas.
+    if (info) layout.value = info
+    await refresh()
+    return info
+  }
+
+  async function ignore(device: DeviceInfo) {
+    await run(() => api.ignoreDevice(device.vid, device.pid))
+    // L'appareil ignoré était peut-être celui qui était ouvert : le Rust l'a
+    // refermé, le gabarit affiché n'a plus de support.
+    if (layout.value?.name === device.name) layout.value = null
+    await refresh()
+  }
+
   async function disconnect() {
     await run(api.disconnect)
     layout.value = null
@@ -67,6 +90,8 @@ export function useDevice() {
     error: readonly(error),
     refresh,
     connect,
+    adopt,
+    ignore,
     disconnect,
     restore,
   }

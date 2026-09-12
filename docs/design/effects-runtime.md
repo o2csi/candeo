@@ -73,12 +73,16 @@ par l'API plutôt que par une constante.
 
 ```
 app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json
-app_config_dir()/settings.json   effet actif, luminosité, périphérique choisi
+app_config_dir()/settings.json   effet actif, luminosité, appareils adoptés
 ```
 
 L'effet est du **contenu** (`data`), le choix de l'effet actif est de la
 **configuration** (`config`). Distinction sans objet sous Windows, exacte sous
 Linux — et gratuite dans les deux cas.
+
+L'état d'adoption de chaque appareil (§7) est de la configuration au même titre :
+c'est une décision de l'utilisateur sur sa machine, pas du contenu qu'on
+emporterait ailleurs.
 
 > Les effets **intégrés** ne sont pas sur disque : ils sont compilés dans le
 > binaire. Seuls les effets écrits par l'utilisateur ont un dossier.
@@ -302,7 +306,73 @@ c'est le seul cas où le calcul changerait.
 
 ---
 
-## 7. Reste à faire
+## 7. Adoption appareil par appareil
+
+Il fallait cliquer « Connecter » à chaque lancement, et ne pas le faire ne
+produisait **aucun** signe : le simulateur s'animait, la case « envoyer au
+clavier » restait cochée, le clavier gardait son image. Ce silence a coûté une
+session entière de diagnostic — on a soupçonné le protocole, la cadence, le
+moteur, avant de trouver que rien n'était ouvert.
+
+La réponse n'est pas d'ouvrir tout ce qu'on détecte.
+
+### Pourquoi pas simplement tout connecter
+
+Écrire sur un périphérique USB qu'on comprend mal n'est pas anodin, et à
+l'échelle d'un catalogue qui grandit — claviers, souris, mémoire, ventilateurs —
+adopter par défaut est la façon de casser le matériel de quelqu'un. Il y a aussi
+les appareils qu'on ne *veut* pas voir pilotés : un pilote constructeur déjà en
+place, ou un modèle dont le relevé est incertain.
+
+### Trois états, décidés une fois et retenus
+
+| État | Au lancement |
+|---|---|
+| `adopted` — piloté | ouvert automatiquement, sans rien demander |
+| `detected` — détecté | listé, mais **pas** ouvert |
+| `ignored` — ignoré | laissé tranquille, et il le reste |
+
+Le défaut est `detected` : la cérémonie disparaît sans que rien ne soit pris en
+main sans accord. La forme exacte dans `settings.json` est dans
+[`../api/commands.md`](../api/commands.md).
+
+### L'identité tient à VID / PID / série, à rien d'autre
+
+Le même clavier s'est déclaré `v1.4 / Unkown Variant` puis `v1.5 / Quartz`
+pendant le relevé du protocole. Une liaison qui apparie sur la variante ou le
+micrologiciel se rompt donc à la mise à jour, et l'appareil adopté redevient un
+inconnu — ce qui est exactement la cérémonie qu'on vient de supprimer.
+
+La série n'est comparée que si **les deux côtés** en portent une : elle départage
+deux exemplaires du même modèle, mais une énumération muette — hidraw sans règle
+udev (§6) — ne doit pas désapparier un appareil déjà adopté.
+
+### L'échec d'un appareil n'en entraîne aucun autre
+
+C'est l'invariant du démarrage, et il est vérifié plutôt que supposé. La boucle
+d'ouverture ne connaît ni Tauri ni HID : la présence et l'ouverture lui arrivent
+en argument, ce qui rend l'invariant testable par un test ordinaire.
+`un_appareil_en_echec_n_en_bloque_aucun_autre` fait échouer l'ouverture du
+premier de deux appareils pilotés et vérifie trois choses :
+
+1. la boucle est allée jusqu'au second, qui est bien ouvert ;
+2. le message d'échec est resté sur le premier ;
+3. le compte rendu du second est vierge — l'erreur n'a pas débordé.
+
+En exploitation, ces messages vivent dans une table indexée par VID/PID, et
+`list_devices` rend à chacun le sien. Un champ unique obligerait à choisir lequel
+afficher, et le suivant effacerait le précédent.
+
+### Ce qui n'est pas fait ici
+
+`AppState` ne porte toujours **qu'un** clavier ouvert (issue #26). L'adoption est
+donc multiple, la poignée ouverte ne l'est pas encore : le second appareil piloté
+et présent est laissé fermé, plutôt qu'ouvert puis relâché aussitôt — toucher un
+appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à éviter.
+
+---
+
+## 8. Reste à faire
 
 - [x] Commandes `install_effect`, `list_effects`, `delete_effect`
 - [x] Commandes `start_effect`, `stop_effect`, `set_effect_params`
@@ -312,6 +382,7 @@ c'est le seul cas où le calcul changerait.
 - [x] Effets intégrés, écrits contre l'API publique
 - [x] Règle udev, livrée par les paquets `deb` et `rpm`
 - [x] Compilation et empaquetage Linux vérifiés en intégration continue
+- [x] Adoption appareil par appareil, et ouverture des pilotés au démarrage
 - [ ] Reprise de l'effet actif au démarrage
 - [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
       de fonctionnalité, filtrage par `interface_number`, chemins résolus par

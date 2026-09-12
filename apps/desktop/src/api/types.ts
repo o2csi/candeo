@@ -6,12 +6,35 @@
  * Rust — serde ne les renomme pas.
  */
 
+/**
+ * Décision prise pour un appareil, retenue dans `settings.json`.
+ *
+ * `detected` est le défaut : **un appareil jamais vu n'est pas piloté**. Écrire
+ * sur un périphérique USB qu'on comprend mal n'est pas anodin, et adopter par
+ * défaut est la façon de casser le matériel de quelqu'un.
+ */
+export type DeviceState = 'detected' | 'adopted' | 'ignored'
+
 export interface DeviceInfo {
   name: string
   vid: number
   pid: number
   /** Vrai si le périphérique est effectivement branché. */
   present: boolean
+  /**
+   * Ce que l'utilisateur a décidé — indépendant de {@link present}. Un appareil
+   * piloté peut être débranché, un appareil branché peut être ignoré.
+   */
+  state: DeviceState
+  /** Vrai si c'est **cet** appareil qui est ouvert en ce moment. */
+  open: boolean
+  /**
+   * Dernier échec d'ouverture **de cet appareil**.
+   *
+   * Chacun porte le sien : une ouverture qui échoue n'empêche pas les autres de
+   * fonctionner, et ne leur fait pas porter son message.
+   */
+  error: string | null
 }
 
 /**

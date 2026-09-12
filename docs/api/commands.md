@@ -7,18 +7,27 @@ Les types sérialisés vivent dans la couche Tauri, **pas** dans les crates :
 Tauri, donc réutilisables hors application et testables en intégration continue.
 
 L'état est un `Mutex<Option<Keyboard>>` : un seul périphérique ouvert à la fois,
-ce qui suffit tant que l'interface n'en pilote qu'un.
+ce qui suffit tant que l'interface n'en pilote qu'un. L'**état d'adoption**, lui,
+est déjà porté par appareil — c'est la décision qui est multiple, pas encore la
+poignée ouverte.
 
 ---
 
-## Découverte et connexion
+## Découverte et adoption
 
 ### `list_devices() -> DeviceInfo[]`
 
-Liste **tous les gabarits connus**, branchés ou non.
+Liste **tous les gabarits connus**, branchés ou non, et dans quel état.
 
 ```ts
-{ name: string, vid: number, pid: number, present: boolean }
+{
+  name: string,
+  vid: number, pid: number,
+  present: boolean,
+  state: 'detected' | 'adopted' | 'ignored',
+  open: boolean,
+  error: string | null
+}
 ```
 
 `present` est vrai si le VID, le PID **et** le numéro d'interface correspondent à
@@ -26,14 +35,79 @@ un périphérique énuméré. L'interface doit afficher un gabarit absent comme 
 pas l'omettre — c'est ce qui permet de dire « branchez votre clavier » plutôt que
 de montrer une liste vide.
 
+`present` dit ce que voit le système, `state` ce que l'utilisateur a décidé :
+**les deux sont indépendants**. Un appareil piloté peut être débranché, un
+appareil branché peut être ignoré. Les fondre en un seul champ rendrait
+« piloté mais débranché » indicible.
+
+`error` porte le dernier échec d'ouverture **de cet appareil**. Une table indexée
+par VID/PID, pas un message global : c'est ce qui fait qu'un appareil en échec
+n'en entraîne aucun autre. Un champ unique obligerait à choisir lequel afficher,
+et le suivant effacerait le précédent.
+
+### Les trois états, décidés une fois et retenus
+
+| `state` | Au lancement |
+|---|---|
+| `adopted` | ouvert automatiquement, sans rien demander |
+| `detected` | listé, mais **pas** ouvert |
+| `ignored` | laissé tranquille, et il le reste |
+
+**Le défaut est `detected`.** Un appareil jamais vu est listé, pas piloté :
+écrire sur un périphérique USB qu'on comprend mal n'est pas anodin, et à
+l'échelle d'un catalogue qui grandit — claviers, souris, mémoire, ventilateurs —
+adopter par défaut est la façon de casser le matériel de quelqu'un. Il y a aussi
+les appareils qu'on ne *veut* pas voir pilotés : un pilote constructeur déjà en
+place, ou un relevé incertain.
+
+### `adopt_device(vid, pid) -> LayoutInfo | null`
+
+Retient `adopted` pour cet appareil, puis l'ouvre s'il est branché.
+
+La décision est écrite **avant** l'ouverture, et elle tient même si celle-ci
+échoue : c'est une décision, pas le compte rendu d'une tentative. Le prochain
+démarrage la rejouera — ce qui est précisément ce qu'on veut d'un clavier qu'un
+concentrateur n'a pas fini d'énumérer.
+
+Rend le gabarit quand l'appareil a été ouvert, `null` quand il est adopté mais
+débranché : ce n'est pas une erreur, il sera ouvert au branchement suivant. Une
+ouverture qui échoue, elle, remonte son message — et le laisse dans `error`.
+
+### `ignore_device(vid, pid)`
+
+Retient `ignored`, et **referme** l'appareil s'il était ouvert : on ne garde pas
+ouvert ce qu'on s'engage à ne plus toucher.
+
+Ne passe pas par HID, volontairement — ignorer un appareil doit rester possible
+quand c'est justement l'accès HID qui pose problème.
+
+> Il n'y a pas de commande pour revenir à `detected`. Les deux décisions qui
+> comptent sont « pilote-le » et « laisse-le tranquille » ; un troisième bouton
+> pour revenir à l'indécision ne répond à aucune question qu'on se pose devant
+> l'écran.
+
 ### `connect(vid, pid) -> LayoutInfo`
 
-Ouvre le périphérique et renvoie son gabarit. Échoue si aucun gabarit connu ne
-correspond, ou si l'ouverture HID échoue.
+Ouverture **ponctuelle**, sans rien décider : ne touche pas à `settings.json`,
+donc ne survit pas au redémarrage. C'est ce qu'on veut pour essayer un appareil
+sans s'engager ; `adopt_device` est ce qu'on veut pour ne plus avoir à le faire.
+
+Échoue si aucun gabarit connu ne correspond, ou si l'ouverture HID échoue.
 
 ### `disconnect()` · `is_connected() -> boolean`
 
 Libération explicite, et interrogation de l'état.
+
+### Au démarrage
+
+L'application ouvre elle-même les appareils `adopted` **et** présents, avant
+d'afficher la fenêtre. Chaque tentative est isolée : une ouverture qui échoue
+n'interrompt pas la boucle, laisse son message sur son appareil, et les suivants
+s'ouvrent normalement.
+
+Des réglages illisibles ou un HID indisponible n'empêchent pas le démarrage — ce
+serait retirer le seul moyen de corriger la situation. Rien n'est ouvert, la
+raison part sur la sortie d'erreur, la fenêtre s'affiche.
 
 ---
 
@@ -240,7 +314,13 @@ on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
 {
   activeEffect: string | null,   // id à reprendre au démarrage
   brightness: number,             // 0-255
-  device: { vid: number, pid: number } | null
+  device: { vid: number, pid: number } | null,
+  devices: {
+    vid: number,
+    pid: number,
+    serial?: string,             // absent quand le système n'en déclare pas
+    state: 'detected' | 'adopted' | 'ignored'
+  }[]
 }
 ```
 
@@ -248,6 +328,30 @@ Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
 **défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
 version antérieure reprend lui aussi son défaut, plutôt que de rendre
 l'application muette au démarrage.
+
+### L'identité d'un appareil : VID / PID / numéro de série
+
+**Ni la variante, ni le micrologiciel.** Le même clavier s'est déclaré
+`v1.4 / Unkown Variant` puis `v1.5 / Quartz` pendant le relevé du protocole : une
+liaison qui apparie sur ces champs se rompt à la mise à jour, et l'appareil
+adopté redevient un inconnu du jour au lendemain.
+
+La série n'est comparée que si **les deux côtés** en portent une, et cet
+arbitrage tient dans les deux sens :
+
+- elle départage deux exemplaires du même modèle — sans elle, adopter l'un
+  adopterait l'autre ;
+- mais une énumération muette — hidraw sans règle udev, un concentrateur qui ne
+  relaie rien — ne doit pas désapparier un appareil déjà adopté, sans quoi la
+  décision serait à reprendre à chaque branchement.
+
+Une entrée apprise sans série se complète dès qu'on la connaît ; elle ne s'efface
+jamais.
+
+`devices` ne contient que les décisions qui **diffèrent du défaut** : un appareil
+absent de la liste est `detected`, ce qui est exactement l'état d'un appareil
+jamais rencontré. Le fichier ne grossit donc pas d'une entrée à chaque
+périphérique branché une fois.
 
 L'écriture passe par un fichier temporaire suivi d'un renommage : une coupure en
 cours d'écriture laisserait sinon des réglages tronqués.
