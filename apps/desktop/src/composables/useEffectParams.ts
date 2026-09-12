@@ -363,6 +363,12 @@ function read(): Promise<void> {
       // ne part qu'au repos du curseur, et `reload` ne choisit pas son moment.
       // Reprendre le fichier tel quel ferait donc reculer un curseur sous la main
       // de celui qui le tient.
+      //
+      // Couvre ce qui attend, pas ce qui est déjà parti : `persist` retire
+      // l'entrée de `writes` **avant** que le Rust n'ait écrit. Une relecture qui
+      // tomberait dans cet aller-retour rendrait la valeur d'avant. Fenêtre
+      // connue et sans conséquence tant que rien n'appelle `reload` — à traiter
+      // avec #46, qui sera le premier à le faire.
       for (const k of writes.keys()) {
         const enVol = remembered.value[k]
         if (enVol !== undefined) disque[k] = enVol
