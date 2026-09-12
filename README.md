@@ -58,6 +58,8 @@ candeo/
 │       └── src-tauri/     liaison Rust, boucle de rendu
 ├── packages/
 │   └── effects-api/       types TypeScript pour l'écriture d'effets
+├── packaging/
+│   └── linux/             règle udev, livrée par les paquets deb et rpm
 └── docs/
     ├── protocol/          relevé du protocole et méthode de capture
     ├── api/               commandes exposées au front
@@ -96,18 +98,52 @@ remontée des images — est décrit dans
 
 ## Portabilité
 
-Développé sous Windows, écrit pour ne pas s'y enfermer.
+Développé sous Windows, écrit pour ne pas s'y enfermer. Personne n'a de machine
+Linux dans la boucle, alors la CI tient le rôle : le job `linux` construit
+l'espace de travail complet sous `ubuntu-latest`, joue les tests, empaquette en
+`.deb` et en `.rpm`, et **lit le paquet produit** pour vérifier que la règle
+udev s'y trouve.
 
-- **Accès matériel.** `hidapi` couvre Windows, Linux, macOS et illumos ;
-  l'écriture de rapport de fonctionnalité est identique partout. Sous Linux,
-  `/dev/hidraw*` exige une règle udev, livrée avec le paquet.
+D'où la distinction que tient cette section : ce qui est **compilé** et ce qui
+reste **supposé**.
+
+### Compilé et vérifié
+
+- **Accès matériel.** La dorsale `hidraw` d'`hidapi` se construit sous Linux, et
+  rien dans les trois crates ne dépend de Windows pour compiler.
+- **Empaquetage.** `.deb` et `.rpm` sont produits, et la règle udev est présente
+  dans le `.deb` à `/usr/lib/udev/rules.d/60-candeo.rules` — vérifié par lecture
+  du paquet, pas par relecture de la configuration.
+- **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
+  des octets, et ses tests tournent partout.
 - **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
   convention du système. Les effets vont dans `app_data_dir()`
   (`%APPDATA%\com.oorabona.candeo` ou `~/.local/share/…`), les réglages dans
   `app_config_dir()`. **Jamais dans `Program Files`** — lecture seule pour un
   compte standard, et commun à tous les comptes.
-- **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
-  des octets, et ses tests tournent partout.
+
+### Supposé, faute de matériel Linux
+
+Il n'y a pas d'USB derrière un coureur GitHub. Trois points attendent un clavier
+branché sur une machine Linux : que l'écriture de rapport de fonctionnalité
+aboutisse par hidraw, que `interface_number` distingue les interfaces du
+composite comme sous Windows, et que les dossiers résolus par Tauri tombent bien
+dans `~/.local/share` et `~/.config`.
+
+### Règle udev
+
+`/dev/hidraw*` est créé en `0600 root:root`. Le fichier est dans
+[`packaging/linux/`](packaging/linux/60-candeo.rules) ; les paquets `deb` et
+`rpm` l'installent. Depuis les sources, il faut le copier soi-même :
+
+```bash
+sudo cp packaging/linux/60-candeo.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Le détail — pourquoi `uaccess` plutôt qu'un groupe, pourquoi le préfixe 60,
+pourquoi les dorsales `*-native` d'`hidapi` ont été évaluées puis écartées — est
+dans [`docs/design/effects-runtime.md`](docs/design/effects-runtime.md) §6.
 
 ---
 
@@ -172,8 +208,22 @@ cargo test -p candeo-protocol   # tests du protocole, sans materiel
 
 ### Prérequis
 
-Rust stable, Node 22+, pnpm 10+, et le runtime WebView2 (présent par défaut sur
-Windows 11).
+Rust stable, Node 22+, pnpm 10+.
+
+Sous **Windows**, le runtime WebView2 — présent par défaut sur Windows 11.
+
+Sous **Debian / Ubuntu**, les dépendances système de Tauri 2, plus `libudev-dev`
+qu'`hidapi` résout par `pkg-config` :
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+  libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+  libudev-dev build-essential pkg-config file
+```
+
+C'est la liste exacte qu'installe le job `linux` de la CI — si elle se périme,
+la CI le dit.
 
 ---
 
