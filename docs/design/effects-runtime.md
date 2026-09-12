@@ -44,6 +44,12 @@ c'est important : voir §4 et §5.
 | `source.ts` | rouvrir l'effet dans l'éditeur | oui, sinon l'effet n'est plus modifiable |
 | `effect.js` | ce que le moteur exécute | **oui** |
 | `manifest.json` | nom, description, paramètres, version de l'API | oui |
+| `swatch.json` | le repère de couleurs de la bibliothèque | non — son absence donne une pastille neutre |
+
+Le `swatch.json` est le seul des quatre que **personne n'écrit** : il est prélevé
+en exécutant l'effet à l'installation. Déclaré, il dériverait dès la première
+modification du code. Le mécanisme est décrit dans
+[`../api/commands.md`](../api/commands.md), § « Le repère de couleurs ».
 
 Le `.js` n'est pas un cache que l'on pourrait régénérer à la demande : le
 transpileur vit dans le front, donc **régénérer exigerait d'ouvrir la fenêtre**.
@@ -72,7 +78,7 @@ par l'API plutôt que par une constante.
 **Répartition retenue :**
 
 ```
-app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json
+app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
 app_config_dir()/settings.json   effet actif, luminosité, appareils adoptés
 ```
 
@@ -85,7 +91,9 @@ c'est une décision de l'utilisateur sur sa machine, pas du contenu qu'on
 emporterait ailleurs.
 
 > Les effets **intégrés** ne sont pas sur disque : ils sont compilés dans le
-> binaire. Seuls les effets écrits par l'utilisateur ont un dossier.
+> binaire. Seuls les effets écrits par l'utilisateur ont un dossier. Leur repère
+> de couleurs vit donc en mémoire, calculé une fois par exécution : il est une
+> propriété du binaire, pas de la bibliothèque de l'utilisateur.
 
 ### Les effets intégrés sont du JavaScript, pas du Rust
 
@@ -380,6 +388,7 @@ appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à évit
 - [x] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
 - [x] Lecture et écriture de `settings.json`
 - [x] Effets intégrés, écrits contre l'API publique
+- [x] Repère de couleurs prélevé sur le rendu, à l'installation
 - [x] Règle udev, livrée par les paquets `deb` et `rpm`
 - [x] Compilation et empaquetage Linux vérifiés en intégration continue
 - [x] Adoption appareil par appareil, et ouverture des pilotés au démarrage
@@ -411,6 +420,16 @@ appareil qu'on ne pilotera pas est précisément ce que l'adoption sert à évit
 - **Une exception ne tue rien.** Elle est rattrapée par image et exposée par
   `engine_status`, puis effacée dès que l'effet se rétablit. Après trente images
   consécutives en échec, la boucle s'arrête.
+- **Le repère de couleurs vient du moteur, pas du manifeste.** Quatre images à
+  des instants irrégulièrement espacés, et dans chacune la moyenne d'une bande
+  diagonale qui avance : c'est ce qui empêche un effet spatial et un effet
+  uniforme de se ressembler. Un prélèvement toujours au même endroit les
+  confondrait, une moyenne de l'image entière aussi.
+- **Échantillonner borne le temps d'exécution ; la boucle, non.** Un effet qui
+  boucle sans fin monopolise son propre fil de rendu, ce qui se voit et s'arrête.
+  Le même effet échantillonné tourne dans le fil d'une commande : sans échéance,
+  un `while (true)` empêcherait son installation d'aboutir. `prepare` accepte
+  donc une échéance facultative, posée **avant** l'évaluation du module.
 
 ### Le seul essai qui traverse toute la chaîne
 

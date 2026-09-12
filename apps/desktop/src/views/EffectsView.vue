@@ -11,12 +11,17 @@
  * seule liste : `kind` les distingue, on ne fait que les répartir. Aucune
  * n'est encore lançable d'ici — les vignettes animées, et le bouton qui va
  * avec, sont l'objet de l'issue #11.
+ *
+ * Chaque entrée porte en revanche son **repère de couleurs**, prélevé par le
+ * Rust en exécutant l'effet : de quoi retrouver un effet sans le lancer, et
+ * sans qu'aucun auteur ait eu à déclarer quoi que ce soit.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { listEffects, type EffectEntry } from '../api/candeo'
 import EffectCard from '../components/EffectCard.vue'
+import EffectSwatch from '../components/EffectSwatch.vue'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects } from '../composables/useEffects'
 
@@ -130,6 +135,7 @@ const noDevice = computed(() => !connected.value && !busy.value)
       <ul v-if="builtin.length" class="rows">
         <li v-for="e in builtin" :key="e.id">
           <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <EffectSwatch :colors="e.swatch" />
             <span class="row-name">{{ e.name }}</span>
             <span class="row-sub">{{ e.description || 'Sans description' }}</span>
             <span class="row-go" aria-hidden="true">Lire ›</span>
@@ -154,6 +160,7 @@ const noDevice = computed(() => !connected.value && !busy.value)
       <ul v-if="mine.length" class="rows">
         <li v-for="e in mine" :key="e.id">
           <button class="row" @click="router.push(`/editor/${e.id}`)">
+            <EffectSwatch :colors="e.swatch" />
             <span class="row-name">{{ e.name }}</span>
             <span class="row-sub">{{ e.description || 'Sans description' }}</span>
             <span class="row-go" aria-hidden="true">Modifier ›</span>
@@ -167,8 +174,9 @@ const noDevice = computed(() => !connected.value && !busy.value)
       </p>
 
       <p class="hint">
-        Les lancer d'ici, avec un aperçu animé, viendra avec la galerie (issue&nbsp;#11) : un
-        bouton sans vignette n'apprendrait rien de plus que le nom déjà écrit.
+        Les lancer d'ici, avec un aperçu animé, viendra avec la galerie (issue&nbsp;#11). Le
+        repère de couleurs, lui, est déjà là : il est prélevé sur le rendu de l'effet à
+        l'installation, il ne peut donc pas décrire autre chose que ce que l'effet fait.
       </p>
     </section>
   </section>
