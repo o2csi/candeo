@@ -4,11 +4,11 @@
 // contre-exemple de l'onde, et la démonstration qu'un paramètre de couleur
 // suffit à faire un effet.
 
-import { rgb } from '@candeo/effects-api'
+import { defineEffect, rgb } from '@candeo/effects-api'
 
 const DEFAUT = { r: 255, g: 96, b: 0 }
 
-export default {
+export default defineEffect({
   name: 'Respiration',
   description: "Tout le clavier respire, d'une seule couleur",
   params: {
@@ -28,4 +28,4 @@ export default {
       frame.set(key, rgb(color.r * k, color.g * k, color.b * k))
     }
   },
-}
+})

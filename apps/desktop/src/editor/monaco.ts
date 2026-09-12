@@ -35,6 +35,7 @@ import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
 // service de langage ne démarre pas.
 import 'monaco-editor/languages/definitions/typescript/register.js'
 import {
+  getTypeScriptWorker,
   ModuleKind,
   ModuleResolutionKind,
   ScriptTarget,
@@ -154,6 +155,11 @@ export function setupMonaco(): void {
 
   typescriptDefaults.addExtraLib(effectsApiSource, API_URI)
 
+  // L'ouvrier reçoit les modèles dès leur création, sans attendre que l'éditeur
+  // les lui pousse. Sans cela, interroger le service juste après l'ouverture
+  // peut porter sur un fichier qu'il n'a pas encore.
+  typescriptDefaults.setEagerModelSync(true)
+
   applyTheme()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
 }
@@ -174,16 +180,40 @@ export function effectModel(source: string): monaco.editor.ITextModel {
   return monaco.editor.createModel(source, 'typescript', EFFECT_URI)
 }
 
+/** Une erreur du service de langage, réduite à ce que l'interface affiche. */
+export interface EffectError {
+  line: number
+  message: string
+}
+
 /**
  * Les erreurs que le service de langage voit dans le fichier.
  *
- * Interrogées au moment de valider : c'est l'éditeur lui-même qui dit si le
- * code tient debout, sans qu'on ait à recompiler pour le savoir.
+ * **Demandées à l'ouvrier, et non lues dans les marqueurs de l'éditeur.** Les
+ * marqueurs sont posés de façon asynchrone : une validation lancée peu après
+ * l'ouverture pouvait lire ceux d'une passe antérieure, effectuée avant que la
+ * déclaration de `@candeo/effects-api` n'ait atteint l'ouvrier. Le service
+ * annonçait alors des paramètres implicitement `any` — donc un refus, sur un
+ * effet parfaitement correct, avec un message qui ne correspondait à rien de
+ * visible à l'écran.
+ *
+ * L'ouvrier, lui, répond sur l'état courant. Il n'y a plus de fenêtre pendant
+ * laquelle la réponse est fausse.
  */
-export function errors(): monaco.editor.IMarker[] {
-  return monaco.editor
-    .getModelMarkers({ resource: EFFECT_URI })
-    .filter((m) => m.severity === monaco.MarkerSeverity.Error)
+export async function errors(): Promise<EffectError[]> {
+  const uri = EFFECT_URI.toString()
+  const worker = await (await getTypeScriptWorker())(EFFECT_URI)
+  const [syntactic, semantic] = await Promise.all([
+    worker.getSyntacticDiagnostics(uri),
+    worker.getSemanticDiagnostics(uri),
+  ])
+
+  const model = monaco.editor.getModel(EFFECT_URI)
+  return [...syntactic, ...semantic].map((d) => ({
+    line: model && d.start !== undefined ? model.getPositionAt(d.start).lineNumber : 1,
+    message:
+      typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText,
+  }))
 }
 
 export { monaco }

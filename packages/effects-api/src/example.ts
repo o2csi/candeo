@@ -6,9 +6,9 @@
  * **un export par défaut**, et rien d'autre.
  */
 
-import { hsv, type EffectModule } from './index'
+import { defineEffect, hsv } from './index'
 
-export default {
+export default defineEffect({
   name: 'Onde',
   description: 'Une onde de teinte se propage depuis le centre',
   params: {
@@ -29,4 +29,4 @@ export default {
       frame.set(key, hsv(time * speed + d * scale, 1, 1))
     }
   },
-} satisfies EffectModule
+})

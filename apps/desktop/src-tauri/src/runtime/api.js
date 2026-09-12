@@ -10,6 +10,15 @@
 
 export const BLACK = { r: 0, g: 0, b: 0 }
 
+/**
+ * Déclare un effet. Identité à l'exécution — elle n'existe que pour donner un
+ * type contextuel côté éditeur, et éviter à l'auteur d'écrire
+ * `satisfies EffectModule`.
+ */
+export function defineEffect(effect) {
+  return effect
+}
+
 function clampByte(v) {
   // `| 0` tronque vers zéro et écarte NaN — un effet qui produit NaN doit
   // donner du noir, pas une couleur indéterminée.

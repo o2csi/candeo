@@ -139,14 +139,29 @@ function defaultExport(ts: typeof TS, file: TS.SourceFile): TS.Expression {
 /** Retire ce qui n'existe qu'à la compilation : `satisfies`, `as`, parenthèses. */
 function unwrap(ts: typeof TS, node: TS.Expression): TS.Expression {
   let current = node
-  while (
-    ts.isSatisfiesExpression(current) ||
-    ts.isAsExpression(current) ||
-    ts.isParenthesizedExpression(current)
-  ) {
-    current = current.expression
+  for (;;) {
+    if (
+      ts.isSatisfiesExpression(current) ||
+      ts.isAsExpression(current) ||
+      ts.isParenthesizedExpression(current)
+    ) {
+      current = current.expression
+      continue
+    }
+    // `defineEffect({ … })` — l'enveloppe recommandée. Elle ne fait rien à
+    // l'exécution ; son seul rôle est de donner un type contextuel à l'objet,
+    // pour que les paramètres de `render` soient typés sans `satisfies`.
+    if (
+      ts.isCallExpression(current) &&
+      ts.isIdentifier(current.expression) &&
+      current.expression.text === 'defineEffect' &&
+      current.arguments.length === 1
+    ) {
+      current = current.arguments[0]
+      continue
+    }
+    return current
   }
-  return current
 }
 
 /** La valeur associée à `name`, ou `undefined` si la propriété est absente. */

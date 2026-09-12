@@ -3,11 +3,11 @@
 // Le seul des effets livrés où la majeure partie du clavier est éteinte à tout
 // instant : c'est ce qui le rend reconnaissable au premier coup d'œil.
 
-import { rgb } from '@candeo/effects-api'
+import { defineEffect, rgb } from '@candeo/effects-api'
 
 const DEFAUT = { r: 0, g: 180, b: 255 }
 
-export default {
+export default defineEffect({
   name: 'Balayage',
   description: 'Une rangée éclairée descend le clavier en laissant une traînée',
   params: {
@@ -35,4 +35,4 @@ export default {
       frame.set(key, rgb(color.r * k, color.g * k, color.b * k))
     }
   },
-}
+})

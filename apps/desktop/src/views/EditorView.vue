@@ -178,11 +178,11 @@ async function validate(): Promise<void> {
   busy.value = true
   problem.value = null
   try {
-    const found = errors()
+    const found = await errors()
     if (found.length > 0) {
       const first = found[0]
       throw new Error(
-        `${found.length} erreur(s) dans l'effet — ligne ${first.startLineNumber} : ${first.message}`,
+        `${found.length} erreur(s) dans l'effet — ligne ${first.line} : ${first.message}`,
       )
     }
 

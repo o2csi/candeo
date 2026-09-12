@@ -586,7 +586,7 @@ mod tests {
             export default {
               name: 'X',
               render({ frame }) {
-                const manquants = ['rgb','hsv','mix','lerp','BLACK'].filter(n => api[n] === undefined)
+                const manquants = ['rgb','hsv','mix','lerp','BLACK','defineEffect'].filter(n => api[n] === undefined)
                 if (manquants.length) throw new Error('absents de api.js : ' + manquants.join(', '))
                 frame.fill(api.BLACK)
               },
