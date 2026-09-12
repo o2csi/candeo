@@ -4,7 +4,7 @@
 //! [`docs/design/effects-runtime.md`](../../../../docs/design/effects-runtime.md) §3 :
 //!
 //! ```text
-//! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json
+//! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
 //! app_config_dir()/settings.json   effet actif, luminosité, périphérique choisi
 //! ```
 //!
@@ -39,6 +39,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::builtins;
+use crate::runtime::swatch::{self, Swatch};
 use crate::CmdResult;
 
 /// Version de l'API d'effets fournie par cette version de l'application.
@@ -54,6 +55,8 @@ const MAX_ID_LEN: usize = 64;
 const SOURCE_FILE: &str = "source.ts";
 const JS_FILE: &str = "effect.js";
 const MANIFEST_FILE: &str = "manifest.json";
+/// Repère de couleurs, à côté du manifeste. Voir [`crate::runtime::swatch`].
+const SWATCH_FILE: &str = "swatch.json";
 
 /// Noms réservés par Windows : un dossier ainsi nommé est refusé par le
 /// système, dans n'importe quel répertoire.
@@ -102,6 +105,20 @@ pub enum EffectKind {
 pub struct EffectEntry {
     pub id: String,
     pub kind: EffectKind,
+    /// Repère de couleurs, **prélevé en exécutant l'effet**.
+    ///
+    /// Il n'est pas dans le manifeste, et ce n'est pas un détail de rangement :
+    /// le manifeste est ce que l'auteur déclare, le repère est ce que l'effet
+    /// fait. Les confondre rouvrirait la porte à un repère écrit à la main,
+    /// donc à un repère qui ment.
+    ///
+    /// Porté par l'entrée pour que la liste suffise à l'afficher : une vignette
+    /// qui demanderait un second appel par effet ferait autant d'allers-retours
+    /// que la bibliothèque compte d'entrées.
+    ///
+    /// Vide quand il n'a pas pu être calculé — voir [`crate::runtime::swatch`].
+    /// L'interface retombe alors sur une pastille neutre.
+    pub swatch: Swatch,
     #[serde(flatten)]
     pub manifest: Manifest,
 }
@@ -280,6 +297,12 @@ impl Store {
         write(&dir.join(JS_FILE), js)?;
         write(&dir.join(MANIFEST_FILE), &json)?;
 
+        // Le repère est prélevé **ici**, une fois, et non à chaque affichage de
+        // la liste : c'est une vignette qui ne bouge pas tant que l'effet ne
+        // bouge pas. Réenregistrer un effet repasse par ce point, donc le
+        // recalcule — un effet devenu bleu ne garde pas sa vignette rouge.
+        write_swatch(&dir, js);
+
         Ok(id)
     }
 
@@ -371,6 +394,7 @@ impl Store {
             installed.push(EffectEntry {
                 id,
                 kind: EffectKind::User,
+                swatch: read_swatch(&entry.path()),
                 manifest,
             });
         }
@@ -460,9 +484,14 @@ impl Store {
 fn builtin_effects() -> Vec<EffectEntry> {
     builtins::ALL
         .iter()
-        .map(|b| EffectEntry {
+        .zip(builtins::swatches())
+        .map(|(b, swatch)| EffectEntry {
             id: b.id.to_string(),
             kind: EffectKind::Builtin,
+            // Les intégrés n'ont pas de dossier : leur repère vit en mémoire,
+            // calculé une fois par exécution. Le pourquoi est dans
+            // [`builtins::swatches`].
+            swatch: swatch.clone(),
             manifest: Manifest {
                 name: b.name.to_string(),
                 description: b.description.to_string(),
@@ -471,6 +500,50 @@ fn builtin_effects() -> Vec<EffectEntry> {
             },
         })
         .collect()
+}
+
+/// Échantillonne le repère de l'effet et l'écrit à côté de son manifeste — ou
+/// efface celui qui s'y trouvait.
+///
+/// **Rien ne remonte, pas même une erreur.** Un repère est un agrément : il ne
+/// doit jamais empêcher l'installation d'un effet par ailleurs valide. Un effet
+/// qui lève, ne charge pas ou boucle pendant l'échantillonnage s'installe donc
+/// normalement, simplement sans vignette.
+///
+/// L'effacement compte autant que l'écriture : un effet modifié qui ne
+/// s'échantillonne plus garderait sinon l'ancien fichier et afficherait les
+/// couleurs d'une version qui n'existe plus.
+fn write_swatch(dir: &Path, js: &str) {
+    // Le gabarit par défaut, jamais celui du clavier branché : un repère qui
+    // dépendrait du matériel présent à l'installation ne serait comparable ni
+    // d'un effet à l'autre, ni d'une machine à l'autre.
+    let swatch = swatch::sample(js, crate::default_layout());
+    let path = dir.join(SWATCH_FILE);
+
+    if swatch.is_empty() {
+        let _ = fs::remove_file(&path);
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&swatch) {
+        let _ = fs::write(&path, json);
+    }
+}
+
+/// Le repère d'un effet installé, vide à défaut.
+///
+/// Aucun recalcul ici : lister la bibliothèque doit rester une lecture de
+/// disque. Échantillonner à l'affichage ferait dépendre l'ouverture de la
+/// galerie du comportement de tous les effets installés — et un repère ne change
+/// pas entre deux affichages.
+///
+/// Un effet installé par une version antérieure n'a donc pas de repère tant
+/// qu'il n'est pas réenregistré. C'est le prix de cette règle, et il est payé
+/// par une pastille neutre, pas par une erreur.
+fn read_swatch(dir: &Path) -> Swatch {
+    fs::read_to_string(dir.join(SWATCH_FILE))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
 }
 
 fn create_dir(path: &Path) -> CmdResult<()> {
@@ -660,7 +733,111 @@ mod tests {
                 "« {} » : paramètres perdus à la lecture du JSON",
                 b.id
             );
+            // Les intégrés n'ont pas de dossier, mais ils ont un repère : il est
+            // calculé en mémoire, à la première lecture de la bibliothèque.
+            assert!(
+                !entry.swatch.is_empty(),
+                "« {} » : aucun repère de couleurs",
+                b.id
+            );
         }
+    }
+
+    // ------------------------------------------------------------ repère
+
+    /// Un effet d'une seule couleur : son repère est cette couleur, quatre fois.
+    fn effet_uni(hex: &str) -> String {
+        format!(
+            "export default {{ name: 'Uni', render({{ layout, frame }}) {{ \
+             for (const key of layout.keys) frame.set(key, {{ r: 0x{}, g: 0x{}, b: 0x{} }}) }} }}",
+            &hex[0..2],
+            &hex[2..4],
+            &hex[4..6]
+        )
+    }
+
+    fn swatch_sur_disque(tmp: &tempfile::TempDir, id: &str) -> Option<String> {
+        let path = tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join(id)
+            .join(SWATCH_FILE);
+        fs::read_to_string(path).ok()
+    }
+
+    /// Le repère est écrit à l'installation, à côté du manifeste, et la liste le
+    /// rend sans second appel.
+    #[test]
+    fn l_installation_preleve_le_repere_sur_l_effet() {
+        let (tmp, store) = store_temporaire();
+        let id = store
+            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .unwrap();
+
+        assert_eq!(
+            swatch_sur_disque(&tmp, &id).as_deref(),
+            Some(r##"["#00ff00","#00ff00","#00ff00","#00ff00"]"##),
+            "le repère doit être rangé à côté du manifeste"
+        );
+        assert_eq!(installes(&store)[0].swatch, vec!["#00ff00"; 4]);
+    }
+
+    /// Réenregistrer un effet modifié refait son repère : c'est toute la raison
+    /// de l'échantillonner plutôt que de le déclarer. Un effet devenu rouge ne
+    /// peut pas garder sa vignette verte.
+    #[test]
+    fn reenregistrer_un_effet_refait_son_repere() {
+        let (_tmp, store) = store_temporaire();
+        store
+            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .unwrap();
+        store
+            .install_effect("", &effet_uni("ff0000"), &manifeste("Uni"))
+            .unwrap();
+
+        assert_eq!(installes(&store)[0].swatch, vec!["#ff0000"; 4]);
+    }
+
+    /// **Un repère qu'on n'arrive pas à calculer n'empêche pas l'installation.**
+    /// C'est du code utilisateur : il a le droit d'être cassé, et l'effet doit
+    /// tout de même se ranger — sans quoi on ne pourrait même plus le rouvrir
+    /// dans l'éditeur pour le réparer.
+    #[test]
+    fn un_effet_qui_leve_s_installe_quand_meme_sans_repere() {
+        let (tmp, store) = store_temporaire();
+        let js = "export default { name: 'Cassé', render() { throw new Error('boum') } }";
+
+        let id = store
+            .install_effect("source", js, &manifeste("Cassé"))
+            .unwrap();
+
+        assert_eq!(store.effect_js(&id).unwrap(), js, "l'effet doit être écrit");
+        assert_eq!(swatch_sur_disque(&tmp, &id), None);
+        assert!(installes(&store)[0].swatch.is_empty());
+    }
+
+    /// Et le repère précédent est **effacé**, pas conservé : afficher les
+    /// couleurs d'une version qui n'existe plus serait pire que n'en afficher
+    /// aucune.
+    #[test]
+    fn un_effet_devenu_casse_perd_son_repere() {
+        let (tmp, store) = store_temporaire();
+        let id = store
+            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .unwrap();
+        assert!(swatch_sur_disque(&tmp, &id).is_some());
+
+        store
+            .install_effect(
+                "",
+                "export default { render() { throw 1 } }",
+                &manifeste("Uni"),
+            )
+            .unwrap();
+
+        assert_eq!(swatch_sur_disque(&tmp, &id), None);
+        assert!(installes(&store)[0].swatch.is_empty());
     }
 
     #[test]

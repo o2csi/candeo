@@ -18,6 +18,10 @@
 //! l'API. Le test `runtime::tests::les_manifestes_integres_correspondent_aux_modules`
 //! interdit la divergence : c'est le module qui fait foi.
 
+use std::sync::OnceLock;
+
+use crate::runtime::swatch::{self, Swatch};
+
 /// Un effet compilé dans le binaire.
 pub struct Builtin {
     /// Identifiant stable, écrit à la main et non dérivé du nom : il est
@@ -92,6 +96,40 @@ pub fn find(id: &str) -> Option<&'static Builtin> {
     ALL.iter().find(|b| b.id == id)
 }
 
+/// Repères de couleurs des effets livrés, **dans l'ordre de [`ALL`]**.
+///
+/// # Pourquoi ils ne sont pas sur disque
+///
+/// Un effet installé range son repère à côté de son manifeste ; un intégré n'a
+/// ni dossier ni manifeste sur disque, la question se repose donc entièrement.
+///
+/// Le repère d'un intégré est une propriété du **binaire**, pas de la
+/// bibliothèque de l'utilisateur : il change quand l'application change, jamais
+/// autrement. L'écrire dans le dossier de données créerait un cache à invalider
+/// à chaque mise à jour — une date de version à comparer, un fichier à réécrire,
+/// et une occasion de montrer le repère de la version précédente. Tout cela pour
+/// quatre effets dont l'échantillonnage coûte quelques millisecondes.
+///
+/// L'écrire à la main dans ce fichier est exclu par le principe même du repère :
+/// il doit venir de l'exécution, sans quoi il finirait par mentir.
+///
+/// Reste donc la mémoire : calculé à la première demande, retenu pour la durée
+/// du processus. C'est la seule initialisation paresseuse du module — les
+/// manifestes, eux, sont reconstruits à chaque appel parce qu'ils ne coûtent que
+/// quatre petits objets JSON, là où ceci instancie quatre moteurs QuickJS.
+///
+/// Le gabarit est celui par défaut, et non celui du clavier branché : un repère
+/// qui dépendrait du matériel présent ne serait pas comparable d'une machine à
+/// l'autre.
+pub fn swatches() -> &'static [Swatch] {
+    static SWATCHES: OnceLock<Vec<Swatch>> = OnceLock::new();
+    SWATCHES.get_or_init(|| {
+        ALL.iter()
+            .map(|b| swatch::sample(b.js, crate::default_layout()))
+            .collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +154,20 @@ mod tests {
                 b.id
             );
         }
+    }
+
+    /// Chaque effet livré a son repère, et l'ordre suit celui de [`ALL`] — c'est
+    /// ce qui permet à la bibliothèque de les apparier par position.
+    #[test]
+    fn chaque_effet_integre_a_son_repere() {
+        let swatches = swatches();
+        assert_eq!(swatches.len(), ALL.len());
+        for (b, swatch) in ALL.iter().zip(swatches) {
+            assert!(!swatch.is_empty(), "« {} » n'a pas de repère", b.id);
+        }
+        // Retenu, donc rendu à l'identique : rien n'est recalculé à chaque
+        // ouverture de la bibliothèque.
+        assert_eq!(swatches, self::swatches());
     }
 
     /// Un manifeste intégré est écrit à la main : un JSON invalide passerait la

@@ -19,6 +19,8 @@ use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
+pub mod swatch;
+
 /// Le module que l'hôte fournit, et que l'éditeur décrit par son `.d.ts`.
 const API_JS: &str = include_str!("api.js");
 
@@ -282,7 +284,26 @@ fn render_loop(
 /// Le `Runtime` est renvoyé avec le contexte, et non gardé ici : c'est lui qui
 /// porte le résolveur de modules, il doit donc vivre aussi longtemps.
 fn prepare(js: &str, layout: &'static Layout) -> Result<(Runtime, Context), String> {
+    prepare_bounded(js, layout, None)
+}
+
+/// Comme [`prepare`], mais l'exécution s'interrompt passé `deadline`.
+///
+/// La boucle de rendu, elle, n'impose aucune échéance : un effet qui boucle y
+/// monopolise son propre fil, ce qui se voit et s'arrête. L'échantillonnage du
+/// repère, lui, tourne dans le fil d'une commande — sans borne, un `while (true)`
+/// empêcherait une installation d'aboutir. L'échéance est posée **avant** toute
+/// évaluation, pour couvrir aussi le corps du module.
+fn prepare_bounded(
+    js: &str,
+    layout: &'static Layout,
+    deadline: Option<Instant>,
+) -> Result<(Runtime, Context), String> {
     let rt = Runtime::new().map_err(|e| format!("QuickJS : {e}"))?;
+
+    if let Some(deadline) = deadline {
+        rt.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
+    }
 
     // `@candeo/effects-api` est **interne**. C'est ce qui permet d'écrire un
     // `import` normal sans bundler, sans résolution de chemins et sans
