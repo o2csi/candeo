@@ -517,13 +517,22 @@ permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne des
   transforment en arrêt propre — aucun chemin nouveau. Le moteur y ajoute
   seulement le nom de la cause, en français : « l'effet a dépassé son temps de
   calcul » se relie à son code, une erreur de QuickJS non.
-- **Les budgets sont mesurés, et le temps dépend du profil de compilation.**
-  QuickJS est du C, compilé au niveau d'optimisation du profil : la même image du
-  même effet coûte 0,23 ms en `release` et 6,3 ms en débogage. Le budget suit —
-  8 ms et 200 ms —, faute de quoi il aurait fallu choisir entre couper des effets
-  irréprochables sous `tauri dev` et laisser un gel de plusieurs secondes en
-  production. La mémoire, elle, ne dépend pas du profil : 32 Mo, soit cinq fois
-  l'effet à état le plus démesuré qu'on sache écrire pour 132 LED.
+- **Les budgets sont mesurés.** Un effet ordinaire coûte 0,23 ms par image en
+  `release`, un champ de cinq mille particules avec une seconde de traînée
+  1,1 ms. Le budget de 10 ms n'est donc pas une allocation de performance mais
+  **un détecteur de gel avec de la marge pour l'à-coup machine** : l'échéance se
+  mesure en temps réel, pas en temps de calcul, et un fil suspendu par
+  l'ordonnanceur consomme son budget sans rien exécuter. Le plafond vient
+  d'ailleurs : l'écriture HID prend 14,4 ms au pire dans la même période de
+  33,3 ms, et l'échéance ne serait ratée en silence qu'à partir d'environ 19 ms
+  de budget. La mémoire ne dépend pas du profil : 32 Mo, soit cinq fois l'effet
+  à état le plus démesuré qu'on sache écrire pour 132 LED.
+- **Le budget de débogage est distinct — 200 ms — et c'est un plafond, pas une
+  cible.** QuickJS est du C compilé au niveau d'optimisation du profil : non
+  optimisé, la même image passait de 0,23 ms à 6,3 ms. Depuis que
+  `[profile.dev.package."*"]` passe les dépendances en `opt-level = 2`, QuickJS
+  est optimisé en débogage aussi et l'écart devrait avoir fondu — **à
+  re-mesurer** avant d'unifier les deux valeurs.
 - **Un appareil a une ligne d'état dès qu'il a porté un effet, et la garde.**
   `engine_status()` rend une entrée par appareil visé, `running` à faux une fois
   l'effet arrêté. Retirer la ligne rendrait « cet appareil ne fait rien »

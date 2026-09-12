@@ -105,41 +105,62 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 30;
 
 /// Temps accordé au calcul d'**une** image.
 ///
-/// Un quart de la période, qui est de 33,3 ms à 30 img/s. Le budget n'a pas
-/// suivi la cadence quand elle est passée de 60 à 30 : il était déjà très
-/// au-dessus du nécessaire, et c'est l'écriture HID — ~13 ms par image — qui
-/// occupe le reste. Le choix se tient par les deux bouts :
+/// ## Ce que ce chiffre mesure vraiment
 ///
-/// - **il est très au-dessus d'un effet honnête.** Mesuré sur ce moteur, en
-///   `release` : 0,23 ms pour une image d'un effet qui parcourt les 106 touches,
-///   1,1 ms pour un champ de cinq mille particules avec une seconde d'images
-///   gardées — un effet démesuré pour un clavier de 132 LED. Huit millisecondes
-///   laissent donc entre sept et trente-cinq fois le nécessaire. Et l'échéance
-///   se mesure en temps réel, pas en temps de calcul : un fil que
-///   l'ordonnanceur suspend au milieu d'une image consomme son budget sans rien
-///   exécuter, il faut de quoi absorber un à-coup de la machine ;
-/// - **il est très en-dessous d'un gel.** Un effet qui ne sort pas s'arrête au
-///   bout de [`MAX_CONSECUTIVE_ERRORS`] images, soit un quart de seconde — alors
-///   qu'un budget d'une seconde par image aurait fait attendre une demi-minute
-///   avant de dire ce qui ne va pas.
+/// Pas une allocation de performance : **un détecteur de gel**, avec de la marge
+/// pour l'à-coup machine. Un effet ordinaire coûte **0,23 ms** et un champ de
+/// cinq mille particules avec une seconde de traînée **1,1 ms** — mesurés en
+/// `release` sur ce moteur, pour un clavier de 132 LED. Aucun effet réaliste ne
+/// vit entre 1 et 10 ms.
+///
+/// Ce que ces millisecondes achètent, c'est donc de la **préemption tolérée** :
+/// l'échéance se mesure en temps réel, pas en temps de calcul, et un fil que
+/// l'ordonnanceur suspend au milieu d'une image consomme son budget sans rien
+/// exécuter. À 10 ms, un effet ordinaire peut se faire suspendre près de 10 ms
+/// sans être accusé de geler.
+///
+/// ## Où est le plafond
+///
+/// L'écriture HID d'une image complète coûte **13,1 ms en moyenne, 14,4 ms au
+/// pire** (§5 du relevé), et elle vit dans la même période de 33,3 ms :
+///
+/// ```text
+///   budget 10 ms + écriture 14,4 ms = 24,4 ms   →  9 ms de marge
+/// ```
+///
+/// Le seuil où l'on commencerait à **rater l'échéance en silence** est vers
+/// **19 ms** de budget. On en est loin, et c'est ce qui rend 10 ms sans risque
+/// là où le chiffre d'origine — la moitié d'une période de 16,7 ms — n'était
+/// qu'une proportion, plus une mesure.
+///
+/// ## Et très en-dessous d'un gel
+///
+/// Un effet qui ne sort pas s'arrête au bout de [`MAX_CONSECUTIVE_ERRORS`]
+/// images, soit **0,3 s** — alors qu'un budget d'une seconde par image aurait
+/// fait attendre une demi-minute avant de dire ce qui ne va pas.
 ///
 /// Dépasser une fois n'arrête rien : le compteur d'erreurs consécutives repart
 /// à zéro dès la première image rendue. Il en faut trente d'affilée.
 #[cfg(not(debug_assertions))]
-const BUDGET_IMAGE: Duration = Duration::from_millis(8);
+const BUDGET_IMAGE: Duration = Duration::from_millis(10);
 
 /// Le même budget, à la vitesse du moteur qu'on a réellement compilé.
 ///
-/// QuickJS est du C, compilé au niveau d'optimisation du profil. En débogage —
-/// donc sous `tauri dev` et sous `cargo test` — la **même** image du **même**
-/// effet simple passe de 0,23 ms à 6,3 ms de JavaScript : vingt-cinq fois plus
-/// lent, mesuré. Ce n'est pas l'effet qui a changé, c'est l'interpréteur.
+/// QuickJS est du C, compilé au niveau d'optimisation du profil. Non optimisé,
+/// la **même** image du **même** effet simple passait de 0,23 ms à 6,3 ms de
+/// JavaScript : vingt-cinq fois plus lent, mesuré. Ce n'est pas l'effet qui
+/// changeait, c'est l'interpréteur.
 ///
-/// Un budget unique aurait donc dû choisir son camp : à 8 ms il couperait des
+/// Un budget unique aurait donc dû choisir son camp : à 10 ms il couperait des
 /// effets irréprochables dès qu'on lance l'application en développement ; à
-/// 200 ms il laisserait un gel de six secondes en production. Le facteur est
-/// appliqué là où il vient, et le rapport entre les deux valeurs est celui qu'on
-/// a mesuré entre les deux moteurs.
+/// 200 ms il laisserait un gel de six secondes en production.
+///
+/// ⚠️ **Ce facteur 25 a été mesuré avant que `[profile.dev.package."*"]` ne
+/// passe les dépendances en `opt-level = 2`.** QuickJS arrive par une
+/// dépendance : il est donc optimisé en débogage lui aussi, désormais, et
+/// l'écart devrait avoir fondu. Cette valeur reste **un plafond, pas une
+/// cible** — la garder large ne coûte rien tant que personne ne la prend pour
+/// une mesure à jour. À refaire si quelqu'un veut unifier les deux budgets.
 #[cfg(debug_assertions)]
 const BUDGET_IMAGE: Duration = Duration::from_millis(200);
 
