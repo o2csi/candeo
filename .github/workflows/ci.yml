@@ -18,7 +18,20 @@ jobs:
       # que l'image du coureur le contient déjà.
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
+      # `rust-cache` bâtit sa clé sur `Cargo.lock` et la chaîne d'outils — **pas**
+      # sur les profils de compilation. Quand `[profile.dev.package."*"]` est passé
+      # à `opt-level = 2` sans que `Cargo.lock` bouge, la clé n'a donc pas changé :
+      # chaque exécution restaurait des dépendances non optimisées, les
+      # recompilait toutes, puis renonçait à sauvegarder — clé déjà présente, donc
+      # « Cache up-to-date ». Un cache périmé que rien ne remplace, et un job passé
+      # de 2 à 30 minutes sans que le cache paraisse en cause.
+      #
+      # L'empreinte du `Cargo.toml` racine referme le trou : c'est le seul fichier
+      # où cargo lit les profils, donc toucher un profil ouvre un espace de noms
+      # neuf, payé une fois puis réutilisé. À ne pas retirer en la prenant pour du
+      # bruit — cette clé est tout ce qui relie le cache aux profils.
       - uses: Swatinem/rust-cache@v2
+        with: { key: "${{ hashFiles('Cargo.toml') }}" }
       - run: cargo fmt --all -- --check
       # Tout l'espace de travail, et non les deux seules crates sans Tauri :
       # les effets livrés avec l'application sont du JavaScript compilé dans le
@@ -54,8 +67,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Même clé d'empreinte des profils que le job `rust`, et pour la même
+      # raison : ce job compile lui aussi en débogage, donc sous
+      # `[profile.dev.package."*"]`. Notation développée et non compacte — deux
+      # clés dont les valeurs portent déjà des guillemets, c'est là que ce fichier
+      # s'est fait piéger une fois.
       - uses: Swatinem/rust-cache@v2
-        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+        with:
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
+          key: "${{ hashFiles('Cargo.toml') }}"
       # Liste de Tauri 2 pour Debian, plus trois ajouts : `libudev-dev`, qu'une
       # dorsale `hidapi` résout par pkg-config quelle qu'elle soit ; `pkg-config`
       # lui-même ; et `rpm`, pour relire le paquet produit — aucun des trois
@@ -105,9 +125,11 @@ jobs:
   # l'apparition d'un avis ne masque pas une régression de code.
   audit:
     runs-on: ubuntu-latest
-    # `rustsec/audit-check` publie son verdict dans un check run dès qu'il a
-    # quelque chose à signaler. Sans `checks: write` la création répond 403,
-    # et l'action se trompe de diagnostic : elle teste `GITHUB_HEAD_REF` pour
+    # Lecture seule : plus rien ici ne crée de check run depuis l'appel direct
+    # à `cargo audit`. La trace de ce que `checks: write` a coûté reste, parce
+    # que le jour où l'on revient à `rustsec/audit-check`, la panne revient
+    # avec. Sans cette permission la création du check run répond 403, et
+    # l'action se trompe de diagnostic : elle teste `GITHUB_HEAD_REF` pour
     # savoir si elle tourne depuis un fork, or cette variable est renseignée
     # pour *toute* pull request. Sur une PR elle retombait donc sur un message
     # trompeur — « executed from the forked repository » — et sur un push vers
@@ -115,20 +137,39 @@ jobs:
     # échouer le job. C'est la cause des CI rouges sur `main`.
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v7
-      # 6 min 08 de job, dont 6 de compilation : `rustsec/audit-check` appelle
-      # `findOrInstall("cargo-audit")`, qui cherche d'abord le binaire dans le
-      # PATH et ne lance `cargo install` qu'à défaut. On le lui fournit donc
-      # déjà installé, depuis les binaires officiels publiés par RustSec —
-      # quelques secondes, somme de contrôle vérifiée. Rien n'est affaibli :
-      # même outil, même `.cargo/audit.toml`, et la base d'avis est de toute
-      # façon retéléchargée à chaque exécution.
+      # Binaires officiels publiés par RustSec, somme de contrôle vérifiée :
+      # quelques secondes, là où laisser `cargo install cargo-audit` compiler
+      # l'outil coûtait six des 6 min 08 du job.
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-audit }
-      - uses: rustsec/audit-check@v2.0.0
-        with: { token: "${{ secrets.GITHUB_TOKEN }}" }
+      # Appel direct plutôt que `rustsec/audit-check@v2.0.0` : l'enrobage tourne
+      # sur un Node.js 20 déprécié, que GitHub force déjà sur Node 24 et finira
+      # par couper. L'amont l'a corrigé — « Update to use Node 24 », 20/03/2026
+      # — mais ne l'a jamais publié : la dernière version reste v2.0.0 de
+      # septembre 2024, la branche `v2` est restée sur ce commit, et il n'existe
+      # aucun tag plus récent. Il n'y avait donc pas de version où aller, et
+      # s'accrocher à un commit non publié aurait acheté le risque d'une branche
+      # mouvante sans la garantie d'une publication.
+      #
+      # Ce qu'on perd, et c'est le seul apport de l'action : le verdict n'est
+      # plus publié dans un *check run* distinct — « Security audit », lisible
+      # depuis l'onglet « Checks » sans ouvrir le journal. Il se lit désormais
+      # dans la sortie du job.
+      #
+      # Ce qui ne bouge pas : même binaire — l'action ne faisait que l'appeler —,
+      # même `.cargo/audit.toml`, c'est lui qui porte l'exception
+      # RUSTSEC-2024-0429, même base d'avis retéléchargée à chaque exécution, et
+      # les avertissements « non maintenu » (six à ce jour) restent non bloquants.
+      #
+      # Ce qui se resserre, délibérément : l'action passait `ignoreReturnCode` et
+      # ne faisait échouer le job que sur une sévérité **critique** — une
+      # vulnérabilité élevée ou modérée n'était qu'un avertissement, et le job
+      # restait vert. C'est maintenant le code de retour qui tranche, donc toute
+      # vulnérabilité. Il n'y en a aucune à ce jour ; le jour où il y en a une,
+      # elle se corrige, ou elle se justifie et se date dans `.cargo/audit.toml`.
+      - run: cargo audit
 
   web:
     runs-on: ubuntu-latest
@@ -156,6 +197,13 @@ jobs:
       # L'écriture est réservée à `main` : une branche ne peut relire que le
       # cache de sa base, et les caches de PR ne feraient qu'évincer celui dont
       # tout le monde repart.
+      #
+      # Sans l'empreinte des profils ajoutée aux jobs `rust` et `linux`, et c'est
+      # délibéré : seul `[profile.dev.package."*"]` a bougé, et il ne touche pas
+      # `release` — ce job est resté à ses six minutes pendant que les deux autres
+      # passaient à trente. Le trou reste néanmoins ouvert ici : le jour où
+      # `[profile.release]` change, la clé ne bougera pas davantage et ce cache-ci
+      # se figera de la même façon. C'est la même clé qu'il faudra lui donner.
       - uses: Swatinem/rust-cache@v2
         with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
       - uses: pnpm/action-setup@v6

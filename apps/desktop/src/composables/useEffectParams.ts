@@ -81,8 +81,21 @@ const remembered = ref<Record<string, EffectParams>>({})
 /** Ce qui a empêché de lire, d'ajuster ou de retenir. Déjà lisible. */
 const error = ref<string | null>(null)
 
-/** La lecture initiale, partagée : elle n'a lieu qu'une fois par session. */
+/** La lecture **en vol**, partagée : deux écrans qui montent ensemble ne lisent qu'une fois. */
 let reading: Promise<void> | null = null
+
+/** Vrai dès qu'une lecture a abouti. C'est lui, et lui seul, qui évite de relire à chaque montage. */
+let loaded = false
+
+/**
+ * Numéro de la dernière lecture lancée.
+ *
+ * `reload` peut partir pendant qu'une lecture est déjà en vol, et rien ne
+ * garantit que les deux reviennent dans l'ordre où elles sont parties. Sans ce
+ * compte, la plus ancienne pourrait atterrir en dernier et réinstaller
+ * exactement l'état qu'on venait de partir remplacer.
+ */
+let generation = 0
 
 const key = (d: DeviceRef, effect: string) => `${d.vid}:${d.pid}/${effect}`
 
@@ -324,26 +337,90 @@ function cancelWrites(keep: (key: string) => boolean): void {
  */
 window.addEventListener('pagehide', flushAll)
 
+// ------------------------------------------------------------------- lecture
+
+/**
+ * Lit `settings.json` et remplace ce qu'on retient.
+ *
+ * Un échec ne marque pas la lecture comme faite : il la laisse à retenter, pour
+ * qu'un second écran ne se contente pas d'hériter d'un refus définitif.
+ */
+function read(): Promise<void> {
+  const mine = ++generation
+
+  const run = api
+    .getSettings()
+    .then((s) => {
+      // Une lecture plus récente est passée devant : la nôtre est périmée, et
+      // l'appliquer reviendrait à défaire ce qu'elle vient d'installer.
+      if (mine !== generation) return
+
+      const disque: Record<string, EffectParams> = Object.fromEntries(
+        s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
+      )
+
+      // Ce qui attend encore le disque est plus récent que le disque : l'écriture
+      // ne part qu'au repos du curseur, et `reload` ne choisit pas son moment.
+      // Reprendre le fichier tel quel ferait donc reculer un curseur sous la main
+      // de celui qui le tient.
+      //
+      // Couvre ce qui attend, pas ce qui est déjà parti : `persist` retire
+      // l'entrée de `writes` **avant** que le Rust n'ait écrit. Une relecture qui
+      // tomberait dans cet aller-retour rendrait la valeur d'avant. Fenêtre
+      // connue et sans conséquence tant que rien n'appelle `reload` — à traiter
+      // avec #46, qui sera le premier à le faire.
+      for (const k of writes.keys()) {
+        const enVol = remembered.value[k]
+        if (enVol !== undefined) disque[k] = enVol
+      }
+
+      remembered.value = disque
+      loaded = true
+    })
+    .catch((e: unknown) => {
+      if (mine !== generation) return
+      error.value = message(e)
+    })
+    .finally(() => {
+      // Pas d'effacement inconditionnel : une lecture plus récente a pu prendre
+      // la place, et la retirer la rendrait invisible à qui appelle `load`.
+      if (reading === run) reading = null
+    })
+
+  reading = run
+  return run
+}
+
 export function useEffectParams() {
   /**
-   * Lit `settings.json` une fois par session.
+   * S'assure que `settings.json` a été lu — une fois par session, pas une fois
+   * par montage.
    *
-   * Un échec n'efface pas la promesse partagée : il la libère, pour qu'un
-   * second écran retente au lieu d'hériter d'un refus définitif.
+   * Revenir sur cet écran ne relit pas, et c'est voulu : le disque ne bouge pas
+   * du seul fait qu'on navigue, et c'est la fenêtre elle-même qui l'écrit, donc
+   * elle en sait déjà plus que lui. Le jour où ce n'est plus vrai, c'est
+   * {@link reload} qu'il faut appeler — pas cette économie qu'il faut retirer.
    */
   function load(): Promise<void> {
-    reading ??= api
-      .getSettings()
-      .then((s) => {
-        remembered.value = Object.fromEntries(
-          s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
-        )
-      })
-      .catch((e: unknown) => {
-        reading = null
-        error.value = message(e)
-      })
-    return reading
+    if (loaded) return Promise.resolve()
+    return reading ?? read()
+  }
+
+  /**
+   * Relit `settings.json`, mémoïsation comprise.
+   *
+   * Pour ce qui écrit les réglages **hors de la fenêtre** — l'icône de zone de
+   * notification (#46) est le premier cas attendu. Sans ce point d'entrée,
+   * `load` ne relirait jamais après un premier succès, et la fenêtre
+   * travaillerait indéfiniment sur l'instantané de son démarrage.
+   *
+   * Ne rejoint pas une lecture déjà en vol : celle-ci a pu partir **avant**
+   * l'écriture qu'on vient d'apprendre, et rendrait alors le contenu même qu'on
+   * cherche à remplacer.
+   */
+  function reload(): Promise<void> {
+    loaded = false
+    return read()
   }
 
   /**
@@ -456,6 +533,7 @@ export function useEffectParams() {
 
   return {
     load,
+    reload,
     valuesFor,
     adjust,
     settle,
