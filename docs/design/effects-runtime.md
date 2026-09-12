@@ -205,9 +205,9 @@ fonctionnalité y est la même. Ce qui change d'un système à l'autre :
 ### Ce que la CI établit
 
 Le job `linux` (`.github/workflows/ci.yml`) fait, dans cet ordre : dépendances
-système Debian de Tauri 2 plus `libudev-dev`, construction du front,
-`cargo check --workspace --all-targets`, `cargo test --workspace`, puis
-`tauri build --debug --bundles deb,rpm` et lecture du `.deb` produit.
+système Debian de Tauri 2 plus `libudev-dev`, `cargo check --workspace
+--all-targets`, `cargo test --workspace`, puis `tauri build --debug --bundles
+deb,rpm` et lecture des deux paquets produits.
 
 Il établit donc que :
 
@@ -217,9 +217,11 @@ Il établit donc que :
 - les tests passent à l'identique sur un système de fichiers sensible à la
   casse ;
 - l'application s'empaquette en `.deb` et en `.rpm` ;
-- la règle udev est **réellement présente** dans le `.deb`, à
-  `/usr/lib/udev/rules.d/60-candeo.rules`. La vérification lit le paquet, elle
-  ne relit pas la configuration.
+- la règle udev est **réellement présente** dans les deux, à
+  `/usr/lib/udev/rules.d/60-candeo.rules`. La vérification lit les paquets
+  (`dpkg-deb -c`, `rpm -qpl`), elle ne relit pas la configuration — `deb` et
+  `rpm` étant deux déclarations distinctes, n'en vérifier qu'une laisserait
+  l'autre se tromper en silence.
 
 ### Ce qui reste supposé
 

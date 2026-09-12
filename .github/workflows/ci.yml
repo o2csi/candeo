@@ -42,24 +42,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
-      # Liste de Tauri 2 pour Debian, plus `libudev-dev` et `pkg-config` :
-      # `hidapi` résout libudev par pkg-config quelle que soit la dorsale, et
-      # le paquet de développement n'est pas préinstallé sur l'image.
+      # Liste de Tauri 2 pour Debian, plus trois ajouts : `libudev-dev`, qu'une
+      # dorsale `hidapi` résout par pkg-config quelle qu'elle soit ; `pkg-config`
+      # lui-même ; et `rpm`, pour relire le paquet produit — aucun des trois
+      # n'est préinstallé sur l'image.
       - name: Dépendances système
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
-            libudev-dev build-essential pkg-config file
+            libudev-dev build-essential pkg-config file rpm
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
+      # `tauri build` construit le front lui-même par `beforeBuildCommand` ; il
+      # ne manque que `node_modules`. `cargo check`, lui, n'a besoin de rien :
+      # `tauri-build` se contente d'un `frontendDist` absent — c'est pourquoi le
+      # job `rust`, sous Windows, compile `candeo-desktop` sans jamais voir pnpm.
       - run: pnpm install --frozen-lockfile
-      # `tauri-build` lit `frontendDist` et s'arrête si le dossier n'existe pas.
-      # Un `cargo check` sur `candeo-desktop` exige donc un front déjà construit,
-      # même quand on ne veut vérifier que du Rust.
-      - run: pnpm --filter @candeo/desktop build
       - run: cargo check --workspace --all-targets
       # Aucun test ne touche au matériel. Les rejouer ici vérifie que la
       # validation des identifiants et le moteur `rquickjs` se comportent de la
@@ -69,14 +70,22 @@ jobs:
       # contenu du paquet. Le profil `release` (lto, codegen-units = 1) coûterait
       # plusieurs minutes pour la même preuve. AppImage est écarté — il télécharge
       # ses propres outils, ce qui n'ajoute rien ici et casse sans prévenir.
+      #
+      # Le prix est connu et mesuré : le `.deb` sort en une dizaine de secondes,
+      # le `.rpm` demande une dizaine de minutes — il recompresse un binaire de
+      # débogage non dépouillé. C'est ce qui fait la durée du job. On le paie
+      # parce que `deb` et `rpm` sont deux déclarations distinctes dans
+      # `tauri.conf.json` : ne vérifier que la première laisserait la seconde se
+      # tromper en silence.
       - run: pnpm --filter @candeo/desktop exec tauri build --debug --bundles deb,rpm
-      # La preuve : la règle est dans le paquet, à l'emplacement attendu. Sans
-      # cette lecture, la configuration `bundle.linux.deb.files` resterait une
-      # déclaration que rien ne confronte au paquet produit.
-      - name: La règle udev est livrée par le paquet
+      # La preuve : la règle est dans les deux paquets, à l'emplacement attendu.
+      # On lit les paquets produits — sans cela, `bundle.linux.*.files` resterait
+      # une déclaration que rien ne confronte au résultat.
+      - name: La règle udev est livrée par les paquets
         run: |
-          deb=$(ls target/debug/bundle/deb/*.deb | head -1)
-          dpkg-deb -c "$deb" | grep -F 'usr/lib/udev/rules.d/60-candeo.rules'
+          regle='usr/lib/udev/rules.d/60-candeo.rules'
+          dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$regle"
+          rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$regle"
 
   # Avis de sécurité des dépendances Rust. Séparé du job `rust` pour que
   # l'apparition d'un avis ne masque pas une régression de code.

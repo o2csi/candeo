@@ -101,7 +101,7 @@ remontée des images — est décrit dans
 Développé sous Windows, écrit pour ne pas s'y enfermer. Personne n'a de machine
 Linux dans la boucle, alors la CI tient le rôle : le job `linux` construit
 l'espace de travail complet sous `ubuntu-latest`, joue les tests, empaquette en
-`.deb` et en `.rpm`, et **lit le paquet produit** pour vérifier que la règle
+`.deb` et en `.rpm`, et **lit les paquets produits** pour vérifier que la règle
 udev s'y trouve.
 
 D'où la distinction que tient cette section : ce qui est **compilé** et ce qui
@@ -112,8 +112,8 @@ reste **supposé**.
 - **Accès matériel.** La dorsale `hidraw` d'`hidapi` se construit sous Linux, et
   rien dans les trois crates ne dépend de Windows pour compiler.
 - **Empaquetage.** `.deb` et `.rpm` sont produits, et la règle udev est présente
-  dans le `.deb` à `/usr/lib/udev/rules.d/60-candeo.rules` — vérifié par lecture
-  du paquet, pas par relecture de la configuration.
+  dans les deux à `/usr/lib/udev/rules.d/60-candeo.rules` — vérifié par lecture
+  des paquets, pas par relecture de la configuration.
 - **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
   des octets, et ses tests tournent partout.
 - **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
@@ -230,8 +230,8 @@ sudo apt-get install -y \
   libudev-dev build-essential pkg-config file
 ```
 
-C'est la liste exacte qu'installe le job `linux` de la CI — si elle se périme,
-la CI le dit.
+C'est la liste qu'installe le job `linux` de la CI — si elle se périme, la CI le
+dit. Elle y ajoute `rpm`, qui ne sert qu'à relire le paquet produit.
 
 ---
 
