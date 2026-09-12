@@ -207,6 +207,33 @@ qui évitent ainsi de réémettre toute la matrice.
 
 Un `0f`/`04` (luminosité) encadre généralement la séquence.
 
+### Ce que cette séquence coûte — mesuré le 12/09/2026
+
+**13,1 ms en moyenne, 14,4 ms au pire**, sur 120 mises à jour enchaînées au plus
+vite, **sans une seule écriture refusée** et l'appareil toujours répondant après
+la rafale. Soit un plafond d'environ **76 images par seconde**.
+
+C'est le **goulot d'étranglement de toute la chaîne**, et il est sur le bus, pas
+dans le calcul :
+
+| Cadence | Période | Part prise par l'écriture | Reste pour l'effet |
+|---|---|---|---|
+| 60 img/s | 16,7 ms | **78 %** | ~3,6 ms |
+| 30 img/s | 33,3 ms | **39 %** | ~20 ms |
+
+> ⚠️ **60 img/s ne tenait qu'en apparence.** L'écriture seule mangeait plus des
+> trois quarts de la période, laissant à l'effet moins que le budget de calcul
+> qu'on lui accorde — donc un effet **parfaitement dans les clous** faisait déjà
+> rater l'échéance, et la boucle retombait en silence à une cadence qu'elle
+> n'annonçait nulle part. La cadence du moteur a été ramenée à **30**.
+
+Deux réserves connues, si la cadence devait remonter :
+
+- **on réécrit les 6 rangées à chaque image**, sans regarder ce qui a changé,
+  alors que l'écriture partielle est vérifiée sur le matériel (§4) ;
+- **la 7e trame est réémise à chaque image** alors qu'on est déjà en mode
+  custom — à elle seule ~1,9 ms sur les 13.
+
 ### Trame réelle — rangée 0 entièrement rouge
 
 ```
@@ -453,7 +480,7 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 - [ ] L'identifiant de transaction (`0x9f`) est-il vérifié par l'appareil ?
 - [ ] Plage réelle de la vitesse de `Wave` ; la direction est bornée à `00`–`02`
 - [ ] Identifiant d'effet `0x06` : jamais essayé
-- [ ] Débit maximal accepté avant décrochage
+- [x] **Débit maximal accepté avant décrochage** — voir ci-dessous
 - [ ] L'appareil accepte-t-il un rapport plus court que 90 octets ?
 - [ ] Sens de `0x0f`/`0x81` (énumération `00`…`09`) et `0x0f`/`0x86` (`00 01`)
 - [ ] Les trois premiers octets de `0x0f`/`0x80` (`05 19 03`), dont les deux suivants donnent bien 6×22
@@ -480,6 +507,7 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 | 2026-09-12 | **Décision : ne jamais basculer en mode pilote.** Il ferait cesser au micrologiciel le traitement de certaines touches, sans contrepartie pour un contrôleur d'éclairage |
 | 2026-09-12 | **`0x0f`/`0x82` relit l'effet courant** — vérification d'un effet sans dépendre de l'œil. `Static` (`0x01`) et `Breathing` (`0x02`) enfin établis : ils exigent une couleur, et le premier balayage les posait en noir |
 | 2026-09-12 | **Les identifiants `0x05` et `0x07` sont refusés** par cet appareil, alors que l'écriture rend `0x02`. Démonstration en direct qu'un octet d'état ne valide pas les arguments |
+| 2026-09-12 | **Débit mesuré** : 13,1 ms par mise à jour complète, plafond ~76 img/s, aucune écriture refusée. Le goulot est le bus, pas le calcul — la cadence du moteur passe de 60 à **30 img/s** |
 
 ## 12. Captures
 

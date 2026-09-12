@@ -75,9 +75,29 @@ const API_JS: &str = include_str!("api.js");
 /// La colle qui importe l'effet et installe la fonction de rendu.
 const BOOTSTRAP_JS: &str = include_str!("bootstrap.js");
 
-/// 60 images par seconde. Le clavier n'en demande pas tant, mais c'est la
-/// cadence à laquelle un mouvement cesse de se voir saccadé.
-const FPS: u32 = 60;
+/// 30 images par seconde — **mesuré, pas supposé**.
+///
+/// La cadence était à 60 par analogie avec un écran. Le chronométrage sur le
+/// matériel dit autre chose : une mise à jour complète coûte **7 transferts de
+/// contrôle** — 6 rangées puis le passage en mode custom, voir
+/// `Keyboard::present` — et les 120 mesurées donnent **13,1 ms en moyenne,
+/// 14,4 ms au pire**, sans une seule écriture refusée. L'appareil accepte donc
+/// jusqu'à ~76 img/s.
+///
+/// 60 img/s tenait donc *à peine* : l'écriture seule mangeait **78 % de la
+/// période** de 16,7 ms, laissant ~3,6 ms à l'effet — moins que le budget de
+/// calcul qu'on lui accorde. Autrement dit un effet **parfaitement dans les
+/// clous** faisait déjà rater l'échéance, et la boucle retombait en silence à
+/// une cadence qu'elle n'annonçait nulle part.
+///
+/// À 33,3 ms, l'écriture retombe à 39 % et il reste ~20 ms pour l'effet. Ce que
+/// 60 promettait sans le tenir, 30 le tient.
+///
+/// ⚠️ **Le goulot est le bus, pas le JavaScript.** Deux pistes si la cadence
+/// devait remonter : ne réécrire que les rangées qui changent — l'écriture
+/// partielle est vérifiée sur le matériel — et cesser de réémettre la trame de
+/// mode custom quand on y est déjà, qui vaut à elle seule ~1,9 ms sur les 13.
+const FPS: u32 = 30;
 
 /// Au-delà, on arrête. Un effet qui lève à chaque image ne se rétablira pas
 /// tout seul, et continuer reviendrait à remplir le journal en silence.
@@ -85,8 +105,10 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 30;
 
 /// Temps accordé au calcul d'**une** image.
 ///
-/// La moitié de la période, qui est de 16,7 ms à 60 img/s. Le choix se tient par
-/// les deux bouts :
+/// Un quart de la période, qui est de 33,3 ms à 30 img/s. Le budget n'a pas
+/// suivi la cadence quand elle est passée de 60 à 30 : il était déjà très
+/// au-dessus du nécessaire, et c'est l'écriture HID — ~13 ms par image — qui
+/// occupe le reste. Le choix se tient par les deux bouts :
 ///
 /// - **il est très au-dessus d'un effet honnête.** Mesuré sur ce moteur, en
 ///   `release` : 0,23 ms pour une image d'un effet qui parcourt les 106 touches,
@@ -1079,7 +1101,7 @@ mod tests {
 
     /// Au-delà, on considère que la condition attendue ne viendra pas.
     ///
-    /// Généreux, et à dessein : à 60 images par seconde quelques images tiennent
+    /// Généreux, et à dessein : à 30 images par seconde quelques images tiennent
     /// dans quelques dizaines de millisecondes, mais la cadence d'un coureur
     /// d'intégration continue n'est pas celle d'une machine de développement.
     /// Un test qui dort une durée choisie serait soit lent, soit capricieux.
