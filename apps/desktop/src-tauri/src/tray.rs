@@ -222,7 +222,7 @@ impl Action {
 struct Pilote {
     layout: &'static Layout,
     device: DeviceRef,
-    disponibilite: Disponibilite,
+    availability: Availability,
 }
 
 /// What the tray can do with a controlled device **right now**.
@@ -231,16 +231,16 @@ struct Pilote {
 /// place in the menu when it is away. Removing it would hide a keyboard the
 /// user decided to control, only because it is momentarily elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Disponibilite {
+enum Availability {
     /// Open: its actions can succeed.
-    Ouvert,
-    /// Plugged in but **not open**. Either another unit of the same model,
-    /// released at startup because its serial is not the adopted one, or an
-    /// adopted unit whose opening failed. Every action would fail with "no
-    /// device open": the menu must not offer them (#72).
-    Ferme,
+    Open,
+    /// Plugged in but **not open**: another unit of the same model released at
+    /// startup, an adopted unit whose opening failed, or a device closed by its
+    /// render loop after its writes kept failing. Every action would fail with
+    /// "no device open": the menu must not offer them (#72).
+    NotOpen,
     /// Unplugged.
-    Debranche,
+    Unplugged,
 }
 
 /// The controlled devices, plugged in or not.
@@ -257,7 +257,7 @@ fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
         .filter_map(|layout| {
             let branche = api.as_ref().and_then(|api| crate::plugged(api, layout));
             let inspection = state.inspection(DeviceRef::of(layout));
-            pilote(layout, settings, branche, inspection.as_ref())
+            controlled_device(layout, settings, branche, inspection.as_ref())
         })
         .collect()
 }
@@ -271,70 +271,70 @@ fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
 /// separately; the tray now asks the same questions.
 ///
 /// Pure, so the #72 scenario is testable without a second keyboard.
-fn pilote(
+fn controlled_device(
     layout: &'static Layout,
     settings: &storage::Settings,
-    branche: Option<Option<String>>,
+    plugged: Option<Option<String>>,
     inspection: Option<&Inspection>,
 ) -> Option<Pilote> {
-    let present = branche.is_some();
-    let serie = crate::serie_connue(inspection, branche.flatten());
-    if settings.device_state(layout.vid, layout.pid, serie.as_deref()) != DeviceState::Adopted {
+    let present = plugged.is_some();
+    let serial = crate::serie_connue(inspection, plugged.flatten());
+    if settings.device_state(layout.vid, layout.pid, serial.as_deref()) != DeviceState::Adopted {
         return None;
     }
-    // Unplugged wins over a handle still open: until the next write notices,
-    // that handle only leads to failures.
-    let disponibilite = match (present, inspection.is_some()) {
-        (false, _) => Disponibilite::Debranche,
-        (true, true) => Disponibilite::Ouvert,
-        (true, false) => Disponibilite::Ferme,
+    // Unplugged wins over a handle still open: until the render loop closes
+    // it, that handle only leads to failures.
+    let availability = match (present, inspection.is_some()) {
+        (false, _) => Availability::Unplugged,
+        (true, true) => Availability::Open,
+        (true, false) => Availability::NotOpen,
     };
     Some(Pilote {
         layout,
         device: DeviceRef::of(layout),
-        disponibilite,
+        availability,
     })
 }
 
 /// What a device submenu shows and allows, derived from its availability.
 #[derive(Debug, PartialEq, Eq)]
 struct Presentation {
-    titre: String,
+    title: String,
     /// A line explaining why nothing can be done, when that is the case.
-    raison: Option<&'static str>,
-    effets: bool,
-    sortie: bool,
-    eteindre: bool,
+    reason: Option<&'static str>,
+    effects: bool,
+    output: bool,
+    turn_off: bool,
 }
 
 /// Only an open device offers actions; the others say why they do not.
 ///
 /// The actions still re-read the state when clicked (see the module header):
 /// greying items is honesty in the menu, not the protection.
-fn presentation(pilote: &Pilote, boucle_en_cours: bool) -> Presentation {
-    let nom = pilote.layout.name;
-    match pilote.disponibilite {
-        Disponibilite::Ouvert => Presentation {
-            titre: nom.to_owned(),
-            raison: None,
-            effets: true,
+fn presentation(device: &Pilote, loop_running: bool) -> Presentation {
+    let name = device.layout.name;
+    match device.availability {
+        Availability::Open => Presentation {
+            title: name.to_owned(),
+            reason: None,
+            effects: true,
             // The toggle lives in the loop: without a loop there is nothing to toggle.
-            sortie: boucle_en_cours,
-            eteindre: true,
+            output: loop_running,
+            turn_off: true,
         },
-        Disponibilite::Ferme => Presentation {
-            titre: format!("{nom} — non ouvert"),
-            raison: Some("Branché mais non ouvert — voir la fenêtre"),
-            effets: false,
-            sortie: false,
-            eteindre: false,
+        Availability::NotOpen => Presentation {
+            title: format!("{name} — non ouvert"),
+            reason: Some("Branché mais non ouvert — voir la fenêtre"),
+            effects: false,
+            output: false,
+            turn_off: false,
         },
-        Disponibilite::Debranche => Presentation {
-            titre: format!("{nom} — débranché"),
-            raison: None,
-            effets: false,
-            sortie: false,
-            eteindre: false,
+        Availability::Unplugged => Presentation {
+            title: format!("{name} — débranché"),
+            reason: None,
+            effects: false,
+            output: false,
+            turn_off: false,
         },
     }
 }
@@ -383,11 +383,8 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
         Ok(sous_menus) => {
             if sous_menus.is_empty() {
                 // An empty section would read as a broken icon. Naming the
-                // absence, and saying where the decision is made, costs one line.
-                articles.push(Box::new(muet(
-                    app,
-                    "Aucun appareil piloté — ouvrez la fenêtre pour en adopter un",
-                )?));
+                // absence costs one line; "Ouvrir la fenêtre" sits just below.
+                articles.push(Box::new(muet(app, "Aucun appareil piloté")?));
             }
             for appareil in sous_menus {
                 articles.push(Box::new(appareil));
@@ -395,10 +392,9 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
             None
         }
         Err(e) => {
-            articles.push(Box::new(muet(
-                app,
-                &format!("Appareils indisponibles — {e}"),
-            )?));
+            // Never the raw error in the menu: it can hold a local file path,
+            // and [`consigner`] already logs it.
+            articles.push(Box::new(muet(app, "Appareils indisponibles")?));
             Some(e)
         }
     };
@@ -445,11 +441,11 @@ fn sous_menu(
         .filter(|s| s.running)
         .and_then(|s| s.effect_id.as_deref());
 
-    let vue = presentation(pilote, en_cours.is_some());
+    let view = presentation(pilote, en_cours.is_some());
 
     let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
-    if let Some(raison) = vue.raison {
-        articles.push(Box::new(muet(app, raison)?));
+    if let Some(reason) = view.reason {
+        articles.push(Box::new(muet(app, reason)?));
         articles.push(Box::new(separateur(app)?));
     }
     for entree in bibliotheque {
@@ -460,7 +456,7 @@ fn sous_menu(
                 effet: entree.id.clone(),
             },
             &entree.manifest.name,
-            vue.effets,
+            view.effects,
             en_cours == Some(entree.id.as_str()),
         )?));
     }
@@ -472,7 +468,7 @@ fn sous_menu(
             device: pilote.device,
         },
         "Envoyer au clavier",
-        vue.sortie,
+        view.output,
         etat.is_some_and(|s| s.to_keyboard),
     )?));
     articles.push(Box::new(article(
@@ -483,11 +479,11 @@ fn sous_menu(
         "Éteindre",
         // Greyed out is display comfort only: what really protects is that
         // [`eteindre`] re-reads the state when clicked. See the module header.
-        vue.eteindre,
+        view.turn_off,
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = articles.iter().map(AsRef::as_ref).collect();
-    Submenu::with_items(app, vue.titre, true, &refs)
+    Submenu::with_items(app, view.title, true, &refs)
         .map_err(|e| format!("sous-menu de {} non assemblé : {e}", pilote.device))
 }
 
@@ -915,81 +911,84 @@ mod tests {
         assert_eq!(Action::depuis(&action.identifiant()), Some(action));
     }
 
-    fn inspection(serie: &str) -> Inspection {
+    fn inspection_with_serial(serial: &str) -> Inspection {
         Inspection {
             firmware: Err("not read".into()),
-            serial: Ok(serie.into()),
+            serial: Ok(serial.into()),
             checks: Vec::new(),
         }
     }
 
-    fn adopte(serie: &str) -> storage::Settings {
+    fn adopted(serial: &str) -> storage::Settings {
         let mut settings = storage::Settings::default();
-        let l = &candeo_device::DEATHSTALKER_V2_PRO;
-        settings.set_device_state(l.vid, l.pid, Some(serie), DeviceState::Adopted);
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        settings.set_device_state(layout.vid, layout.pid, Some(serial), DeviceState::Adopted);
         settings
     }
 
-    /// #72: the adopted unit is plugged in but not open — for instance another
-    /// unit of the model, released at startup. The USB descriptor gives no
-    /// serial, so the adoption still matches: the menu must say "not open" and
-    /// offer nothing, instead of looking ready.
+    /// #72: the adopted unit is plugged in but not open — another unit of the
+    /// model released at startup, or a device its render loop closed. The USB
+    /// descriptor gives no serial, so the adoption still matches: the menu must
+    /// say "not open" and offer nothing, instead of looking ready.
     #[test]
     fn a_plugged_but_unopened_device_offers_no_action() {
-        let settings = adopte("XY01");
-        let l = &candeo_device::DEATHSTALKER_V2_PRO;
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
 
-        let p = pilote(l, &settings, Some(None), None).expect("still controlled");
-        assert_eq!(p.disponibilite, Disponibilite::Ferme);
+        let device =
+            controlled_device(layout, &settings, Some(None), None).expect("still controlled");
+        assert_eq!(device.availability, Availability::NotOpen);
 
-        let vue = presentation(&p, false);
-        assert!(!vue.effets && !vue.sortie && !vue.eteindre, "{vue:?}");
-        assert!(vue.raison.is_some());
-        assert_ne!(vue.titre, l.name, "the title must not look ready");
+        let view = presentation(&device, false);
+        assert!(!view.effects && !view.output && !view.turn_off, "{view:?}");
+        assert!(view.reason.is_some());
+        assert_ne!(view.title, layout.name, "the title must not look ready");
     }
 
     #[test]
     fn an_open_device_offers_its_actions() {
-        let settings = adopte("XY01");
-        let l = &candeo_device::DEATHSTALKER_V2_PRO;
-        let ouvert = inspection("XY01");
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let open = inspection_with_serial("XY01");
 
-        let p = pilote(l, &settings, Some(None), Some(&ouvert)).expect("controlled");
-        assert_eq!(p.disponibilite, Disponibilite::Ouvert);
+        let device =
+            controlled_device(layout, &settings, Some(None), Some(&open)).expect("controlled");
+        assert_eq!(device.availability, Availability::Open);
 
-        let vue = presentation(&p, false);
+        let view = presentation(&device, false);
         assert!(
-            vue.effets && vue.eteindre && vue.raison.is_none(),
-            "{vue:?}"
+            view.effects && view.turn_off && view.reason.is_none(),
+            "{view:?}"
         );
-        assert!(!vue.sortie, "no loop, nothing to toggle");
-        assert_eq!(vue.titre, l.name);
-        assert!(presentation(&p, true).sortie);
+        assert!(!view.output, "no loop, nothing to toggle");
+        assert_eq!(view.title, layout.name);
+        assert!(presentation(&device, true).output);
     }
 
-    /// A handle can outlive the unplugging until the next write notices: the
+    /// A handle can outlive the unplugging until the render loop closes it: the
     /// enumeration wins, since that handle only leads to failures.
     #[test]
     fn unplugged_wins_over_a_stale_handle() {
-        let settings = adopte("XY01");
-        let l = &candeo_device::DEATHSTALKER_V2_PRO;
-        let perimee = inspection("XY01");
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let stale = inspection_with_serial("XY01");
 
-        let p = pilote(l, &settings, None, Some(&perimee)).expect("still controlled");
-        assert_eq!(p.disponibilite, Disponibilite::Debranche);
-        assert!(!presentation(&p, true).effets);
+        let device =
+            controlled_device(layout, &settings, None, Some(&stale)).expect("still controlled");
+        assert_eq!(device.availability, Availability::Unplugged);
+        assert!(!presentation(&device, true).effects);
     }
 
     /// The open unit's serial decides, not the model: an open unit that is not
     /// the adopted one is not presented as controlled.
     #[test]
     fn the_open_units_serial_decides_adoption() {
-        let mut settings = adopte("XY01");
-        let l = &candeo_device::DEATHSTALKER_V2_PRO;
-        settings.set_device_state(l.vid, l.pid, Some("XY02"), DeviceState::Ignored);
-        let autre = inspection("XY02");
+        let mut settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        settings.set_device_state(layout.vid, layout.pid, Some("XY02"), DeviceState::Ignored);
+        let other = inspection_with_serial("XY02");
 
-        assert!(pilote(l, &settings, Some(None), Some(&autre)).is_none());
+        assert!(controlled_device(layout, &settings, Some(None), Some(&other)).is_none());
     }
 
     /// The event name is written on both sides of the IPC, and nothing links the

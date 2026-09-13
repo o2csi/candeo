@@ -397,13 +397,13 @@ impl DeviceOut for Handle {
         // consigné : une boucle ne tient jamais la poignée et un verrou du
         // moteur en même temps.
         let mut guard = self.lock().unwrap();
-        let resultat = guard.as_ref()?.present(colors).map_err(|e| e.to_string());
-        if resultat.is_err() && abandon {
+        let result = guard.as_ref()?.present(colors).map_err(|e| e.to_string());
+        if result.is_err() && abandon {
             // Only the keyboard that just failed can be dropped here: a
             // reconnection would have replaced it before this lock was taken.
             *guard = None;
         }
-        Some(resultat)
+        Some(result)
     }
 }
 
@@ -1231,8 +1231,8 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
         // donnait une boucle qui se dit saine pendant qu'aucun octet n'atteint
         // l'appareil. Et l'échec de celui-ci ne dit rien des autres : chaque
         // boucle écrit dans son propre état.
-        let echecs = shared.device_failures.load(Ordering::Relaxed);
-        let abandon = echecs + 1 >= MAX_DEVICE_WRITE_ERRORS;
+        let failures = shared.device_failures.load(Ordering::Relaxed);
+        let abandon = failures + 1 >= MAX_DEVICE_WRITE_ERRORS;
         match out.present(&colors, abandon) {
             // **Aucun périphérique ouvert.** Sans ce signalement, lancer un
             // effet sans clavier connecté ne produisait aucun signe : le
@@ -1257,17 +1257,14 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
             }
             Some(Err(e)) if abandon => {
                 // The device was dropped under its own lock (see
-                // [`DeviceOut::present`]). The error kept for the window says
-                // so, and what to do: a closed device is reopened by the
-                // existing commands, not by waiting.
+                // [`DeviceOut::present`]). The message kept for the window says
+                // what to do, a closed device is reopened by the existing
+                // commands; the technical cause goes to the log only.
                 shared.device_failures.store(0, Ordering::Relaxed);
-                let message = format!(
-                    "appareil refermé après {MAX_DEVICE_WRITE_ERRORS} échecs d'écriture \
-                     consécutifs, rebranchez-le puis reconnectez-le : {e}"
-                );
-                *shared.device_error.lock().unwrap() = Some(message);
+                *shared.device_error.lock().unwrap() =
+                    Some("Appareil refermé : rebranchez-le puis reconnectez-le.".to_owned());
                 tracing::warn!(
-                    "appareil refermé après {MAX_DEVICE_WRITE_ERRORS} échecs d'écriture consécutifs : {e}"
+                    "device closed after {MAX_DEVICE_WRITE_ERRORS} consecutive failed writes: {e}"
                 );
                 shared.reaching.store(false, Ordering::Relaxed);
             }
@@ -1275,7 +1272,9 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
                 // Même règle que pour l'erreur d'effet : le début de la panne,
                 // et rien d'autre. Un clavier débranché en cours de route
                 // échouerait à chaque image jusqu'à ce qu'on le rebranche.
-                shared.device_failures.store(echecs + 1, Ordering::Relaxed);
+                shared
+                    .device_failures
+                    .store(failures + 1, Ordering::Relaxed);
                 let avant = shared.device_error.lock().unwrap().replace(e.clone());
                 if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
                     tracing::warn!("l'écriture vers l'appareil a commencé à échouer : {e}");
@@ -1628,23 +1627,23 @@ mod tests {
         ecrites: AtomicU32,
         en_panne: AtomicBool,
         /// Writes still to fail before this output recovers on its own.
-        pannes_restantes: AtomicU32,
+        transient_failures: AtomicU32,
         /// Set when the loop dropped the device, as the real handle does.
-        fermee: AtomicBool,
+        closed: AtomicBool,
     }
 
     impl DeviceOut for Arc<Sortie> {
         fn present(&self, _colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
-            if self.fermee.load(Ordering::Relaxed) {
+            if self.closed.load(Ordering::Relaxed) {
                 return None;
             }
-            let passagere = self
-                .pannes_restantes
+            let transient = self
+                .transient_failures
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
                 .is_ok();
-            if passagere || self.en_panne.load(Ordering::Relaxed) {
+            if transient || self.en_panne.load(Ordering::Relaxed) {
                 if abandon {
-                    self.fermee.store(true, Ordering::Relaxed);
+                    self.closed.store(true, Ordering::Relaxed);
                 }
                 return Some(Err("écriture refusée par l'appareil".into()));
             }
@@ -1661,19 +1660,19 @@ mod tests {
     #[test]
     fn a_device_that_keeps_failing_is_closed_but_the_loop_goes_on() {
         let engine = Engine::default();
-        let panne = Arc::new(Sortie::default());
-        panne.en_panne.store(true, Ordering::Relaxed);
+        let broken = Arc::new(Sortie::default());
+        broken.en_panne.store(true, Ordering::Relaxed);
 
-        demarrer(&engine, PREMIER, "casse", Arc::clone(&panne));
+        demarrer(&engine, PREMIER, "broken", Arc::clone(&broken));
         attendre("the failing device was never closed", || {
-            panne.fermee.load(Ordering::Relaxed)
+            broken.closed.load(Ordering::Relaxed)
         });
 
-        let statut = etat(&engine, PREMIER);
-        assert!(statut.running, "closing the device stopped the loop");
-        assert!(!statut.reaching_keyboard);
-        let erreur = statut.device_error.unwrap_or_default();
-        assert!(erreur.contains("refermé"), "{erreur}");
+        let status = etat(&engine, PREMIER);
+        assert!(status.running, "closing the device stopped the loop");
+        assert!(!status.reaching_keyboard);
+        let message = status.device_error.unwrap_or_default();
+        assert!(message.contains("refermé"), "{message}");
 
         engine.stop(PREMIER);
     }
@@ -1683,21 +1682,21 @@ mod tests {
     #[test]
     fn a_transient_write_failure_does_not_close_the_device() {
         let engine = Engine::default();
-        let sortie = Arc::new(Sortie::default());
-        sortie.pannes_restantes.store(3, Ordering::Relaxed);
+        let output = Arc::new(Sortie::default());
+        output.transient_failures.store(3, Ordering::Relaxed);
 
-        demarrer(&engine, PREMIER, "hoquet", Arc::clone(&sortie));
+        demarrer(&engine, PREMIER, "hiccup", Arc::clone(&output));
         attendre("writing never recovered", || {
-            sortie.ecrites.load(Ordering::Relaxed) >= 3
+            output.ecrites.load(Ordering::Relaxed) >= 3
         });
 
         assert!(
-            !sortie.fermee.load(Ordering::Relaxed),
+            !output.closed.load(Ordering::Relaxed),
             "closed on a transient failure"
         );
-        let statut = etat(&engine, PREMIER);
-        assert!(statut.reaching_keyboard);
-        assert_eq!(statut.device_error, None);
+        let status = etat(&engine, PREMIER);
+        assert!(status.reaching_keyboard);
+        assert_eq!(status.device_error, None);
 
         engine.stop(PREMIER);
     }
