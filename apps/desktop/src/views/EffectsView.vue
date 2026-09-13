@@ -781,15 +781,29 @@ const savedNote = computed<string | null>(() => {
 /**
  * Un réglage part vers **la boucle qu'on regarde**, et sur disque.
  *
- * Vers les deux boucles quand elles existent, et c'est voulu : on peut régler
- * l'effet appliqué pendant qu'on en prévisualise un autre — le simulateur montre
- * alors l'aperçu, le clavier suit l'autre, et les deux restent justes.
+ * ⚠️ **Vers le clavier uniquement si c'est cet effet-là qui y tourne.** Une
+ * première version poussait systématiquement vers les deux boucles, en pensant
+ * qu'on réglait l'effet appliqué tout en en prévisualisant un autre. C'est faux :
+ * `selectedEffect` est celui qu'on **regarde**, pas celui qui est appliqué.
+ * Régler la couleur d'un effet prévisualisé changeait donc l'éclairage en cours,
+ * et pouvait arrêter l'effet appliqué — les valeurs d'un effet arrivaient dans
+ * la boucle d'un autre.
+ *
+ * Le disque, lui, retient toujours : le réglage appartient à la paire
+ * appareil/effet et vaudra au prochain lancement de cet effet.
  */
 function onParamChange(id: string, value: ParamValue): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  const complete = adjust({ vid: d.vid, pid: d.pid }, c.id, specs.value, id, value)
+  const complete = adjust(
+    { vid: d.vid, pid: d.pid },
+    c.id,
+    specs.value,
+    id,
+    value,
+    c.id === activeId.value,
+  )
   if (preview.value) adjustPreview(complete)
 }
 
@@ -805,7 +819,7 @@ function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  const declarees = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value)
+  const declarees = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, c.id === activeId.value)
   if (preview.value) adjustPreview(declarees)
 }
 
