@@ -6,7 +6,7 @@
 // take several cells — it takes one. Matrix holes no longer count as distance,
 // since they take no space.
 //
-// The wave that counts cells is "Onde matricielle", and it is a different
+// The wave that counts cells is "Onde diagonale", and it is a different
 // effect: it leaves a corner in diagonals. The two follow each other in the
 // gallery.
 

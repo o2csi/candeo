@@ -57,7 +57,7 @@ pub static ALL: [Builtin; 5] = [
     Builtin {
         id: "onde-matricielle",
         js: include_str!("onde-matricielle.js"),
-        name: "Onde matricielle",
+        name: "Onde diagonale",
         description:
             "Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale",
         params: r#"{

@@ -1,4 +1,4 @@
-// Matrix wave — a hue wave leaves the top-left corner and crosses the keyboard
+// Diagonal wave — a hue wave leaves the top-left corner and crosses the keyboard
 // in diagonals.
 //
 // The wave from before the geometry, and an effect in its own right: its
@@ -16,7 +16,7 @@
 import { defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
-  name: 'Onde matricielle',
+  name: 'Onde diagonale',
   description: 'Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale',
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },

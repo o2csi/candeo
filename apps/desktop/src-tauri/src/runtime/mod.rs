@@ -2253,11 +2253,11 @@ mod tests {
         );
     }
 
-    /// And the matrix wave, for its part, does run there: that is the whole
+    /// And the diagonal wave, for its part, does run there: that is the whole
     /// point of having kept it rather than fixed it. A layout that has not been
     /// drawn keeps an effect.
     #[test]
-    fn the_matrix_wave_runs_without_geometry() {
+    fn the_diagonal_wave_runs_without_geometry() {
         let js = crate::builtins::find("onde-matricielle")
             .expect("built-in")
             .js;
@@ -2266,7 +2266,7 @@ mod tests {
         let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("render");
         assert!(
             bytes.iter().any(|&c| c != 0),
-            "the matrix wave only needs `row` and `col`"
+            "the diagonal wave only needs `row` and `col`"
         );
     }
 
@@ -2620,7 +2620,7 @@ mod tests {
         );
     }
 
-    /// **The matrix wave leaves the top-left corner in diagonals.** Any wave
+    /// **The diagonal wave leaves the top-left corner.** Any wave
     /// measured from the center looked like the radial one on a keyboard 22 cells
     /// wide and 6 high: both became near-vertical bands. Counting steps from a
     /// corner changes the motion itself.
@@ -2629,8 +2629,8 @@ mod tests {
     /// (column + row) gives the same color, and mirrored keys, at equal distance
     /// from the center, no longer do.
     #[test]
-    fn the_matrix_wave_draws_diagonals_from_the_corner() {
-        let matrix = first_frame("onde-matricielle");
+    fn the_diagonal_wave_starts_from_the_corner() {
+        let diagonal = first_frame("onde-matricielle");
         let l = layout();
         let keys: Vec<(u16, u8, u8)> = (0..l.rows)
             .flat_map(|row| (0..l.cols).map(move |col| (row, col)))
@@ -2641,8 +2641,8 @@ mod tests {
             for &(b, b_row, b_col) in &keys[i + 1..] {
                 if a_row + a_col == b_row + b_col {
                     assert_eq!(
-                        color_at(&matrix, a.into()),
-                        color_at(&matrix, b.into()),
+                        color_at(&diagonal, a.into()),
+                        color_at(&diagonal, b.into()),
                         "LEDs {a} and {b} are on the same diagonal"
                     );
                 }
@@ -2652,8 +2652,8 @@ mod tests {
         // "L" (row 3, column 9) and "*" (row 3, column 12) mirror each other
         // around the center: a centered wave painted them alike.
         assert_ne!(
-            color_at(&matrix, 75),
-            color_at(&matrix, 78),
+            color_at(&diagonal, 75),
+            color_at(&diagonal, 78),
             "the wave must not be symmetric around the center any more"
         );
     }
@@ -2662,7 +2662,7 @@ mod tests {
     /// second moves them by exactly one step: "L" (row 3, column 9) then shows
     /// the color "K" (row 3, column 8) had a second earlier.
     #[test]
-    fn the_matrix_wave_moves_away_from_the_corner() {
+    fn the_diagonal_wave_moves_away_from_the_corner() {
         let js = crate::builtins::find("onde-matricielle")
             .expect("built-in")
             .js;

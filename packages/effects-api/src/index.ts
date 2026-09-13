@@ -36,20 +36,19 @@ export interface Rgb {
 }
 
 /**
- * Une position de la matrice portant une LED.
+ * A matrix position that carries an LED.
  *
- * **Deux espaces cohabitent ici, et ils ne disent pas la même chose.**
+ * **Two spaces live here, and they do not say the same thing.**
  *
- * - `row`/`col` situent la LED dans la **matrice**. Le voisinage y a un sens,
- *   mais une case vaut une case : la barre d'espace en occupe **une seule**
- *   malgré ses 6,25 u, et les trous de la matrice comptent comme de la distance
- *   alors qu'ils n'occupent aucun espace.
- * - `x`/`y`/`w`/`h` donnent le **rectangle physique** du capuchon, celui que le
- *   simulateur dessine.
+ * - `row`/`col` place the LED in the **matrix**. Neighborhood has a meaning
+ *   there, but a cell is a cell: the space bar takes **a single one** despite its
+ *   6.25 u, and matrix holes count as distance although they take no space.
+ * - `x`/`y`/`w`/`h` give the **physical rectangle** of the keycap, the one the
+ *   simulator draws.
  *
- * Un effet qui parle de distance doit donc choisir ce qu'il mesure. C'est
- * exactement ce qui sépare « Onde radiale » d'« Onde matricielle » parmi les
- * effets livrés : même mouvement, deux espaces, deux images.
+ * An effect that talks about distance must therefore choose what it measures:
+ * among the shipped effects, "Onde radiale" measures the keycaps, "Onde
+ * diagonale" counts matrix steps.
  */
 export interface Key {
   /** Index de LED dans l'image. */
