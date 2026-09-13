@@ -592,6 +592,7 @@ export function useSettings() {
     specs: Record<string, ParamSpec>,
     id: string,
     value: ParamValue,
+    applied: boolean,
   ): EffectParams {
     // Comme `useEffects.apply` : l'échec précédent s'efface à la tentative
     // suivante. Sans cela un incident passager laisserait un bandeau rouge
@@ -604,7 +605,20 @@ export function useSettings() {
     // Remplacement plutôt que mutation, comme dans `useEffects` : la réactivité
     // ne dépend plus de la présence de la clé.
     remembered.value = { ...remembered.value, [key(device, effect)]: kept }
-    hot(deviceKey(device), (p) => api.setEffectParams(device, p), complete)
+    // ⚠️ Vers l'appareil **seulement si c'est cet effet-là qui y tourne**.
+    //
+    // La boucle d'un appareil n'a qu'un effet, et elle relit un JSON de
+    // paramètres sans savoir de quel effet il vient. Pousser les valeurs de
+    // l'effet qu'on règle vers une boucle qui en exécute un autre lui fait
+    // appliquer des réglages qui ne sont pas les siens : un nom de paramètre qui
+    // coïncide — `couleur` — change l'éclairage sous les yeux de l'utilisateur,
+    // et une forme qui ne convient pas fait échouer le rendu jusqu'à l'arrêt au
+    // bout de [`MAX_CONSECUTIVE_ERRORS`] images.
+    //
+    // Régler un effet qu'on prévisualise ne doit donc rien envoyer au clavier —
+    // c'est tout l'objet de l'aperçu. On retient quand même : le réglage est
+    // celui de la paire appareil/effet, il vaudra au prochain lancement.
+    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), complete)
     persist(device, effect, kept)
     return complete
   }
@@ -695,11 +709,15 @@ export function useSettings() {
     device: DeviceRef,
     effect: string,
     specs: Record<string, ParamSpec>,
+    applied: boolean,
   ): EffectParams {
     error.value = null
     const declarees = merge(specs, {})
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
-    hot(deviceKey(device), (p) => api.setEffectParams(device, p), declarees)
+    // Même condition qu'{@link adjust}, et pour la même raison : rétablir les
+    // valeurs d'un effet qu'on prévisualise n'a aucune raison de toucher au
+    // clavier, qui exécute peut-être autre chose.
+    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), declarees)
     persist(device, effect, {})
     settleOne(device, effect, true)
     return declarees

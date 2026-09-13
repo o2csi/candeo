@@ -22,7 +22,7 @@ bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
 | `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
 | Commandes Tauri | câblées et documentées — voir [`docs/api/`](docs/api/commands.md) |
 | Interface Vue | trois écrans — bibliothèque, périphériques, éditeur ; décisions dans [`docs/design/`](docs/design/studio.md) |
-| Moteur d'effets utilisateur | moteur unique `rquickjs` côté Rust ; stockage, réglages et **quatre effets livrés** faits |
+| Moteur d'effets utilisateur | moteur unique `rquickjs` côté Rust ; stockage, réglages et **cinq effets livrés** faits |
 
 ---
 
@@ -246,8 +246,8 @@ export default defineEffect({
 })
 ```
 
-Les quatre effets livrés avec l'application — onde radiale, respiration,
-balayage, dégradé fixe — sont écrits contre cette même API, dans
+Les cinq effets livrés avec l'application — onde radiale, onde matricielle,
+respiration, balayage, dégradé fixe — sont écrits contre cette même API, dans
 [`apps/desktop/src-tauri/src/builtins/`](apps/desktop/src-tauri/src/builtins/).
 Ils sont compilés dans le binaire, pas écrits en Rust : le premier exemple qu'on
 ouvre doit être exactement ce qu'on peut écrire soi-même.
