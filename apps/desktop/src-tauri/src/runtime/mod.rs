@@ -70,7 +70,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -120,6 +120,18 @@ const FPS: u32 = 30;
 /// Au-delà, on arrête. Un effet qui lève à chaque image ne se rétablira pas
 /// tout seul, et continuer reviendrait à remplir le journal en silence.
 const MAX_CONSECUTIVE_ERRORS: u32 = 30;
+
+/// Consecutive failed writes after which the loop **closes** its device.
+///
+/// An unplugged keyboard leaves a dead handle: every write fails, and plugging
+/// it back in creates a new device instance that this handle will never reach.
+/// Kept open, it made the window and the tray report the device as open while
+/// nothing got through (#72). Closed, every view tells the truth, and
+/// reconnecting goes through the existing commands.
+///
+/// One second at [`FPS`]: a transient failure does not close anything, and a
+/// device that is gone is not presented as open for long.
+const MAX_DEVICE_WRITE_ERRORS: u32 = FPS;
 
 /// Temps accordé au calcul d'**une** image.
 ///
@@ -245,6 +257,9 @@ struct Shared {
     /// et le clavier gardait son image précédente. Un silence qui se lit comme
     /// une panne du moteur.
     reaching: AtomicBool,
+    /// Consecutive failed writes, reset by any successful write. See
+    /// [`MAX_DEVICE_WRITE_ERRORS`].
+    device_failures: AtomicU32,
     /// Nom de l'effet en cours, pour que l'interface sache quoi mettre en
     /// avant après un redémarrage de la fenêtre.
     effect_id: Mutex<Option<String>>,
@@ -260,6 +275,7 @@ impl Default for Shared {
             error: Mutex::new(None),
             device_error: Mutex::new(None),
             reaching: AtomicBool::new(false),
+            device_failures: AtomicU32::new(0),
             effect_id: Mutex::new(None),
         }
     }
@@ -360,7 +376,11 @@ pub(crate) trait DeviceOut: Send {
     /// `None` quand aucun appareil n'est ouvert. Ce n'est pas un échec : on
     /// écrit un effet sans posséder le clavier, et l'interface doit pouvoir le
     /// dire autrement qu'en erreur.
-    fn present(&self, colors: &[Rgb]) -> Option<Result<(), String>>;
+    ///
+    /// `abandon`: if this write fails too, **drop the device** in the same
+    /// critical section as the write. Deciding outside it would race with a
+    /// reconnection: the loop could close the keyboard that was just reopened.
+    fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>>;
 }
 
 /// La poignée d'un appareil, partagée entre les commandes et sa boucle.
@@ -372,13 +392,18 @@ pub(crate) trait DeviceOut: Send {
 pub(crate) type Handle = Arc<Mutex<Option<Keyboard>>>;
 
 impl DeviceOut for Handle {
-    fn present(&self, colors: &[Rgb]) -> Option<Result<(), String>> {
+    fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
         // Le verrou de la poignée est rendu **avant** que le résultat ne soit
         // consigné : une boucle ne tient jamais la poignée et un verrou du
         // moteur en même temps.
-        let guard = self.lock().unwrap();
-        let kb = guard.as_ref()?;
-        Some(kb.present(colors).map_err(|e| e.to_string()))
+        let mut guard = self.lock().unwrap();
+        let result = guard.as_ref()?.present(colors).map_err(|e| e.to_string());
+        if result.is_err() && abandon {
+            // Only the keyboard that just failed can be dropped here: a
+            // reconnection would have replaced it before this lock was taken.
+            *guard = None;
+        }
+        Some(result)
     }
 }
 
@@ -391,7 +416,7 @@ impl DeviceOut for Handle {
 struct SansSortie;
 
 impl DeviceOut for SansSortie {
-    fn present(&self, _colors: &[Rgb]) -> Option<Result<(), String>> {
+    fn present(&self, _colors: &[Rgb], _abandon: bool) -> Option<Result<(), String>> {
         None
     }
 }
@@ -1206,7 +1231,9 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
         // donnait une boucle qui se dit saine pendant qu'aucun octet n'atteint
         // l'appareil. Et l'échec de celui-ci ne dit rien des autres : chaque
         // boucle écrit dans son propre état.
-        match out.present(&colors) {
+        let failures = shared.device_failures.load(Ordering::Relaxed);
+        let abandon = failures + 1 >= MAX_DEVICE_WRITE_ERRORS;
+        match out.present(&colors, abandon) {
             // **Aucun périphérique ouvert.** Sans ce signalement, lancer un
             // effet sans clavier connecté ne produisait aucun signe : le
             // simulateur s'animait, la case « envoyer » restait cochée, et le
@@ -1216,18 +1243,38 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
             // est un usage prévu, pas une panne. Le dire par image le noierait,
             // et le dire une fois ferait passer pour un incident ce que
             // `reachingKeyboard` rend déjà visible à l'écran.
-            None => shared.reaching.store(false, Ordering::Relaxed),
+            None => {
+                shared.device_failures.store(0, Ordering::Relaxed);
+                shared.reaching.store(false, Ordering::Relaxed);
+            }
             Some(Ok(())) => {
+                shared.device_failures.store(0, Ordering::Relaxed);
                 let avant = shared.device_error.lock().unwrap().take();
                 if journal::bascule(avant.as_deref(), None) == journal::Bascule::Retabli {
                     tracing::info!("l'écriture vers l'appareil est rétablie");
                 }
                 shared.reaching.store(true, Ordering::Relaxed);
             }
+            Some(Err(e)) if abandon => {
+                // The device was dropped under its own lock (see
+                // [`DeviceOut::present`]). The message kept for the window says
+                // what to do, a closed device is reopened by the existing
+                // commands; the technical cause goes to the log only.
+                shared.device_failures.store(0, Ordering::Relaxed);
+                *shared.device_error.lock().unwrap() =
+                    Some("Appareil refermé : reconnectez-le depuis Périphériques.".to_owned());
+                tracing::warn!(
+                    "device closed after {MAX_DEVICE_WRITE_ERRORS} consecutive failed writes: {e}"
+                );
+                shared.reaching.store(false, Ordering::Relaxed);
+            }
             Some(Err(e)) => {
                 // Même règle que pour l'erreur d'effet : le début de la panne,
                 // et rien d'autre. Un clavier débranché en cours de route
                 // échouerait à chaque image jusqu'à ce qu'on le rebranche.
+                shared
+                    .device_failures
+                    .store(failures + 1, Ordering::Relaxed);
                 let avant = shared.device_error.lock().unwrap().replace(e.clone());
                 if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
                     tracing::warn!("l'écriture vers l'appareil a commencé à échouer : {e}");
@@ -1518,8 +1565,6 @@ pub fn engine_status(state: State<'_, AppState>) -> EngineReport {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU32;
-
     use super::*;
 
     /// Un effet minimal, écrit comme l'utilisateur l'écrirait.
@@ -1581,16 +1626,79 @@ mod tests {
     struct Sortie {
         ecrites: AtomicU32,
         en_panne: AtomicBool,
+        /// Writes still to fail before this output recovers on its own.
+        transient_failures: AtomicU32,
+        /// Set when the loop dropped the device, as the real handle does.
+        closed: AtomicBool,
     }
 
     impl DeviceOut for Arc<Sortie> {
-        fn present(&self, _colors: &[Rgb]) -> Option<Result<(), String>> {
-            if self.en_panne.load(Ordering::Relaxed) {
+        fn present(&self, _colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
+            if self.closed.load(Ordering::Relaxed) {
+                return None;
+            }
+            let transient = self
+                .transient_failures
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                .is_ok();
+            if transient || self.en_panne.load(Ordering::Relaxed) {
+                if abandon {
+                    self.closed.store(true, Ordering::Relaxed);
+                }
                 return Some(Err("écriture refusée par l'appareil".into()));
             }
             self.ecrites.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
         }
+    }
+
+    /// #72: a device whose writes keep failing is **closed** after
+    /// [`MAX_DEVICE_WRITE_ERRORS`] frames. An unplugged keyboard leaves a dead
+    /// handle, and keeping it made every view report the device as open. The
+    /// loop itself goes on — the simulator still animates — and the error kept
+    /// for the window says the device was closed.
+    #[test]
+    fn a_device_that_keeps_failing_is_closed_but_the_loop_goes_on() {
+        let engine = Engine::default();
+        let broken = Arc::new(Sortie::default());
+        broken.en_panne.store(true, Ordering::Relaxed);
+
+        demarrer(&engine, PREMIER, "broken", Arc::clone(&broken));
+        attendre("the failing device was never closed", || {
+            broken.closed.load(Ordering::Relaxed)
+        });
+
+        let status = etat(&engine, PREMIER);
+        assert!(status.running, "closing the device stopped the loop");
+        assert!(!status.reaching_keyboard);
+        let message = status.device_error.unwrap_or_default();
+        assert!(message.contains("refermé"), "{message}");
+
+        engine.stop(PREMIER);
+    }
+
+    /// A few failures below the threshold close nothing: a transient error
+    /// must not cost a manual reconnection, and a success clears the count.
+    #[test]
+    fn a_transient_write_failure_does_not_close_the_device() {
+        let engine = Engine::default();
+        let output = Arc::new(Sortie::default());
+        output.transient_failures.store(3, Ordering::Relaxed);
+
+        demarrer(&engine, PREMIER, "hiccup", Arc::clone(&output));
+        attendre("writing never recovered", || {
+            output.ecrites.load(Ordering::Relaxed) >= 3
+        });
+
+        assert!(
+            !output.closed.load(Ordering::Relaxed),
+            "closed on a transient failure"
+        );
+        let status = etat(&engine, PREMIER);
+        assert!(status.reaching_keyboard);
+        assert_eq!(status.device_error, None);
+
+        engine.stop(PREMIER);
     }
 
     fn demarrer(engine: &Engine, device: DeviceRef, effect_id: &str, out: Arc<Sortie>) {

@@ -1097,6 +1097,12 @@ nobody. A preview that cut out **on its own**, after thirty failed frames,
 does however remain visible with its error: it is the only way to know
 why the screen froze.
 
+**A device whose writes keep failing is closed.** After one second of
+consecutive failures, the loop drops the device: `deviceError` then says it was
+closed and must be reconnected from the devices screen, and `list_devices`
+reports it as not open. The effect keeps running. See
+[`effects-runtime.md`](../design/effects-runtime.md), §7.
+
 **One entry per device** in `devices`, `reachingKeyboard` included. A global
 state would force choosing which one to show, and the next would erase the previous one
 — exactly what the open failures table already avoids on the adoption side.

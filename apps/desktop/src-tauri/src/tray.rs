@@ -1,57 +1,56 @@
-//! L'icône de zone de notification : piloter candeo **sans la fenêtre**.
+//! The tray icon: controlling candeo **without the window**.
 //!
-//! # Ce module ne livre pas un raccourci, il livre une promesse
+//! # This module does not deliver a shortcut, it delivers a promise
 //!
-//! L'architecture pose depuis le début qu'**un effet tourne fenêtre fermée** :
-//! le moteur vit dans un fil indépendant ([`crate::runtime`]), et c'est
-//! l'argument qui a fait écarter l'exécution des effets dans le WebView. La
-//! conception était juste ; l'implémentation s'arrêtait avant la fin. Rien
-//! n'empêchait `RunEvent::ExitRequested`, donc sous Windows comme sous Linux le
-//! processus s'arrêtait avec sa dernière fenêtre — et avec lui le fil de rendu.
-//! Fermer la fenêtre éteignait l'effet.
+//! The architecture has stated from the start that **an effect runs with the
+//! window closed**: the engine lives in an independent thread
+//! ([`crate::runtime`]), and that is the argument that ruled out running effects
+//! in the WebView. The design was right; the implementation stopped short.
+//! Nothing prevented `RunEvent::ExitRequested`, so on Windows as on Linux the
+//! process ended with its last window — and with it the render thread. Closing
+//! the window turned the effect off.
 //!
-//! **C'est ce module qui rend la phrase vraie**, et les deux moitiés ne se
-//! défont pas l'une sans l'autre : une icône sans interception laisserait
-//! l'application mourir quand même, une interception sans icône laisserait un
-//! processus vivant que plus rien ne commande — et que plus rien ne quitte.
-//! D'où [`installee`], et les deux interceptions de [`crate::run`] qui la
-//! consultent : **tant qu'il n'y a pas d'icône, la croix reste une sortie**.
+//! **This module is what makes the sentence true**, and the two halves do not
+//! come apart one without the other: an icon without interception would still
+//! let the application die, an interception without an icon would leave a live
+//! process that nothing controls any more — and that nothing can quit.
+//! Hence [`installee`], and the two interceptions in [`crate::run`] that
+//! consult it: **as long as there is no icon, the close button remains an exit**.
 //!
-//! # Ce que fait la croix de la fenêtre
+//! # What the window's close button does
 //!
-//! Elle **replie**, elle ne quitte pas. C'était le choix à faire, et c'est celui
-//! qui suit de tout ce qui précède : fermer pour arrêter l'effet reviendrait à
-//! annuler la promesse à l'endroit même où on vient de la tenir.
+//! It **hides** the window, it does not quit. That was the choice to make, and it
+//! follows from everything above: closing to stop the effect would break the
+//! promise at the very place where it has just been kept.
 //!
-//! Le prix est réel — l'application n'a plus de sortie évidente — et il est payé
-//! deux fois : « Quitter candeo » est **la seule** sortie franche, isolée en bas
-//! du menu par son propre séparateur, et la fenêtre le dit en toutes lettres
-//! (voir `App.vue`). Une application qu'on ne sait pas quitter est une
-//! application qu'on désinstalle.
+//! The cost is real — the application no longer has an obvious exit — and it is
+//! paid twice: "Quitter candeo" (Quit candeo) is **the only** clean exit, isolated
+//! at the bottom of the menu by its own separator, and the window says so in so
+//! many words (see `App.vue`). An application you cannot figure out how to quit
+//! is an application you uninstall.
 //!
-//! # Ce que quitter ne fait pas : éteindre le clavier
+//! # What quitting does not do: turn the keyboard off
 //!
-//! Voir [`quitter`]. C'est un choix, et il est motivé sur place.
+//! See [`quitter`]. It is a choice, and the reasoning is given there.
 //!
-//! # Le menu est une vue, jamais une source
+//! # The menu is a view, never a source
 //!
-//! Il est rebâti à partir de l'état **réel** — `settings.json`, la bibliothèque,
-//! [`crate::runtime::Engine::status`] — au survol de l'icône, et après chaque
-//! action. Mais rien ne garantit qu'il soit à jour au moment du clic : un
-//! clavier peut être débranché menu ouvert, un effet supprimé depuis la fenêtre,
-//! une boucle s'arrêter d'elle-même après trente échecs. **Chaque action relit
-//! donc l'état au moment où elle s'exécute** plutôt que de croire l'article sur
-//! lequel on vient de cliquer ; ce qui échoue part au journal, seul endroit
-//! visible en `release`.
+//! It is rebuilt from the **real** state — `settings.json`, the library,
+//! [`crate::runtime::Engine::status`] — when the pointer hovers the icon, and
+//! after every action. But nothing guarantees it is current at click time: a
+//! keyboard can be unplugged while the menu is open, an effect deleted from the
+//! window, a loop can stop on its own after thirty failures. **Every action
+//! therefore re-reads the state when it runs** instead of trusting the item that
+//! was just clicked; whatever fails goes to the log, the only visible place in
+//! `release`.
 //!
-//! # Ce qui n'est pas garanti sous Linux
+//! # What is not guaranteed on Linux
 //!
-//! `TrayIconEvent` n'y est pas émis du tout — l'icône s'affiche et son menu
-//! s'ouvre, mais aucun survol ne se signale. Le menu y est donc rafraîchi par
-//! les actions seules. C'est une limite de la pile GTK/AppIndicator, pas un
-//! oubli ; la parade serait de reconstruire le menu sur minuterie, c'est-à-dire
-//! d'énumérer l'USB et de lire le disque en boucle pour un menu que personne ne
-//! regarde.
+//! `TrayIconEvent` is not emitted there at all — the icon shows and its menu
+//! opens, but no hover is reported. The menu is therefore refreshed there by
+//! actions alone. This is a limit of the GTK/AppIndicator stack, not an
+//! oversight; the workaround would be to rebuild the menu on a timer, that is,
+//! to enumerate USB and read the disk in a loop for a menu nobody is looking at.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -63,84 +62,82 @@ use tauri::menu::{
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
-use candeo_device::Layout;
+use candeo_device::{Inspection, Layout};
 
 use crate::runtime::DeviceEngineStatus;
 use crate::storage::{self, DeviceState, EffectEntry};
 use crate::{journal, single_instance, AppState, CmdResult, DeviceRef};
 
-/// Étiquette de l'icône, pour la retrouver et lui refaire son menu.
+/// The icon's id, used to find it again and give it a new menu.
 const ICONE: &str = "candeo";
 
-/// Ce que la fenêtre doit apprendre quand l'état a changé **sans elle**.
+/// What the window must learn when the state changed **without it**.
 ///
-/// La fenêtre interroge déjà le moteur toutes les secondes, mais elle ne relit
-/// ni la liste des appareils ni `settings.json` : elle les avait lus une fois,
-/// au montage, parce qu'elle était jusqu'ici la seule à les écrire. Elle ne l'est
-/// plus, et elle survit désormais à sa propre fermeture — repliée, son
-/// instantané peut vieillir des jours.
+/// The window already polls the engine every second, but it re-reads neither
+/// the device list nor `settings.json`: it read them once, on mount, because it
+/// was until now the only one writing them. It no longer is, and it now
+/// outlives its own closing — hidden, its snapshot can age for days.
 ///
-/// Écrit ici **et** dans `src/api/candeo.ts` ; le test en fin de module confronte
-/// les deux, faute de quoi renommer l'événement compilerait sans un mot et
-/// donnerait une fenêtre qui ne se resynchronise plus jamais.
+/// Written here **and** in `src/api/candeo.ts`; the test at the end of the module
+/// checks the two against each other, otherwise renaming the event would compile
+/// without a word and yield a window that never resynchronizes again.
 pub(crate) const ETAT_CHANGE: &str = "candeo://etat-change";
 
-/// Vrai quand l'icône est bel et bien posée.
+/// True when the icon is actually in place.
 ///
-/// **Ce n'est pas une commodité : c'est ce qui empêche de rendre candeo
-/// impossible à quitter.** Si la pose échoue — pas de zone de notification, pas
-/// d'icône dans le paquet, un environnement de bureau sans plateau — il ne reste
-/// que la fenêtre pour commander l'application. Empêcher alors la sortie, ou
-/// replier la fenêtre sur sa croix, laisserait un processus qu'aucun geste
-/// ordinaire ne termine.
+/// **This is not a convenience: it is what keeps candeo from becoming
+/// impossible to quit.** If placing it fails — no system tray, no icon in the
+/// bundle, a desktop environment without a tray area — only the window is left
+/// to control the application. Preventing the exit then, or hiding the window on
+/// its close button, would leave a process that no ordinary gesture terminates.
 static INSTALLEE: AtomicBool = AtomicBool::new(false);
 
-/// Dernier échec de construction du menu, pour n'en journaliser que la bascule.
+/// Last menu build failure, so that only the transition is logged.
 ///
-/// Le menu se refait **à chaque survol de l'icône**. Un `settings.json`
-/// illisible ou une énumération USB en panne produiraient une ligne par passage
-/// de souris : c'est la même inondation que le par-image, à une autre cadence, et
-/// c'est la même règle qui la ferme. Voir [`journal::bascule`].
+/// The menu is rebuilt **on every hover of the icon**. An unreadable
+/// `settings.json` or a broken USB enumeration would produce one line per mouse
+/// pass: the same flood as per-frame logging, at a different rate, and the same
+/// rule shuts it. See [`journal::bascule`].
 static DERNIER_ECHEC: Mutex<Option<String>> = Mutex::new(None);
 
-/// Vrai si l'icône est là, donc si l'application survit à ses fenêtres.
+/// True if the icon is there, hence if the application outlives its windows.
 pub(crate) fn installee() -> bool {
     INSTALLEE.load(Ordering::Relaxed)
 }
 
-/// Annonce à la fenêtre que l'état a changé sans elle.
+/// Tells the window that the state changed without it.
 ///
-/// Générique parce que [`single_instance`] l'est : c'est lui qui ramène la
-/// fenêtre, et une fenêtre qui revient après avoir été repliée est exactement le
-/// cas où son instantané est le plus vieux.
+/// Generic because [`single_instance`] is: it is what brings the window back,
+/// and a window returning after being hidden is exactly the case where its
+/// snapshot is oldest.
 ///
-/// L'échec est avalé : personne n'écoute quand aucune fenêtre n'est ouverte, et
-/// c'est le cas nominal de ce module.
+/// Failure is swallowed: nobody listens when no window is open, and that is the
+/// nominal case for this module.
 pub(crate) fn signaler<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit(ETAT_CHANGE, ());
 }
 
-// ---------------------------------------------------------------- articles
+// ---------------------------------------------------------------- items
 
-/// Ce qu'un article de menu déclenche.
+/// What a menu item triggers.
 ///
-/// Un type, et non une chaîne comparée à la main dans le gestionnaire : muda ne
-/// transporte qu'un identifiant textuel, et c'est le seul endroit du code où une
-/// faute de frappe ne se verrait ni à la compilation, ni à l'exécution — l'article
-/// ne ferait simplement rien. Le passage par [`Action::identifiant`] et
-/// [`Action::depuis`] ramène cette liaison sous le compilateur, et le test
-/// d'aller-retour la vérifie sans qu'il faille cliquer.
+/// A type, and not a string compared by hand in the handler: muda carries only a
+/// text identifier, and this is the one place in the code where a typo would
+/// show neither at compile time nor at run time — the item would simply do
+/// nothing. Going through [`Action::identifiant`] and [`Action::depuis`] brings
+/// that binding back under the compiler, and the round-trip test checks it
+/// without any clicking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Action {
-    /// Ramener la fenêtre sous les yeux.
+    /// Bring the window back into view.
     Ouvrir,
-    /// **La seule sortie franche.**
+    /// **The only clean exit.**
     Quitter,
-    /// Lancer cet effet sur cet appareil.
+    /// Start this effect on this device.
     Effet { device: DeviceRef, effet: String },
-    /// Basculer la sortie clavier de cet appareil.
+    /// Toggle this device's keyboard output.
     Sortie { device: DeviceRef },
-    /// `Effect::Off` du micrologiciel sur cet appareil.
+    /// The firmware's `Effect::Off` on this device.
     Eteindre { device: DeviceRef },
 }
 
@@ -150,20 +147,20 @@ const EFFET: &str = "effet";
 const SORTIE: &str = "sortie";
 const ETEINDRE: &str = "eteindre";
 
-/// Le séparateur des champs d'un identifiant.
+/// The separator between the fields of an identifier.
 ///
-/// `:` peut le rester sans échappement : un identifiant d'effet passe par
-/// [`storage::validate_id`], qui n'accepte que `a-z`, `0-9` et le tiret — il ne
-/// peut donc jamais en contenir un. Le test
-/// `l_alphabet_des_effets_exclut_le_separateur` tient cette dépendance, sans quoi
-/// élargir un jour l'alphabet des identifiants casserait le menu en silence.
+/// `:` can stay unescaped: an effect identifier goes through
+/// [`storage::validate_id`], which accepts only `a-z`, `0-9` and the hyphen — so
+/// it can never contain one. The test
+/// `the_effect_alphabet_excludes_the_separator` holds that dependency; without
+/// it, widening the identifier alphabet one day would silently break the menu.
 const SEP: char = ':';
 
-/// L'appareil, écrit pour être relu — quatre chiffres hexadécimaux par champ.
+/// The device, written to be read back — four hex digits per field.
 ///
-/// Pas le `Display` de [`DeviceRef`] : celui-ci est fait pour être lu par un
-/// humain dans un journal (`0x1532:0x0292`), et ce qu'on écrit ici doit
-/// simplement se reparser sans ambiguïté.
+/// Not the `Display` of [`DeviceRef`]: that one is made for a human reading a
+/// log (`0x1532:0x0292`), and what is written here must simply parse back
+/// without ambiguity.
 fn cle(device: DeviceRef) -> String {
     format!("{:04x}{SEP}{:04x}", device.vid, device.pid)
 }
@@ -186,11 +183,11 @@ impl Action {
         }
     }
 
-    /// L'action que désigne cet identifiant, s'il en désigne une.
+    /// The action this identifier designates, if it designates one.
     ///
-    /// `None` plutôt qu'une panique : le gestionnaire est **global** — il reçoit
-    /// les événements de tous les menus de l'application —, et un article venu
-    /// d'ailleurs n'est pas une erreur de programmation.
+    /// `None` rather than a panic: the handler is **global** — it receives the
+    /// events of every menu in the application — and an item from elsewhere is
+    /// not a programming error.
     fn depuis(id: &str) -> Option<Self> {
         match id {
             OUVRIR => return Some(Self::Ouvrir),
@@ -219,96 +216,179 @@ impl Action {
     }
 }
 
-// ---------------------------------------------------------------- le menu
+// ---------------------------------------------------------------- the menu
 
-/// Un appareil piloté, tel que le menu doit le présenter.
+/// A controlled device, as the menu must present it.
 struct Pilote {
     layout: &'static Layout,
     device: DeviceRef,
-    /// Vrai si le périphérique est effectivement branché.
-    ///
-    /// Distinct de « piloté », comme partout ailleurs : un appareil adopté peut
-    /// être débranché, et il garde alors sa place dans le menu. Le retirer ferait
-    /// disparaître de la liste un clavier que l'utilisateur a décidé de piloter,
-    /// pour la seule raison qu'il est momentanément ailleurs.
-    branche: bool,
+    availability: Availability,
 }
 
-/// Les appareils pilotés, branchés ou non.
+/// What the tray can do with a controlled device **right now**.
 ///
-/// L'énumération USB peut échouer — c'est le cas d'un HID indisponible — et ce
-/// n'est pas une raison de vider le menu : on retombe alors sur « aucune série
-/// connue », ce que [`storage::DeviceRecord::matches`] tolère précisément pour
-/// cette situation.
-fn pilotes(settings: &storage::Settings) -> Vec<Pilote> {
+/// Distinct from "controlled", as everywhere else: an adopted device keeps its
+/// place in the menu when it is away. Removing it would hide a keyboard the
+/// user decided to control, only because it is momentarily elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Availability {
+    /// Open: its actions can succeed.
+    Open,
+    /// Plugged in but **not open**: another unit of the same model released at
+    /// startup, an adopted unit whose opening failed, or a device closed by its
+    /// render loop after its writes kept failing. Every action would fail with
+    /// "no device open": the menu must not offer them (#72).
+    NotOpen,
+    /// Unplugged.
+    Unplugged,
+}
+
+/// The controlled devices, plugged in or not.
+///
+/// USB enumeration can fail — that is the case when HID is unavailable — and
+/// that is no reason to empty the menu: it then falls back to "no known serial",
+/// which [`storage::DeviceRecord::matches`] tolerates precisely for this
+/// situation.
+fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
     let api = crate::hid().ok();
     crate::LAYOUTS
         .iter()
         .copied()
         .filter_map(|layout| {
             let branche = api.as_ref().and_then(|api| crate::plugged(api, layout));
-            let serie = branche.as_ref().and_then(|s| s.as_deref());
-            if settings.device_state(layout.vid, layout.pid, serie) != DeviceState::Adopted {
-                return None;
+            let inspection = state.inspection(DeviceRef::of(layout));
+            let device = controlled_device(layout, settings, branche, inspection.as_ref());
+            if let Some(d) = &device {
+                tracing::debug!(appareil = %d.device, availability = ?d.availability, "tray menu device state");
             }
-            Some(Pilote {
-                layout,
-                device: DeviceRef::of(layout),
-                branche: branche.is_some(),
-            })
+            device
         })
         .collect()
 }
 
-/// Les sous-menus des appareils pilotés, bâtis sur l'état **courant**.
+/// One controlled device, decided from the same facts as `list_devices`.
 ///
-/// Isolé du reste du menu parce que c'est la seule part qui dépende du disque et
-/// de l'USB : voir [`menu`], qui traite son échec comme une dégradation et non
-/// comme un refus.
+/// **The serial comes from the open handle first.** The USB descriptor of this
+/// keyboard carries none, so looking the adoption up with it alone matched any
+/// unit of the model, and "plugged in" was taken for "ready". The window never
+/// had that problem because it reads [`crate::serie_connue`] and reports `open`
+/// separately; the tray now asks the same questions.
+///
+/// Pure, so the #72 scenario is testable without a second keyboard.
+fn controlled_device(
+    layout: &'static Layout,
+    settings: &storage::Settings,
+    plugged: Option<Option<String>>,
+    inspection: Option<&Inspection>,
+) -> Option<Pilote> {
+    let present = plugged.is_some();
+    let serial = crate::serie_connue(inspection, plugged.flatten());
+    if settings.device_state(layout.vid, layout.pid, serial.as_deref()) != DeviceState::Adopted {
+        return None;
+    }
+    // Unplugged wins over a handle still open: until the render loop closes
+    // it, that handle only leads to failures.
+    let availability = match (present, inspection.is_some()) {
+        (false, _) => Availability::Unplugged,
+        (true, true) => Availability::Open,
+        (true, false) => Availability::NotOpen,
+    };
+    Some(Pilote {
+        layout,
+        device: DeviceRef::of(layout),
+        availability,
+    })
+}
+
+/// What a device submenu shows and allows, derived from its availability.
+#[derive(Debug, PartialEq, Eq)]
+struct Presentation {
+    title: String,
+    /// A line explaining why nothing can be done, when that is the case.
+    reason: Option<&'static str>,
+    effects: bool,
+    output: bool,
+    turn_off: bool,
+}
+
+/// Only an open device offers actions; the others say why they do not.
+///
+/// The actions still re-read the state when clicked (see the module header):
+/// greying items is honesty in the menu, not the protection.
+fn presentation(device: &Pilote, loop_running: bool) -> Presentation {
+    let name = device.layout.name;
+    match device.availability {
+        Availability::Open => Presentation {
+            title: name.to_owned(),
+            reason: None,
+            effects: true,
+            // The toggle lives in the loop: without a loop there is nothing to toggle.
+            output: loop_running,
+            turn_off: true,
+        },
+        Availability::NotOpen => Presentation {
+            title: format!("{name} — non ouvert"),
+            reason: Some("Branché mais non ouvert — voir la fenêtre"),
+            effects: false,
+            output: false,
+            turn_off: false,
+        },
+        Availability::Unplugged => Presentation {
+            title: format!("{name} — débranché"),
+            reason: None,
+            effects: false,
+            output: false,
+            turn_off: false,
+        },
+    }
+}
+
+/// The submenus of the controlled devices, built on the **current** state.
+///
+/// Kept apart from the rest of the menu because it is the only part that
+/// depends on the disk and on USB: see [`menu`], which treats its failure as a
+/// degradation and not as a refusal.
 fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
     let store = storage::store(app)?;
     let settings = store.read_settings()?;
     let bibliotheque = store.list_effects()?;
-    // L'état réel du moteur, et non un souvenir : c'est la même source que la
-    // commande `engine_status` que lit la fenêtre.
+    // The real engine state, not a memory: it is the same source as the
+    // `engine_status` command the window reads.
     //
-    // **Les appareils seuls, jamais l'aperçu.** Ce menu décrit ce que font les
-    // claviers ; cocher ici un effet qu'on est seulement en train de regarder
-    // dans la fenêtre serait le mensonge que l'issue #63 refuse. Rien à filtrer —
-    // `device_status` ne peut pas rendre l'aperçu.
+    // **Devices only, never the preview.** This menu describes what the
+    // keyboards are doing; ticking here an effect that is only being looked at
+    // in the window would be the lie that issue #63 rejects. Nothing to filter —
+    // `device_status` cannot return the preview.
     let moteur = app.state::<AppState>().engine.device_status();
 
-    pilotes(&settings)
+    pilotes(&settings, &app.state::<AppState>())
         .iter()
         .map(|pilote| sous_menu(app, pilote, &bibliotheque, &moteur))
         .collect()
 }
 
-/// Le menu, et ce qui a manqué pour le bâtir en entier.
+/// The menu, and what was missing to build it fully.
 ///
-/// Le second membre est `Some` quand le menu est **dégradé** : l'icône est là,
-/// « Ouvrir la fenêtre » et « Quitter candeo » aussi, mais la liste des appareils
-/// a manqué. C'est délibérément une dégradation et non une erreur — les deux
-/// articles qui restent sont ceux qui ne dépendent de rien, et ce sont eux dont
-/// on a le plus besoin quand quelque chose ne va pas. Refuser de poser l'icône
-/// pour un `settings.json` illisible rendrait en prime la croix à nouveau
-/// mortelle pour les effets, le temps d'une session entière.
+/// The second member is `Some` when the menu is **degraded**: the icon is there,
+/// "Ouvrir la fenêtre" (Open window) and "Quitter candeo" too, but the device
+/// list is missing. That is deliberately a degradation and not an error — the
+/// two remaining items are the ones that depend on nothing, and they are the
+/// ones most needed when something is wrong. Refusing to place the icon over an
+/// unreadable `settings.json` would, on top of that, make the close button fatal
+/// to effects again, for an entire run of the application.
 ///
-/// Et le dire **dans le menu** n'est pas un pis-aller : en `release` le binaire
-/// est compilé sans console, et l'icône est précisément l'endroit où un échec
-/// peut se voir sans en ouvrir une.
+/// And saying so **in the menu** is not a stopgap: in `release` the binary is
+/// built without a console, and the icon is precisely the place where a failure
+/// can be seen without opening one.
 fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
     let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
     let degrade = match appareils(app) {
         Ok(sous_menus) => {
             if sous_menus.is_empty() {
-                // Une section vide se lirait comme une panne de l'icône. Nommer
-                // l'absence, et dire où se prend la décision, coûte une ligne.
-                articles.push(Box::new(muet(
-                    app,
-                    "Aucun appareil piloté — ouvrez la fenêtre pour en adopter un",
-                )?));
+                // An empty section would read as a broken icon. Naming the
+                // absence costs one line; "Ouvrir la fenêtre" sits just below.
+                articles.push(Box::new(muet(app, "Aucun appareil piloté")?));
             }
             for appareil in sous_menus {
                 articles.push(Box::new(appareil));
@@ -316,10 +396,9 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
             None
         }
         Err(e) => {
-            articles.push(Box::new(muet(
-                app,
-                &format!("Appareils indisponibles — {e}"),
-            )?));
+            // Never the raw error in the menu: it can hold a local file path,
+            // and [`consigner`] already logs it.
+            articles.push(Box::new(muet(app, "Appareils indisponibles")?));
             Some(e)
         }
     };
@@ -331,9 +410,9 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
         "Ouvrir la fenêtre",
         true,
     )?));
-    // Son propre séparateur, et il n'est pas décoratif : fermer la fenêtre ne
-    // quitte plus, donc cet article est la seule sortie de l'application. Le
-    // noyer dans la liste au-dessus reviendrait à la cacher.
+    // Its own separator, and it is not decorative: closing the window no
+    // longer quits, so this item is the application's only exit. Burying it in
+    // the list above would amount to hiding it.
     articles.push(Box::new(separateur(app)?));
     articles.push(Box::new(article(
         app,
@@ -347,7 +426,7 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
     Ok((assemble, degrade))
 }
 
-/// Le sous-menu d'un appareil : son effet, sa sortie, son extinction.
+/// A device's submenu: its effect, its output, turning it off.
 fn sous_menu(
     app: &AppHandle,
     pilote: &Pilote,
@@ -359,14 +438,20 @@ fn sous_menu(
         .find(|s| s.device == pilote.device)
         .map(|s| &s.status);
 
-    // `effect_id` survit à l'arrêt d'une boucle qui s'est coupée elle-même après
-    // trente échecs : sans le filtre, le menu cocherait un effet que plus rien
-    // ne fait tourner.
+    // `effect_id` survives the stop of a loop that shut itself down after
+    // thirty failures: without the filter, the menu would tick an effect that
+    // nothing runs any more.
     let en_cours = etat
         .filter(|s| s.running)
         .and_then(|s| s.effect_id.as_deref());
 
+    let view = presentation(pilote, en_cours.is_some());
+
     let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
+    if let Some(reason) = view.reason {
+        articles.push(Box::new(muet(app, reason)?));
+        articles.push(Box::new(separateur(app)?));
+    }
     for entree in bibliotheque {
         articles.push(Box::new(coche(
             app,
@@ -375,7 +460,7 @@ fn sous_menu(
                 effet: entree.id.clone(),
             },
             &entree.manifest.name,
-            true,
+            view.effects,
             en_cours == Some(entree.id.as_str()),
         )?));
     }
@@ -387,8 +472,7 @@ fn sous_menu(
             device: pilote.device,
         },
         "Envoyer au clavier",
-        // La bascule vit dans la boucle : sans boucle, elle n'a rien à basculer.
-        en_cours.is_some(),
+        view.output,
         etat.is_some_and(|s| s.to_keyboard),
     )?));
     articles.push(Box::new(article(
@@ -397,20 +481,13 @@ fn sous_menu(
             device: pilote.device,
         },
         "Éteindre",
-        // Grisé quand l'appareil n'est pas là — mais ce n'est qu'un confort
-        // d'affichage : ce qui protège vraiment, c'est que [`eteindre`] relit
-        // l'état au moment du clic. Voir l'en-tête du module.
-        pilote.branche,
+        // Greyed out is display comfort only: what really protects is that
+        // [`eteindre`] re-reads the state when clicked. See the module header.
+        view.turn_off,
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = articles.iter().map(AsRef::as_ref).collect();
-    let titre = if pilote.branche {
-        pilote.layout.name.to_owned()
-    } else {
-        format!("{} — débranché", pilote.layout.name)
-    };
-
-    Submenu::with_items(app, titre, true, &refs)
+    Submenu::with_items(app, view.title, true, &refs)
         .map_err(|e| format!("sous-menu de {} non assemblé : {e}", pilote.device))
 }
 
@@ -437,10 +514,10 @@ fn coche(
     .map_err(|e| format!("bascule « {texte} » non créée : {e}"))
 }
 
-/// Un article qui ne fait rien : il informe, et il est grisé pour le dire.
+/// An item that does nothing: it informs, and it is greyed out to say so.
 ///
-/// Sans identifiant, donc sans [`Action`] : cliquer dessus est impossible, et
-/// lui en donner un laisserait croire le contraire.
+/// No identifier, hence no [`Action`]: clicking it is impossible, and giving it
+/// one would suggest otherwise.
 fn muet(app: &AppHandle, texte: &str) -> CmdResult<MenuItem<Wry>> {
     MenuItem::new(app, texte, false, None::<&str>)
         .map_err(|e| format!("article « {texte} » non créé : {e}"))
@@ -450,17 +527,17 @@ fn separateur(app: &AppHandle) -> CmdResult<PredefinedMenuItem<Wry>> {
     PredefinedMenuItem::separator(app).map_err(|e| format!("séparateur non créé : {e}"))
 }
 
-// ---------------------------------------------------------------- les actions
+// ---------------------------------------------------------------- the actions
 
-/// Exécute ce que l'article demande, en relisant l'état au passage.
+/// Performs what the item asks for, re-reading the state along the way.
 fn agir(app: &AppHandle, action: Action) {
     match action {
-        // Ces deux-là ne touchent pas au moteur, et ne passent donc pas par
-        // [`rendre_compte`] : [`reveler`] prévient déjà la fenêtre qui revient,
-        // et [`quitter`] emporte le processus — refaire un menu ou prévenir une
-        // fenêtre qu'on est en train de détruire n'ajouterait qu'une ligne
-        // d'échec à chaque sortie. `app.exit` **rend la main** : ce qui suit un
-        // appel à [`quitter`] s'exécute bel et bien.
+        // These two do not touch the engine, and so do not go through
+        // [`rendre_compte`]: [`reveler`] already notifies the returning window,
+        // and [`quitter`] takes the process down — rebuilding a menu or
+        // notifying a window that is being destroyed would only add a failure
+        // line on every exit. `app.exit` **returns**: what follows a call to
+        // [`quitter`] does run.
         Action::Ouvrir => reveler(app),
         Action::Quitter => quitter(app),
         Action::Effet { device, effet } => {
@@ -478,50 +555,51 @@ fn agir(app: &AppHandle, action: Action) {
     }
 }
 
-/// Ce qui vient d'être démenti par une action : le menu, et la fenêtre.
+/// What an action has just invalidated: the menu, and the window.
 ///
-/// Refaire le menu **maintenant** est ce qui tient « le menu reflète l'état
-/// réel » là où aucun survol n'est signalé, c'est-à-dire sous Linux.
+/// Rebuilding the menu **now** is what keeps "the menu reflects the real state"
+/// true where no hover is reported, that is, on Linux.
 fn rendre_compte(app: &AppHandle) {
     rafraichir(app);
     signaler(app);
 }
 
 fn reveler(app: &AppHandle) {
-    // Le chemin de l'instance unique, et non un second : il sait montrer une
-    // fenêtre masquée comme en rouvrir une depuis sa déclaration, et il cherche
-    // sur l'étiquette seule — une fenêtre `create: false` reste donc celle qu'il
-    // faut ouvrir. En écrire un autre ici en ferait deux à maintenir d'accord.
+    // The single-instance path, not a second one: it can show a hidden window
+    // as well as reopen one from its declaration, and it searches by label
+    // alone — a `create: false` window is therefore still the one to open.
+    // Writing another one here would make two to keep in agreement.
     if let Err(e) = single_instance::reveal(app) {
         tracing::warn!("fenêtre non ramenée depuis la zone de notification : {e}");
     }
 }
 
-/// **La seule sortie franche.**
+/// **The only clean exit.**
 ///
-/// # L'éclairage est laissé tel quel, et c'est un choix
+/// # The lighting is left as is, and that is a choice
 ///
-/// Quitter n'éteint pas le clavier. Un effet micrologiciel survit de toute façon
-/// à l'extinction du logiciel — c'est le micrologiciel qui l'exécute — et un
-/// clavier qui s'éteindrait en quittant surprendrait davantage qu'un clavier qui
-/// reste comme on l'a laissé. « Éteindre » est dans le menu, à un clic, pour qui
-/// veut le noir.
+/// Quitting does not turn the keyboard off. A firmware effect outlives the
+/// software shutting down anyway — the firmware runs it — and a keyboard that
+/// went dark on quit would surprise more than a keyboard that stays as it was
+/// left. "Éteindre" (Turn off) is in the menu, one click away, for anyone who
+/// wants darkness.
 ///
-/// La conséquence est assumée : un effet de la boucle hôte laisse le clavier sur
-/// sa **dernière image**, figée, et une image figée ressemble à un effet qui
-/// tourne encore. C'est le prix du choix inverse de [`crate::release_devices`],
-/// qui éteint parce qu'elle, elle repart d'un état connu.
+/// The consequence is accepted: a host-loop effect leaves the keyboard on its
+/// **last frame**, frozen, and a frozen frame looks like an effect still
+/// running. That is the price of the opposite choice from
+/// [`crate::release_devices`], which turns the keyboard off because that path,
+/// for its part, starts over from a known state.
 ///
-/// Les boucles sont tout de même arrêtées, et **attendues** : une écriture HID
-/// coupée en plein transfert par la fin du processus laisserait l'appareil sur
-/// une trame partielle. L'éclairage, lui, ne bouge pas — arrêter une boucle
-/// n'écrit rien de plus.
+/// The loops are still stopped, and **awaited**: a HID write cut off
+/// mid-transfer by the end of the process would leave the device on a partial
+/// report. The lighting, for its part, does not change — stopping a loop writes
+/// nothing more.
 fn quitter(app: &AppHandle) {
     app.state::<AppState>().engine.stop_all();
     tracing::info!("candeo s'arrête, demandé depuis la zone de notification");
-    // Un code, donc `ExitRequested { code: Some(_) }` : c'est ce qui distingue
-    // cette sortie-ci de celle que provoque la fermeture de la dernière fenêtre,
-    // et donc ce qui la laisse passer. Voir [`crate::run`].
+    // A code, hence `ExitRequested { code: Some(_) }`: that is what tells this
+    // exit apart from the one caused by closing the last window, and therefore
+    // what lets it through. See [`crate::run`].
     app.exit(0);
 }
 
@@ -534,10 +612,10 @@ fn demarrer(app: &AppHandle, device: DeviceRef, effet: &str) {
         }
     };
 
-    // La commande de la fenêtre, et non une copie : lancer un effet depuis le
-    // menu doit faire exactement ce que fait la galerie — même résolution de la
-    // bibliothèque, même gabarit, même poignée partagée avec la boucle. Une
-    // seconde écriture de ce chemin divergerait au premier changement.
+    // The window's command, not a copy: starting an effect from the menu must
+    // do exactly what the gallery does — same library lookup, same layout, same
+    // handle shared with the loop. A second implementation of this path would
+    // diverge at the first change.
     if let Err(e) = crate::runtime::start_effect(
         app.clone(),
         app.state(),
@@ -545,17 +623,17 @@ fn demarrer(app: &AppHandle, device: DeviceRef, effet: &str) {
         effet.to_owned(),
         serde_json::Value::Object(params),
     ) {
-        // Le moteur a déjà pu nommer la cause sous son propre *span* ; ce qui
-        // manquerait sans cette ligne, c'est **d'où venait la demande** — et
-        // l'échec le plus probable ici, un effet supprimé depuis que le menu a
-        // été bâti, est refusé avant que le moteur n'en sache rien. Une ligne
-        // par clic n'inonde personne : la règle des transitions vise le
-        // par-image, pas un geste humain.
+        // The engine may already have named the cause under its own *span*;
+        // what would be missing without this line is **where the request came
+        // from** — and the most likely failure here, an effect deleted since
+        // the menu was built, is refused before the engine knows anything about
+        // it. One line per click floods nobody: the transitions rule targets
+        // per-frame logging, not a human gesture.
         tracing::error!(appareil = %device, effet, "effet non lancé depuis la zone de notification : {e}");
     }
 }
 
-/// Les valeurs sur lesquelles lancer cet effet, relues maintenant.
+/// The values to start this effect with, re-read now.
 fn parametres(
     app: &AppHandle,
     device: DeviceRef,
@@ -575,11 +653,11 @@ fn parametres(
     ))
 }
 
-/// Bascule la sortie clavier, **d'après l'état du moteur**.
+/// Toggles the keyboard output, **based on the engine state**.
 ///
-/// Pas d'après la case du menu : muda la retourne toute seule au clic, et elle
-/// datait de la dernière construction. S'y fier ferait rétablir une sortie qu'on
-/// venait de couper depuis la fenêtre.
+/// Not based on the menu checkbox: muda flips it by itself on click, and it
+/// dated from the last build. Trusting it would re-enable an output that had
+/// just been cut from the window.
 fn basculer(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     let Some(etat) = state
@@ -595,41 +673,41 @@ fn basculer(app: &AppHandle, device: DeviceRef) {
     crate::runtime::set_output_to_keyboard(app.state(), device, !etat.status.to_keyboard);
 }
 
-/// `Effect::Off` du micrologiciel : coût nul, et ça survit à la fermeture.
+/// The firmware's `Effect::Off`: zero cost, and it survives closing.
 ///
-/// L'ordre est celui de [`crate::release_devices`], et il n'est pas indifférent :
-/// la boucle s'arrête **et son arrêt est attendu**, sinon l'image suivante
-/// rallumerait ce qu'on vient d'éteindre.
+/// The order is that of [`crate::release_devices`], and it matters: the loop
+/// stops **and its stop is awaited**, otherwise the next frame would light up
+/// again what was just turned off.
 fn eteindre(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     state.engine.stop(device);
-    // Plus rien ne tourne sur cet appareil, et le fichier doit le dire : laisser
-    // l'identifiant en place ferait décrire par `settings.json` un effet que
-    // personne n'a plus demandé. C'est le même geste que `stop_effect` fait
-    // depuis la fenêtre.
+    // Nothing runs on this device any more, and the file must say so: leaving
+    // the identifier in place would make `settings.json` describe an effect
+    // nobody asks for any more. It is the same step `stop_effect` takes from
+    // the window.
     crate::runtime::retenir_l_effet_actif(app, device, None);
 
     if let Err(e) = crate::with_keyboard(&state, device, |kb| {
         kb.set_effect(Effect::Off).map_err(|e| e.to_string())
     }) {
-        // Le cas prévu : l'appareil a été débranché — ou ignoré depuis la
-        // fenêtre — pendant que le menu était ouvert. L'article était grisé au
-        // moment où le menu a été bâti ; il ne l'était plus au moment du clic.
+        // The expected case: the device was unplugged — or ignored from the
+        // window — while the menu was open. The item was enabled when the menu
+        // was built; the device was gone by the time of the click.
         tracing::warn!(appareil = %device, "extinction refusée depuis la zone de notification : {e}");
     }
 }
 
-// ---------------------------------------------------------------- la pose
+// ---------------------------------------------------------------- installation
 
-/// Pose l'icône. **Ne peut pas échouer**, au sens où rien ne remonte.
+/// Places the icon. **Cannot fail**, in the sense that nothing propagates.
 ///
-/// Un échec ici ne doit pas empêcher l'application de démarrer : il la ramène à
-/// ce qu'elle était avant cette issue — une fenêtre, et la croix pour la quitter.
-/// C'est [`installee`] qui porte cette bascule, et [`crate::run`] qui la lit.
+/// A failure here must not prevent the application from starting: it brings it
+/// back to what it was before this issue — a window, and the close button to
+/// quit it. [`installee`] carries that switch, and [`crate::run`] reads it.
 ///
-/// Restent les échecs qui n'en sont pas : un `settings.json` illisible ou une
-/// énumération USB en panne posent l'icône quand même, avec un menu qui le dit.
-/// Voir [`menu`].
+/// That leaves the failures that are not really failures: an unreadable
+/// `settings.json` or a broken USB enumeration still place the icon, with a
+/// menu that says so. See [`menu`].
 pub(crate) fn installer(app: &AppHandle) {
     match poser(app) {
         Ok(()) => {
@@ -638,9 +716,9 @@ pub(crate) fn installer(app: &AppHandle) {
                 "icône de zone de notification posée, la fenêtre n'est plus la seule commande"
             );
         }
-        // `error` : sans icône, fermer la fenêtre arrête les effets — c'est
-        // exactement la panne que cette issue referme, et elle redevient
-        // silencieuse si personne ne la dit.
+        // `error`: without an icon, closing the window stops the effects — that
+        // is exactly the failure this issue closes, and it becomes silent again
+        // if nobody reports it.
         Err(e) => tracing::error!(
             "aucune icône de zone de notification, fermer la fenêtre arrêtera les effets : {e}"
         ),
@@ -648,15 +726,15 @@ pub(crate) fn installer(app: &AppHandle) {
 }
 
 fn poser(app: &AppHandle) -> CmdResult<()> {
-    // L'icône de l'application, pas une seconde image à tenir à jour : c'est
-    // celle que le paquet embarque déjà, et celle que l'utilisateur reconnaît.
+    // The application icon, not a second image to keep up to date: it is the
+    // one the bundle already ships, and the one the user recognizes.
     let icone = app
         .default_window_icon()
         .cloned()
         .ok_or_else(|| "aucune icône d'application dans le paquet".to_string())?;
 
-    // Le menu de départ, dégradation comprise ; ce qui a manqué est consigné par
-    // le même chemin que les suivants, pour n'en garder que le début.
+    // The initial menu, degradation included; what was missing is recorded
+    // through the same path as later rebuilds, so that only the onset is kept.
     let (depart, degrade) = menu(app)?;
     consigner(degrade.as_deref());
 
@@ -664,15 +742,18 @@ fn poser(app: &AppHandle) -> CmdResult<()> {
         .icon(icone)
         .tooltip("candeo")
         .menu(&depart)
-        // Le clic gauche ouvre la fenêtre, le clic droit ouvre le menu : c'est la
-        // convention de la zone de notification, et elle met « Ouvrir la
-        // fenêtre » à un seul clic. Sous Linux aucun clic n'est signalé, seul le
-        // menu du clic droit répond — d'où l'article, qui reste le chemin sûr.
+        // Left click opens the window, right click opens the menu: that is the
+        // system tray convention, and it puts "Ouvrir la fenêtre" one click
+        // away. On Linux no click is reported, only the right-click menu
+        // responds — hence the item, which remains the safe path.
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|icone, evenement| match evenement {
-            // Le survol précède le clic droit : c'est le dernier instant où l'on
-            // peut refaire le menu avant qu'il ne s'affiche.
-            TrayIconEvent::Enter { .. } => rafraichir(icone.app_handle()),
+            // Hover precedes the right click: it is the last moment the menu
+            // can be rebuilt before it is shown.
+            TrayIconEvent::Enter { .. } => {
+                tracing::debug!("tray icon hovered, rebuilding the menu");
+                rafraichir(icone.app_handle());
+            }
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
@@ -681,37 +762,36 @@ fn poser(app: &AppHandle) -> CmdResult<()> {
             _ => {}
         })
         .on_menu_event(|app, evenement: MenuEvent| {
-            // Le gestionnaire est global : il voit passer les articles de tous
-            // les menus. Ce qui ne nous concerne pas est ignoré, pas refusé.
+            // The handler is global: it sees the items of every menu go by.
+            // What does not concern us is ignored, not refused.
             if let Some(action) = Action::depuis(evenement.id.as_ref()) {
                 agir(app, action);
             }
         })
         .build(app)
-        // La poignée est déposée : le gestionnaire de l'application en garde une,
-        // c'est elle qui maintient l'icône en vie, et [`rafraichir`] la retrouve
-        // par son étiquette.
+        // The handle is dropped: the application's manager keeps one, that is
+        // what keeps the icon alive, and [`rafraichir`] finds it again by its
+        // id.
         .map(|_| ())
         .map_err(|e| format!("icône non posée : {e}"))
 }
 
-/// Refait le menu à partir de l'état courant.
+/// Rebuilds the menu from the current state.
 ///
-/// Le prix est celui d'une commande ordinaire : une lecture de `settings.json`,
-/// une lecture de la bibliothèque, et une énumération USB. C'est exactement ce
-/// que coûte `list_devices` à chaque ouverture de l'écran des périphériques, et
-/// c'est payé ici au même titre — sur un geste de l'utilisateur, jamais sur une
-/// minuterie. Un menu qui se reconstruirait en fond énumérerait l'USB
-/// indéfiniment pour un menu que personne ne regarde.
+/// The cost is that of an ordinary command: one read of `settings.json`, one
+/// read of the library, and one USB enumeration. That is exactly what
+/// `list_devices` costs each time the devices screen opens, and it is paid here
+/// on the same terms — on a user gesture, never on a timer. A menu rebuilt in
+/// the background would enumerate USB forever for a menu nobody is looking at.
 pub(crate) fn rafraichir(app: &AppHandle) {
     let Some(icone) = app.tray_by_id(ICONE) else {
         return;
     };
 
     let echec = match menu(app) {
-        // Un menu dégradé est bel et bien posé : il porte de quoi ouvrir la
-        // fenêtre et de quoi quitter, et il **dit** ce qui a manqué. Ce que le
-        // journal en retient, c'est le début de la panne, pas un survol sur deux.
+        // A degraded menu is indeed set: it carries a way to open the window
+        // and a way to quit, and it **says** what was missing. What the log
+        // keeps of it is the start of the failure, not a line per hover.
         Ok((menu, degrade)) => icone
             .set_menu(Some(menu))
             .map_err(|e| format!("menu non remplacé, l'ancien reste affiché : {e}"))
@@ -722,8 +802,8 @@ pub(crate) fn rafraichir(app: &AppHandle) {
     consigner(echec.as_deref());
 }
 
-/// Journalise le **début** d'un échec de menu, et son rétablissement. Rien
-/// d'autre — voir [`DERNIER_ECHEC`].
+/// Logs the **start** of a menu failure, and its recovery. Nothing
+/// else — see [`DERNIER_ECHEC`].
 fn consigner(echec: Option<&str>) {
     let mut dernier = DERNIER_ECHEC.lock().unwrap();
     let bascule = journal::bascule(dernier.as_deref(), echec);
@@ -750,9 +830,9 @@ mod tests {
         vid: 0x1532,
         pid: 0x0292,
     };
-    /// Deux appareils, parce que tout ce qui est « par appareil » n'a de sens
-    /// qu'à partir de deux — et que confondre deux identifiants ferait agir le
-    /// menu sur le mauvais clavier.
+    /// Two devices, because anything "per device" only makes sense from two
+    /// on — and mixing up two identifiers would make the menu act on the wrong
+    /// keyboard.
     const AUTRE: DeviceRef = DeviceRef {
         vid: 0x1532,
         pid: 0x0001,
@@ -775,12 +855,11 @@ mod tests {
         ]
     }
 
-    /// **Le seul lien entre un article et ce qu'il fait est une chaîne.** muda ne
-    /// transporte rien d'autre : une écriture et une lecture qui divergeraient
-    /// donneraient un article qui ne fait rien, sans erreur ni à la compilation
-    /// ni à l'exécution.
+    /// **The only link between an item and what it does is a string.** muda
+    /// carries nothing else: a write and a read that diverged would yield an
+    /// item that does nothing, with no error at compile time or at run time.
     #[test]
-    fn chaque_action_se_relit_telle_qu_elle_s_ecrit() {
+    fn every_action_reads_back_as_written() {
         for action in toutes() {
             let id = action.identifiant();
             assert_eq!(
@@ -791,10 +870,10 @@ mod tests {
         }
     }
 
-    /// Deux appareils ne doivent pas se confondre : le menu agirait sur le
-    /// mauvais clavier, et rien ne le signalerait.
+    /// Two devices must not be confused: the menu would act on the wrong
+    /// keyboard, and nothing would report it.
     #[test]
-    fn deux_appareils_donnent_deux_identifiants() {
+    fn two_devices_give_two_identifiers() {
         assert_ne!(
             Action::Eteindre { device: APPAREIL }.identifiant(),
             Action::Eteindre { device: AUTRE }.identifiant()
@@ -802,11 +881,11 @@ mod tests {
         assert_ne!(cle(APPAREIL), cle(AUTRE));
     }
 
-    /// Le gestionnaire est global : il reçoit les articles de tous les menus de
-    /// l'application. Ce qui ne vient pas d'ici doit être ignoré, pas interprété
-    /// de travers.
+    /// The handler is global: it receives the items of every menu in the
+    /// application. What does not come from here must be ignored, not
+    /// misinterpreted.
     #[test]
-    fn un_identifiant_etranger_ne_declenche_rien() {
+    fn a_foreign_identifier_triggers_nothing() {
         for id in [
             "",
             "ouvrir-vraiment",
@@ -817,17 +896,17 @@ mod tests {
             "sortie:1532",
             "sortie:1532:0292:en-trop",
             "eteindre:1532:029x",
-            "3", // un identifiant que muda a numéroté lui-même
+            "3", // an identifier muda numbered itself
         ] {
             assert_eq!(Action::depuis(id), None, "« {id} » a été interprété");
         }
     }
 
-    /// **Ce qui rend `:` utilisable sans échappement.** Le jour où l'alphabet des
-    /// identifiants d'effet s'élargirait, le menu se mettrait à viser le mauvais
-    /// effet — ou aucun — sans que rien ne le dise.
+    /// **What makes `:` usable without escaping.** The day the effect identifier
+    /// alphabet widened, the menu would start targeting the wrong effect — or
+    /// none — without anything saying so.
     #[test]
-    fn l_alphabet_des_effets_exclut_le_separateur() {
+    fn the_effect_alphabet_excludes_the_separator() {
         assert!(storage::validate_id(&format!("a{SEP}b")).is_err());
 
         let effet = "a".repeat(64);
@@ -839,12 +918,92 @@ mod tests {
         assert_eq!(Action::depuis(&action.identifiant()), Some(action));
     }
 
-    /// Le nom de l'événement est écrit des deux côtés de l'IPC, et rien ne relie
-    /// les deux à la compilation : le renommer d'un seul côté donnerait une
-    /// fenêtre qui ne se resynchronise plus, sans une erreur nulle part. Même
-    /// garde que pour l'étiquette de la fenêtre, voir [`single_instance`].
+    fn inspection_with_serial(serial: &str) -> Inspection {
+        Inspection {
+            firmware: Err("not read".into()),
+            serial: Ok(serial.into()),
+            checks: Vec::new(),
+        }
+    }
+
+    fn adopted(serial: &str) -> storage::Settings {
+        let mut settings = storage::Settings::default();
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        settings.set_device_state(layout.vid, layout.pid, Some(serial), DeviceState::Adopted);
+        settings
+    }
+
+    /// #72: the adopted unit is plugged in but not open — another unit of the
+    /// model released at startup, or a device its render loop closed. The USB
+    /// descriptor gives no serial, so the adoption still matches: the menu must
+    /// say "not open" and offer nothing, instead of looking ready.
     #[test]
-    fn l_evenement_porte_le_meme_nom_des_deux_cotes() {
+    fn a_plugged_but_unopened_device_offers_no_action() {
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+
+        let device =
+            controlled_device(layout, &settings, Some(None), None).expect("still controlled");
+        assert_eq!(device.availability, Availability::NotOpen);
+
+        let view = presentation(&device, false);
+        assert!(!view.effects && !view.output && !view.turn_off, "{view:?}");
+        assert!(view.reason.is_some());
+        assert_ne!(view.title, layout.name, "the title must not look ready");
+    }
+
+    #[test]
+    fn an_open_device_offers_its_actions() {
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let open = inspection_with_serial("XY01");
+
+        let device =
+            controlled_device(layout, &settings, Some(None), Some(&open)).expect("controlled");
+        assert_eq!(device.availability, Availability::Open);
+
+        let view = presentation(&device, false);
+        assert!(
+            view.effects && view.turn_off && view.reason.is_none(),
+            "{view:?}"
+        );
+        assert!(!view.output, "no loop, nothing to toggle");
+        assert_eq!(view.title, layout.name);
+        assert!(presentation(&device, true).output);
+    }
+
+    /// A handle can outlive the unplugging until the render loop closes it: the
+    /// enumeration wins, since that handle only leads to failures.
+    #[test]
+    fn unplugged_wins_over_a_stale_handle() {
+        let settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let stale = inspection_with_serial("XY01");
+
+        let device =
+            controlled_device(layout, &settings, None, Some(&stale)).expect("still controlled");
+        assert_eq!(device.availability, Availability::Unplugged);
+        assert!(!presentation(&device, true).effects);
+    }
+
+    /// The open unit's serial decides, not the model: an open unit that is not
+    /// the adopted one is not presented as controlled.
+    #[test]
+    fn the_open_units_serial_decides_adoption() {
+        let mut settings = adopted("XY01");
+        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        settings.set_device_state(layout.vid, layout.pid, Some("XY02"), DeviceState::Ignored);
+        let other = inspection_with_serial("XY02");
+
+        assert!(controlled_device(layout, &settings, Some(None), Some(&other)).is_none());
+    }
+
+    /// The event name is written on both sides of the IPC, and nothing links the
+    /// two at compile time: renaming it on one side only would yield a window
+    /// that no longer resynchronizes, without a single error anywhere. Same
+    /// guard as for the window label, see [`single_instance`].
+    #[test]
+    fn the_event_has_the_same_name_on_both_sides() {
         let ts = include_str!("../../src/api/candeo.ts");
         assert!(
             ts.contains(ETAT_CHANGE),
