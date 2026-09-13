@@ -1099,7 +1099,7 @@ why the screen froze.
 
 **A device whose writes keep failing is closed.** After one second of
 consecutive failures, the loop drops the device: `deviceError` then says it was
-closed and that it must be plugged back in and reconnected, and `list_devices`
+closed and must be reconnected from the devices screen, and `list_devices`
 reports it as not open. The effect keeps running. See
 [`effects-runtime.md`](../design/effects-runtime.md), §7.
 

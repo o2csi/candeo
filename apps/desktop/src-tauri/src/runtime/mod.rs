@@ -1262,7 +1262,7 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
                 // commands; the technical cause goes to the log only.
                 shared.device_failures.store(0, Ordering::Relaxed);
                 *shared.device_error.lock().unwrap() =
-                    Some("Appareil refermé : rebranchez-le puis reconnectez-le.".to_owned());
+                    Some("Appareil refermé : reconnectez-le depuis Périphériques.".to_owned());
                 tracing::warn!(
                     "device closed after {MAX_DEVICE_WRITE_ERRORS} consecutive failed writes: {e}"
                 );
