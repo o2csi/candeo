@@ -6,11 +6,11 @@ import * as api from './api/candeo'
 import { alerte, message } from './api/journal'
 import DevicePill from './components/DevicePill.vue'
 import { useDevice } from './composables/useDevice'
-import { useEffectParams } from './composables/useEffectParams'
+import { useSettings } from './composables/useSettings'
 
 const route = useRoute()
 const { error, restore } = useDevice()
-const { reload } = useEffectParams()
+const { reload } = useSettings()
 
 /** L'éditeur occupe toute la fenêtre : c'est un mode, pas un onglet. */
 const full = computed(() => route.meta.full === true)

@@ -413,7 +413,7 @@ pub fn relire_le_reglage(app: &AppHandle) {
         // qu'il devait démarrer avant le magasin.
         Err(e) => tracing::error!("niveau de journal non relu, le défaut s'applique : {e}"),
         Ok(settings) => {
-            if let Some(niveau) = settings.log_level {
+            if let Some(niveau) = settings.preferences.log_level {
                 appliquer(niveau);
             }
         }
@@ -601,7 +601,10 @@ fn niveau_actif() -> Option<LogLevel> {
 #[tauri::command]
 pub fn get_journal(app: AppHandle) -> CmdResult<JournalStatus> {
     Ok(etat(
-        crate::storage::store(&app)?.read_settings()?.log_level,
+        crate::storage::store(&app)?
+            .read_settings()?
+            .preferences
+            .log_level,
     ))
 }
 
@@ -625,15 +628,15 @@ pub fn get_journal(app: AppHandle) -> CmdResult<JournalStatus> {
 pub fn set_log_level(app: AppHandle, level: LogLevel) -> CmdResult<JournalStatus> {
     let store = crate::storage::store(&app)?;
     let mut settings = store.read_settings()?;
-    if settings.log_level != Some(level) {
-        settings.log_level = Some(level);
+    if settings.preferences.log_level != Some(level) {
+        settings.preferences.log_level = Some(level);
         store.write_settings(&settings)?;
     }
 
     if !COLLECTEUR.get().is_some_and(|c| c.impose) {
         appliquer(level);
     }
-    Ok(etat(settings.log_level))
+    Ok(etat(settings.preferences.log_level))
 }
 
 /// Ouvre le dossier des journaux dans le gestionnaire de fichiers du système.
@@ -685,7 +688,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let settings = crate::storage::store(&app).and_then(|s| s.read_settings());
     let api = crate::hid();
 
-    let journal = etat(settings.as_ref().ok().and_then(|s| s.log_level));
+    let journal = etat(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
     ligne(
         &mut out,
         "journal",
@@ -749,6 +752,26 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 layout.lit_count(),
             ),
         );
+
+        // Ce que le **fichier** retient pour cet appareil, en face de ce que le
+        // moteur en fait plus bas. Les deux doivent concorder ; quand ils
+        // divergent — un effet appliqué qui ne tourne pas, une luminosité retenue
+        // qu'aucune adoption n'a réappliquée — c'est précisément la ligne qui le
+        // montre, et elle ne coûte rien à celui qui lit.
+        if let Ok(s) = &settings {
+            ligne(
+                &mut out,
+                "    retenu",
+                &format!(
+                    "effet {} · luminosité {}",
+                    s.active_effect(layout.vid, layout.pid).unwrap_or("aucun"),
+                    match s.brightness(layout.vid, layout.pid, serial.as_deref()) {
+                        crate::storage::BRIGHTNESS_DEFAUT => "pleine (défaut)".to_string(),
+                        n => n.to_string(),
+                    }
+                ),
+            );
+        }
     }
     if let Err(e) = &api {
         ligne(&mut out, "  énumération USB", e);
@@ -761,7 +784,8 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     ligne(&mut out, "  micrologiciel", "non lu (issue #35)");
 
     out.push_str("\nMoteur\n");
-    let moteur = state.engine.status();
+    let rapport = state.engine.report();
+    let moteur = rapport.devices;
     if moteur.is_empty() {
         out.push_str("  aucun appareil visé depuis le démarrage\n");
     }
@@ -792,6 +816,26 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             ),
         );
     }
+
+    // **Sur sa propre ligne, et dite pour ce qu'elle est.** Un aperçu n'écrit sur
+    // aucun clavier : le confondre avec ce qui précède ferait chercher côté
+    // matériel une panne qui n'y est pas — et son absence de la liste ci-dessus
+    // se lirait comme un oubli si rien ne la nommait ici.
+    ligne(
+        &mut out,
+        "  aperçu",
+        &match rapport.preview {
+            None => "aucun — rien n'est prévisualisé".to_string(),
+            Some(p) => format!(
+                "{} · effet {} · gabarit emprunté {} · aucune sortie clavier{}",
+                if p.running { "en cours" } else { "arrêté" },
+                p.effect_id.as_deref().unwrap_or("aucun"),
+                p.layout_of,
+                p.error
+                    .map_or(String::new(), |e| format!(" · erreur d'effet : {e}")),
+            ),
+        },
+    );
 
     Ok(out)
 }

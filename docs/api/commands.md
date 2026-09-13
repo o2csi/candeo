@@ -227,7 +227,13 @@ argument, et échouent s'il n'est pas ouvert.
 
 ### `set_brightness(device, level: number)`
 
-`level` de 0 à 255.
+`level` de 0 à 255. Écrit **sur le clavier**, et rien d'autre : c'est une commande
+distincte du protocole (`0x0f`/`0x04`), sans rapport avec l'effet en cours.
+
+Retenir ce niveau d'un lancement à l'autre est l'affaire de `remember_brightness`
+(§Réglages), qui n'écrit que sur disque. Même partage que `set_effect_params` /
+`remember_effect_params`, et pour la même raison : un curseur qu'on glisse produit
+des dizaines d'écritures HID et une seule écriture disque, quand il s'arrête.
 
 ### `set_effect(device, effect: EffectDto)`
 
@@ -444,19 +450,30 @@ accès au disque. Un effet intégré n'a pas de dossier et ne se supprime pas ; 
 disque est consulté d'abord, ce qui laisse retirer un dossier qui usurperait un
 identifiant intégré.
 
-Emporte aussi les **réglages retenus** pour cet effet, sur tous les appareils
-(voir §Réglages). L'oubli vient après la suppression : si celle-ci échoue,
-l'effet est toujours là et ses réglages doivent l'être aussi.
+Emporte aussi tout ce que `settings.json` retenait de lui : les **réglages**, sur
+tous les appareils, et son **application** (`activeEffects`). L'oubli vient après
+la suppression : si celle-ci échoue, l'effet est toujours là et ses réglages
+doivent l'être aussi.
+
+La purge de `activeEffects` tranche le piège relevé par l'issue #48 : sans elle,
+supprimer l'effet appliqué laisserait un **identifiant pendant**, que la reprise au
+démarrage tenterait de lancer. Deux réponses étaient possibles — purger à la
+suppression, ou se replier en silence au démarrage. La première est retenue :
+l'invariant « le fichier ne contient jamais un identifiant que la bibliothèque ne
+connaît pas » se vérifie sans rien faire tourner, là où un silence au lancement est
+exactement le genre de panne qui coûte une session. Le repli reste nécessaire en
+**seconde** barrière — un dossier d'effet retiré à la main ne passe pas par ici —
+mais il n'est plus le seul.
 
 **Trois temps, et l'ordre fait partie du contrat :**
 
 1. **le refus**, avant tout — un effet intégré ou un identifiant qui ne désigne
    rien s'entend dire non sans que rien n'ait été arrêté ni effacé ;
-2. **l'arrêt des boucles** qui font tourner cet effet, sur **tous** les appareils,
-   et avant l'effacement. Le moteur charge `effect.js` une fois au démarrage et le
-   garde en mémoire : une boucle laissée en vie continuerait sans la moindre
-   erreur visible, sur un dossier qui n'existe plus, et l'appareil resterait
-   piloté par un effet absent de la bibliothèque ;
+2. **l'arrêt des boucles** qui font tourner cet effet, sur **tous** les appareils
+   et dans l'aperçu, avant l'effacement. Le moteur charge `effect.js` une fois au
+   démarrage et le garde en mémoire : une boucle laissée en vie continuerait sans
+   la moindre erreur visible, sur un dossier qui n'existe plus, et l'appareil
+   resterait piloté — ou l'écran animé — par un effet absent de la bibliothèque ;
 3. **l'effacement**, puis l'oubli des réglages.
 
 L'arrêt est fait **côté Rust**, pas dans la fenêtre : c'est le seul endroit qui le
@@ -480,29 +497,71 @@ on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
 
 ```ts
 {
-  activeEffect: string | null,   // id à reprendre au démarrage
-  brightness: number,             // 0-255
-  device: { vid: number, pid: number } | null,
+  preferences: {
+    logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace'
+  },
   devices: {
     vid: number,
     pid: number,
     serial?: string,             // absent quand le système n'en déclare pas
-    state: 'detected' | 'adopted' | 'ignored'
+    state: 'detected' | 'adopted' | 'ignored',
+    brightness?: number          // absent = pleine (255)
+  }[],
+  activeEffects: {
+    vid: number,
+    pid: number,
+    effect: string               // l'effet appliqué sur cet appareil
   }[],
   effectParams: {
     vid: number,
     pid: number,
     effect: string,              // identifiant de l'effet réglé
     values: Record<string, ParamValue>
-  }[],
-  logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace'
+  }[]
 }
 ```
+
+**Une préférence globale dans `preferences`, tout ce qui dépend d'un clavier dans
+une liste indexée.** C'est la règle que ce fichier tient, et elle vaut pour tout ce
+qu'on y ajoutera : la langue ira dans `preferences`, sans rien avoir à arbitrer.
+
+Chaque liste ne porte que ce qui **diffère du défaut** : un appareil absent de
+`devices` est `detected` et à pleine luminosité, un appareil absent
+d'`activeEffects` ne s'est vu appliquer aucun effet, et une entrée d'appareil qui
+ne retient plus rien — `detected` sans luminosité — est retirée plutôt que gardée
+vide.
 
 Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
 **défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
 version antérieure reprend lui aussi son défaut, plutôt que de rendre
 l'application muette au démarrage.
+
+#### Ce qui a disparu en v2.1, et pourquoi
+
+`activeEffect`, `device` et `brightness` étaient trois scalaires à la racine. Les
+deux premiers n'étaient lus ni écrits par personne ; le troisième l'était. Le
+problème n'était pas leur valeur, c'était leur **forme** : ils décrivaient *un*
+effet actif, *un* appareil choisi et *un* niveau de luminosité, alors que le moteur
+fait tourner un effet par appareil depuis l'issue #26 — et que
+`set_brightness(device, level)` prenait déjà un `DeviceRef`.
+
+- `activeEffect` → `activeEffects[]`, une entrée par appareil ;
+- `device` → **retiré**. `devices` porte déjà les décisions appareil par
+  appareil ; un « appareil choisi » global n'a plus de sens depuis qu'il n'y a
+  plus d'appareil implicite ;
+- `brightness` → `devices[].brightness`. Deux claviers n'ont aucune raison de
+  partager un niveau.
+
+Un fichier antérieur se relit sans erreur, et ces trois clés sont simplement
+ignorées : les récupérer aurait demandé de choisir *quel* appareil elles
+désignaient, question sans réponse. Seul `logLevel`, qui a changé de place sans
+changer de sens, est **récupéré** depuis la racine et versé dans `preferences` à
+la première lecture — le retomber au défaut aurait ramené au silence celui qui
+était justement en train de chercher une panne.
+
+`activeEffects` est écrit par `start_effect` et effacé par `stop_effect` ; l'aperçu
+n'y touche jamais. Supprimer un effet purge son entrée partout — voir
+`delete_effect`.
 
 ### `reset_settings()`
 
@@ -511,7 +570,8 @@ C'est la seule façon de revenir à un état connu sans aller éditer le fichier
 main — la première chose qu'on cherche quand quelque chose se comporte mal, et ce
 qui rend un rapport de bogue exploitable.
 
-Ce qui part : les décisions d'adoption — tout repasse en `detected` — et les
+Ce qui part : les décisions d'adoption — tout repasse en `detected` —, la
+luminosité retenue de chaque appareil, l'effet appliqué sur chacun, et les
 réglages retenus par paire appareil / effet.
 
 **Aucun effet n'est touché.** Les effets écrits vivent dans
@@ -557,6 +617,22 @@ d'un côté, un seul quand le curseur s'arrête de l'autre — ni la même desti
 
 Une commande dédiée plutôt qu'un `set_settings` depuis la fenêtre : la lecture,
 la modification et l'écriture se font côté Rust, d'un seul tenant.
+
+### `remember_brightness(device, level)`
+
+Retient la luminosité de **cet** appareil, sans toucher au clavier — le pendant
+disque de `set_brightness`. Elle est réappliquée à l'ouverture de l'appareil, au
+démarrage comme à l'adoption : un niveau retenu qui ne se réappliquerait pas au
+branchement ne servirait à rien, et le protocole relevé sait écrire la luminosité
+mais pas la relire.
+
+Le maximum (255) **efface** l'entrée au lieu d'y écrire le défaut, exactement
+comme une table de paramètres vide efface les réglages d'un effet. Un appareil
+dont c'était la seule décision disparaît alors de `devices`.
+
+La série est relevée si elle se donne, comme pour `ignore_device` : elle fait
+atterrir le niveau sur le bon exemplaire quand il y en a deux du même modèle, et
+son absence ne bloque rien.
 
 Ce n'est pas une précaution contre un entrelacement — les commandes synchrones
 s'exécutent sur le fil principal, elles ne se chevauchent pas. C'est une
@@ -846,23 +922,96 @@ ouvert sur l'appareil précédent alimenterait le même simulateur en parallèle
 Se désabonner arrête le flux **sans arrêter l'effet**, qui continue d'alimenter
 le clavier.
 
-### `engine_status() -> DeviceEngineStatus[]`
+### L'aperçu : `start_preview` · `stop_preview` · `set_preview_params`
+
+```ts
+start_preview(device: { vid, pid } | null, id: string, params: object)
+```
+
+Le pendant exact de `start_effect`, **moins tout ce qui engage** : aucune sortie
+matérielle, rien d'écrit dans `settings.json`, et surtout **aucune boucle
+d'appareil arrêtée**.
+
+C'est ce qui rend « sélectionner un effet lance l'aperçu » possible. Le moteur est
+à un effet par appareil (issue #26, délibéré) : prévisualiser Y sur un clavier qui
+exécute X l'aurait arrêté, autrement dit **parcourir la galerie aurait éteint
+l'éclairage en cours**. La boucle d'aperçu est donc distincte, et sa sortie
+matérielle est celle qui n'écrit nulle part — `DeviceOut::present` rendant `None`
+signifie déjà « aucun appareil ouvert, ce n'est pas un échec ».
+
+`device` désigne l'appareil dont l'aperçu **emprunte le gabarit** : il n'est ni
+ouvert, ni piloté, ni forcément branché. `null` retombe sur le gabarit par défaut
+— on prévisualise sans posséder de clavier, et sans en avoir adopté aucun.
+
+**Il n'y en a qu'un.** Appeler à nouveau remplace le précédent, et chaque
+remplacement détruit un contexte QuickJS pour en construire un autre. La cadence
+est donc bornée **du côté du geste** — la fenêtre attend que la sélection se pose
+(180 ms) — et non dans le moteur, qui aurait dû choisir entre faire attendre la
+dernière sélection et la perdre.
+
+`set_preview_params` ajuste à chaud, comme `set_effect_params` pour un appareil :
+la boucle relit son JSON à chaque image.
+
+L'aperçu s'arrête : quand on quitte l'écran, **quand la fenêtre se replie** (c'est
+le Rust qui le fait, la vue web n'étant pas détruite), quand l'effet qu'il fait
+tourner est supprimé, et avec `stop_all` — remise à zéro de la configuration,
+sortie de l'application. L'effet appliqué, lui, survit à tout cela : c'est toute la
+différence entre ce que le clavier fait et ce qu'on regarde.
+
+### `subscribe_preview_frames(channel)` · `unsubscribe_preview_frames()`
+
+Comme `subscribe_frames`, pour la boucle d'aperçu. Un canal **distinct** de celui
+des appareils : les deux flux existent en même temps, et la fenêtre choisit lequel
+elle dessine.
+
+⚠️ Le canal vit dans l'état de la boucle, et `start_preview` en construit une
+neuve : **il faut se réabonner après chaque démarrage**, exactement comme pour
+`start_effect`. Sans cela le simulateur reste figé sur la dernière image du
+précédent, sans qu'aucune erreur ne le dise.
+
+### `engine_status() -> EngineReport`
 
 ```ts
 {
-  device: { vid: number, pid: number },
-  running: boolean,
-  effectId: string | null,
-  error: string | null,
-  deviceError: string | null,
-  reachingKeyboard: boolean,
-  toKeyboard: boolean
-}[]
+  devices: {
+    device: { vid: number, pid: number },
+    running: boolean,
+    effectId: string | null,
+    error: string | null,
+    deviceError: string | null,
+    reachingKeyboard: boolean,
+    toKeyboard: boolean
+  }[],
+  preview: {
+    layoutOf: { vid: number, pid: number },   // gabarit emprunté
+    running: boolean,
+    effectId: string | null,
+    error: string | null
+  } | null
+}
 ```
 
-**Une entrée par appareil**, `reachingKeyboard` compris. Un état global
-obligerait à choisir lequel afficher, et le suivant effacerait le précédent —
-exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
+**Deux champs, et non une liste avec un drapeau.** Ce qui tourne sur le matériel
+et ce qu'on regarde ne doivent pas pouvoir se confondre : c'est la quatrième fois
+dans ce projet qu'un état qui ment coûte une session de diagnostic — le clavier non
+adopté, l'écriture « acceptée », l'image figée après arrêt automatique, et
+maintenant l'aperçu. Un drapeau à filtrer se filtre mal : il suffit d'un appelant
+qui l'oublie pour annoncer comme tournant sur le clavier un effet qu'on ne fait que
+regarder. Ici il n'y a rien à filtrer.
+
+**La zone de notification, le journal et la galerie ne lisent que `devices`.**
+
+`preview` ne porte ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError` :
+une boucle d'aperçu n'a aucune sortie matérielle, et ces champs à faux
+décriraient une panne là où il n'y a qu'un choix. Il vaut `null` dès que l'aperçu
+est arrêté — « le dernier effet que vous avez regardé » n'est une information pour
+personne. Un aperçu qui s'est coupé **tout seul**, après trente images en échec,
+reste en revanche visible avec son erreur : c'est la seule façon de savoir
+pourquoi l'écran s'est figé.
+
+**Une entrée par appareil** dans `devices`, `reachingKeyboard` compris. Un état
+global obligerait à choisir lequel afficher, et le suivant effacerait le précédent
+— exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
 
 La liste couvre les appareils sur lesquels un effet a été lancé depuis le
 démarrage, pas seulement ceux qui en portent un en ce moment : un appareil arrêté

@@ -79,7 +79,7 @@ par l'API plutôt que par une constante.
 
 ```
 app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
-app_config_dir()/settings.json   effet actif, luminosité, appareils adoptés
+app_config_dir()/settings.json   préférences · appareils · effet appliqué · réglages
 ```
 
 L'effet est du **contenu** (`data`), le choix de l'effet actif est de la

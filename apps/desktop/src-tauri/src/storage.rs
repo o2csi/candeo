@@ -5,12 +5,29 @@
 //!
 //! ```text
 //! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
-//! app_config_dir()/settings.json   effet actif, luminosité, appareils adoptés
+//! app_config_dir()/settings.json   préférences · appareils · effet appliqué · réglages
 //! ```
 //!
 //! L'effet est du **contenu**, le choix de l'effet actif est de la
 //! **configuration**. Sous Windows les deux dossiers se confondent, sous Linux
 //! non — d'où le passage par l'API de Tauri plutôt que par une constante.
+//!
+//! # La forme du fichier : les préférences d'un côté, les appareils de l'autre
+//!
+//! `settings.json` porte deux choses qui ne se rangent pas ensemble : ce qui vaut
+//! pour l'application entière ([`Preferences`]) et ce qui est **indexé par
+//! appareil** (`devices`, `activeEffects`, `effectParams`). Les mélanger à la
+//! racine, c'est ce qui a produit les trois vestiges mono-appareil qu'on retire
+//! ici : `activeEffect`, `device` et `brightness` décrivaient **un** effet, **un**
+//! appareil et **un** niveau, alors que le moteur fait tourner un effet par
+//! appareil depuis l'issue #26. Ce n'était pas la mauvaise valeur, c'était la
+//! mauvaise **forme** — et la réveiller telle quelle aurait donné un fichier qui
+//! décrit mal la réalité.
+//!
+//! La règle qui en découle vaut pour tout ce qu'on ajoutera : **une préférence
+//! globale va dans `preferences`, tout ce qui dépend d'un clavier va dans une
+//! liste indexée.** La langue, le jour où elle arrivera, n'a donc rien à
+//! arbitrer.
 //!
 //! Toute la manipulation de fichiers vit dans [`Store`], qui reçoit ses chemins
 //! de base en argument ; les commandes Tauri ne font que les résoudre. C'est ce
@@ -124,12 +141,11 @@ pub struct EffectEntry {
     pub manifest: Manifest,
 }
 
-/// Périphérique retenu par l'utilisateur.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DeviceSelection {
-    pub vid: u16,
-    pub pid: u16,
-}
+/// Luminosité d'un clavier qu'on vient de brancher : pleine.
+///
+/// C'est le défaut le moins surprenant, et c'est aussi la valeur que le fichier
+/// **n'écrit pas** — voir [`DeviceRecord::brightness`].
+pub const BRIGHTNESS_DEFAUT: u8 = 255;
 
 /// Décision prise pour un appareil, une fois, et retenue.
 ///
@@ -172,9 +188,38 @@ pub struct DeviceRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial: Option<String>,
     pub state: DeviceState,
+    /// Luminosité retenue pour **cet** appareil.
+    ///
+    /// # Pourquoi ici plutôt qu'à la racine
+    ///
+    /// Elle l'est déjà partout ailleurs : `Keyboard::set_brightness` est une
+    /// commande de l'appareil (`0x0f`/`0x04`), distincte de l'effet en cours, et
+    /// `set_brightness(device, level)` prend un [`DeviceRef`] depuis le premier
+    /// jour. Le scalaire global de `Settings` était le seul endroit qui disait le
+    /// contraire — et deux claviers n'ont aucune raison de partager un niveau.
+    ///
+    /// # `None` veut dire « le défaut », pas « éteint »
+    ///
+    /// Le fichier ne porte alors rien du tout : écrire [`BRIGHTNESS_DEFAUT`] par
+    /// appareil simplement branché le ferait grossir d'entrées qui ne décident de
+    /// rien. Même économie que `devices` et `effectParams` — une entrée n'existe
+    /// que si quelqu'un a bougé quelque chose. C'est aussi pourquoi une entrée
+    /// redevenue `detected` **sans** luminosité disparaît : voir
+    /// [`Self::inerte`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<u8>,
 }
 
 impl DeviceRecord {
+    /// Vrai si cette entrée ne retient plus aucune décision.
+    ///
+    /// `detected` sans luminosité dit exactement ce que dit l'**absence**
+    /// d'entrée. La garder n'apprendrait rien à qui relit ses réglages, et
+    /// ferait grossir le fichier d'une ligne par appareil effleuré une fois.
+    fn inerte(&self) -> bool {
+        self.state == DeviceState::Detected && self.brightness.is_none()
+    }
+
     /// Vrai si cette entrée désigne l'appareil énuméré.
     ///
     /// Le VID et le PID doivent correspondre ; la série n'est comparée que si
@@ -195,6 +240,36 @@ impl DeviceRecord {
             _ => true,
         }
     }
+}
+
+/// L'effet **appliqué** sur un appareil, celui qui pilote ses LED.
+///
+/// # Une liste, pas un scalaire
+///
+/// Le champ qui précédait — `activeEffect: Option<String>` — décrivait **un**
+/// effet actif, alors que le moteur en fait tourner un par appareil depuis
+/// l'issue #26. Aucune valeur ne pouvait rendre ce champ juste : c'est sa forme
+/// qui était fausse. Une entrée par appareil, absente tant que rien n'a été
+/// appliqué, est la seule qui décrive ce que le moteur fait réellement.
+///
+/// # Ce n'est pas ce qu'on regarde
+///
+/// **L'aperçu n'écrit jamais ici.** Prévisualiser un effet ne le retient pas :
+/// c'est « Appliquer » qui décide, et c'est le geste qui envoie au clavier. Voir
+/// [`crate::runtime::start_preview`], qui n'a aucun accès au disque.
+///
+/// # La clé est le [`DeviceRef`], sans numéro de série
+///
+/// Même raison que [`EffectParamsRecord`] : les boucles du moteur sont indexées
+/// par VID/PID, deux exemplaires du même modèle en partagent une, et les
+/// distinguer ici promettrait une séparation que le moteur ne tient pas.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveEffectRecord {
+    pub vid: u16,
+    pub pid: u16,
+    /// Identifiant de l'effet appliqué.
+    pub effect: String,
 }
 
 /// Réglages d'un effet, retenus pour **un** appareil.
@@ -231,33 +306,16 @@ pub struct EffectParamsRecord {
     pub values: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Réglages persistants.
+/// Ce qui vaut pour l'application entière, et pour aucun appareil en
+/// particulier.
 ///
-/// `#[serde(default)]` sur la structure entière : un `settings.json` écrit par
-/// une version antérieure, à qui il manque un champ ajouté depuis, se relit
-/// sans erreur au lieu de rendre l'application muette au démarrage.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+/// Un objet à part plutôt que des champs à la racine : c'est le rangement qui
+/// empêche la confusion dont ce module vient de sortir. Tout ce qui dépend d'un
+/// clavier vit dans une liste indexée ; ce qui n'en dépend pas vit ici, et la
+/// langue — quand elle arrivera — n'aura rien à arbitrer.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
-pub struct Settings {
-    /// Identifiant de l'effet à reprendre au démarrage.
-    pub active_effect: Option<String>,
-    pub brightness: u8,
-    /// Périphérique choisi, quand il y en a plusieurs de connus.
-    pub device: Option<DeviceSelection>,
-    /// Décisions prises appareil par appareil.
-    ///
-    /// Ne contient que celles qui **diffèrent du défaut** : un appareil absent
-    /// de cette liste est `detected`, ce qui est exactement l'état d'un appareil
-    /// jamais rencontré. Le fichier ne grossit donc pas d'une entrée à chaque
-    /// périphérique branché une fois.
-    pub devices: Vec<DeviceRecord>,
-    /// Réglages d'effet retenus, par appareil et par effet.
-    ///
-    /// Même économie que `devices` : une entrée n'existe que si quelqu'un a
-    /// **déplacé** un curseur. Rétablir les valeurs déclarées la retire, plutôt
-    /// que d'écrire une copie des défauts que la prochaine version de l'effet
-    /// contredirait.
-    pub effect_params: Vec<EffectParamsRecord>,
+pub struct Preferences {
     /// Niveau du journal, quand quelqu'un l'a changé depuis l'application.
     ///
     /// `None` — donc absent du fichier — veut dire « le défaut », et non « pas de
@@ -275,22 +333,62 @@ pub struct Settings {
     pub log_level: Option<LogLevel>,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            active_effect: None,
-            // Pleine luminosité : c'est l'état d'un clavier qu'on vient de
-            // brancher, donc le défaut le moins surprenant.
-            brightness: 255,
-            device: None,
-            devices: Vec::new(),
-            effect_params: Vec::new(),
-            log_level: None,
-        }
-    }
+/// Réglages persistants.
+///
+/// `#[serde(default)]` sur la structure entière : un `settings.json` écrit par
+/// une version antérieure, à qui il manque un champ ajouté depuis, se relit
+/// sans erreur au lieu de rendre l'application muette au démarrage.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Settings {
+    /// Ce qui ne dépend d'aucun appareil. Voir [`Preferences`].
+    pub preferences: Preferences,
+    /// Décisions prises appareil par appareil, luminosité comprise.
+    ///
+    /// Ne contient que celles qui **diffèrent du défaut** : un appareil absent
+    /// de cette liste est `detected` et à pleine luminosité, ce qui est
+    /// exactement l'état d'un appareil jamais rencontré. Le fichier ne grossit
+    /// donc pas d'une entrée à chaque périphérique branché une fois.
+    pub devices: Vec<DeviceRecord>,
+    /// L'effet **appliqué** sur chaque appareil. Voir [`ActiveEffectRecord`].
+    ///
+    /// Même économie que le reste : pas d'entrée tant que rien n'a été appliqué,
+    /// et l'entrée part quand l'effet s'arrête ou qu'il est supprimé.
+    pub active_effects: Vec<ActiveEffectRecord>,
+    /// Réglages d'effet retenus, par appareil et par effet.
+    ///
+    /// Même économie que `devices` : une entrée n'existe que si quelqu'un a
+    /// **déplacé** un curseur. Rétablir les valeurs déclarées la retire, plutôt
+    /// que d'écrire une copie des défauts que la prochaine version de l'effet
+    /// contredirait.
+    pub effect_params: Vec<EffectParamsRecord>,
+    /// Le niveau du journal tel qu'une version antérieure l'écrivait, **à la
+    /// racine**.
+    ///
+    /// Lu, jamais réécrit (`skip_serializing`) : [`Store::read_settings`] le
+    /// verse dans [`Preferences`], et il disparaît du fichier à la première
+    /// écriture. Sans cette passerelle, déplacer `logLevel` aurait ramené au
+    /// défaut le niveau de celui qui était **en train** de chercher une panne —
+    /// c'est-à-dire au pire moment, puisque c'est le seul où ce réglage sert.
+    ///
+    /// L'alternative écartée : ne rien faire et l'assumer. Elle coûtait douze
+    /// lignes de moins et une session de diagnostic perdue. À retirer quand plus
+    /// aucun `settings.json` antérieur à la v2.1 ne circule.
+    #[serde(default, rename = "logLevel", skip_serializing)]
+    log_level_herite: Option<LogLevel>,
 }
 
 impl Settings {
+    /// Verse dans [`Preferences`] ce qu'un fichier antérieur portait à la racine.
+    ///
+    /// Ce qui est déjà rangé l'emporte : un fichier écrit par cette version a
+    /// raison contre une clé héritée qu'un éditeur de texte y aurait laissée.
+    fn absorber_l_heritage(&mut self) {
+        if let Some(niveau) = self.log_level_herite.take() {
+            self.preferences.log_level.get_or_insert(niveau);
+        }
+    }
+
     /// Rang de l'entrée décrivant cet appareil, s'il y en a une.
     ///
     /// L'identité exacte d'abord — série comprise, `None` comprise —, puis la
@@ -340,7 +438,102 @@ impl Settings {
                 pid,
                 serial: serial.map(str::to_owned),
                 state,
+                brightness: None,
             }),
+        }
+        self.elaguer();
+    }
+
+    /// La luminosité retenue pour cet appareil, ou [`BRIGHTNESS_DEFAUT`].
+    pub fn brightness(&self, vid: u16, pid: u16, serial: Option<&str>) -> u8 {
+        self.position(vid, pid, serial)
+            .and_then(|i| self.devices[i].brightness)
+            .unwrap_or(BRIGHTNESS_DEFAUT)
+    }
+
+    /// Retient une luminosité. [`BRIGHTNESS_DEFAUT`] **oublie** l'entrée.
+    ///
+    /// Le parallèle de « rétablir les valeurs déclarées » pour les réglages
+    /// d'effet : remonter le curseur à fond ne doit pas écrire 255 dans le
+    /// fichier, il doit y retirer la ligne. Un appareil dont c'était la seule
+    /// décision disparaît alors complètement — voir [`DeviceRecord::inerte`].
+    ///
+    /// Rend vrai si quelque chose a changé, pour qu'on ne repasse pas par le
+    /// fichier temporaire et son renommage quand il n'y a rien à y écrire.
+    pub fn set_brightness(&mut self, vid: u16, pid: u16, serial: Option<&str>, level: u8) -> bool {
+        let retenu = (level != BRIGHTNESS_DEFAUT).then_some(level);
+        match self.position(vid, pid, serial) {
+            Some(i) => {
+                if self.devices[i].brightness == retenu {
+                    return false;
+                }
+                self.devices[i].brightness = retenu;
+                // Même règle que [`Self::set_device_state`] : la série se
+                // complète si on vient de l'apprendre, elle ne s'efface jamais.
+                if self.devices[i].serial.is_none() {
+                    self.devices[i].serial = serial.map(str::to_owned);
+                }
+            }
+            None => {
+                // Le défaut, sur un appareil dont on ne retient rien : il n'y a
+                // aucune entrée à créer pour n'y rien mettre.
+                let Some(level) = retenu else { return false };
+                self.devices.push(DeviceRecord {
+                    vid,
+                    pid,
+                    serial: serial.map(str::to_owned),
+                    state: DeviceState::default(),
+                    brightness: Some(level),
+                });
+            }
+        }
+        self.elaguer();
+        true
+    }
+
+    /// Retire les entrées d'appareil qui ne retiennent plus rien.
+    fn elaguer(&mut self) {
+        self.devices.retain(|r| !r.inerte());
+    }
+
+    /// L'effet appliqué sur cet appareil, s'il y en a un.
+    pub fn active_effect(&self, vid: u16, pid: u16) -> Option<&str> {
+        self.active_effects
+            .iter()
+            .find(|r| r.vid == vid && r.pid == pid)
+            .map(|r| r.effect.as_str())
+    }
+
+    /// Retient l'effet appliqué, ou l'oublie avec `None`.
+    ///
+    /// Rend vrai si quelque chose a changé : relancer deux fois le même effet sur
+    /// le même clavier — ce que fait un double-clic — ne doit pas réécrire le
+    /// fichier.
+    pub fn set_active_effect(&mut self, vid: u16, pid: u16, effect: Option<&str>) -> bool {
+        let position = self
+            .active_effects
+            .iter()
+            .position(|r| r.vid == vid && r.pid == pid);
+
+        match (position, effect) {
+            (Some(i), None) => {
+                self.active_effects.remove(i);
+                true
+            }
+            (Some(i), Some(e)) if self.active_effects[i].effect == e => false,
+            (Some(i), Some(e)) => {
+                self.active_effects[i].effect = e.to_owned();
+                true
+            }
+            (None, None) => false,
+            (None, Some(e)) => {
+                self.active_effects.push(ActiveEffectRecord {
+                    vid,
+                    pid,
+                    effect: e.to_owned(),
+                });
+                true
+            }
         }
     }
 
@@ -389,16 +582,37 @@ impl Settings {
         }
     }
 
-    /// Oublie les réglages d'un effet, **sur tous les appareils**.
+    /// Oublie un effet **partout** : ses réglages, et son application.
     ///
-    /// Appelée quand l'effet est supprimé : sans cela ses réglages resteraient
+    /// Appelée quand l'effet est supprimé. Sans cela ses réglages resteraient
     /// dans `settings.json` pour un identifiant que plus rien ne désigne, et le
-    /// fichier ne ferait que grossir. Rend vrai si quelque chose a été retiré,
-    /// pour qu'on ne réécrive pas le fichier quand il n'y a rien à y changer.
+    /// fichier ne ferait que grossir.
+    ///
+    /// # Pourquoi l'application part avec, et pas seulement les réglages
+    ///
+    /// C'est le piège que l'issue #48 avait relevé et que #64 tranche ici :
+    /// `delete_effect` laissait un **identifiant pendant**. Tant que le champ
+    /// était mort, la question ne se posait pas ; maintenant qu'`activeEffects`
+    /// est écrit, elle se pose, et les deux réponses possibles n'ont pas le même
+    /// prix :
+    ///
+    /// - **purger à la suppression** — retenu : le fichier ne contient jamais un
+    ///   identifiant que la bibliothèque ne connaît pas, et cet invariant se
+    ///   vérifie sans faire tourner quoi que ce soit ;
+    /// - se replier en silence au démarrage — écarté *comme seule mesure* : un
+    ///   silence au lancement est exactement le genre de panne qui coûte une
+    ///   session, et l'identifiant survivrait à autant de démarrages qu'on veut.
+    ///
+    /// Le repli reste nécessaire en **seconde** barrière — un dossier d'effet
+    /// retiré à la main ne passe pas par ici — mais il n'est plus le seul.
+    ///
+    /// Rend vrai si quelque chose a été retiré, pour qu'on ne réécrive pas le
+    /// fichier quand il n'y a rien à y changer.
     pub fn forget_effect(&mut self, effect: &str) -> bool {
-        let avant = self.effect_params.len();
+        let avant = self.effect_params.len() + self.active_effects.len();
         self.effect_params.retain(|r| r.effect != effect);
-        self.effect_params.len() != avant
+        self.active_effects.retain(|r| r.effect != effect);
+        self.effect_params.len() + self.active_effects.len() != avant
     }
 }
 
@@ -747,12 +961,17 @@ impl Store {
                 ))
             }
         };
-        serde_json::from_str(&raw).map_err(|e| {
+        let mut settings: Settings = serde_json::from_str(&raw).map_err(|e| {
             format!(
                 "réglages illisibles dans {} : {e}",
                 self.settings_file.display()
             )
-        })
+        })?;
+        // Ici et nulle part ailleurs : c'est le seul chemin par lequel un fichier
+        // entre dans l'application, donc le seul endroit où une clé héritée peut
+        // être traduite une fois pour toutes.
+        settings.absorber_l_heritage();
+        Ok(settings)
     }
 
     /// Écrit `settings.json`.
@@ -925,12 +1144,16 @@ pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
 }
 
-/// Supprime un effet, **et les réglages qu'on avait retenus pour lui**.
+/// Supprime un effet, **et tout ce que `settings.json` retenait de lui** : ses
+/// réglages, et son application sur les appareils.
 ///
 /// Les deux vont ensemble : laisser les réglages derrière ferait grossir
 /// `settings.json` d'entrées désignant un identifiant que plus rien ne nomme, et
 /// un effet réinstallé plus tard sous le même nom hériterait en silence des
-/// réglages de son homonyme disparu.
+/// réglages de son homonyme disparu. Laisser l'**application** derrière laisserait
+/// en plus un identifiant pendant, que le jour où l'on reprendra l'effet au
+/// démarrage on essaierait de lancer — voir [`Settings::forget_effect`], où ce
+/// choix est arbitré.
 ///
 /// L'oubli vient **après** la suppression : si celle-ci échoue, l'effet est
 /// toujours là et ses réglages doivent l'être aussi.
@@ -1502,17 +1725,20 @@ mod tests {
     fn les_reglages_font_un_aller_retour() {
         let (tmp, store) = store_temporaire();
         let settings = Settings {
-            active_effect: Some("onde".into()),
-            brightness: 128,
-            device: Some(DeviceSelection {
-                vid: 0x1532,
-                pid: 0x0292,
-            }),
+            preferences: Preferences {
+                log_level: Some(LogLevel::Debug),
+            },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
                 pid: 0x0292,
                 serial: Some("XY01".into()),
                 state: DeviceState::Adopted,
+                brightness: Some(128),
+            }],
+            active_effects: vec![ActiveEffectRecord {
+                vid: 0x1532,
+                pid: 0x0292,
+                effect: "onde".into(),
             }],
             effect_params: vec![EffectParamsRecord {
                 vid: 0x1532,
@@ -1520,7 +1746,7 @@ mod tests {
                 effect: "respiration".into(),
                 values: valeurs(&[("period", serde_json::json!(12.5))]),
             }],
-            log_level: Some(LogLevel::Debug),
+            log_level_herite: None,
         };
 
         store.write_settings(&settings).unwrap();
@@ -1536,11 +1762,111 @@ mod tests {
         let (tmp, store) = store_temporaire();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
-        fs::write(config.join("settings.json"), r#"{"brightness":10}"#).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{"devices":[{"vid":5426,"pid":658,"state":"adopted","brightness":10}]}"#,
+        )
+        .unwrap();
 
         let settings = store.read_settings().unwrap();
-        assert_eq!(settings.brightness, 10);
-        assert_eq!(settings.active_effect, None);
+        assert_eq!(settings.brightness(VID, PID, None), 10);
+        assert_eq!(settings.active_effect(VID, PID), None);
+        assert_eq!(settings.preferences, Preferences::default());
+    }
+
+    /// **Les trois vestiges mono-appareil ont disparu du fichier.** Les garder
+    /// aurait produit un `settings.json` qui décrit un effet actif, un appareil
+    /// choisi et un niveau de luminosité là où le moteur en fait tourner un par
+    /// appareil depuis l'issue #26.
+    #[test]
+    fn le_fichier_ne_porte_plus_de_champ_mono_appareil() {
+        let (_tmp, store) = store_temporaire();
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+        settings.set_active_effect(VID, PID, Some("onde"));
+        settings.set_brightness(VID, PID, Some("XY01"), 40);
+        store.write_settings(&settings).unwrap();
+
+        let json = serde_json::to_string(&settings).unwrap();
+        for mort in [r#""activeEffect""#, r#""device":"#, r#""brightness":40,"#] {
+            assert!(!json.contains(mort), "« {mort} » subsiste : {json}");
+        }
+        // Ce qui les remplace est bien là, et indexé par appareil.
+        assert!(json.contains(r#""activeEffects":[{"vid":5426,"pid":658,"effect":"onde"}]"#));
+        assert!(json.contains(r#""brightness":40"#));
+    }
+
+    /// La luminosité est une décision **de l'appareil** : deux claviers ne
+    /// partagent pas un niveau, et c'est tout l'objet du déplacement.
+    #[test]
+    fn la_luminosite_est_retenue_appareil_par_appareil() {
+        let mut settings = Settings::default();
+        settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+        settings.set_device_state(VID, PID + 1, Some("ZZ02"), DeviceState::Adopted);
+
+        assert!(settings.set_brightness(VID, PID, Some("XY01"), 40));
+        assert_eq!(settings.brightness(VID, PID, Some("XY01")), 40);
+        assert_eq!(
+            settings.brightness(VID, PID + 1, Some("ZZ02")),
+            BRIGHTNESS_DEFAUT,
+            "le niveau du premier a débordé sur le second"
+        );
+
+        // Rien de neuf : pas de réécriture du fichier pour la même valeur.
+        assert!(!settings.set_brightness(VID, PID, Some("XY01"), 40));
+    }
+
+    /// Le défaut ne s'écrit pas, et **retirer** est ce que fait le retour au
+    /// maximum : le pendant de « rétablir les valeurs déclarées » côté effets.
+    #[test]
+    fn la_luminosite_par_defaut_ne_laisse_aucune_entree() {
+        let mut settings = Settings::default();
+
+        // Sur un appareil dont on ne retient rien : aucune entrée n'est créée.
+        assert!(!settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT));
+        assert!(settings.devices.is_empty());
+
+        // Réglée puis ramenée au maximum : l'entrée naît puis disparaît, parce
+        // qu'elle ne retenait que ça.
+        assert!(settings.set_brightness(VID, PID, None, 40));
+        assert_eq!(settings.devices.len(), 1);
+        assert!(settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT));
+        assert!(
+            settings.devices.is_empty(),
+            "une entrée qui ne décide plus rien est restée : {:?}",
+            settings.devices
+        );
+
+        // Mais une décision d'adoption, elle, retient l'entrée.
+        settings.set_device_state(VID, PID, None, DeviceState::Ignored);
+        settings.set_brightness(VID, PID, None, 40);
+        settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT);
+        assert_eq!(settings.devices.len(), 1);
+        assert_eq!(settings.device_state(VID, PID, None), DeviceState::Ignored);
+    }
+
+    /// L'effet appliqué est une liste indexée, pas un scalaire : deux claviers
+    /// portent deux effets, et c'est exactement ce que le moteur fait.
+    #[test]
+    fn l_effet_applique_est_retenu_par_appareil() {
+        let mut settings = Settings::default();
+
+        assert!(settings.set_active_effect(VID, PID, Some("onde")));
+        assert!(settings.set_active_effect(VID, PID + 1, Some("respiration")));
+        assert_eq!(settings.active_effect(VID, PID), Some("onde"));
+        assert_eq!(settings.active_effect(VID, PID + 1), Some("respiration"));
+
+        // Relancer le même effet ne réécrit pas le fichier : c'est un double-clic.
+        assert!(!settings.set_active_effect(VID, PID, Some("onde")));
+        // Changer d'effet remplace l'entrée, il n'en empile pas une seconde.
+        assert!(settings.set_active_effect(VID, PID, Some("balayage")));
+        assert_eq!(settings.active_effects.len(), 2);
+
+        // Arrêter oublie, plutôt que de laisser un identifiant qui ne décrit rien.
+        assert!(settings.set_active_effect(VID, PID, None));
+        assert_eq!(settings.active_effect(VID, PID), None);
+        assert_eq!(settings.active_effects.len(), 1);
+        assert!(!settings.set_active_effect(VID, PID, None));
     }
 
     /// Le niveau du journal **survit au redémarrage** — c'est l'arbitrage retenu
@@ -1560,7 +1886,9 @@ mod tests {
         );
 
         let settings = Settings {
-            log_level: Some(LogLevel::Trace),
+            preferences: Preferences {
+                log_level: Some(LogLevel::Trace),
+            },
             ..Settings::default()
         };
         store.write_settings(&settings).unwrap();
@@ -1568,8 +1896,53 @@ mod tests {
             .unwrap()
             .contains(r#""logLevel": "trace""#));
         assert_eq!(
-            store.read_settings().unwrap().log_level,
+            store.read_settings().unwrap().preferences.log_level,
             Some(LogLevel::Trace)
+        );
+    }
+
+    /// **La passerelle de la v2.1.** `logLevel` a quitté la racine pour
+    /// [`Preferences`] ; un fichier antérieur doit y arriver quand même, sans
+    /// quoi le niveau retomberait au défaut sous celui qui était justement en
+    /// train de chercher une panne.
+    #[test]
+    fn un_niveau_de_journal_ecrit_a_la_racine_est_recupere() {
+        let (tmp, store) = store_temporaire();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join("settings.json"), r#"{"logLevel":"debug"}"#).unwrap();
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.preferences.log_level, Some(LogLevel::Debug));
+
+        // Et il ne repart pas à la racine : la passerelle traduit une fois.
+        store.write_settings(&settings).unwrap();
+        let ecrit = fs::read_to_string(config.join("settings.json")).unwrap();
+        assert!(ecrit.contains(r#""preferences""#), "écrit : {ecrit}");
+        assert_eq!(
+            ecrit.matches(r#""logLevel""#).count(),
+            1,
+            "le niveau est écrit deux fois : {ecrit}"
+        );
+    }
+
+    /// Ce qui est déjà rangé l'emporte sur la clé héritée : un fichier écrit par
+    /// cette version a raison contre une racine qu'un éditeur de texte y aurait
+    /// laissée.
+    #[test]
+    fn les_preferences_l_emportent_sur_la_cle_heritee() {
+        let (tmp, store) = store_temporaire();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{"logLevel":"debug","preferences":{"logLevel":"error"}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            store.read_settings().unwrap().preferences.log_level,
+            Some(LogLevel::Error)
         );
     }
 
@@ -1595,11 +1968,10 @@ mod tests {
             .install_effect("la source", "le js", &manifeste("Onde"))
             .unwrap();
 
-        let mut settings = Settings {
-            brightness: 12,
-            ..Settings::default()
-        };
+        let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
+        settings.set_brightness(VID, PID, Some("XY01"), 12);
+        settings.set_active_effect(VID, PID, Some(&id));
         settings.set_effect_params(VID, PID, &id, valeurs(&[("speed", serde_json::json!(3))]));
         store.write_settings(&settings).unwrap();
 
@@ -1714,8 +2086,15 @@ mod tests {
         assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
     }
 
-    /// Le fichier d'une version antérieure ne connaît pas `devices`. Il doit
-    /// se relire, et surtout **ne rien perdre** quand on le réécrit.
+    /// Le fichier d'une version antérieure ne connaît ni `devices` ni la forme
+    /// actuelle. Il doit se relire sans erreur, et la réécriture ne doit pas
+    /// perdre ce qu'on vient d'y décider.
+    ///
+    /// Ce qui **ne survit pas**, et c'est le sujet de l'issue #64 : les trois
+    /// champs mono-appareil. `activeEffect` et `device` n'étaient lus ni écrits
+    /// par personne, et `brightness` à la racine décrivait un niveau partagé que
+    /// deux claviers n'ont aucune raison d'avoir. Les récupérer aurait demandé de
+    /// choisir *quel* appareil ils désignaient — question sans réponse.
     #[test]
     fn un_fichier_anterieur_se_relit_et_garde_ses_reglages() {
         let (tmp, store) = store_temporaire();
@@ -1723,23 +2102,23 @@ mod tests {
         fs::create_dir_all(&config).unwrap();
         fs::write(
             config.join("settings.json"),
-            r#"{"activeEffect":"onde-radiale","brightness":90}"#,
+            r#"{"activeEffect":"onde-radiale","brightness":90,"device":{"vid":5426,"pid":658}}"#,
         )
         .unwrap();
 
         let mut settings = store.read_settings().unwrap();
         assert!(settings.devices.is_empty());
+        assert!(settings.active_effects.is_empty());
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
         store.write_settings(&settings).unwrap();
 
         let relu = store.read_settings().unwrap();
-        assert_eq!(relu.active_effect.as_deref(), Some("onde-radiale"));
-        assert_eq!(relu.brightness, 90);
         assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
+        assert_eq!(relu.brightness(VID, PID, None), BRIGHTNESS_DEFAUT);
     }
 
     /// Les champs partent en camelCase, comme tous les DTO, et une entrée sans
-    /// série n'écrit pas de clé vide.
+    /// série ni luminosité n'écrit pas de clé vide.
     #[test]
     fn les_appareils_se_serialisent_en_camel_case() {
         let mut settings = Settings::default();
@@ -1747,8 +2126,9 @@ mod tests {
         let json = serde_json::to_string(&settings).unwrap();
 
         assert!(json.contains(r#""devices":[{"vid":5426,"pid":658,"state":"adopted"}]"#));
-        assert!(json.contains(r#""activeEffect""#));
+        assert!(json.contains(r#""activeEffects":[]"#));
         assert!(!json.contains("serial"), "clé vide écrite : {json}");
+        assert!(!json.contains("brightness"), "défaut écrit : {json}");
     }
 
     // ------------------------------------------------- réglages d'effet
@@ -1829,8 +2209,7 @@ mod tests {
         fs::create_dir_all(&config).unwrap();
         fs::write(
             config.join("settings.json"),
-            r#"{"activeEffect":"onde-radiale","brightness":90,
-                "devices":[{"vid":5426,"pid":658,"state":"adopted"}]}"#,
+            r#"{"devices":[{"vid":5426,"pid":658,"state":"adopted","brightness":90}]}"#,
         )
         .unwrap();
 
@@ -1846,7 +2225,7 @@ mod tests {
 
         let relu = store.read_settings().unwrap();
         assert_eq!(relu.effect_params(VID, PID, "balayage"), Some(&reglages));
-        assert_eq!(relu.brightness, 90);
+        assert_eq!(relu.brightness(VID, PID, None), 90);
         assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
     }
 
@@ -1896,6 +2275,27 @@ mod tests {
         // Rien à retirer : le fichier n'a aucune raison d'être réécrit.
         assert!(!settings.forget_effect("balayage"));
         assert!(!settings.forget_effect("jamais-regle"));
+    }
+
+    /// **Le piège de l'issue #48, tranché.** Supprimer l'effet appliqué doit
+    /// purger son identifiant, sinon `settings.json` désignerait comme appliqué
+    /// un effet que la bibliothèque ne connaît plus — et le jour où l'on
+    /// reprendra l'effet au démarrage, on tenterait de lancer un effet absent.
+    #[test]
+    fn oublier_un_effet_purge_aussi_son_application() {
+        let mut settings = Settings::default();
+        settings.set_active_effect(VID, PID, Some("a-supprimer"));
+        settings.set_active_effect(VID, PID + 1, Some("a-supprimer"));
+        settings.set_active_effect(VID, PID + 2, Some("epargne"));
+
+        assert!(settings.forget_effect("a-supprimer"));
+        assert_eq!(settings.active_effect(VID, PID), None);
+        assert_eq!(settings.active_effect(VID, PID + 1), None);
+        assert_eq!(
+            settings.active_effect(VID, PID + 2),
+            Some("epargne"),
+            "la suppression a emporté l'effet d'un autre appareil"
+        );
     }
 
     /// Les réglages d'effet partent en camelCase comme le reste des DTO.

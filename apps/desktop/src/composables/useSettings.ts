@@ -1,13 +1,28 @@
 /**
- * Les réglages d'un effet : ce qu'on retient, et ce qu'on envoie.
+ * Ce que `settings.json` retient, et comment la fenêtre l'écrit.
  *
- * Trois destinations pour un même geste — bouger un curseur —, et elles n'ont
- * ni la même cadence ni la même durée de vie :
+ * Trois sortes de décisions y vivent, et elles n'ont ni la même forme ni le même
+ * chemin vers le disque :
+ *
+ * - les **réglages d'un effet**, par paire appareil / effet ;
+ * - la **luminosité** d'un appareil, réappliquée à chaque branchement ;
+ * - l'**effet appliqué** sur un appareil, écrit par le Rust au lancement.
+ *
+ * Le module portait le nom du premier seul — `useEffectParams` — et c'était le
+ * même défaut de forme que les trois champs mono-appareil retirés de
+ * `settings.json` : un nom qui décrit une part et un contenu qui en couvre
+ * trois. Une **seule** lecture du fichier alimente les trois, ce qui est aussi
+ * la raison de ne pas les séparer en trois composables.
+ *
+ * ## Les réglages d'un effet : trois destinations pour un même geste
+ *
+ * Bouger un curseur écrit à trois endroits, et ils n'ont ni la même cadence ni
+ * la même durée de vie :
  *
  * 1. **La mémoire de la fenêtre**, immédiate : c'est elle que le formulaire
  *    affiche, et changer d'effet puis revenir la relit ;
  * 2. **la boucle de rendu**, à chaud, quelques dizaines de fois par seconde au
- *    plus (`set_effect_params`) ;
+ *    plus (`set_effect_params`, `set_preview_params`) ;
  * 3. **`settings.json`**, quand le curseur s'arrête (`remember_effect_params`).
  *
  * ## Pourquoi le disque et pas la seule session
@@ -78,6 +93,23 @@ const DISK_PERIOD = 250
 /** Ce qui diffère du manifeste, par appareil et par effet. Clé `vid:pid/effet`. */
 const remembered = ref<Record<string, EffectParams>>({})
 
+/**
+ * L'effet **appliqué** sur chaque appareil, tel que le fichier le retient.
+ * Clé `vid:pid`.
+ *
+ * Relu, jamais écrit d'ici : c'est le Rust qui le retient, au moment où l'effet
+ * démarre pour de bon. La fenêtre n'aurait pas de quoi le faire honnêtement —
+ * l'icône de zone de notification lance des effets sans elle.
+ *
+ * Ce qui en dépend : dire qu'un appareil au repos **se souvient** de son dernier
+ * effet, plutôt que d'afficher « aucun effet » et laisser croire que rien n'a
+ * été retenu.
+ */
+const applied = ref<Record<string, string>>({})
+
+/** La luminosité retenue par appareil, clé `vid:pid`. Absente = le défaut. */
+const brightness = ref<Record<string, number>>({})
+
 /** Ce qui a empêché de lire, d'ajuster ou de retenir. Déjà lisible. */
 const error = ref<string | null>(null)
 
@@ -97,7 +129,8 @@ let loaded = false
  */
 let generation = 0
 
-const key = (d: DeviceRef, effect: string) => `${d.vid}:${d.pid}/${effect}`
+const deviceKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
+const key = (d: DeviceRef, effect: string) => `${deviceKey(d)}/${effect}`
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
@@ -170,7 +203,7 @@ function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectPa
 // ------------------------------------------------------------ envois à chaud
 
 /**
- * Ce qu'il reste à envoyer à la boucle d'un appareil.
+ * Ce qu'il reste à envoyer à **une** boucle de rendu.
  *
  * Un seul envoi en vol à la fois, et jamais deux à moins de {@link HOT_PERIOD}
  * d'intervalle : les mouvements intermédiaires sont **écrasés**, pas empilés.
@@ -189,23 +222,43 @@ interface Sender {
   last: number
   /** Minuterie d'attente de cadence, `0` s'il n'y en a pas. */
   timer: number
+  /** Où ces valeurs vont. Voir {@link hot}. */
+  send: (params: EffectParams) => Promise<void>
 }
 
-/** Un émetteur par appareil : deux claviers réglés à la suite ne se gênent pas. */
+/**
+ * Un émetteur par boucle : deux claviers réglés à la suite ne se gênent pas, et
+ * l'aperçu a le sien.
+ *
+ * La clé de l'aperçu ne peut pas entrer en collision avec celle d'un appareil :
+ * `vid:pid` est fait de deux nombres.
+ */
 const senders = new Map<string, Sender>()
 
-function hot(device: DeviceRef, params: EffectParams): void {
-  const k = `${device.vid}:${device.pid}`
+/** La clé de l'émetteur de l'aperçu, qui n'est la boucle d'aucun appareil. */
+const PREVIEW = 'apercu'
+
+/**
+ * Pousse des valeurs vers une boucle, à cadence bornée.
+ *
+ * `send` est fourni par l'appelant plutôt que déduit d'un `DeviceRef` : l'aperçu
+ * n'a pas d'appareil, et lui inventer un identifiant d'appareil factice aurait
+ * remis dans ce module la confusion que le moteur vient d'en sortir.
+ */
+function hot(k: string, send: Sender['send'], params: EffectParams): void {
   let s = senders.get(k)
   if (!s) {
-    s = { pending: null, inFlight: false, last: 0, timer: 0 }
+    s = { pending: null, inFlight: false, last: 0, timer: 0, send }
     senders.set(k, s)
   }
+  // L'aperçu change de boucle à chaque sélection : l'envoi doit suivre la
+  // dernière, pas celle qui vivait quand l'émetteur a été créé.
+  s.send = send
   s.pending = params
-  pump(device, s)
+  pump(s)
 }
 
-function pump(device: DeviceRef, s: Sender): void {
+function pump(s: Sender): void {
   // Rien à envoyer, ou quelqu'un s'en charge déjà : le retour de l'envoi en
   // cours, ou l'expiration de la minuterie, rappellera cette fonction.
   if (s.pending === null || s.inFlight || s.timer !== 0) return
@@ -214,7 +267,7 @@ function pump(device: DeviceRef, s: Sender): void {
   if (wait > 0) {
     s.timer = window.setTimeout(() => {
       s.timer = 0
-      pump(device, s)
+      pump(s)
     }, wait)
     return
   }
@@ -224,14 +277,14 @@ function pump(device: DeviceRef, s: Sender): void {
   s.inFlight = true
   s.last = Date.now()
 
-  void api
-    .setEffectParams(device, params)
+  void s
+    .send(params)
     .catch((e: unknown) => {
       error.value = message(e)
     })
     .finally(() => {
       s.inFlight = false
-      pump(device, s)
+      pump(s)
     })
 }
 
@@ -406,6 +459,19 @@ function read(): Promise<void> {
         s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
       )
 
+      // Les deux autres tables sont reprises telles quelles : la fenêtre ne les
+      // écrit pas — le Rust retient l'effet appliqué au lancement, et la
+      // luminosité repart par sa propre commande —, il n'y a donc rien à
+      // protéger d'une écriture en vol comme pour les réglages ci-dessous.
+      applied.value = Object.fromEntries(
+        s.activeEffects.map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.effect]),
+      )
+      brightness.value = Object.fromEntries(
+        s.devices
+          .filter((r) => r.brightness !== undefined)
+          .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.brightness as number]),
+      )
+
       // Ce qui attend encore le disque est plus récent que le disque : l'écriture
       // ne part qu'au repos du curseur, et `reload` ne choisit pas son moment.
       // Reprendre le fichier tel quel ferait donc reculer un curseur sous la main
@@ -440,7 +506,7 @@ function read(): Promise<void> {
   return run
 }
 
-export function useEffectParams() {
+export function useSettings() {
   /**
    * S'assure que `settings.json` a été lu — une fois par session, pas une fois
    * par montage.
@@ -491,10 +557,27 @@ export function useEffectParams() {
   }
 
   /**
-   * Change **un** réglage : mémoire, boucle, disque.
+   * Vrai si quelque chose est **retenu** pour cette paire.
+   *
+   * Sert à le dire à l'écran. C'était le défaut réel de la persistance livrée
+   * par l'issue #28 : les réglages tenaient, et rien ne laissait le deviner — on
+   * règle, on ferme, et on n'a aucune raison de croire que ça a survécu.
+   */
+  function keptFor(device: DeviceRef | null, effect: string): boolean {
+    if (!device) return false
+    return Object.keys(remembered.value[key(device, effect)] ?? {}).length > 0
+  }
+
+  /**
+   * Change **un** réglage : mémoire, boucle de l'appareil, disque.
    *
    * Le tout est envoyé à la boucle, pas le seul champ modifié : `set_params`
    * remplace le JSON des paramètres, il ne le fusionne pas.
+   *
+   * Rend les valeurs complètes, pour que l'appelant puisse les pousser aussi
+   * vers l'aperçu ({@link adjustPreview}). Les envoyer ici sans condition
+   * ajusterait un aperçu qui ne montre peut-être pas cet effet-là — seul
+   * l'appelant sait ce qu'il regarde.
    */
   function adjust(
     device: DeviceRef,
@@ -502,7 +585,7 @@ export function useEffectParams() {
     specs: Record<string, ParamSpec>,
     id: string,
     value: ParamValue,
-  ): void {
+  ): EffectParams {
     // Comme `useEffects.apply` : l'échec précédent s'efface à la tentative
     // suivante. Sans cela un incident passager laisserait un bandeau rouge
     // jusqu'à la fermeture, longtemps après que tout est rentré dans l'ordre.
@@ -514,8 +597,68 @@ export function useEffectParams() {
     // Remplacement plutôt que mutation, comme dans `useEffects` : la réactivité
     // ne dépend plus de la présence de la clé.
     remembered.value = { ...remembered.value, [key(device, effect)]: kept }
-    hot(device, complete)
+    hot(deviceKey(device), (p) => api.setEffectParams(device, p), complete)
     persist(device, effect, kept)
+    return complete
+  }
+
+  /**
+   * Pousse des valeurs vers la boucle d'**aperçu**, à la même cadence.
+   *
+   * C'est ce qui fait qu'un réglage agit à chaud sur ce qu'on regarde, sans
+   * l'avoir appliqué : la boucle d'aperçu relit son JSON à chaque image, comme
+   * celle d'un appareil. Rien n'est écrit sur disque ici — c'est {@link adjust}
+   * qui retient, et il retient pour la paire appareil / effet, pas pour l'aperçu
+   * qui n'appartient à aucun appareil.
+   */
+  function adjustPreview(values: EffectParams): void {
+    hot(PREVIEW, api.setPreviewParams, values)
+  }
+
+  /** La luminosité retenue pour cet appareil, ou le défaut. */
+  function brightnessOf(device: DeviceRef | null): number {
+    if (!device) return api.BRIGHTNESS_DEFAULT
+    return brightness.value[deviceKey(device)] ?? api.BRIGHTNESS_DEFAULT
+  }
+
+  /**
+   * Change la luminosité d'un appareil : mémoire, clavier, et disque si demandé.
+   *
+   * Deux commandes et non une, comme pour les réglages d'effet : `setBrightness`
+   * écrit sur le clavier à chaque mouvement, `rememberBrightness` n'écrit sur
+   * disque qu'à la fin du geste. `commit` dit lequel des deux on est en train de
+   * faire — un glissement produit des dizaines de `setBrightness` et une seule
+   * écriture disque.
+   */
+  function setBrightness(device: DeviceRef, level: number, commit: boolean): void {
+    error.value = null
+    const k = deviceKey(device)
+    // Le défaut ne se retient pas : l'absence d'entrée **est** le défaut, ici
+    // comme dans le fichier.
+    const suite = { ...brightness.value }
+    if (level === api.BRIGHTNESS_DEFAULT) delete suite[k]
+    else suite[k] = level
+    brightness.value = suite
+
+    const echoue = (e: unknown) => {
+      error.value = message(e)
+    }
+    // L'appareil peut être fermé — débranché, ignoré : l'écriture HID échoue
+    // alors, et ce n'est pas une raison de ne pas retenir le niveau. Il sera
+    // réappliqué au branchement suivant, c'est tout l'objet de le retenir.
+    void api.setBrightness(device, level).catch(echoue)
+    if (commit) void api.rememberBrightness(device, level).catch(echoue)
+  }
+
+  /**
+   * L'effet que `settings.json` retient comme appliqué sur cet appareil.
+   *
+   * Ce n'est **pas** ce qui tourne — ça, c'est `engine_status`. C'est ce qui a
+   * été appliqué la dernière fois, et ce qui permet à un appareil au repos de
+   * dire qu'il s'en souvient plutôt que d'afficher « aucun effet ».
+   */
+  function lastAppliedOn(device: DeviceRef | null): string | null {
+    return device ? (applied.value[deviceKey(device)] ?? null) : null
   }
 
   /**
@@ -536,13 +679,23 @@ export function useEffectParams() {
    *
    * Écrit sans attendre : c'est un clic, pas un glissement, il n'y a rien à
    * regrouper.
+   *
+   * Rend les valeurs déclarées, pour la même raison qu'{@link adjust} rend les
+   * siennes : l'aperçu doit revenir avec, et seul l'appelant sait ce qu'il
+   * regarde.
    */
-  function forget(device: DeviceRef, effect: string, specs: Record<string, ParamSpec>): void {
+  function forget(
+    device: DeviceRef,
+    effect: string,
+    specs: Record<string, ParamSpec>,
+  ): EffectParams {
     error.value = null
+    const declarees = merge(specs, {})
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
-    hot(device, merge(specs, {}))
+    hot(deviceKey(device), (p) => api.setEffectParams(device, p), declarees)
     persist(device, effect, {})
     settleOne(device, effect, true)
+    return declarees
   }
 
   /**
@@ -567,6 +720,13 @@ export function useEffectParams() {
     remembered.value = Object.fromEntries(
       Object.entries(remembered.value).filter(([k]) => autres(k)),
     )
+    // Le pendant de ce que `Settings::forget_effect` vient de faire sur disque :
+    // l'identifiant ne désigne plus rien, et le laisser ici ferait annoncer par
+    // la colonne des appareils un effet « retenu » que la bibliothèque ne
+    // connaît plus.
+    applied.value = Object.fromEntries(
+      Object.entries(applied.value).filter(([, id]) => id !== effect),
+    )
   }
 
   /**
@@ -580,17 +740,28 @@ export function useEffectParams() {
   function dropAll(): void {
     cancelWrites(() => false)
     remembered.value = {}
+    // Les deux autres tables décrivaient un fichier qui vient d'être remis à
+    // plat : les garder ferait dire à l'écran qu'un effet reste appliqué et
+    // qu'une luminosité reste retenue, alors que le Rust a tout éteint et tout
+    // refermé.
+    applied.value = {}
+    brightness.value = {}
   }
 
   return {
     load,
     reload,
     valuesFor,
+    keptFor,
     adjust,
+    adjustPreview,
     settle,
     forget,
     dropEffect,
     dropAll,
+    lastAppliedOn,
+    brightnessOf,
+    setBrightness,
     flush: flushAll,
     error: readonly(error),
   }

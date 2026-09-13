@@ -70,9 +70,38 @@ export function getDefaultLayout(): Promise<LayoutInfo> {
   return invoke('get_default_layout')
 }
 
-/** `level` de 0 à 255. */
+/**
+ * Luminosité **pleine** : le défaut d'un clavier qu'on vient de brancher.
+ *
+ * Miroir de `BRIGHTNESS_DEFAUT` dans `src-tauri/src/storage.rs`. C'est aussi la
+ * valeur que `settings.json` n'écrit pas — la retenir revient à retirer l'entrée.
+ */
+export const BRIGHTNESS_DEFAULT = 255
+
+/**
+ * Écrit la luminosité **sur le clavier**, et rien d'autre. `level` de 0 à 255.
+ *
+ * Ne retient rien : c'est {@link rememberBrightness}. Même séparation que
+ * {@link setEffectParams} et {@link rememberEffectParams}, pour la même raison —
+ * un curseur qu'on glisse produit des dizaines d'écritures HID et une seule
+ * écriture disque, quand il s'arrête.
+ */
 export function setBrightness(device: DeviceRef, level: number): Promise<void> {
   return invoke('set_brightness', { device, level })
+}
+
+/**
+ * Retient la luminosité de cet appareil, sans toucher au clavier.
+ *
+ * Elle est réappliquée à l'adoption et au démarrage : un niveau retenu qui ne se
+ * réapplique pas au branchement ne servirait à rien, et le protocole relevé sait
+ * écrire la luminosité mais pas la relire.
+ *
+ * {@link BRIGHTNESS_DEFAULT} **efface** l'entrée, comme une table de paramètres
+ * vide efface les réglages d'un effet.
+ */
+export function rememberBrightness(device: DeviceRef, level: number): Promise<void> {
+  return invoke('remember_brightness', { device, level })
 }
 
 /**
@@ -229,7 +258,7 @@ export function listEffects(): Promise<EffectEntry[]> {
  * l'icône de zone de notification lance un effet sans fenêtre, elle ne peut donc
  * rien emprunter d'ici. Ce que les deux doivent dire pareil : les défauts du
  * manifeste, recouverts par ce qu'on a retenu (`merge`, dans
- * `useEffectParams`), et **bornés aux paramètres déclarés**. Les désaccorder
+ * `useSettings`), et **bornés aux paramètres déclarés**. Les désaccorder
  * donnerait deux éclairages différents pour le même effet selon l'endroit d'où
  * on l'a lancé.
  */
@@ -250,6 +279,43 @@ export interface DeviceRecord {
   /** Absent quand le système n'en déclare pas — pas `null`. */
   serial?: string
   state: DeviceState
+  /**
+   * Luminosité retenue pour **cet** appareil. Absente = {@link BRIGHTNESS_DEFAULT}.
+   *
+   * Ici et non à la racine : `set_brightness(device, level)` prend un `DeviceRef`
+   * depuis le premier jour, et le protocole en fait une commande de l'appareil
+   * distincte de l'effet en cours. Deux claviers n'ont aucune raison de partager
+   * un niveau.
+   */
+  brightness?: number
+}
+
+/**
+ * L'effet **appliqué** sur un appareil — celui qui pilote ses LED.
+ *
+ * Une liste indexée, pas un scalaire : le moteur fait tourner un effet par
+ * appareil, et un champ unique ne pouvait pas décrire ça.
+ *
+ * **L'aperçu n'écrit jamais ici.** Regarder un effet ne le retient pas ; c'est
+ * « Appliquer » qui décide.
+ */
+export interface ActiveEffectRecord {
+  vid: number
+  pid: number
+  effect: string
+}
+
+/**
+ * Ce qui vaut pour l'application entière, et pour aucun appareil en particulier.
+ *
+ * Un objet à part : tout ce qui dépend d'un clavier vit dans une liste indexée,
+ * ce qui n'en dépend pas vit ici. C'est le rangement qui empêche la confusion
+ * dont `settings.json` vient de sortir — et la langue, quand elle arrivera,
+ * n'aura rien à arbitrer.
+ */
+export interface Preferences {
+  /** Le niveau du journal, quand quelqu'un l'a changé. Absent = le défaut. */
+  logLevel?: LogLevel
 }
 
 /**
@@ -271,12 +337,18 @@ export interface EffectParamsRecord {
   values: EffectParams
 }
 
-/** Miroir de `Settings`, dans `src-tauri/src/storage.rs`. */
+/**
+ * Miroir de `Settings`, dans `src-tauri/src/storage.rs`.
+ *
+ * Une préférence globale dans `preferences`, tout ce qui dépend d'un clavier dans
+ * une liste indexée. Chacune ne porte que ce qui **diffère du défaut** : un
+ * appareil absent de `devices` est détecté et à pleine luminosité, et un appareil
+ * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
+ */
 export interface Settings {
-  activeEffect: string | null
-  brightness: number
-  device: DeviceRef | null
+  preferences: Preferences
   devices: DeviceRecord[]
+  activeEffects: ActiveEffectRecord[]
   effectParams: EffectParamsRecord[]
 }
 
@@ -293,7 +365,8 @@ export function getSettings(): Promise<Settings> {
 /**
  * Remet `settings.json` au défaut, et repose les appareils.
  *
- * Ce qui part : les décisions d'adoption — tout repasse en `detected` — et les
+ * Ce qui part : les décisions d'adoption — tout repasse en `detected` —, la
+ * luminosité retenue de chaque appareil, l'effet appliqué sur chacun, et les
  * réglages retenus par paire appareil / effet. Le Rust arrête d'abord les
  * boucles en cours, éteint le rétroéclairage et referme les appareils : remettre
  * la table des appareils à zéro pendant qu'un effet tourne laisserait des
@@ -365,6 +438,44 @@ export interface DeviceEngineStatus extends EngineStatus {
 }
 
 /**
+ * Ce que la fenêtre **regarde**, et qui n'atteint aucun clavier.
+ *
+ * Un type distinct, dans un champ distinct : c'est la quatrième fois dans ce
+ * projet qu'un état qui ment coûte une session de diagnostic, et un drapeau à
+ * filtrer se filtre mal. Ici il n'y a rien à filtrer — l'aperçu n'est pas dans
+ * la liste des appareils, et personne ne peut l'y trouver par mégarde.
+ *
+ * Il ne porte ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError` : une
+ * boucle d'aperçu n'a aucune sortie matérielle, et ces champs à faux se liraient
+ * comme une panne là où il n'y a qu'un choix.
+ */
+export interface PreviewStatus {
+  /**
+   * L'appareil dont l'aperçu **emprunte** le gabarit.
+   *
+   * Il n'est ni piloté ni forcément branché : c'est une géométrie, pas une
+   * destination.
+   */
+  layoutOf: DeviceRef
+  running: boolean
+  effectId: string | null
+  /** Erreur venant du code de l'effet. Déjà lisible : à afficher telle quelle. */
+  error: string | null
+}
+
+/**
+ * Tout ce que le moteur sait, **rangé de façon à ne pas se confondre**.
+ *
+ * `devices` décrit ce qui tourne sur le matériel — c'est ce que liste l'icône de
+ * zone de notification. `preview` décrit ce qu'on regarde.
+ */
+export interface EngineReport {
+  devices: DeviceEngineStatus[]
+  /** `null` quand rien n'est prévisualisé — dont dès que la fenêtre est repliée. */
+  preview: PreviewStatus | null
+}
+
+/**
  * Démarre un effet installé **sur un appareil**.
  *
  * Le moteur tourne dans un fil Rust par appareil, indépendant de la fenêtre :
@@ -385,6 +496,60 @@ export function startEffect(
 
 export function stopEffect(device: DeviceRef): Promise<void> {
   return invoke('stop_effect', { device })
+}
+
+/**
+ * Démarre l'aperçu d'un effet, **sans toucher au clavier ni au disque**.
+ *
+ * Le pendant exact de {@link startEffect}, moins tout ce qui engage : aucune
+ * sortie matérielle, rien d'écrit dans `settings.json`, et surtout **aucune
+ * boucle d'appareil arrêtée**. C'est ce qui permet de parcourir la galerie
+ * pendant qu'un effet tourne sur le clavier : sans cette boucle séparée,
+ * sélectionner un effet éteindrait l'éclairage en cours.
+ *
+ * `device` désigne l'appareil dont on **emprunte le gabarit** ; `null` retombe
+ * sur le gabarit par défaut, pour prévisualiser sans posséder de clavier.
+ *
+ * Il n'y a qu'un aperçu : appeler à nouveau **remplace** le précédent. Chaque
+ * appel construit un contexte QuickJS et en détruit un, d'où la temporisation
+ * côté appelant — la borner ici obligerait à choisir entre faire attendre la
+ * dernière sélection et la perdre.
+ */
+export function startPreview(
+  device: DeviceRef | null,
+  id: string,
+  params: EffectParams = {},
+): Promise<void> {
+  return invoke('start_preview', { device, id, params })
+}
+
+/** Arrête l'aperçu. Aucun effet d'appareil n'est touché. */
+export function stopPreview(): Promise<void> {
+  return invoke('stop_preview')
+}
+
+/** Ajuste les paramètres de l'aperçu à chaud, sans redémarrer sa boucle. */
+export function setPreviewParams(params: EffectParams): Promise<void> {
+  return invoke('set_preview_params', { params })
+}
+
+/**
+ * Ouvre le flux d'images de l'aperçu vers le simulateur.
+ *
+ * Un canal distinct de celui des appareils, et c'est ce qui permet de regarder un
+ * effet pendant qu'un autre tourne sur le clavier : les deux flux existent en
+ * même temps, et la fenêtre choisit lequel elle dessine.
+ */
+export function subscribePreviewFrames(
+  onFrame: (frame: Uint8Array) => void,
+): Promise<() => void> {
+  const channel = new Channel<ArrayBuffer | number[]>()
+  channel.onmessage = (m) => {
+    onFrame(m instanceof ArrayBuffer ? new Uint8Array(m) : Uint8Array.from(m))
+  }
+  return invoke<void>('subscribe_preview_frames', { channel }).then(
+    () => () => void invoke('unsubscribe_preview_frames'),
+  )
 }
 
 /** Ajuste les paramètres à chaud, sans redémarrer la boucle. */
@@ -427,16 +592,18 @@ export function subscribeFrames(
 }
 
 /**
- * État du moteur **par appareil**, erreur comprise.
+ * État du moteur : ce qui tourne **sur les appareils**, et ce qu'on **regarde**.
  *
  * Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire
  * à la réouverture, ce qu'un événement ponctuel ne permet pas.
  *
- * Une entrée par appareil visé depuis le démarrage, pas seulement par appareil
- * ouvert : un appareil sans ligne est un appareil dont on ne sait rien, ce qui
- * n'est pas la même chose qu'un appareil qui ne fait rien.
+ * `devices` porte une entrée par appareil visé depuis le démarrage, pas seulement
+ * par appareil ouvert : un appareil sans ligne est un appareil dont on ne sait
+ * rien, ce qui n'est pas la même chose qu'un appareil qui ne fait rien.
+ *
+ * `preview` est à part — voir {@link PreviewStatus}.
  */
-export function engineStatus(): Promise<DeviceEngineStatus[]> {
+export function engineStatus(): Promise<EngineReport> {
   return invoke('engine_status')
 }
 

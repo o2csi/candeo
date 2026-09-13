@@ -374,14 +374,31 @@ pictogramme de type suffit — et il n'est pas deviné sur le nom : un seul gaba
 est connu, c'est un clavier ; le jour où le Rust déclarera un type, il viendra de
 là.
 
-### Un seul effet « actif », celui de l'appareil sélectionné
+Elle porte aussi la **luminosité** de l'appareil sélectionné. C'est là qu'elle
+appartient : le protocole en fait une commande de l'appareil (`0x0f`/`0x04`),
+distincte de l'effet en cours, et `set_brightness` prend un `DeviceRef` depuis le
+premier jour. Elle existait, elle était persistée, et elle n'était affichée nulle
+part — ce n'était pas un bogue d'affichage, c'était une interface qui n'avait
+jamais été écrite. Retenue par appareil, et **réappliquée au branchement** : un
+niveau qui ne se réapplique pas ne sert à rien, et le protocole relevé sait
+écrire la luminosité mais pas la relire.
+
+### Un seul effet « appliqué », celui de l'appareil sélectionné
 
 Marquer actifs les effets de tous les appareils dans une liste qui décrit ce que
 fait *un* appareil n'est pas une simplification, c'est une information fausse.
 Ce que cette session a posé est donc retenu **par appareil**, pas dans un champ
 global.
 
-### L'aperçu suit l'appareil
+Le mot est « appliqué » et non « actif », depuis que sélectionner lance l'aperçu :
+« actif » valait pour les deux états à la fois, or ils n'ont rien à voir — l'un dit
+ce que le clavier fait, l'autre ce qu'on regarde.
+
+### Sélectionner lance l'aperçu, « Appliquer » envoie au clavier
+
+On réglait à l'aveugle puis on découvrait le résultat sur le clavier. C'est
+l'inverse désormais : **sélectionner un effet le fait tourner à l'écran**, on
+ajuste en voyant, et « Appliquer » devient le geste qui engage le matériel.
 
 Le simulateur est dans le panneau de droite : liste à gauche / rendu à droite
 ici, code à gauche / rendu à droite dans l'éditeur. Même grammaire, et **un seul
@@ -389,10 +406,33 @@ dessin** — `KeyboardSimulator` est le même composant des deux côtés, il n'y
 deux tracés à tenir d'accord. Le gabarit vient de l'appareil sélectionné :
 `get_layout` s'il est ouvert, `get_default_layout` sinon.
 
-Il suit **l'appareil**, pas la sélection : il montre les images que le moteur
-produit pour lui. Sélectionner un effet sans l'appliquer ne change donc rien au
-dessin, et la légende le dit. Lui faire montrer l'effet *sélectionné* exigerait
-de l'exécuter dans la fenêtre — un second moteur, exactement ce que le §3 refuse.
+> ⚠️ **Le piège, et il était bloquant.** Le moteur est à un effet par appareil
+> (§4, délibéré). Prévisualiser Y sur un clavier qui exécute X l'aurait arrêté :
+> autrement dit, **parcourir la galerie aurait éteint l'éclairage en cours**. Ça
+> ne se serait vu qu'une fois livré.
+>
+> La sortie est une **boucle d'aperçu distincte**, sans sortie HID, qui emprunte
+> le *gabarit* de l'appareil sélectionné sans rien lui prendre d'autre.
+> L'architecture le permettait déjà : `DeviceOut::present` rendant `None` signifie
+> « aucun appareil ouvert, ce n'est pas un échec ». Rien n'a été inventé, une
+> sémantique a été posée sur une machinerie qui existait.
+
+Ce que le simulateur montre est donc l'un ou l'autre, et **l'écran dit lequel** :
+les vraies images du clavier quand l'effet sélectionné est celui qui y tourne, et
+l'aperçu sinon. `engine_status` range les deux dans deux champs distincts, et rien
+ne les mélange en chemin — voir `docs/api/commands.md`.
+
+Ce qui est **arrêté** quand : l'aperçu s'arrête en quittant l'écran et quand la
+fenêtre se replie — il n'y a plus personne pour regarder —, tandis que l'effet
+appliqué survit aux deux. C'est toute la différence entre ce que le clavier fait
+et ce qu'on regarde.
+
+**Le coût est borné du côté du geste.** Chaque aperçu construit un contexte
+QuickJS et en détruit un ; parcourir la galerie à la flèche du clavier en
+produirait plusieurs par seconde. La fenêtre attend donc que la sélection se pose
+(180 ms). Le borner dans le moteur aurait obligé à choisir entre faire attendre la
+dernière sélection et la perdre, et la fenêtre aurait ensuite eu à réconcilier ce
+qu'elle croyait avoir demandé avec ce qui tourne.
 
 ### La pastille dit l'état, pas l'identité
 
@@ -403,13 +443,19 @@ barre : depuis l'éditeur, où cette colonne n'existe pas, c'est le seul endroit
 qui signale une perte. Un appareil adopté mais débranché y est compté **et** dit
 injoignable — fondre les deux rendrait « piloté mais absent » indicible.
 
-### Trois écarts assumés avec la maquette
+### Deux écarts assumés avec la maquette
 
 | Maquette | Ici | Pourquoi |
 |---|---|---|
 | Un dessin de souris | Le seul gabarit connu | La maquette l'utilise pour illustrer qu'un effet reçoit *un gabarit*, pas un clavier. Dessiner une souris qu'aucun relevé ne décrit serait inventer du matériel. |
 | Un repère de couleurs pour les effets matériels | Pastille sourde | Le repère est **prélevé en exécutant l'effet**. Le micrologiciel exécute ceux-là : l'application ne voit jamais leurs images, et quatre couleurs plausibles décriraient un effet qu'on n'a pas regardé. |
-| « L'aperçu tourne quand même » sans appareil | Aucun aperçu animé | L'aperçu est alimenté par la boucle du moteur, qui vise un appareil. Sans appareil piloté il n'y a pas de boucle — et en animer une sur un appareil que l'utilisateur n'a pas autorisé est exactement ce que l'adoption interdit. |
+
+Le troisième écart — « l'aperçu ne tourne pas sans appareil piloté » — n'en est
+plus un. Il tenait à ce que l'aperçu soit la boucle d'un appareil ; la boucle
+d'aperçu n'en vise aucun, elle emprunte un gabarit. Sans appareil piloté elle
+emprunte donc le gabarit par défaut, et **rien n'est écrit sur un appareil que
+l'utilisateur n'a pas autorisé** — c'est l'invariant de l'adoption, et il est tenu
+par construction plutôt que par abstention.
 
 ---
 
@@ -513,19 +559,38 @@ est écrit ; les détails et le sort du numéro de série sont dans
 
 ### Régler un effet qu'on n'a pas appliqué
 
-Un paramètre ne change quelque chose que dans la boucle en cours. Bouger un
-curseur pour un effet qui ne tourne pas sur cet appareil ne peut donc rien
-produire — et le laisser bouger sans effet serait pire que de l'interdire.
+Un paramètre ne change quelque chose que dans une boucle en cours. Le formulaire
+était donc **inerte** hors de l'effet appliqué, et il disait pourquoi — ce qui
+revenait à régler à l'aveugle puis à découvrir le résultat sur le clavier.
 
-Le formulaire est **inerte, et il dit pourquoi** : « ces réglages agissent sur
-l'effet en cours sur l'appareil ; *Appliquer* lance celui-ci avec les valeurs
-ci-dessous ». Les valeurs restent visibles et retenues — ce sont exactement
-celles avec lesquelles « Appliquer » démarrera l'effet.
+**La boucle d'aperçu supprime ce marché** (§8) : il y a désormais une boucle à
+ajuster dès qu'un effet est sélectionné, les contrôles sont vivants, et ce qu'on
+règle se voit à l'écran sans que rien ne parte vers le clavier. C'est le meilleur
+des deux : on ajuste en voyant, et lancer une boucle sur un clavier reste un geste
+qu'on décide.
 
 L'autre réponse possible — appliquer l'effet au premier mouvement de curseur — a
-été écartée : lancer une boucle sur un clavier est un geste qu'on décide, c'est
-tout le sens de « Appliquer » et de l'adoption avant lui. Qu'un glissement de
-souris s'en charge à la place ferait d'un réglage une prise de contrôle.
+été écartée, et l'aperçu ne la réhabilite pas : lancer une boucle sur un clavier
+est un geste qu'on décide, c'est tout le sens de « Appliquer » et de l'adoption
+avant lui. Qu'un glissement de souris s'en charge à la place ferait d'un réglage
+une prise de contrôle.
+
+Le formulaire reste inerte dans les deux cas où il n'y a rien à ajuster : un effet
+**matériel**, dont le micrologiciel n'expose aucun réglage, et le court instant
+avant que l'aperçu n'ait démarré.
+
+### Dire que c'est enregistré
+
+Les réglages sont conservés depuis l'issue #28, et **rien à l'écran ne le laissait
+deviner** : on règle, on ferme, et on n'a aucune raison de croire que ça a tenu.
+C'était le défaut réel de cette persistance, pas son mécanisme.
+
+Le formulaire le dit donc, sous les contrôles, et il dit lequel des deux états il
+décrit — « valeurs déclarées par l'effet, ce qui s'en écarte est enregistré » ou
+« réglages enregistrés pour *cet appareil*, repris au prochain lancement ». La
+colonne des appareils fait la même chose pour l'effet appliqué : un appareil
+arrêté qui **se souvient** de son dernier effet l'affiche, plutôt que « aucun
+effet ».
 
 > **Un `fieldset`, et son piège.** L'état inerte se décide une fois, sur le
 > groupe : `<fieldset disabled>` neutralise tous les contrôles descendants, le
@@ -553,8 +618,8 @@ chose qui compte est qu'on ne puisse pas les confondre.**
 
 | Geste | Où | Ce qui part |
 |---|---|---|
-| Supprimer un effet | bibliothèque, troisième colonne, un effet à la fois | `effects/<id>/`, source comprise, et les réglages retenus pour lui |
-| Remettre la configuration au défaut | écran Périphériques, tout en bas | `settings.json` : adoptions, réglages d'effets |
+| Supprimer un effet | bibliothèque, troisième colonne, un effet à la fois | `effects/<id>/`, source comprise, les réglages retenus pour lui, et son application sur les appareils |
+| Remettre la configuration au défaut | écran Périphériques, tout en bas | `settings.json` : adoptions, luminosités, effets appliqués, réglages d'effets |
 
 ### Ils ne vivent pas au même endroit, et ce n'est pas une commodité de rangement
 

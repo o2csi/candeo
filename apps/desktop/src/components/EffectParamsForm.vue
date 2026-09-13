@@ -36,12 +36,12 @@
 import { computed, useId } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { EffectParams } from '../api/candeo'
-import { sameValue } from '../composables/useEffectParams'
+import { sameValue } from '../composables/useSettings'
 
 const props = defineProps<{
   /** Les paramètres déclarés par l'effet. Vide est un cas normal. */
   specs: Record<string, ParamSpec>
-  /** Leurs valeurs courantes, déjà complètes — voir `useEffectParams`. */
+  /** Leurs valeurs courantes, déjà complètes — voir `useSettings`. */
   values: EffectParams
   /**
    * Pourquoi les contrôles sont inertes, ou `null` s'ils sont vivants.
