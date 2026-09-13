@@ -1,67 +1,67 @@
-# Commandes Tauri — surface exposée au front
+# Tauri commands — the surface exposed to the front end
 
-Définies dans [`apps/desktop/src-tauri/src/lib.rs`](../../apps/desktop/src-tauri/src/lib.rs).
+Defined in [`apps/desktop/src-tauri/src/lib.rs`](../../apps/desktop/src-tauri/src/lib.rs).
 
-Les types sérialisés vivent dans la couche Tauri, **pas** dans les crates :
-`candeo-protocol` et `candeo-device` restent ainsi sans dépendance à serde ni à
-Tauri, donc réutilisables hors application et testables en intégration continue.
+The serialized types live in the Tauri layer, **not** in the crates: this keeps
+`candeo-protocol` and `candeo-device` free of any dependency on serde or
+Tauri, and therefore reusable outside the application and testable in CI.
 
-L'état est une **table d'appareils ouverts**, indexée comme l'adoption les
-identifie. La décision, la poignée ouverte, la boucle de rendu, l'effet en cours
-et l'état d'erreur sont tous portés **par appareil** : plus rien n'est implicite,
-plus rien n'est unique.
+The state is a **table of open devices**, keyed the way adoption identifies
+them. The decision, the open handle, the render loop, the running effect
+and the error state are all held **per device**: nothing is implicit any more,
+nothing is unique any more.
 
 ---
 
-## Désigner un appareil
+## Designating a device
 
-Toute commande qui agit sur un appareil en prend un, sous la forme d'un objet à
-deux champs :
+Every command that acts on a device takes one, as an object with two
+fields:
 
 ```ts
 type DeviceRef = { vid: number, pid: number }
 ```
 
-**VID et PID, rien d'autre.** C'est ce qui identifie un appareil à l'adoption, et
-c'est la clé des trois tables : appareils ouverts, échecs d'ouverture, boucles de
-rendu. Le numéro de série départage deux exemplaires du même modèle dans
-`settings.json`, mais il ne peut pas servir de clé ici — une énumération muette
-(hidraw sans règle udev) n'en déclare aucun, et l'appareil deviendrait
-indésignable.
+**VID and PID, nothing else.** That is what identifies a device at adoption, and
+it is the key of all three tables: open devices, open failures, render
+loops. The serial number tells apart two units of the same model in
+`settings.json`, but it cannot serve as a key here — a silent enumeration
+(hidraw without a udev rule) declares none, and the device would become
+impossible to designate.
 
-Un objet plutôt que deux entiers côte à côte : la même forme part en argument et
-revient dans l'état que rend le moteur, et intervertir deux `number` ne se verrait
-qu'à l'exécution.
+An object rather than two integers side by side: the same shape goes out as an
+argument and comes back in the state the engine returns, and swapping two `number`
+would only show at run time.
 
-> Les commandes d'adoption — `adopt_device`, `ignore_device`, `connect` — gardent
-> `vid` et `pid` séparés : elles désignent un **gabarit du catalogue**, pas un
-> appareil ouvert, et l'une d'elles est justement ce qui le fait exister.
+> The adoption commands — `adopt_device`, `ignore_device`, `connect` — keep
+> `vid` and `pid` separate: they designate a **catalog layout**, not an
+> open device, and one of them is precisely what brings that device into existence.
 
-### L'ordre de prise des verrous
+### Lock acquisition order
 
-Un interblocage a déjà été attrapé sur cette base : `list_devices` prenait le
-verrou du clavier puis celui des échecs, `ignore_device` l'inverse. Avec une table
-d'appareils et N boucles de rendu, la règle est explicite :
+A deadlock has already been caught on this code base: `list_devices` took the
+keyboard lock then the failures lock, `ignore_device` the reverse. With a table
+of devices and N render loops, the rule is explicit:
 
-> **Aucun code ne tient deux verrous en même temps.** Une table est verrouillée le
-> temps d'y lire ou d'y poser un pointeur partagé — jamais le temps d'une écriture
-> HID, d'un démarrage de boucle ni d'une attente de fin.
+> **No code holds two locks at the same time.** A table is locked for as long as
+> it takes to read or store a shared pointer in it — never for an HID
+> write, a loop start or a wait for completion.
 
-Là où deux deviendraient inévitables, l'ordre est celui de la déclaration dans
-`AppState` : table des appareils → moteur → table des échecs → poignée d'un
-appareil → état partagé d'une boucle. Le fil de rendu, lui, ne connaît que les
-deux derniers : il n'a aucun moyen de prendre un verrou de l'application, donc
-aucun moyen d'en bloquer une commande. La seule attente tenue verrou en main est
-celle de `stop` — et ce verrou est **propre à l'appareil**, ce qui est exactement
-ce qui empêche l'arrêt de l'un de retenir les commandes visant les autres.
+Where two would become unavoidable, the order is the declaration order in
+`AppState`: device table → engine → failures table → a device's
+handle → a loop's shared state. The render thread only knows the
+last two: it has no way to take an application lock, and therefore
+no way to block a command with one. The only wait performed while holding a lock is
+the one in `stop` — and that lock is **specific to the device**, which is exactly
+what prevents stopping one device from holding up the commands aimed at the others.
 
 ---
 
-## Découverte et adoption
+## Discovery and adoption
 
 ### `list_devices() -> DeviceInfo[]`
 
-Liste **tous les gabarits connus**, branchés ou non, et dans quel état.
+Lists **all known layouts**, plugged in or not, and in which state.
 
 ```ts
 {
@@ -77,164 +77,164 @@ Liste **tous les gabarits connus**, branchés ou non, et dans quel état.
 }
 ```
 
-`present` est vrai si le VID, le PID **et** le numéro d'interface correspondent à
-un périphérique énuméré. L'interface doit afficher un gabarit absent comme absent,
-pas l'omettre — c'est ce qui permet de dire « branchez votre clavier » plutôt que
-de montrer une liste vide.
+`present` is true if the VID, the PID **and** the interface number match
+an enumerated device. The UI must show an absent layout as absent,
+not omit it — that is what makes it possible to say "plug in your keyboard" rather
+than show an empty list.
 
-Le numéro d'interface est exigé égal à celui du gabarit, ce qui écarte l'entrée
-`interface -1` que porte l'énumération sous Windows sur les mêmes VID et PID :
-une collection HID du nœud virtuel du pilote du fabricant, pas le clavier (§1 du
-relevé).
+The interface number is required to equal the layout's, which rules out the
+`interface -1` entry that the Windows enumeration carries on the same VID and PID:
+an HID collection of the manufacturer driver's virtual node, not the keyboard (§1 of the
+survey).
 
-### Ce que l'appareil dit de lui-même, à l'ouverture
+### What the device says about itself, on open
 
-Toute ouverture — adoption au démarrage, adoption à la demande, `connect` —
-**inspecte** l'appareil, une fois. C'est `Keyboard::open` qui le fait, et nulle
-part ailleurs : un chemin d'ouverture qui l'oublierait ne peut pas exister.
-Détail dans [`crates/candeo-device/src/inspection.rs`](../../crates/candeo-device/src/inspection.rs).
+Every open — adoption at startup, adoption on demand, `connect` —
+**inspects** the device, once. `Keyboard::open` does it, and nowhere
+else: an open path that forgot it cannot exist.
+Details in [`crates/candeo-device/src/inspection.rs`](../../crates/candeo-device/src/inspection.rs).
 
-| Question | Commande | Ce qu'on en fait |
+| Question | Command | What we do with it |
 |---|---|---|
-| quel micrologiciel ? | `0x00`/`0x81` | `firmware`, comparé à `surveyedFirmware` : **avertit, ne bloque pas** |
-| quel exemplaire ? | `0x00`/`0x82` | appariement de l'adoption — le descripteur USB n'en porte aucun |
-| la luminosité est-elle connue ? | relue, réécrite **à l'identique**, relue | refusée si l'appareil rend `0x05` |
-| l'effet est-il connu ? | idem, seulement si l'effet courant se réécrit à l'identique | idem |
-| la rangée ? | **jamais émise** — aucune rangée écrite n'est invisible | non vérifiée |
+| which firmware? | `0x00`/`0x81` | `firmware`, compared with `surveyedFirmware`: **warns, does not block** |
+| which unit? | `0x00`/`0x82` | adoption matching — the USB descriptor carries none |
+| is brightness known? | read back, rewritten **unchanged**, read back | refused if the device returns `0x05` |
+| is the effect known? | same, only if the current effect can be rewritten unchanged | same |
+| the row? | **never sent** — no row write is invisible | unverified |
 
-**Avertir sans bloquer.** Une version différente de celle du relevé produit un
-avertissement dans `warnings`, affiché sur la ligne de l'appareil et consigné en
-`warn` — jamais un refus. Bloquer rendrait l'application inutile après une mise à
-jour de routine, alors que le protocole n'aura très probablement pas bougé.
+**Warn without blocking.** A version different from the surveyed one produces a
+warning in `warnings`, shown on the device's line and logged at
+`warn` — never a refusal. Blocking would make the application useless after a
+routine update, when the protocol will very probably not have changed.
 
-**Une commande que l'appareil déclare inconnue (`0x05`) n'est plus envoyée** :
-l'écriture échoue avec un message qui le dit, et cet échec remonte par
-`deviceError` comme n'importe quel refus d'écriture. Sans ça, `hidapi` accepterait
-chaque trame, la boucle se dirait saine, et `reachingKeyboard` resterait vert
-au-dessus d'un clavier qui jette tout.
+**A command the device declares unknown (`0x05`) is no longer sent**:
+the write fails with a message that says so, and that failure propagates through
+`deviceError` like any other write refusal. Without this, `hidapi` would accept
+every report, the loop would consider itself healthy, and `reachingKeyboard` would stay green
+above a keyboard that discards everything.
 
-⚠️ **Ce que ce contrôle ne dit pas.** L'appareil valide le couple classe /
-commande, **jamais la valeur d'un argument** : poser l'effet `0x05`, que ce
-clavier refuse, rend quand même `0x02`. Une commande « connue » est connue, et
-c'est tout. La relecture après réécriture détecte un argument compris
-**autrement** — l'appareil poserait autre chose que ce qu'on a réécrit — mais pas
-une commande ignorée, qui laisse la valeur identique.
+⚠️ **What this check does not tell.** The device validates the class /
+command pair, **never the value of an argument**: setting effect `0x05`, which this
+keyboard refuses, still returns `0x02`. A "known" command is known, and
+that is all. Reading back after rewriting detects an argument understood
+**differently** — the device would set something other than what was rewritten — but not
+an ignored command, which leaves the value unchanged.
 
-Rien de tout cela ne se refait ensuite : relire coûte un aller-retour USB, et la
-boucle de rendu n'en a pas le temps.
+None of this is done again afterwards: reading back costs a USB round trip, and the
+render loop has no time for it.
 
-`present` dit ce que voit le système, `state` ce que l'utilisateur a décidé :
-**les deux sont indépendants**. Un appareil piloté peut être débranché, un
-appareil branché peut être ignoré. Les fondre en un seul champ rendrait
-« piloté mais débranché » indicible.
+`present` says what the system sees, `state` what the user decided:
+**the two are independent**. A controlled device can be unplugged, a
+plugged-in device can be ignored. Merging them into a single field would make
+"controlled but unplugged" impossible to express.
 
-`error` porte le dernier échec d'ouverture **de cet appareil**. Une table indexée
-par VID/PID, pas un message global : c'est ce qui fait qu'un appareil en échec
-n'en entraîne aucun autre. Un champ unique obligerait à choisir lequel afficher,
-et le suivant effacerait le précédent.
+`error` carries the last open failure **of this device**. A table keyed
+by VID/PID, not a global message: that is what keeps a failing device
+from dragging any other down with it. A single field would force choosing which one to show,
+and the next would erase the previous one.
 
-### Les trois états, décidés une fois et retenus
+### The three states, decided once and remembered
 
-| `state` | Au lancement |
+| `state` | At launch |
 |---|---|
-| `adopted` | ouvert automatiquement, sans rien demander |
-| `detected` | listé, mais **pas** ouvert |
-| `ignored` | laissé tranquille, et il le reste |
+| `adopted` | opened automatically, without asking anything |
+| `detected` | listed, but **not** opened |
+| `ignored` | left alone, and it stays that way |
 
-**Le défaut est `detected`.** Un appareil jamais vu est listé, pas piloté :
-écrire sur un périphérique USB qu'on comprend mal n'est pas anodin, et à
-l'échelle d'un catalogue qui grandit — claviers, souris, mémoire, ventilateurs —
-adopter par défaut est la façon de casser le matériel de quelqu'un. Il y a aussi
-les appareils qu'on ne *veut* pas voir pilotés : un pilote constructeur déjà en
-place, ou un relevé incertain.
+**The default is `detected`.** A device never seen before is listed, not controlled:
+writing to a USB device one understands poorly is not harmless, and at the
+scale of a growing catalog — keyboards, mice, memory, fans —
+adopting by default is the way to break someone's hardware. There are also
+the devices one does *not want* controlled: a vendor driver already in
+place, or an uncertain survey.
 
 ### `adopt_device(vid, pid) -> LayoutInfo | null`
 
-Retient `adopted` pour cet appareil, et l'ouvre s'il est branché.
+Remembers `adopted` for this device, and opens it if it is plugged in.
 
-La décision est écrite **quelle que soit l'issue de l'ouverture** : c'est une
-décision, pas le compte rendu d'une tentative. Le prochain démarrage la rejouera —
-ce qui est précisément ce qu'on veut d'un clavier qu'un concentrateur n'a pas fini
-d'énumérer.
+The decision is written **whatever the outcome of the open**: it is a
+decision, not the report of an attempt. The next startup will replay it —
+which is precisely what we want for a keyboard that a hub has not finished
+enumerating.
 
-L'ouverture passe **avant** l'écriture, pour une seule raison : c'est elle qui lit
-la série par le protocole. Écrite d'abord, la décision serait retenue sans série,
-donc pour tout exemplaire du modèle. Si l'écriture échoue, la poignée est relâchée
-— rien n'est ouvert sans décision pour le justifier.
+The open happens **before** the write, for a single reason: it is the open that
+reads the serial through the protocol. Written first, the decision would be remembered
+without a serial, and therefore for any unit of the model. If the write fails, the handle is released
+— nothing is open without a decision to justify it.
 
-Rend le gabarit quand l'appareil a été ouvert, `null` quand il est adopté mais
-débranché : ce n'est pas une erreur, il sera ouvert au branchement suivant. Une
-ouverture qui échoue, elle, remonte son message — et le laisse dans `error`.
+Returns the layout when the device was opened, `null` when it is adopted but
+unplugged: that is not an error, it will be opened the next time it is plugged in. An
+open that fails, on the other hand, propagates its message — and leaves it in `error`.
 
-Les autres appareils ouverts le restent : adopter celui-ci n'est pas un choix à
-leur place.
+The other open devices stay open: adopting this one is not a choice made on
+their behalf.
 
 ### `ignore_device(vid, pid)`
 
-Retient `ignored`, et **referme** l'appareil s'il était ouvert : on ne garde pas
-ouvert ce qu'on s'engage à ne plus toucher. La poignée est vidée, pas retirée —
-la boucle qui l'alimentait en tient une copie, elle s'en aperçoit à l'image
-suivante et cesse d'écrire, sans que les autres appareils soient touchés.
+Remembers `ignored`, and **closes** the device if it was open: one does not keep
+open what one commits to no longer touching. The handle is emptied, not removed —
+the loop that fed it holds a copy, notices at the next frame
+and stops writing, without the other devices being affected.
 
-Ne passe pas par HID, volontairement — ignorer un appareil doit rester possible
-quand c'est justement l'accès HID qui pose problème.
+Does not go through HID, deliberately — ignoring a device must remain possible
+precisely when HID access is the problem.
 
-> Il n'y a pas de commande pour ramener **un** appareil à `detected`. Les deux
-> décisions qui comptent sont « pilote-le » et « laisse-le tranquille » ; un
-> troisième bouton pour revenir à l'indécision ne répond à aucune question qu'on
-> se pose devant l'écran. `reset_settings` (§Réglages) les ramène **tous** à la
-> fois, et c'est une autre question : celle de repartir d'un état connu.
+> There is no command to bring **one** device back to `detected`. The two
+> decisions that matter are "control it" and "leave it alone"; a
+> third button to return to indecision answers no question one
+> asks in front of the screen. `reset_settings` (§Settings) brings them **all** back at
+> once, and that is a different question: starting again from a known state.
 
 ### `connect(vid, pid) -> LayoutInfo`
 
-Ouverture **ponctuelle**, sans rien décider : ne touche pas à `settings.json`,
-donc ne survit pas au redémarrage. C'est ce qu'on veut pour essayer un appareil
-sans s'engager ; `adopt_device` est ce qu'on veut pour ne plus avoir à le faire.
+**One-off** open, without deciding anything: does not touch `settings.json`,
+and therefore does not survive a restart. This is what we want to try a device
+without committing; `adopt_device` is what we want so as never to have to do it again.
 
-Échoue si aucun gabarit connu ne correspond, ou si l'ouverture HID échoue.
+Fails if no known layout matches, or if the HID open fails.
 
 ### `disconnect(device)`
 
-Libération explicite d'**un** appareil. Les autres ne sont pas touchés.
+Explicit release of **one** device. The others are not affected.
 
-Avec `connect`, la paire qui ouvre et referme **sans décider**, là où
-`adopt_device` et `ignore_device` écrivent dans `settings.json`. Les deux sont
-enveloppées par `useDevice` et aucun écran ne les appelle encore : ce qui manque
-est un bouton, pas une commande.
+With `connect`, the pair that opens and closes **without deciding**, where
+`adopt_device` and `ignore_device` write to `settings.json`. Both are
+wrapped by `useDevice` and no screen calls them yet: what is missing
+is a button, not a command.
 
-> **`is_connected` a été retirée** (audit #65). Elle répondait ce que
-> `list_devices` porte déjà dans le champ `open` de chaque appareil, et que la
-> fenêtre lit par là — une seconde source de vérité pour un état que le Rust est
-> seul à connaître. Interroger appareil par appareil ce qu'une seule commande
-> énumère n'apportait rien, et faisait diverger les deux réponses le jour où
-> l'une des deux aurait été rafraîchie sans l'autre.
+> **`is_connected` was removed** (audit #65). It answered what
+> `list_devices` already carries in the `open` field of each device, and what the
+> window reads from there — a second source of truth for a state that only the Rust side
+> knows. Querying device by device what a single command
+> enumerates brought nothing, and made the two answers diverge the day
+> one of them was refreshed without the other.
 
-### Au démarrage
+### At startup
 
-L'application ouvre elle-même **tous** les appareils `adopted` et présents, avant
-d'afficher la fenêtre. Chaque tentative est isolée : une ouverture qui échoue
-n'interrompt pas la boucle, laisse son message sur son appareil, et les suivants
-s'ouvrent normalement.
+The application itself opens **all** `adopted` devices that are present, before
+showing the window. Each attempt is isolated: an open that fails
+does not interrupt the loop, leaves its message on its device, and the following ones
+open normally.
 
-La série lue à l'ouverture est confrontée à la décision. Si elle désigne un autre
-exemplaire que celui qui a été adopté, la poignée est relâchée et la ligne de
-l'appareil dit pourquoi — par l'empreinte de la série, jamais la série. Le bouton
-« Piloter » reste alors proposé : il adopte l'exemplaire branché à son tour. Une
-adoption antérieure, retenue sans série, **l'apprend** au premier démarrage qui la
-lit, et `settings.json` n'est réécrit que dans ce cas.
+The serial read on open is checked against the decision. If it designates a different
+unit from the one that was adopted, the handle is released and the device's
+line says why — through the serial's fingerprint, never the serial. The
+"Piloter" (Control) button then remains offered: it adopts the plugged-in unit in turn. An
+earlier adoption, remembered without a serial, **learns it** at the first startup that
+reads it, and `settings.json` is rewritten only in that case.
 
-Des réglages illisibles ou un HID indisponible n'empêchent pas le démarrage — ce
-serait retirer le seul moyen de corriger la situation. Rien n'est ouvert, la
-raison part au journal (`tracing::error!`, donc dans le fichier du jour), la
-fenêtre s'affiche.
+Unreadable settings or unavailable HID do not prevent startup — that
+would remove the only means of fixing the situation. Nothing is opened, the
+reason goes to the log (`tracing::error!`, hence into the day's file), the
+window is shown.
 
 ---
 
-## Gabarit
+## Layout
 
 ### `get_layout(device) -> LayoutInfo`
 
-Échoue si cet appareil n'est pas ouvert.
+Fails if this device is not open.
 
 ```ts
 {
@@ -251,61 +251,61 @@ fenêtre s'affiche.
 }
 ```
 
-> Les DTO portent `#[serde(rename_all = "camelCase")]` : le champ Rust `frame_len`
-> arrive donc en `frameLen`. Le nommage Rust ne doit pas filtrer jusque dans
-> l'interface — c'est une fuite d'abstraction qui ne se verrait qu'à l'exécution.
+> The DTOs carry `#[serde(rename_all = "camelCase")]`: the Rust field `frame_len`
+> therefore arrives as `frameLen`. Rust naming must not leak through into
+> the UI — that is an abstraction leak that would only show at run time.
 
-> **`frameLen` et `keys.length` diffèrent, et c'est voulu.**
-> `frameLen` vaut **132** — toutes les cases de la matrice, trous compris : c'est
-> ce qu'une image doit couvrir. `keys` n'en contient que **106**, celles portant
-> une LED physique : c'est ce que le simulateur dessine et ce qu'un effet itère.
+> **`frameLen` and `keys.length` differ, and that is intended.**
+> `frameLen` is **132** — every cell of the matrix, gaps included: that is
+> what a frame must cover. `keys` holds only **106** of them, the ones carrying
+> a physical LED: that is what the simulator draws and what an effect iterates over.
 >
-> Confondre les deux est le piège de ce matériel. Voir
+> Confusing the two is the trap of this hardware. See
 > [`../protocol/deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §6.
 
-### La géométrie n'est pas une lecture du périphérique
+### The geometry is not read from the device
 
-`x` / `y` / `w` / `h` sont en **unités de pas de clavier** — 1 u = la largeur
-d'une touche alphabétique — origine en haut à gauche, `y` vers le bas. Le dessin
-complet fait 22,5 u × 6,5 u.
+`x` / `y` / `w` / `h` are in **keyboard pitch units** — 1 u = the width
+of a letter key — origin at the top left, `y` pointing down. The complete
+drawing measures 22.5 u × 6.5 u.
 
-Ces rectangles **ne viennent pas du matériel** : celui-ci n'expose que la grille
-6 × 22 et ne déclare aucune dimension. Ils sont une transcription à la main de la
-disposition ISO pleine taille, écrite dans
+These rectangles **do not come from the hardware**: it only exposes the 6 × 22
+grid and declares no dimension. They are a hand transcription of the
+full-size ISO key arrangement, written in
 [`crates/candeo-device/src/layout.rs`](../../crates/candeo-device/src/layout.rs).
-Une erreur de dessin ne casse aucun test de cohérence : elle ne se voit qu'à
-l'œil, sur le simulateur.
+A drawing mistake breaks no consistency test: it can only be seen by
+eye, on the simulator.
 
-Deux singularités du matériel affleurent ici :
+Two hardware quirks surface here:
 
-- **L'Entrée ISO porte deux LED** (index 57 et 79) et apparaît donc dans `keys`
-  **deux fois**, sous le même `name`. Les deux rectangles sont les deux bras
-  jointifs du L — ils ne se recouvrent pas, et un rendu qui les peint séparément
-  reproduit le dégradé vertical visible sur l'appareil.
-- **La barre d'espace n'en porte qu'une** (index 116), pour 6,25 u de large.
+- **The ISO Enter key carries two LEDs** (indices 57 and 79) and therefore appears in `keys`
+  **twice**, under the same `name`. The two rectangles are the two adjoining
+  arms of the L — they do not overlap, and a renderer that paints them separately
+  reproduces the vertical gradient visible on the device.
+- **The space bar carries only one** (index 116), for a width of 6.25 u.
 
-Un rendu qui suppose « une touche = une LED » se trompe donc dans les deux sens.
+A renderer that assumes "one key = one LED" is therefore wrong in both directions.
 
 ---
 
-## Éclairage
+## Lighting
 
-Les quatre commandes écrivent sur **un** appareil, qu'elles prennent en premier
-argument, et échouent s'il n'est pas ouvert.
+The four commands write to **one** device, which they take as their first
+argument, and fail if it is not open.
 
 ### `set_brightness(device, level: number)`
 
-`level` de 0 à 255. Écrit **sur le clavier**, et rien d'autre : c'est une commande
-distincte du protocole (`0x0f`/`0x04`), sans rapport avec l'effet en cours.
+`level` from 0 to 255. Writes **to the keyboard**, and nothing else: it is a
+separate protocol command (`0x0f`/`0x04`), unrelated to the running effect.
 
-Retenir ce niveau d'un lancement à l'autre est l'affaire de `remember_brightness`
-(§Réglages), qui n'écrit que sur disque. Même partage que `set_effect_params` /
-`remember_effect_params`, et pour la même raison : un curseur qu'on glisse produit
-des dizaines d'écritures HID et une seule écriture disque, quand il s'arrête.
+Remembering this level from one launch to the next is the job of `remember_brightness`
+(§Settings), which only writes to disk. Same split as `set_effect_params` /
+`remember_effect_params`, and for the same reason: dragging a slider produces
+dozens of HID writes and a single disk write, when it stops.
 
 ### `set_effect(device, effect: EffectDto)`
 
-Étiquetage serde sur le champ `kind` :
+Serde tagging on the `kind` field:
 
 ```ts
 { kind: 'off' }
@@ -314,33 +314,33 @@ des dizaines d'écritures HID et une seule écriture disque, quand il s'arrête.
 { kind: 'custom' }
 ```
 
-Les trois premiers sont exécutés **par le micrologiciel** : coût processeur nul,
-et ils survivent à la fermeture de l'application. `custom` bascule le clavier en
-mode piloté par l'hôte, ce qui suppose une poussée d'images continue.
+The first three are executed **by the firmware**: zero CPU cost,
+and they survive the application closing. `custom` switches the keyboard to
+host-controlled mode, which requires a continuous push of frames.
 
 ### `present(device, frame: number[])`
 
-Image complète : suite plate de triplets RGB, **`frameLen × 3` octets exactement**
-(396 pour le DeathStalker). Une taille différente est refusée avec un message
-explicite plutôt que d'écrire partiellement.
+Complete frame: a flat sequence of RGB triplets, **exactly `frameLen × 3` bytes**
+(396 for the DeathStalker). A different size is refused with an explicit
+message rather than writing partially.
 
-En interne : six transferts `0x0f`/`0x03`, un par rangée, puis une bascule en
-effet `custom`.
+Internally: six `0x0f`/`0x03` transfers, one per row, then a switch to the
+`custom` effect.
 
 ### `write_row(device, row, col_start, colors: number[])`
 
-Écrit un segment de rangée sans toucher au reste — l'écriture partielle est prise
-en charge par l'appareil, vérifié sur le matériel. Utile aux effets localisés,
-qui évitent ainsi de réémettre les 132 positions.
+Writes a row segment without touching the rest — partial writes are supported
+by the device, verified on hardware. Useful for localized effects,
+which thus avoid resending all 132 positions.
 
 ---
 
-## Bibliothèque d'effets
+## Effect library
 
-Les emplacements et le format sont figés dans
-[`../design/effects-runtime.md`](../design/effects-runtime.md) §2 et §3. Aucun
-chemin n'est écrit en dur : `app_data_dir()` porte le contenu, `app_config_dir()`
-la configuration — identiques sous Windows, distincts sous Linux.
+The locations and the format are fixed in
+[`../design/effects-runtime.md`](../design/effects-runtime.md) §2 and §3. No
+path is hard-coded: `app_data_dir()` holds the content, `app_config_dir()`
+the configuration — identical on Windows, distinct on Linux.
 
 ```
 app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
@@ -349,8 +349,8 @@ app_config_dir()/settings.json
 
 ### `install_effect(source_ts, js, manifest) -> string`
 
-Écrit les trois fichiers, prélève le repère de couleurs dans un quatrième, et
-renvoie l'`id` retenu.
+Writes the three files, samples the color swatch into a fourth, and
+returns the `id` that was chosen.
 
 ```ts
 manifest: {
@@ -361,23 +361,23 @@ manifest: {
 }
 ```
 
-Les paramètres sont stockés **tels quels** : leur forme est celle de `ParamSpec`
-dans `@candeo/effects-api`, elle évolue avec l'éditeur, et le Rust ne les
-interprète pas. Les retyper en Rust créerait une seconde source de vérité.
+The parameters are stored **as is**: their shape is that of `ParamSpec`
+in `@candeo/effects-api`, it evolves with the editor, and the Rust side does not
+interpret them. Retyping them in Rust would create a second source of truth.
 
-`apiVersion` est obligatoire. Un effet écrit pour une version que cette
-application ne connaît pas est refusé à l'installation, avec un message qui le
-dit — plutôt que d'échouer plus tard à la première image.
+`apiVersion` is mandatory. An effect written for a version this
+application does not know is refused at install time, with a message that
+says so — rather than failing later at the first frame.
 
-Le front envoie le JavaScript déjà transpilé par Monaco, **et** la source
-TypeScript : sans elle l'effet ne serait plus modifiable, sans le `.js` il ne
-pourrait plus démarrer sans ouvrir la fenêtre.
+The front end sends the JavaScript already transpiled by Monaco, **and** the
+TypeScript source: without it the effect could no longer be edited, without the `.js` it
+could no longer start without opening the window.
 
-**L'`id` est dérivé du nom, jamais repris tel quel.** Seuls `a-z`, `0-9` et le
-tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
-`..`, les séparateurs de chemin et les noms réservés de Windows (`CON`, `NUL`,
-`COM1`…) ne peuvent pas en sortir. Deux effets de même nom obtiennent le même
-`id` : réenregistrer depuis l'éditeur **met à jour** au lieu de dupliquer.
+**The `id` is derived from the name, never taken as is.** Only `a-z`, `0-9` and the
+hyphen remain; everything else becomes a hyphen. It is an allowlist, so
+`..`, path separators and Windows reserved names (`CON`, `NUL`,
+`COM1`…) cannot come out of it. Two effects with the same name get the same
+`id`: saving again from the editor **updates** instead of duplicating.
 
 ### `list_effects() -> EffectEntry[]`
 
@@ -393,179 +393,179 @@ tiret subsistent ; tout le reste devient un tiret. C'est une liste blanche, donc
 }
 ```
 
-Effets intégrés **et** installés, dans une seule liste : les intégrés sont
-compilés dans le binaire et n'ont pas de dossier, `kind` les distingue. Ils
-viennent en tête, les installés ensuite, triés par `id`.
+Built-in **and** installed effects, in a single list: built-in ones are
+compiled into the binary and have no folder, `kind` tells them apart. They
+come first, the installed ones after, sorted by `id`.
 
-Le repère voyage avec l'entrée, et non derrière un second appel : sinon une
-bibliothèque de vingt effets demanderait vingt allers-retours pour afficher
-vingt vignettes.
+The swatch travels with the entry, not behind a second call: otherwise a
+library of twenty effects would need twenty round trips to show
+twenty thumbnails.
 
-Un dossier dont le manifeste est illisible est ignoré, pas propagé en erreur :
-une bibliothèque de vingt effets ne doit pas disparaître à cause d'un seul.
-L'ordre est stable — le système de fichiers n'en garantit aucun.
+A folder whose manifest is unreadable is ignored, not propagated as an error:
+a library of twenty effects must not vanish because of a single one.
+The order is stable — the file system guarantees none.
 
-### Le repère de couleurs
+### The color swatch
 
-Chaque entrée porte quelques couleurs qui aident à retrouver un effet sans le
-lancer. **Elles sont obtenues en exécutant l'effet**, jamais déclarées dans le
-manifeste ni dessinées à la main.
+Each entry carries a few colors that help find an effect without
+running it. **They are obtained by running the effect**, never declared in the
+manifest nor drawn by hand.
 
-Deux raisons, et la seconde pèse plus que la première. L'auteur n'a rien à
-fournir : on écrit son effet, il a son repère — aucun champ, aucun mode avancé.
-Et surtout, **le repère ne peut pas mentir**. Déclaré, il dériverait dès la
-première modification du code, et un effet devenu bleu garderait sa vignette
-rouge.
+Two reasons, and the second weighs more than the first. The author has nothing to
+provide: you write your effect, it has its swatch — no field, no advanced mode.
+And above all, **the swatch cannot lie**. Declared, it would drift from the
+first change to the code, and an effect that turned blue would keep its red
+thumbnail.
 
-#### Comment il est prélevé
+#### How it is sampled
 
-Quatre images sont rendues par le moteur, sans toucher au matériel, à quatre
-instants : 0 s, 0,37 s, 1,13 s et 2,61 s. L'effet tourne avec les **valeurs par
-défaut que son module déclare** — celles avec lesquelles la galerie le lancerait,
-et non un objet vide, qui donnerait du noir à tout effet ne se repliant sur rien.
-Le gabarit est celui **par défaut**, jamais celui du clavier branché : un repère
-qui dépendrait du matériel présent à l'installation ne serait comparable ni d'un
-effet à l'autre, ni d'une machine à l'autre.
+Four frames are rendered by the engine, without touching the hardware, at four
+instants: 0 s, 0.37 s, 1.13 s and 2.61 s. The effect runs with the **default
+values its module declares** — the ones the gallery would launch it with,
+and not an empty object, which would give black for any effect that falls back on nothing.
+The layout is the **default** one, never the plugged-in keyboard's: a swatch
+that depended on the hardware present at install time would be comparable neither from one
+effect to another, nor from one machine to another.
 
-De chaque image on tire **une** couleur : la moyenne d'une bande diagonale du
-clavier, la bande avançant d'une image à la suivante. Trois choix, trois raisons :
+From each frame **one** color is taken: the average of a diagonal band of the
+keyboard, the band moving forward from one frame to the next. Three choices, three reasons:
 
-| Choix | Pourquoi pas autrement |
+| Choice | Why not otherwise |
 |---|---|
-| des instants **irrégulièrement espacés** | régulièrement espacés, ils se caleraient sur la période d'un effet cyclique et rendraient quatre fois la même couleur |
-| une bande **diagonale** | un dégradé horizontal ne varie que selon la colonne, un balayage vertical que selon la rangée : découper selon l'une des deux rendrait l'autre parfaitement uniforme |
-| une **bande**, et non une touche | un effet peut laisser presque tout le clavier éteint — `balayage` est exactement cela — et une touche isolée tomberait sur du noir par hasard |
+| **irregularly spaced** instants | regularly spaced, they would lock onto the period of a cyclic effect and return the same color four times |
+| a **diagonal** band | a horizontal gradient varies only by column, a vertical sweep only by row: slicing along either would make the other perfectly uniform |
+| a **band**, not a key | an effect can leave almost the whole keyboard off — `balayage` is exactly that — and an isolated key would land on black by chance |
 
-Le résultat : un effet uniforme rend quatre fois sa couleur, un dégradé rend
-quatre couleurs échelonnées, un effet majoritairement sombre rend un repère
-sombre. Un effet spatial et un effet uniforme ne peuvent pas se ressembler.
+The result: a uniform effect returns its color four times, a gradient returns
+four staggered colors, a mostly dark effect returns a dark
+swatch. A spatial effect and a uniform effect cannot look alike.
 
-> **Ce document ne liste plus les repères des effets livrés.** Il en portait un
-> tableau de valeurs hexadécimales, que **rien ne confrontait au résultat** : le
-> jour où « Onde radiale » est passée de la distance de grille à la distance
-> physique, ses quatre couleurs sont devenues fausses sans qu'aucun test, aucune
-> compilation et aucune relecture ne le signale.
+> **This document no longer lists the swatches of the shipped effects.** It used to carry a
+> table of hexadecimal values, which **nothing checked against the result**: the
+> day "Onde radiale" (Radial wave) moved from grid distance to physical
+> distance, its four colors became wrong without any test, any
+> build or any review flagging it.
 >
-> Un repère **se prélève en exécutant l'effet** — c'est tout l'objet du mécanisme
-> décrit ici. Le recopier dans une page, c'est fabriquer une seconde source de
-> vérité qui ne peut que dériver. La bibliothèque les affiche ; c'est là qu'il
-> faut les regarder.
+> A swatch **is sampled by running the effect** — that is the whole point of the mechanism
+> described here. Copying it into a page means creating a second source of
+> truth that can only drift. The library displays them; that is where
+> to look at them.
 
-#### Quand il est calculé, et où il est rangé
+#### When it is computed, and where it is stored
 
-**Une fois à l'installation**, dans `effects/<id>/swatch.json`, à côté du
-manifeste — jamais à l'affichage de la liste, qui reste une lecture de disque :
-échantillonner là ferait dépendre l'ouverture de la galerie du comportement de
-tous les effets installés, pour des vignettes qui ne bougent pas. Réenregistrer
-un effet repasse par `install_effect`, donc le recalcule.
+**Once at install time**, in `effects/<id>/swatch.json`, next to the
+manifest — never when the list is displayed, which remains a disk read:
+sampling there would make opening the gallery depend on the behavior of
+every installed effect, for thumbnails that do not change. Saving
+an effect again goes through `install_effect`, and therefore recomputes it.
 
-Les effets **intégrés** n'ont pas de dossier : leur repère vit **en mémoire**,
-calculé à la première lecture de la bibliothèque et retenu pour la durée du
-processus. Il est une propriété du binaire et non de la bibliothèque de
-l'utilisateur : l'écrire dans le dossier de données créerait un cache à invalider
-à chaque mise à jour de l'application — une version à comparer, un fichier à
-réécrire, et une occasion de montrer le repère de la version précédente — pour
-une poignée d'effets dont l'échantillonnage coûte quelques millisecondes.
-L'écrire à la main dans le Rust est exclu par le principe même du repère.
+**Built-in** effects have no folder: their swatch lives **in memory**,
+computed at the first read of the library and kept for the lifetime of the
+process. It is a property of the binary, not of the user's library:
+writing it to the data folder would create a cache to invalidate
+at every application update — a version to compare, a file to
+rewrite, and an opportunity to show the previous version's swatch — for
+a handful of effects whose sampling costs a few milliseconds.
+Writing it by hand in the Rust code is ruled out by the very principle of the swatch.
 
-⚠️ Le coût, lui, **croît avec le nombre d'effets livrés** : chacun instancie son
-moteur au premier listage. C'est négligeable aujourd'hui et ça ne le restera pas
-indéfiniment — ne pas chiffrer ici, le nombre a déjà menti une fois.
+⚠️ The cost, however, **grows with the number of shipped effects**: each one instantiates its
+engine at the first listing. It is negligible today and will not remain so
+indefinitely — do not put a figure here, the number has already lied once.
 
-Un effet installé par une version antérieure n'a donc pas de repère tant qu'il
-n'est pas réenregistré. C'est le prix de cette règle, et il se paie en pastille
-neutre, pas en erreur.
+An effect installed by an earlier version therefore has no swatch until it
+is saved again. That is the price of this rule, and it is paid with a neutral
+dot, not with an error.
 
-#### Ce qui peut mal se passer
+#### What can go wrong
 
-C'est du code utilisateur : il peut lever, ne pas charger, ou boucler sans fin.
-Un repère qu'on n'arrive pas à calculer **n'empêche jamais l'installation** —
-`swatch` est alors un tableau vide et l'interface montre une pastille neutre.
-L'échantillonnage est borné dans le temps, sans quoi un `while (true)`
-empêcherait un effet de s'installer pour toujours. Et un repère précédent est
-**effacé** plutôt que conservé : montrer les couleurs d'une version qui n'existe
-plus serait pire que n'en montrer aucune.
+This is user code: it can throw, fail to load, or loop forever.
+A swatch that cannot be computed **never prevents installation** —
+`swatch` is then an empty array and the UI shows a neutral dot.
+Sampling is time-bounded, otherwise a `while (true)`
+would prevent an effect from ever installing. And a previous swatch is
+**erased** rather than kept: showing the colors of a version that no longer
+exists would be worse than showing none.
 
-Un effet qui rend du noir partout, lui, n'est pas un échec : son repère est noir,
-et c'est la vérité sur ce qu'il fait.
+An effect that renders black everywhere, on the other hand, is not a failure: its swatch is black,
+and that is the truth about what it does.
 
-#### Ce que le format ne fige pas
+#### What the format does not freeze
 
-`swatch` est une **liste**, pas un quadruplet, et rien dans le stockage n'en fixe
-la longueur. Le jour où la galerie voudra des vignettes animées, il suffira de ne
-pas s'arrêter à quatre images : ni le fichier ni le type exposé n'ont à changer.
+`swatch` is a **list**, not a quadruple, and nothing in storage fixes
+its length. The day the gallery wants animated thumbnails, it will be enough not
+to stop at four frames: neither the file nor the exposed type has to change.
 
-### Les effets intégrés
+### The built-in effects
 
-Quatre sont livrés, écrits en **JavaScript contre la même API** que les effets
-de l'utilisateur et chargés par le même moteur. Un effet intégré écrit en Rust
-natif serait plus rapide et ne prouverait rien : le premier exemple qu'on ouvre
-doit être exactement ce qu'on peut écrire soi-même. Ils vivent dans
+Four are shipped, written in **JavaScript against the same API** as the user's
+effects and loaded by the same engine. A built-in effect written in native Rust
+would be faster and would prove nothing: the first example one opens
+must be exactly what one can write oneself. They live in
 [`apps/desktop/src-tauri/src/builtins/`](../../apps/desktop/src-tauri/src/builtins/).
 
-| `id` | Nom | Ce qui le distingue |
+| `id` | Name | What sets it apart |
 |---|---|---|
-| `onde-radiale` | Onde radiale | teinte en mouvement, propagée depuis le centre |
-| `respiration` | Respiration | une seule couleur, aucune variation dans l'espace |
-| `balayage` | Balayage | une rangée éclairée, le reste éteint |
-| `degrade-fixe` | Dégradé fixe | deux couleurs, immobile — son `render` ignore `time` |
+| `onde-radiale` | "Onde radiale" (Radial wave) | moving hue, propagated from the center |
+| `respiration` | "Respiration" (Breathing) | a single color, no variation in space |
+| `balayage` | "Balayage" (Sweep) | one lit row, the rest off |
+| `degrade-fixe` | "Dégradé fixe" (Fixed gradient) | two colors, motionless — its `render` ignores `time` |
 
-**Un identifiant intégré est réservé.** `install_effect` refuse un nom qui
-dérive vers l'un d'eux, en le disant. Et si un dossier portant un tel `id`
-apparaît malgré tout — copie manuelle, bibliothèque héritée —, c'est l'intégré
-qui est lu et affiché : une entrée marquée `builtin` exécute le code livré, et
-rien d'autre. Le dossier usurpateur n'est pas listé (la liste est indexée par
-`id`, elle ne peut pas en montrer deux) mais reste supprimable.
+**A built-in identifier is reserved.** `install_effect` refuses a name that
+derives to one of them, and says so. And if a folder bearing such an `id`
+appears anyway — manual copy, inherited library —, the built-in one is what
+is read and displayed: an entry marked `builtin` runs the shipped code, and
+nothing else. The usurping folder is not listed (the list is keyed by
+`id`, it cannot show two) but can still be deleted.
 
 ### `delete_effect(id)`
 
-Supprime le dossier. Un `id` hors de la liste blanche est refusé avant tout
-accès au disque. Un effet intégré n'a pas de dossier et ne se supprime pas ; le
-disque est consulté d'abord, ce qui laisse retirer un dossier qui usurperait un
-identifiant intégré.
+Deletes the folder. An `id` outside the allowlist is refused before any
+disk access. A built-in effect has no folder and cannot be deleted; the
+disk is checked first, which allows removing a folder that would usurp a
+built-in identifier.
 
-Emporte aussi tout ce que `settings.json` retenait de lui : les **réglages**, sur
-tous les appareils, et son **application** (`activeEffects`). L'oubli vient après
-la suppression : si celle-ci échoue, l'effet est toujours là et ses réglages
-doivent l'être aussi.
+Also takes away everything `settings.json` remembered about it: the **settings**, on
+all devices, and its **application** (`activeEffects`). Forgetting comes after
+deletion: if deletion fails, the effect is still there and its settings
+must be too.
 
-La purge de `activeEffects` tranche le piège relevé par l'issue #48 : sans elle,
-supprimer l'effet appliqué laisserait un **identifiant pendant**, que la reprise au
-démarrage tenterait de lancer. Deux réponses étaient possibles — purger à la
-suppression, ou se replier en silence au démarrage. La première est retenue :
-l'invariant « le fichier ne contient jamais un identifiant que la bibliothèque ne
-connaît pas » se vérifie sans rien faire tourner, là où un silence au lancement est
-exactement le genre de panne qui coûte une session. Le repli reste nécessaire en
-**seconde** barrière — un dossier d'effet retiré à la main ne passe pas par ici —
-mais il n'est plus le seul.
+Purging `activeEffects` settles the trap raised by issue #48: without it,
+deleting the applied effect would leave a **dangling identifier**, which the restore at
+startup would try to launch. Two answers were possible — purge on
+deletion, or fall back silently at startup. The first one is chosen:
+the invariant "the file never contains an identifier the library does not
+know" can be checked without running anything, whereas a silence at launch is
+exactly the kind of failure that costs a debugging session. The fallback remains necessary as a
+**second** barrier — an effect folder removed by hand does not go through here —
+but it is no longer the only one.
 
-**Trois temps, et l'ordre fait partie du contrat :**
+**Three steps, and the order is part of the contract:**
 
-1. **le refus**, avant tout — un effet intégré ou un identifiant qui ne désigne
-   rien s'entend dire non sans que rien n'ait été arrêté ni effacé ;
-2. **l'arrêt des boucles** qui font tourner cet effet, sur **tous** les appareils
-   et dans l'aperçu, avant l'effacement. Le moteur charge `effect.js` une fois au
-   démarrage et le garde en mémoire : une boucle laissée en vie continuerait sans
-   la moindre erreur visible, sur un dossier qui n'existe plus, et l'appareil
-   resterait piloté — ou l'écran animé — par un effet absent de la bibliothèque ;
-3. **l'effacement**, puis l'oubli des réglages.
+1. **the refusal**, first of all — a built-in effect or an identifier that designates
+   nothing gets a no without anything having been stopped or erased;
+2. **stopping the loops** running this effect, on **all** devices
+   and in the preview, before erasing. The engine loads `effect.js` once at
+   start and keeps it in memory: a loop left alive would carry on without
+   the slightest visible error, on a folder that no longer exists, and the device would
+   remain controlled — or the screen animated — by an effect missing from the library;
+3. **erasing**, then forgetting the settings.
 
-L'arrêt est fait **côté Rust**, pas dans la fenêtre : c'est le seul endroit qui le
-garantisse quel que soit l'appelant. La ligne d'`engine_status()` de l'appareil
-subsiste, mais elle cesse de nommer l'effet — l'identifiant ne désigne plus rien.
+Stopping is done **on the Rust side**, not in the window: it is the only place that
+guarantees it whoever the caller is. The device's `engine_status()` line
+remains, but it stops naming the effect — the identifier no longer designates anything.
 
-L'interface ne propose pas le geste sur un effet intégré, plutôt que de le
-proposer et de le laisser échouer.
+The UI does not offer the action on a built-in effect, rather than
+offering it and letting it fail.
 
 ### `read_effect_source(id) -> string`
 
-La source, pour la rouvrir dans l'éditeur. Un effet intégré rend son JavaScript,
-qui **est** sa source : il n'y a pas de `.ts` à transpiler. C'est l'usage prévu —
-on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
+The source, to reopen it in the editor. A built-in effect returns its JavaScript,
+which **is** its source: there is no `.ts` to transpile. That is the intended use —
+start from an effect that works, modify it, save it under another name.
 
 ---
 
-## Réglages
+## Settings
 
 ### `get_settings() -> Settings` · `set_settings(settings)`
 
@@ -595,255 +595,255 @@ on part d'un effet qui marche, on le modifie, on l'enregistre sous un autre nom.
 }
 ```
 
-**Une préférence globale dans `preferences`, tout ce qui dépend d'un clavier dans
-une liste indexée.** C'est la règle que ce fichier tient, et elle vaut pour tout ce
-qu'on y ajoutera : la langue ira dans `preferences`, sans rien avoir à arbitrer.
+**A global preference goes in `preferences`, anything that depends on a keyboard
+in a keyed list.** That is the rule this file follows, and it holds for everything
+added to it later: the language will go in `preferences`, with nothing to arbitrate.
 
-Chaque liste ne porte que ce qui **diffère du défaut** : un appareil absent de
-`devices` est `detected` et à pleine luminosité, un appareil absent
-d'`activeEffects` ne s'est vu appliquer aucun effet, et une entrée d'appareil qui
-ne retient plus rien — `detected` sans luminosité — est retirée plutôt que gardée
-vide.
+Each list carries only what **differs from the default**: a device absent from
+`devices` is `detected` and at full brightness, a device absent
+from `activeEffects` has had no effect applied, and a device entry that
+no longer remembers anything — `detected` with no brightness — is removed rather
+than kept empty.
 
-Au premier lancement il n'y a pas de fichier : `get_settings` renvoie les
-**défauts**, ce n'est pas une erreur. Un champ absent d'un fichier écrit par une
-version antérieure reprend lui aussi son défaut, plutôt que de rendre
-l'application muette au démarrage.
+On first launch there is no file: `get_settings` returns the
+**defaults**, it is not an error. A field missing from a file written by an
+earlier version also takes its default, rather than leaving the
+application silent at startup.
 
-#### Ce qui a disparu en v2.1, et pourquoi
+#### What disappeared in v2.1, and why
 
-`activeEffect`, `device` et `brightness` étaient trois scalaires à la racine. Les
-deux premiers n'étaient lus ni écrits par personne ; le troisième l'était. Le
-problème n'était pas leur valeur, c'était leur **forme** : ils décrivaient *un*
-effet actif, *un* appareil choisi et *un* niveau de luminosité, alors que le moteur
-fait tourner un effet par appareil depuis l'issue #26 — et que
-`set_brightness(device, level)` prenait déjà un `DeviceRef`.
+`activeEffect`, `device` and `brightness` were three scalars at the root. The
+first two were neither read nor written by anyone; the third was. The
+problem was not their value, it was their **shape**: they described *one*
+active effect, *one* chosen device and *one* brightness level, whereas the engine
+has been running one effect per device since issue #26 — and
+`set_brightness(device, level)` already took a `DeviceRef`.
 
-- `activeEffect` → `activeEffects[]`, une entrée par appareil ;
-- `device` → **retiré**. `devices` porte déjà les décisions appareil par
-  appareil ; un « appareil choisi » global n'a plus de sens depuis qu'il n'y a
-  plus d'appareil implicite ;
-- `brightness` → `devices[].brightness`. Deux claviers n'ont aucune raison de
-  partager un niveau.
+- `activeEffect` → `activeEffects[]`, one entry per device;
+- `device` → **removed**. `devices` already carries the decisions device by
+  device; a global "chosen device" has made no sense since there has been
+  no implicit device;
+- `brightness` → `devices[].brightness`. Two keyboards have no reason to
+  share a level.
 
-Un fichier antérieur se relit sans erreur, et ces trois clés sont simplement
-ignorées : les récupérer aurait demandé de choisir *quel* appareil elles
-désignaient, question sans réponse. Seul `logLevel`, qui a changé de place sans
-changer de sens, est **récupéré** depuis la racine et versé dans `preferences` à
-la première lecture — le retomber au défaut aurait ramené au silence celui qui
-était justement en train de chercher une panne.
+An earlier file is read back without error, and these three keys are simply
+ignored: recovering them would have required choosing *which* device they
+designated, a question with no answer. Only `logLevel`, which moved without
+changing meaning, is **recovered** from the root and moved into `preferences` at
+the first read — resetting it to the default would have silenced the very person
+who was in the middle of hunting down a failure.
 
-`activeEffects` est écrit par `start_effect` et effacé par `stop_effect` ; l'aperçu
-n'y touche jamais. Supprimer un effet purge son entrée partout — voir
+`activeEffects` is written by `start_effect` and cleared by `stop_effect`; the preview
+never touches it. Deleting an effect purges its entry everywhere — see
 `delete_effect`.
 
 ### `reset_settings()`
 
-Réécrit `settings.json` avec les **valeurs par défaut**, et repose les appareils.
-C'est la seule façon de revenir à un état connu sans aller éditer le fichier à la
-main — la première chose qu'on cherche quand quelque chose se comporte mal, et ce
-qui rend un rapport de bogue exploitable.
+Rewrites `settings.json` with the **default values**, and resets the devices.
+It is the only way to return to a known state without editing the file by
+hand — the first thing one looks for when something misbehaves, and what
+makes a bug report usable.
 
-Ce qui part : les décisions d'adoption — tout repasse en `detected` —, la
-luminosité retenue de chaque appareil, l'effet appliqué sur chacun, et les
-réglages retenus par paire appareil / effet.
+What goes: the adoption decisions — everything goes back to `detected` —, the
+remembered brightness of each device, the effect applied on each, and the
+settings remembered per device / effect pair.
 
-**Aucun effet n'est touché.** Les effets écrits vivent dans
-`app_data_dir()/effects/`, pas dans `settings.json` ; les retirer est une autre
-action, `delete_effect`, une par effet. C'est la distinction que tout le stockage
-tient — un effet est du contenu, le choix de l'effet actif est de la
-configuration — et la confondre ferait perdre du code écrit à la main à qui
-voulait seulement désadopter un clavier. La commande n'en a d'ailleurs pas les
-moyens : elle n'écrit que dans le fichier de configuration.
+**No effect is touched.** Written effects live in
+`app_data_dir()/effects/`, not in `settings.json`; removing them is a different
+action, `delete_effect`, one per effect. That is the distinction the whole storage
+layer holds to — an effect is content, the choice of the active effect is
+configuration — and blurring it would lose hand-written code for someone who
+only wanted to un-adopt a keyboard. The command does not have the
+means anyway: it only writes to the configuration file.
 
-Les appareils sont reposés **avant** l'écriture, dans cet ordre :
+The devices are reset **before** the write, in this order:
 
-1. **les boucles s'arrêtent**, et l'arrêt est attendu — remettre la table des
-   appareils à zéro pendant qu'un effet tourne laisserait des boucles que plus
-   aucune décision ne désigne, et l'image suivante rallumerait ce qu'on est sur le
-   point d'éteindre ;
-2. **le rétroéclairage s'éteint** (`Effect::Off`). Arrêter une boucle laisse le
-   clavier sur sa dernière image, et une image figée ressemble à un effet qui
-   tourne encore ; l'extinction est exécutée par le micrologiciel, elle ne coûte
-   rien ;
-3. **les poignées sont refermées** et les échecs d'ouverture oubliés : on ne garde
-   pas ouvert un appareil que plus aucune décision ne désigne, et un message
-   d'échec décrivant une adoption qui n'existe plus n'apprend rien.
+1. **the loops stop**, and the stop is awaited — resetting the device
+   table while an effect is running would leave loops that no
+   decision designates any more, and the next frame would turn back on what is
+   about to be turned off;
+2. **the backlight turns off** (`Effect::Off`). Stopping a loop leaves the
+   keyboard on its last frame, and a frozen frame looks like an effect still
+   running; turning off is executed by the firmware, it costs
+   nothing;
+3. **the handles are closed** and the open failures forgotten: one does not keep
+   a device open that no decision designates any more, and a failure
+   message describing an adoption that no longer exists teaches nothing.
 
-Un clavier qui refuse de s'éteindre — débranché entre-temps, accès perdu —
-n'interrompt pas la remise à zéro : l'extinction est un agrément, pas le geste.
+A keyboard that refuses to turn off — unplugged in the meantime, access lost —
+does not interrupt the reset: turning off is a nicety, not the point.
 
-Ce n'est **pas** un endroit où libérer des ressources côté effets. Chaque boucle
-porte son `Runtime` et son `Context` QuickJS, tous deux détruits avec elle : tout
-le tas JavaScript part avec. Aucun point d'entrée `dispose()` n'est souhaitable,
-il mettrait du code utilisateur sur le chemin de l'arrêt.
+This is **not** a place to free resources on the effects side. Each loop
+holds its own QuickJS `Runtime` and `Context`, both destroyed with it: the whole
+JavaScript heap goes with them. No `dispose()` entry point is desirable,
+it would put user code on the shutdown path.
 
-La fenêtre, elle, garde ce qu'elle avait lu : c'est à elle d'oublier les réglages
-tenus en mémoire après l'appel, sans quoi le premier mouvement de curseur les
-réécrirait.
+The window, for its part, keeps what it had read: it is up to the window to forget the settings
+held in memory after the call, otherwise the first slider movement would
+write them back.
 
 ### `remember_effect_params(device, effect, params)`
 
-Retient les réglages d'un effet **pour un appareil**, et rien d'autre du
-fichier. À ne pas confondre avec `set_effect_params`, plus bas, qui ajuste la
-boucle en cours : celle-ci écrit sur disque et ne change rien à ce qui tourne. Les deux n'ont ni la même cadence — des dizaines d'appels par seconde
-d'un côté, un seul quand le curseur s'arrête de l'autre — ni la même destination.
+Remembers an effect's settings **for one device**, and nothing else in the
+file. Not to be confused with `set_effect_params`, further down, which adjusts the
+running loop: this one writes to disk and changes nothing about what is running. The two have neither the same rate — dozens of calls per second
+on one side, a single one when the slider stops on the other — nor the same destination.
 
-Une commande dédiée plutôt qu'un `set_settings` depuis la fenêtre : la lecture,
-la modification et l'écriture se font côté Rust, d'un seul tenant.
+A dedicated command rather than a `set_settings` from the window: reading,
+modifying and writing happen on the Rust side, in one go.
 
 ### `remember_brightness(device, level)`
 
-Retient la luminosité de **cet** appareil, sans toucher au clavier — le pendant
-disque de `set_brightness`. Elle est réappliquée à l'ouverture de l'appareil, au
-démarrage comme à l'adoption : un niveau retenu qui ne se réappliquerait pas au
-branchement ne servirait à rien, et le protocole relevé sait écrire la luminosité
-mais pas la relire.
+Remembers the brightness of **this** device, without touching the keyboard — the disk
+counterpart of `set_brightness`. It is reapplied when the device is opened, at
+startup as well as at adoption: a remembered level that was not reapplied when
+plugged in would be useless, and the surveyed protocol can write brightness
+but not read it back.
 
-Le maximum (255) **efface** l'entrée au lieu d'y écrire le défaut, exactement
-comme une table de paramètres vide efface les réglages d'un effet. Un appareil
-dont c'était la seule décision disparaît alors de `devices`.
+The maximum (255) **erases** the entry instead of writing the default into it, exactly
+as an empty parameter table erases an effect's settings. A device
+whose only decision it was then disappears from `devices`.
 
-La série est relevée si elle se donne, comme pour `ignore_device` : elle fait
-atterrir le niveau sur le bon exemplaire quand il y en a deux du même modèle, et
-son absence ne bloque rien.
+The serial is recorded if it is available, as for `ignore_device`: it makes
+the level land on the right unit when there are two of the same model, and
+its absence blocks nothing.
 
-Ce n'est pas une précaution contre un entrelacement — les commandes synchrones
-s'exécutent sur le fil principal, elles ne se chevauchent pas. C'est une
-précaution contre une **copie périmée** : la fenêtre lit les réglages une fois,
-au montage de l'écran, et un `set_settings` posté au premier mouvement de curseur
-renverrait cet instantané tel quel, effaçant ce qui aurait été décidé depuis. Ce
-n'est pas un cas d'école — `adopt_device` écrit `settings.json`, et adopter un
-appareil est justement ce qu'on fait entre deux réglages.
+This is not a precaution against interleaving — synchronous commands
+run on the main thread, they do not overlap. It is a
+precaution against a **stale copy**: the window reads the settings once,
+when the screen mounts, and a `set_settings` posted at the first slider movement
+would send that snapshot back as is, erasing whatever had been decided since. This
+is not a textbook case — `adopt_device` writes `settings.json`, and adopting a
+device is precisely what one does between two adjustments.
 
-Une table `params` **vide** efface l'entrée : c'est « rétablir les valeurs
-déclarées ». L'effet repart alors de son manifeste, y compris si une version
-ultérieure en change les défauts.
+An **empty** `params` table erases the entry: it means "restore the declared
+values". The effect then starts again from its manifest, including if a later
+version changes its defaults.
 
-Elle est appelée **à la fin du geste** — curseur relâché, case cochée — et non
-après une temporisation : fermer la fenêtre détruit la vue web sans exécuter ses
-crochets de sortie, or fermer la fenêtre pendant qu'un effet tourne est le mode
-d'emploi de l'application. Une minuterie ne serait donc jamais qu'un filet.
+It is called **at the end of the gesture** — slider released, box checked — and not
+after a debounce delay: closing the window destroys the web view without running its
+exit hooks, and closing the window while an effect is running is the intended way
+of using the application. A timer would therefore only ever be a safety net.
 
-`delete_effect` emporte les réglages retenus pour l'effet supprimé, sur tous les
-appareils. Sans quoi le fichier garderait des entrées désignant un identifiant
-que plus rien ne nomme, et un effet réinstallé sous le même nom hériterait en
-silence des réglages de son homonyme disparu.
+`delete_effect` takes away the settings remembered for the deleted effect, on all
+devices. Otherwise the file would keep entries designating an identifier
+that nothing names any more, and an effect reinstalled under the same name would silently
+inherit the settings of its vanished namesake.
 
-### La clé d'un réglage : l'appareil et l'effet, sans le numéro de série
+### The key of a setting: the device and the effect, without the serial number
 
-Le même effet n'a aucune raison de tourner à la même vitesse sur deux claviers,
-et deux effets du même clavier n'ont pas les mêmes paramètres : la clé est donc
-la paire. Changer d'effet puis revenir retrouve ses réglages, et l'écran les
-relit au démarrage suivant.
+The same effect has no reason to run at the same speed on two keyboards,
+and two effects on the same keyboard do not have the same parameters: the key is therefore
+the pair. Switching effects and coming back finds its settings again, and the screen
+reads them back at the next startup.
 
-**Sans la série, contrairement à `devices`.** Toutes les commandes du moteur
-visent un `DeviceRef`, c'est-à-dire un VID et un PID ; deux exemplaires du même
-modèle partagent déjà leur boucle de rendu. Les distinguer ici promettrait une
-séparation que le reste de l'application ne tient pas, et le réglage semblerait
-perdu une fois sur deux. L'adoption, elle, décide d'ouvrir un exemplaire précis :
-elle a besoin de la série, et c'est pourquoi elle la porte.
+**Without the serial, unlike `devices`.** All engine commands
+target a `DeviceRef`, that is a VID and a PID; two units of the same
+model already share their render loop. Telling them apart here would promise a
+separation the rest of the application does not keep, and the setting would seem
+lost one time out of two. Adoption, for its part, decides to open a specific unit:
+it needs the serial, and that is why it carries it.
 
-Comme `devices`, `effectParams` ne contient que ce qui **diffère du défaut** :
-un paramètre laissé à sa valeur déclarée n'y figure pas, et suivra le manifeste
-si l'effet est réenregistré avec d'autres défauts. Une entrée n'apparaît donc que
-si quelqu'un a déplacé un curseur.
+Like `devices`, `effectParams` contains only what **differs from the default**:
+a parameter left at its declared value does not appear in it, and will follow the manifest
+if the effect is saved again with other defaults. An entry therefore appears only
+if someone has moved a slider.
 
-### L'identité d'un appareil : VID / PID / numéro de série
+### The identity of a device: VID / PID / serial number
 
-**Ni la variante, ni le micrologiciel.** Le même clavier s'est déclaré
-`v1.4 / Unkown Variant` puis `v1.5 / Quartz` pendant le relevé du protocole : une
-liaison qui apparie sur ces champs se rompt à la mise à jour, et l'appareil
-adopté redevient un inconnu du jour au lendemain.
+**Neither the variant, nor the firmware.** The same keyboard reported itself as
+`v1.4 / Unkown Variant` then `v1.5 / Quartz` during the protocol survey: a
+binding that matches on these fields breaks at the update, and the adopted
+device becomes a stranger overnight.
 
-**La série vient du protocole** (`0x00`/`0x82`), lue à l'ouverture : le
-descripteur USB du DeathStalker n'en porte aucune. Un appareil fermé ne s'ouvre pas
-pour qu'on la lui demande — un appareil ignoré doit rester tranquille — et c'est
-alors le descripteur, muet, qui sert de repli.
+**The serial comes from the protocol** (`0x00`/`0x82`), read on open: the
+DeathStalker's USB descriptor carries none. A closed device is not opened
+just to ask it for the serial — an ignored device must be left alone — and it is
+then the descriptor, silent, that serves as fallback.
 
-La série n'est comparée que si **les deux côtés** en portent une, et cet
-arbitrage tient dans les deux sens :
+The serial is only compared if **both sides** carry one, and this
+trade-off holds in both directions:
 
-- elle départage deux exemplaires du même modèle — sans elle, adopter l'un
-  adopterait l'autre ;
-- mais une énumération muette — hidraw sans règle udev, un concentrateur qui ne
-  relaie rien — ne doit pas désapparier un appareil déjà adopté, sans quoi la
-  décision serait à reprendre à chaque branchement.
+- it tells apart two units of the same model — without it, adopting one
+  would adopt the other;
+- but a silent enumeration — hidraw without a udev rule, a hub that
+  relays nothing — must not unmatch an already adopted device, otherwise the
+  decision would have to be made again at every plug-in.
 
-Une entrée apprise sans série se complète dès qu'on la connaît ; elle ne s'efface
-jamais.
+An entry learned without a serial is completed as soon as the serial is known; it is never
+erased.
 
-`devices` ne contient que les décisions qui **diffèrent du défaut** : un appareil
-absent de la liste est `detected`, ce qui est exactement l'état d'un appareil
-jamais rencontré. Le fichier ne grossit donc pas d'une entrée à chaque
-périphérique branché une fois.
+`devices` contains only the decisions that **differ from the default**: a device
+absent from the list is `detected`, which is exactly the state of a device
+never encountered. The file therefore does not grow by one entry for every
+device plugged in once.
 
-L'écriture passe par un fichier temporaire suivi d'un renommage : une coupure en
-cours d'écriture laisserait sinon des réglages tronqués.
+Writing goes through a temporary file followed by a rename: a power cut in
+the middle of a write would otherwise leave truncated settings.
 
-Le nom de ce temporaire est **fixe**, et il peut l'être parce que les commandes
-synchrones s'exécutent sur le fil principal : deux séquences lire-modifier-écrire
-ne s'entrelacent pas. Le raisonnement vaut *à l'intérieur* d'un processus — entre
-deux, rien ne les sérialiserait, et l'un renommerait ce que l'autre est en train
-d'écrire. C'est donc l'**instance unique**
-([`single_instance.rs`](../../apps/desktop/src-tauri/src/single_instance.rs)) qui
-rend ce nom fixe sûr : les deux décisions se tiennent, et ne se défont pas l'une
-sans l'autre.
-
----
-
-## Erreurs
-
-Toutes les commandes faillibles renvoient `Result<T, String>`. Le message est
-destiné à être **affiché tel quel** : il doit rester lisible par un humain, pas
-devenir un code à traduire côté front.
+The name of this temporary file is **fixed**, and it can be because synchronous
+commands run on the main thread: two read-modify-write sequences
+do not interleave. The reasoning holds *within* a process — between
+two, nothing would serialize them, and one would rename what the other is in the middle
+of writing. It is therefore the **single instance**
+([`single_instance.rs`](../../apps/desktop/src-tauri/src/single_instance.rs)) that
+makes this fixed name safe: the two decisions go together, and cannot be undone one
+without the other.
 
 ---
 
-## Journal
+## Errors
 
-`tracing` + `tracing-subscriber` + `tracing-appender`, initialisés en tête du
-`setup` de l'application — **avant que le magasin ne soit résolu**, sinon un échec
-de résolution du dossier de configuration arriverait avant qu'il n'y ait de quoi
-l'écrire. Conception et arbitrages dans `src-tauri/src/journal.rs`.
+All fallible commands return `Result<T, String>`. The message is
+meant to be **displayed as is**: it must remain readable by a human, not
+become a code to translate on the front end.
 
-Le fichier tourne **par jour**, sept au plus, dans `app_log_dir()` — par l'API
-Tauri, jamais un chemin en dur : les journaux ne sont ni des données ni de la
-configuration, et sous Linux les trois dossiers diffèrent.
+---
 
-| Niveau | Ce que ça veut dire |
+## Log
+
+`tracing` + `tracing-subscriber` + `tracing-appender`, initialized at the top of the
+application's `setup` — **before the store is resolved**, otherwise a failure
+to resolve the configuration folder would happen before there was anything to
+write it with. Design and trade-offs in `src-tauri/src/journal.rs`.
+
+The file rotates **daily**, seven at most, in `app_log_dir()` — through the
+Tauri API, never a hard-coded path: logs are neither data nor
+configuration, and on Linux the three folders differ.
+
+| Level | What it means |
 |---|---|
-| `error` | l'éclairage de l'utilisateur est cassé |
-| `warn` | dégradé mais fonctionnel — micrologiciel inattendu (#35), exclusion d'instance inopérante (#45) |
-| `info` | cycle de vie : appareil adopté, effet démarré, effet arrêté |
-| `debug` / `trace` | par image, **éteint par défaut** |
+| `error` | the user's lighting is broken |
+| `warn` | degraded but working — unexpected firmware (#35), inoperative instance exclusion (#45) |
+| `info` | lifecycle: device adopted, effect started, effect stopped |
+| `debug` / `trace` | per frame, **off by default** |
 
-**Les transitions, jamais les occurrences.** À 30 images par seconde, une écriture
-qui échoue produirait trente lignes par seconde et enterrerait la seule qui
-compte. Le journal suit exactement le modèle du moteur — « a commencé à échouer
-(raison) », « rétabli », « arrêté après 30 échecs » — et rien par image.
+**Transitions, never occurrences.** At 30 frames per second, a failing write
+would produce thirty lines per second and bury the only one that
+matters. The log follows the engine's model exactly — "started failing
+(reason)", "recovered", "stopped after 30 failures" — and nothing per frame.
 
-**Un span par boucle de rendu**, portant l'appareil et l'effet. C'est la raison
-d'avoir pris `tracing` plutôt que `tauri-plugin-log` : il y a une boucle par
-appareil, et « écriture refusée » ne sert à rien sans savoir laquelle.
+**One span per render loop**, carrying the device and the effect. That is the reason
+for choosing `tracing` rather than `tauri-plugin-log`: there is one loop per
+device, and "écriture refusée" (write refused) is useless without knowing which one.
 
-**Le numéro de série ne figure nulle part.** Une empreinte stable (FNV-1a, 16
-chiffres hexadécimaux) le remplace : elle distingue deux exemplaires du même
-modèle sans divulguer lequel. Une énumération muette — hidraw sans règle udev —
-se dit `aucune`, ce qui n'est pas la même chose.
+**The serial number appears nowhere.** A stable fingerprint (FNV-1a, 16
+hexadecimal digits) replaces it: it tells apart two units of the same
+model without disclosing which one. A silent enumeration — hidraw without a udev rule —
+is reported as `aucune`, which is not the same thing.
 
-### Priorité du niveau
+### Level precedence
 
-1. **`CANDEO_LOG` l'emporte**, toujours — c'est ce qui permet de diagnostiquer
-   une application qui ne va pas assez loin pour lire ses réglages. Elle accepte
-   un niveau seul (`debug`) ou une directive `EnvFilter` complète
-   (`candeo_desktop_lib::runtime=trace,warn`) ;
-2. sinon `settings.json`, champ `logLevel` ;
-3. sinon `info`.
+1. **`CANDEO_LOG` wins**, always — that is what makes it possible to diagnose
+   an application that does not get far enough to read its settings. It accepts
+   a bare level (`debug`) or a full `EnvFilter` directive
+   (`candeo_desktop_lib::runtime=trace,warn`);
+2. otherwise `settings.json`, field `logLevel`;
+3. otherwise `info`.
 
-`CANDEO_LOG` et non `RUST_LOG` : cette dernière est partagée par tout l'outillage
-Rust, et quelqu'un qui l'a posée pour `cargo` changerait sans le vouloir le
-journal de l'application.
+`CANDEO_LOG` and not `RUST_LOG`: the latter is shared by all Rust
+tooling, and someone who set it for `cargo` would unintentionally change the
+application's log.
 
 ### `get_journal() -> JournalStatus`
 
@@ -859,96 +859,96 @@ journal de l'application.
 
 ### `set_log_level(level) -> JournalStatus`
 
-Change le niveau **sans redémarrer** (`tracing_subscriber::reload`), et le
-retient. Le défaut qu'on cherche peut ne pas survivre au redémarrage : un clavier
-qui décroche après deux heures, un appareil qui disparaît par intermittence —
-« relancez en mode détaillé » revient à demander de reproduire ce qu'on vient
-d'observer.
+Changes the level **without restarting** (`tracing_subscriber::reload`), and
+remembers it. The fault being chased may not survive a restart: a keyboard
+that drops out after two hours, a device that disappears intermittently —
+"restart in verbose mode" amounts to asking to reproduce what one has just
+observed.
 
-**Il survit au redémarrage**, et c'est un arbitrage : le retour automatique au
-défaut protégerait du disque plein, la persistance sert celui qui traque un défaut
-au lancement. Le prix est payé par `verbose`, que l'interface affiche.
+**It survives a restart**, and that is a trade-off: automatically returning to the
+default would protect against a full disk, persistence serves whoever is tracking down a fault
+at launch. The price is paid by `verbose`, which the UI displays.
 
-Quand `CANDEO_LOG` est posée, le réglage est **écrit mais pas appliqué** — la
-priorité vaut pendant toute l'exécution, pas seulement au démarrage. Il vaudra au
-prochain lancement sans la variable, et `forcedByEnv` dit à l'interface de
-l'annoncer.
+When `CANDEO_LOG` is set, the setting is **written but not applied** — the
+precedence holds for the whole run, not only at startup. It will apply at the
+next launch without the variable, and `forcedByEnv` tells the UI to
+announce it.
 
-`reset_settings()` ramène aussi le niveau au défaut, et tout de suite : il vient
-d'être effacé du fichier, le laisser appliqué ferait mentir l'écran.
+`reset_settings()` also brings the level back to the default, and immediately: it has
+just been erased from the file, leaving it applied would make the screen lie.
 
 ### `open_log_dir()`
 
-Ouvre le dossier des journaux dans le gestionnaire de fichiers du système. Un
-journal que personne ne sait trouver ne sert à rien, et le chemin dépend du
-système : le donner à lire ne suffit pas.
+Opens the log folder in the system's file manager. A
+log nobody knows how to find is useless, and the path depends on the
+system: giving it to read is not enough.
 
 ### `diagnostic() -> string`
 
-Le texte à coller dans un rapport de bogue : version de l'application, système,
-appareils connus — branché, décision retenue, empreinte de série, gabarit — et
-état du moteur appareil par appareil.
+The text to paste into a bug report: application version, system,
+known devices — plugged in, remembered decision, serial fingerprint, layout — and
+engine state device by device.
 
-Pour chaque appareil, **le micrologiciel lu en face de celui du relevé** — le
-premier champ qu'on demandera devant un comportement inexpliqué — puis le verdict
-de chaque commande et les avertissements. Un appareil fermé se dit « non lu,
-appareil fermé » plutôt que de répéter la version d'une ouverture passée :
-l'exemplaire branché depuis n'est peut-être plus le même. Le diagnostic ne refait
-aucun échange avec l'appareil, il relit ce que l'ouverture a obtenu.
+For each device, **the firmware read, next to the surveyed one** — the
+first field anyone will ask for in front of unexplained behavior — then the verdict
+of each command and the warnings. A closed device is reported as
+"non lu, appareil fermé" (not read, device closed) rather than repeating the version from a past open:
+the unit plugged in since may no longer be the same. The diagnostic performs
+no exchange with the device, it rereads what the open obtained.
 
-Une commande vérifiée s'y dit « connue », jamais « comprise » ni « compatible » :
-voir plus haut ce que l'octet d'état ne dit pas.
+A verified command is reported there as "connue" (known), never "understood" or "compatible":
+see above what the status byte does not tell.
 
-Ne peut pas échouer sur un appareil : ne pas pouvoir énumérer l'USB ou relire les
-réglages est exactement ce qu'un diagnostic doit **dire**, pas ce qui doit
-l'interrompre.
+Cannot fail because of a device: being unable to enumerate USB or read back the
+settings is exactly what a diagnostic must **say**, not what should
+interrupt it.
 
 ### `log_from_webview(level, source, message)`
 
-Consigne dans le même fichier ce que voit la fenêtre : `app.config.errorHandler`
-et les refus de compilation d'effet, qui partaient jusqu'ici dans une console que
-personne n'ouvre — et qui n'existe pas en `release`, le binaire étant compilé
-`windows_subsystem = "windows"`. Cible `candeo_webview`, origine en champ.
+Logs into the same file what the window sees: `app.config.errorHandler`
+and effect compilation refusals, which until now went to a console that
+nobody opens — and which does not exist in `release`, the binary being compiled with
+`windows_subsystem = "windows"`. Target `candeo_webview`, origin as a field.
 
-`level` exclut `trace` : le par-image vient du moteur, pas de la fenêtre.
+`level` excludes `trace`: per-frame output comes from the engine, not from the window.
 
 ---
 
 
-## Moteur d'effets
+## Effects engine
 
-**Un fil de rendu Rust par appareil**, indépendants de la fenêtre : fermer
-l'application n'éteint pas les effets. C'est le seul endroit où du code d'effet
-s'exécute — le front n'en exécute jamais, ce qui lui retire au passage tout accès
-au DOM et à l'API Tauri. Conception dans
-[`../design/effects-runtime.md`](../design/effects-runtime.md) §4 et §5.
+**One Rust render thread per device**, independent of the window: closing
+the application does not turn off the effects. It is the only place where effect code
+runs — the front end never runs any, which incidentally denies it any access to
+the DOM and the Tauri API. Design in
+[`../design/effects-runtime.md`](../design/effects-runtime.md) §4 and §5.
 
-**Un appareil, un effet.** Chacun porte sa boucle, donc sa cadence, ses
-paramètres, son état d'erreur et sa sortie. Rien n'est partagé entre deux
-appareils, et c'est ce qui fait qu'un appareil en panne n'en affecte aucun autre.
+**One device, one effect.** Each carries its own loop, hence its own frame rate, its own
+parameters, its own error state and its own output. Nothing is shared between two
+devices, and that is what keeps a failing device from affecting any other.
 
 ### `start_effect(device, id, params)`
 
-Charge le JavaScript de l'effet — celui d'un intégré, sinon
-`effects/<id>/effect.js` — et démarre la boucle **de cet appareil**. Le moteur ne
-fait aucune différence entre les deux : un effet livré est un module chargé
-exactement comme celui qu'on vient d'écrire.
+Loads the effect's JavaScript — a built-in's, otherwise
+`effects/<id>/effect.js` — and starts the loop **of this device**. The engine makes
+no difference between the two: a shipped effect is a module loaded
+exactly like the one you just wrote.
 
-Remplace l'effet en cours **sur cet appareil**, s'il y en avait un — l'arrêt
-précédent est **attendu**, sans quoi deux boucles écriraient un instant sur le
-même appareil. Les autres appareils ne sont pas touchés, et l'attente ne les
-retient pas : le verrou attendu est propre à l'appareil visé.
+Replaces the running effect **on this device**, if there was one — the previous
+stop is **awaited**, otherwise two loops would briefly write to the
+same device. The other devices are not affected, and the wait does not hold
+them up: the awaited lock is specific to the targeted device.
 
-Une erreur de syntaxe ou un module mal formé est signalé **à l'appel**, pas
-découvert plus tard dans un état : l'appel attend le verdict du chargement.
+A syntax error or a malformed module is reported **at call time**, not
+discovered later in a state: the call waits for the load verdict.
 
-Le gabarit vient de **l'appareil visé**, ouvert ou non. Délibéré, et à double
-titre : le gabarit d'un appareil ne dépend pas de sa présence, et on doit pouvoir
-écrire et prévisualiser un effet **sans posséder le clavier**. Viser un appareil
-débranché lance donc l'effet, alimente le simulateur, et laisse
-`reachingKeyboard` à faux jusqu'à l'ouverture.
+The layout comes from **the targeted device**, open or not. Deliberate, on two
+counts: a device's layout does not depend on its presence, and one must be able to
+write and preview an effect **without owning the keyboard**. Targeting an
+unplugged device therefore starts the effect, feeds the simulator, and leaves
+`reachingKeyboard` false until the open.
 
-#### Ce qu'un module d'effet doit exposer
+#### What an effect module must expose
 
 ```ts
 import { hsv } from '@candeo/effects-api'
@@ -959,103 +959,103 @@ export default {
 }
 ```
 
-**Un export par défaut, et rien d'autre.** L'import de `@candeo/effects-api` est
-résolu vers un module interne fourni par l'hôte : pas de bundler, pas de
-`node_modules`, pas de résolution de chemins.
+**A default export, and nothing else.** The import of `@candeo/effects-api` is
+resolved to an internal module provided by the host: no bundler, no
+`node_modules`, no path resolution.
 
-Chaque image repart du noir. Un effet qui n'écrit qu'une partie du clavier
-n'hérite donc pas en silence de l'image précédente — une image est complète par
-définition.
+Each frame starts from black. An effect that writes only part of the keyboard
+therefore does not silently inherit the previous frame — a frame is complete by
+definition.
 
 ### `stop_effect(device)` · `set_effect_params(device, params)`
 
-`set_effect_params` ajuste **à chaud** : la boucle relit les paramètres à chaque
-image, elle ne redémarre pas. Les deux ne touchent qu'à l'appareil visé ; un
-appareil sur lequel rien n'a jamais été lancé les ignore silencieusement.
+`set_effect_params` adjusts **live**: the loop rereads the parameters at every
+frame, it does not restart. Both touch only the targeted device; a
+device on which nothing was ever started ignores them silently.
 
-`params` **remplace** la table entière, il ne la fusionne pas : l'appelant envoie
-l'état complet, pas le seul champ qu'il vient de changer.
+`params` **replaces** the whole table, it does not merge into it: the caller sends
+the complete state, not just the field it has just changed.
 
-L'appel est bon marché mais pas gratuit, et un curseur en produit des dizaines
-par seconde. La fenêtre les ramène donc à **25 par seconde au plus, un seul en
-vol à la fois**, en écrasant les états intermédiaires : la boucle ne lit que le
-dernier, et une file d'attente ne ferait que le lui livrer en retard. Le dernier
-état demandé part toujours — c'est la seule garantie qui compte, puisque c'est
-celui qu'on voit.
+The call is cheap but not free, and a slider produces dozens of them
+per second. The window therefore throttles them to **25 per second at most, a single one in
+flight at a time**, overwriting intermediate states: the loop only reads the
+latest, and a queue would only deliver it late. The last
+requested state always goes out — it is the only guarantee that matters, since it is
+the one you see.
 
-Retenir ces valeurs d'un lancement à l'autre est l'affaire de
-`remember_effect_params` (§Réglages), qui n'écrit que sur disque.
+Remembering these values from one launch to the next is the job of
+`remember_effect_params` (§Settings), which only writes to disk.
 
 ### `set_output_to_keyboard(device, on)`
 
-Coupe ou rétablit l'écriture vers **cet** appareil, **sans toucher au
-simulateur** ni aux autres appareils. Les deux sorties d'une boucle sont
-indépendantes, et chacune peut être absente :
+Cuts or restores writing to **this** device, **without touching the
+simulator** or the other devices. The two outputs of a loop are
+independent, and each can be absent:
 
-- fenêtre fermée → seule l'écriture HID subsiste, aucune image n'est sérialisée ;
-- sortie clavier coupée → seul le simulateur est alimenté ;
-- les deux actives → l'aperçu montre exactement les octets envoyés.
+- window closed → only the HID write remains, no frame is serialized;
+- keyboard output cut → only the simulator is fed;
+- both active → the preview shows exactly the bytes sent.
 
 ### `subscribe_frames(device, channel)` · `unsubscribe_frames(device)`
 
-Une commande répond **une fois** ; un effet produit 30 images par seconde. La
-remontée passe donc par `tauri::ipc::Channel`, créé côté front et passé en
-argument. Les images y circulent en binaire (`InvokeResponseBody::Raw`) :
-396 octets, contre plus de 1,5 Ko sérialisées en tableau JSON d'entiers.
+A command answers **once**; an effect produces 30 frames per second. Frames
+therefore travel up through `tauri::ipc::Channel`, created on the front end and passed as an
+argument. They travel over it in binary (`InvokeResponseBody::Raw`):
+396 bytes, against more than 1.5 KB serialized as a JSON array of integers.
 
-Un canal **par appareil** : le simulateur suit celui qu'on a sélectionné, et
-changer de sélection ferme un canal pour en ouvrir un autre. Un abonnement laissé
-ouvert sur l'appareil précédent alimenterait le même simulateur en parallèle.
+One channel **per device**: the simulator follows the selected one, and
+changing the selection closes one channel to open another. A subscription left
+open on the previous device would feed the same simulator in parallel.
 
-Se désabonner arrête le flux **sans arrêter l'effet**, qui continue d'alimenter
-le clavier.
+Unsubscribing stops the stream **without stopping the effect**, which keeps feeding
+the keyboard.
 
-### L'aperçu : `start_preview` · `stop_preview` · `set_preview_params`
+### The preview: `start_preview` · `stop_preview` · `set_preview_params`
 
 ```ts
 start_preview(device: { vid, pid } | null, id: string, params: object)
 ```
 
-Le pendant exact de `start_effect`, **moins tout ce qui engage** : aucune sortie
-matérielle, rien d'écrit dans `settings.json`, et surtout **aucune boucle
-d'appareil arrêtée**.
+The exact counterpart of `start_effect`, **minus everything that commits**: no hardware
+output, nothing written to `settings.json`, and above all **no device
+loop stopped**.
 
-C'est ce qui rend « sélectionner un effet lance l'aperçu » possible. Le moteur est
-à un effet par appareil (issue #26, délibéré) : prévisualiser Y sur un clavier qui
-exécute X l'aurait arrêté, autrement dit **parcourir la galerie aurait éteint
-l'éclairage en cours**. La boucle d'aperçu est donc distincte, et sa sortie
-matérielle est celle qui n'écrit nulle part — `DeviceOut::present` rendant `None`
-signifie déjà « aucun appareil ouvert, ce n'est pas un échec ».
+That is what makes "selecting an effect starts the preview" possible. The engine is
+one effect per device (issue #26, deliberate): previewing Y on a keyboard that
+runs X would have stopped X, in other words **browsing the gallery would have turned off
+the current lighting**. The preview loop is therefore separate, and its hardware
+output is the one that writes nowhere — `DeviceOut::present` returning `None`
+already means "no device open, this is not a failure".
 
-`device` désigne l'appareil dont l'aperçu **emprunte le gabarit** : il n'est ni
-ouvert, ni piloté, ni forcément branché. `null` retombe sur le gabarit par défaut
-— on prévisualise sans posséder de clavier, et sans en avoir adopté aucun.
+`device` designates the device whose **layout the preview borrows**: it is neither
+opened, nor controlled, nor necessarily plugged in. `null` falls back on the default layout
+— one previews without owning a keyboard, and without having adopted any.
 
-**Il n'y en a qu'un.** Appeler à nouveau remplace le précédent, et chaque
-remplacement détruit un contexte QuickJS pour en construire un autre. La cadence
-est donc bornée **du côté du geste** — la fenêtre attend que la sélection se pose
-(180 ms) — et non dans le moteur, qui aurait dû choisir entre faire attendre la
-dernière sélection et la perdre.
+**There is only one.** Calling again replaces the previous one, and each
+replacement destroys a QuickJS context to build another. The rate
+is therefore bounded **on the gesture side** — the window waits for the selection to settle
+(180 ms) — and not in the engine, which would have had to choose between making the
+latest selection wait and losing it.
 
-`set_preview_params` ajuste à chaud, comme `set_effect_params` pour un appareil :
-la boucle relit son JSON à chaque image.
+`set_preview_params` adjusts live, like `set_effect_params` for a device:
+the loop rereads its JSON at every frame.
 
-L'aperçu s'arrête : quand on quitte l'écran, **quand la fenêtre se replie** (c'est
-le Rust qui le fait, la vue web n'étant pas détruite), quand l'effet qu'il fait
-tourner est supprimé, et avec `stop_all` — remise à zéro de la configuration,
-sortie de l'application. L'effet appliqué, lui, survit à tout cela : c'est toute la
-différence entre ce que le clavier fait et ce qu'on regarde.
+The preview stops: when you leave the screen, **when the window hides to the tray** (it is
+the Rust side that does it, since the web view is not destroyed), when the effect it
+runs is deleted, and with `stop_all` — configuration reset,
+application exit. The applied effect, on the other hand, survives all of that: that is the whole
+difference between what the keyboard does and what you are looking at.
 
 ### `subscribe_preview_frames(channel)` · `unsubscribe_preview_frames()`
 
-Comme `subscribe_frames`, pour la boucle d'aperçu. Un canal **distinct** de celui
-des appareils : les deux flux existent en même temps, et la fenêtre choisit lequel
-elle dessine.
+Like `subscribe_frames`, for the preview loop. A channel **separate** from the
+devices' one: both streams exist at the same time, and the window chooses which one
+it draws.
 
-⚠️ Le canal vit dans l'état de la boucle, et `start_preview` en construit une
-neuve : **il faut se réabonner après chaque démarrage**, exactement comme pour
-`start_effect`. Sans cela le simulateur reste figé sur la dernière image du
-précédent, sans qu'aucune erreur ne le dise.
+⚠️ The channel lives in the loop's state, and `start_preview` builds a
+new one: **you must resubscribe after every start**, exactly as for
+`start_effect`. Otherwise the simulator stays frozen on the last frame of the
+previous one, without any error saying so.
 
 ### `engine_status() -> EngineReport`
 
@@ -1079,75 +1079,75 @@ précédent, sans qu'aucune erreur ne le dise.
 }
 ```
 
-**Deux champs, et non une liste avec un drapeau.** Ce qui tourne sur le matériel
-et ce qu'on regarde ne doivent pas pouvoir se confondre : c'est la quatrième fois
-dans ce projet qu'un état qui ment coûte une session de diagnostic — le clavier non
-adopté, l'écriture « acceptée », l'image figée après arrêt automatique, et
-maintenant l'aperçu. Un drapeau à filtrer se filtre mal : il suffit d'un appelant
-qui l'oublie pour annoncer comme tournant sur le clavier un effet qu'on ne fait que
-regarder. Ici il n'y a rien à filtrer.
+**Two fields, not a list with a flag.** What runs on the hardware
+and what you are looking at must not be confusable: this is the fourth time
+in this project that a lying state has cost a debugging session — the keyboard not
+adopted, the "accepted" write, the frame frozen after automatic stop, and
+now the preview. A flag to filter is filtered badly: all it takes is one caller
+that forgets it to announce as running on the keyboard an effect that is only being
+watched. Here there is nothing to filter.
 
-**La zone de notification, le journal et la galerie ne lisent que `devices`.**
+**The system tray, the log and the gallery read only `devices`.**
 
-`preview` ne porte ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError` :
-une boucle d'aperçu n'a aucune sortie matérielle, et ces champs à faux
-décriraient une panne là où il n'y a qu'un choix. Il vaut `null` dès que l'aperçu
-est arrêté — « le dernier effet que vous avez regardé » n'est une information pour
-personne. Un aperçu qui s'est coupé **tout seul**, après trente images en échec,
-reste en revanche visible avec son erreur : c'est la seule façon de savoir
-pourquoi l'écran s'est figé.
+`preview` carries neither `toKeyboard`, nor `reachingKeyboard`, nor `deviceError`:
+a preview loop has no hardware output, and those fields set to false would describe
+a failure where there is only a choice. It is `null` as soon as the preview
+is stopped — "the last effect you looked at" is information for
+nobody. A preview that cut out **on its own**, after thirty failed frames,
+does however remain visible with its error: it is the only way to know
+why the screen froze.
 
-**Une entrée par appareil** dans `devices`, `reachingKeyboard` compris. Un état
-global obligerait à choisir lequel afficher, et le suivant effacerait le précédent
-— exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
+**One entry per device** in `devices`, `reachingKeyboard` included. A global
+state would force choosing which one to show, and the next would erase the previous one
+— exactly what the open failures table already avoids on the adoption side.
 
-La liste couvre les appareils sur lesquels un effet a été lancé depuis le
-démarrage, pas seulement ceux qui en portent un en ce moment : un appareil arrêté
-garde sa ligne, `running` à faux. « Cet appareil ne fait rien » et « je ne sais
-rien de cet appareil » ne se disent pas pareil, et l'interface doit pouvoir les
-distinguer. L'ordre est stable, trié par VID puis PID.
+The list covers the devices on which an effect has been started since
+startup, not only those running one right now: a stopped device
+keeps its line, `running` false. "This device is doing nothing" and "I know
+nothing about this device" do not mean the same thing, and the UI must be able to
+tell them apart. The order is stable, sorted by VID then PID.
 
-Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire à
-la réouverture, ce qu'un événement ponctuel ne permet pas.
+Polled rather than pushed: an error that occurred while the window was closed must be
+readable on reopening, which a one-off event does not allow.
 
-Une exception dans un effet **ne fait pas tomber l'application** : elle est
-rattrapée par image, exposée ici, et effacée dès que l'effet se rétablit. Après
-trente images consécutives en échec, la boucle s'arrête — un effet qui lève à
-chaque image ne se rétablira pas tout seul. Et elle n'arrête que **sa** boucle :
-les autres appareils continuent.
+An exception in an effect **does not bring down the application**: it is
+caught per frame, exposed here, and cleared as soon as the effect recovers. After
+thirty consecutive failed frames, the loop stops — an effect that throws on
+every frame will not recover on its own. And it stops only **its own** loop:
+the other devices carry on.
 
 ---
 
-## Le seul événement : `candeo://etat-change`
+## The only event: `candeo://etat-change`
 
 ```ts
 listen('candeo://etat-change', () => { /* charge utile vide */ })
 ```
 
-Tout le reste de cette page est **interrogé**. Celui-ci est poussé, et il l'est
-pour une raison précise : depuis l'icône de zone de notification
-([`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs)), l'état peut changer
-**sans la fenêtre** — un effet lancé, une sortie coupée, un clavier éteint — et
-la fenêtre ne meurt plus quand on la ferme, elle se replie. Son instantané peut
-donc vieillir des jours.
+Everything else on this page is **polled**. This one is pushed, and it is pushed
+for a precise reason: from the system tray icon
+([`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs)), the state can change
+**without the window** — an effect started, an output cut, a keyboard turned off — and
+the window no longer dies when it is closed, it hides to the tray. Its snapshot can
+therefore become days old.
 
-Ce qu'elle réinterroge déjà chaque seconde — `engine_status` — n'a pas besoin de
-cet événement. Ce qu'elle ne lit qu'**une fois**, au montage, en a besoin : la
-liste des appareils, et `settings.json`. Sonder le disque et l'USB en boucle pour
-couvrir quelques changements par session serait le mauvais échange.
+What it already polls every second — `engine_status` — does not need
+this event. What it reads only **once**, on mount, does need it: the
+device list, and `settings.json`. Probing the disk and USB in a loop to
+cover a few changes per session would be the wrong trade-off.
 
-Émis dans deux cas, et la charge utile est vide dans les deux : rien ne dit *ce*
-qui a changé, parce que le destinataire relit de toute façon.
+Emitted in two cases, and the payload is empty in both: nothing says *what*
+changed, because the recipient rereads everything anyway.
 
-1. après chaque action du menu de l'icône ;
-2. quand la fenêtre est ramenée au premier plan — c'est le même chemin que le
-   second lancement de l'application, voir `single_instance::reveal`. Une fenêtre
-   qui vient d'être **rouverte** ne l'entend pas : son JavaScript n'est pas
-   encore chargé, et elle lit tout au montage.
+1. after every action of the icon's menu;
+2. when the window is brought to the foreground — it is the same path as the
+   second launch of the application, see `single_instance::reveal`. A window
+   that has just been **reopened** does not hear it: its JavaScript is not
+   loaded yet, and it reads everything on mount.
 
-Aucune permission supplémentaire : `core:event:default`, que `core:default`
-comprend, accorde déjà `listen`.
+No additional permission: `core:event:default`, which `core:default`
+includes, already grants `listen`.
 
-Le nom est écrit des deux côtés — `tray::ETAT_CHANGE` et `src/api/candeo.ts` — et
-un test Rust confronte les deux : rien d'autre ne les relie, et les désaccorder
-donnerait une fenêtre qui ne se resynchronise plus, sans une erreur nulle part.
+The name is written on both sides — `tray::ETAT_CHANGE` and `src/api/candeo.ts` — and
+a Rust test checks the two against each other: nothing else ties them together, and letting them
+drift apart would produce a window that no longer resynchronizes, without a single error anywhere.

@@ -1,103 +1,103 @@
-# Protocole d'éclairage — Razer DeathStalker V2 Pro (filaire)
+# Lighting protocol — Razer DeathStalker V2 Pro (wired)
 
-**Relevé des 11–12/09/2026 · validé en écriture directe**
+**Survey of 11–12/09/2026 · validated by direct writes**
 
-> **Origine des informations.** Établi par observation du matériel : énumération PnP
-> Windows, interrogation d'un serveur SDK par son protocole réseau, capture du bus USB
-> (USBPcap 1.5.4.0 + Wireshark 4.6.8), puis **écriture et lecture directes** via
+> **Source of the information.** Established by observing the hardware: Windows PnP
+> enumeration, querying an SDK server over its network protocol, capture of the USB bus
+> (USBPcap 1.5.4.0 + Wireshark 4.6.8), then **direct writes and reads** via
 > `HidD_SetFeature` / `HidD_GetFeature`.
 >
-> **Tout ce qui suit vaut pour le micrologiciel v1.5**, relevé les 11 et 12/09/2026.
-> Le journal du §11 date chaque fait. Ce qui n'a pas pu être vérifié sur l'appareil
-> est marqué **non vérifié**, et le reste au §10.
+> **Everything below applies to firmware v1.5**, surveyed on 11 and 12/09/2026.
+> The log in §11 dates each fact. Whatever could not be verified on the device
+> is marked **unverified**, and remains in §10.
 >
-> Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur relevé
-> aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du Code de la
-> propriété intellectuelle** (directive 2009/24/CE, article 6).
+> Facts about a protocol are not covered by copyright, and surveying them
+> for interoperability purposes is provided for by **article L.122-6-1 IV of the French
+> Intellectual Property Code** (Directive 2009/24/EC, article 6).
 
 ---
 
 ## 1. Identification
 
-| Élément | Valeur |
+| Item | Value |
 |---|---|
-| Fabricant | Razer — `VID 0x1532` |
-| Produit | DeathStalker V2 Pro filaire — `PID 0x0292` |
-| Numéro de série | *(masqué)* |
+| Manufacturer | Razer — `VID 0x1532` |
+| Product | DeathStalker V2 Pro wired — `PID 0x0292` |
+| Serial number | *(masked)* |
 | Firmware | `v1.5` |
-| Variante déclarée | `Razer Device, French (ISO), Quartz` |
+| Declared variant | `Razer Device, French (ISO), Quartz` |
 
-> ⚠️ **Ne jamais identifier le périphérique sur sa variante ni son firmware.** Le même
-> clavier se déclarait `v1.4 / Unkown Variant` en 2024. Une liaison appariant sur ces
-> champs se rompt à la mise à jour — c'est ce qui a cassé un profil d'effets pendant
-> le relevé. L'identité, c'est **VID / PID / numéro de série**.
+> ⚠️ **Never identify the device by its variant or its firmware.** The same
+> keyboard declared itself `v1.4 / Unkown Variant` in 2024. A binding that matches on these
+> fields breaks on update — that is what broke an effect profile during
+> the survey. The identity is **VID / PID / serial number**.
 
-### Interfaces USB
+### USB interfaces
 
-Composite à cinq interfaces. L'éclairage passe par **`MI_03`**, ce que confirme le
-champ `wIndex = 3` de chaque requête.
+Composite device with five interfaces. Lighting goes through **`MI_03`**, which the
+`wIndex = 3` field of every request confirms.
 
-| Interface | Rôle |
+| Interface | Role |
 |---|---|
-| `MI_00` | entrée clavier + contrôles consommateur |
-| `MI_01` | collections HID multiples |
-| `MI_02` | souris HID |
-| **`MI_03`** | **éclairage** |
-| `MI_04` | entrée HID supplémentaire |
+| `MI_00` | keyboard input + consumer controls |
+| `MI_01` | multiple HID collections |
+| `MI_02` | HID mouse |
+| **`MI_03`** | **lighting** |
+| `MI_04` | additional HID input |
 
-> Sur un composite, ouvrir la mauvaise interface donne un handle **valide** sur lequel
-> toute écriture échoue — sans erreur explicite. Filtrer sur `interface_number`.
+> On a composite device, opening the wrong interface gives a **valid** handle on which
+> every write fails — with no explicit error. Filter on `interface_number`.
 
-### L'entrée `interface -1` — ce n'est pas le clavier
+### The `interface -1` entry — it is not the keyboard
 
-L'énumération HID porte, sur les mêmes VID et PID, une entrée **sans numéro
-d'interface** (`-1`), sans nom de produit, de révision `0x0101` là où tout le
-composite déclare `0x0200`, en page d'usage `0x000c`/`0x0001` (contrôle
-consommateur).
+HID enumeration carries, on the same VID and PID, an entry **with no interface
+number** (`-1`), with no product name, with revision `0x0101` where the whole
+composite declares `0x0200`, on usage page `0x000c`/`0x0001` (consumer
+control).
 
-Établi le 13/09/2026 par l'arbre des périphériques Windows : son chemin est
-`HID#VID_1532&PID_0292&MI_00&Col03&Col01#9&…`, et son **parent** est
-`RZVIRTUAL\VID_1532&PID_0292&MI_00&Col03`, un nœud créé par le service
-`RzDev_0292` du pilote du fabricant — lui-même enfant de l'interface USB `MI_01`.
-Ce n'est donc pas une interface USB, d'où l'absence de numéro que `hidapi` puisse
-lire : c'est une collection HID **virtuelle**, qui n'existe que là où ce pilote est
-installé.
+Established on 13/09/2026 from the Windows device tree: its path is
+`HID#VID_1532&PID_0292&MI_00&Col03&Col01#9&…`, and its **parent** is
+`RZVIRTUAL\VID_1532&PID_0292&MI_00&Col03`, a node created by the
+`RzDev_0292` service of the manufacturer's driver — itself a child of USB interface `MI_01`.
+So it is not a USB interface, hence no number that `hidapi` could
+read: it is a **virtual** HID collection, which only exists where that driver is
+installed.
 
-candeo l'écarte par la règle qui vaut déjà pour toutes les autres : l'interface
-doit être celle du gabarit (`Layout::is_lighting_interface`).
+candeo rules it out with the rule that already applies to all the others: the interface
+must be the layout's (`Layout::is_lighting_interface`).
 
 ---
 
 ## 2. Transport
 
-Transfert **de contrôle** USB, `SET_REPORT` sur rapport de **fonctionnalité**.
+USB **control** transfer, `SET_REPORT` on a **feature** report.
 
-| Champ du setup | Valeur |
+| Setup field | Value |
 |---|---|
-| `bmRequestType` | `0x21` — hôte→périphérique, classe, destinataire interface |
+| `bmRequestType` | `0x21` — host→device, class, interface recipient |
 | `bRequest` | `0x09` — `SET_REPORT` |
 | `wValue` | `0x0300` — ReportID 0, ReportType Feature (3) |
 | `wIndex` | `0x0003` — interface 3 |
 | `wLength` | `90` |
 
-### Depuis l'API HID de Windows
+### From the Windows HID API
 
-`HidD_SetFeature` attend un tampon de **91 octets** : l'identifiant de rapport (`0x00`)
-puis les 90 octets du rapport. Vérifié — 90 seuls sont refusés.
+`HidD_SetFeature` expects a **91-byte** buffer: the report ID (`0x00`)
+then the 90 bytes of the report. Verified — 90 alone are refused.
 
 ```
 buf[0]      = 0x00        identifiant de rapport HID
 buf[1..91]  = rapport     les 90 octets décrits ci-dessous
 ```
 
-**Sens retour** : `GET_REPORT` — `bRequest 0x01`, `bmRequestType 0xa1`
-(périphérique→hôte), reste du setup identique. Relevé par l'API et non par
-capture : `hid_get_feature_report` (hidapi), `HidD_GetFeature` sous Windows,
-même tampon de 91 octets. Ce que la réponse contient est décrit au §8.
+**Return direction**: `GET_REPORT` — `bRequest 0x01`, `bmRequestType 0xa1`
+(device→host), rest of the setup identical. Surveyed through the API, not by
+capture: `hid_get_feature_report` (hidapi), `HidD_GetFeature` on Windows,
+same 91-byte buffer. What the response contains is described in §8.
 
 ---
 
-## 3. Structure du rapport (90 octets)
+## 3. Report structure (90 bytes)
 
 ```
  offset  taille  contenu
@@ -116,10 +116,10 @@ même tampon de 91 octets. Ce que la réponse contient est décrit au §8.
   89       1     réservé                     0x00
 ```
 
-### Somme de contrôle
+### Checksum
 
-**XOR des octets 2 à 87 inclus**, placé en octet 88. Vérifié sur l'intégralité des
-trames capturées, toutes commandes confondues, sans exception.
+**XOR of bytes 2 to 87 inclusive**, placed in byte 88. Verified on every
+captured frame, across all commands, without exception.
 
 ```rust
 let crc = report[2..88].iter().fold(0u8, |acc, b| acc ^ b);
@@ -127,132 +127,132 @@ let crc = report[2..88].iter().fold(0u8, |acc, b| acc ^ b);
 
 ---
 
-## 4. Jeu de commandes — classe `0x0f`
+## 4. Command set — class `0x0f`
 
-| Commande | Taille args | Rôle |
+| Command | Args size | Role |
 |---|---|---|
-| `0x02` | `0x06`–`0x09` | définir l'effet |
-| `0x03` | `0x47` | écrire une rangée de couleurs |
-| `0x04` | `0x03` | définir la luminosité |
-| `0x80` | `0x03` | **lire** un descripteur — contient `06 16`, soit nos 6×22 |
-| `0x81` | `0x03` | **lire** une énumération `00`…`09`, sens non établi |
-| `0x82` | `0x03` | **lire l'effet courant** — voir §8 |
-| `0x84` | `0x03` | **lire la luminosité** |
-| `0x86` | `0x03` | **lire** `00 01`, sens non établi |
+| `0x02` | `0x06`–`0x09` | set the effect |
+| `0x03` | `0x47` | write a row of colors |
+| `0x04` | `0x03` | set the brightness |
+| `0x80` | `0x03` | **read** a descriptor — contains `06 16`, i.e. our 6×22 |
+| `0x81` | `0x03` | **read** an enumeration `00`…`09`, meaning not established |
+| `0x82` | `0x03` | **read the current effect** — see §8 |
+| `0x84` | `0x03` | **read the brightness** |
+| `0x86` | `0x03` | **read** `00 01`, meaning not established |
 
-Les deux premiers octets d'arguments valent `00 00` dans toutes nos captures. Un
-pilote tiers les nomme *variable storage* et *identifiant de LED* ; nous ne
-l'avons **pas vérifié** — et les réponses en lecture commencent souvent par `05`,
-ce qui irait dans le sens d'un identifiant de LED « rétroéclairage ». À établir.
+The first two argument bytes are `00 00` in all our captures. A
+third-party driver names them *variable storage* and *LED identifier*; we have
+**not verified** this — and read responses often start with `05`,
+which would be consistent with a "backlight" LED identifier. To be established.
 
-### `0x0f` / `0x04` — luminosité
+### `0x0f` / `0x04` — brightness
 
 ```
 args = 00 00 <niveau>
 ```
 
-Observé systématiquement à `00 00 ff`. Émis avant et après chaque changement d'effet.
+Consistently observed at `00 00 ff`. Sent before and after every effect change.
 
-### `0x0f` / `0x02` — effet
+### `0x0f` / `0x02` — effect
 
 ```
 args = 00 00 <effet> <param1> <param2> 00
 ```
 
-| Effet | Valeur | Taille | Paramètres | Pris en charge |
+| Effect | Value | Size | Parameters | Supported |
 |---|---|---|---|---|
 | Off | `0x00` | `0x06` | — | ✅ |
-| **Statique** | `0x01` | `0x09` | `args[5]=01`, puis R G B | ✅ |
-| **Respiration** | `0x02` | `0x09` | `args[5]=01`, puis R G B | ✅ |
+| **Static** | `0x01` | `0x09` | `args[5]=01`, then R G B | ✅ |
+| **Breathing** | `0x02` | `0x09` | `args[5]=01`, then R G B | ✅ |
 | Spectrum Cycle | `0x03` | `0x06` | — | ✅ |
-| Wave | `0x04` | `0x06` | `param1` direction (`00`–`02`), `param2` vitesse (obs. `0x28`) | ✅ |
-| Réactif | `0x05` | `0x09` | — | ❌ **refusé** |
-| Étoilé | `0x07` | `0x06`+ | — | ❌ **refusé** |
+| Wave | `0x04` | `0x06` | `param1` direction (`00`–`02`), `param2` speed (obs. `0x28`) | ✅ |
+| Reactive | `0x05` | `0x09` | — | ❌ **refused** |
+| Starlight | `0x07` | `0x06`+ | — | ❌ **refused** |
 | **Direct / custom** | `0x08` | `0x06` | — | ✅ |
 
-**La colonne « pris en charge » est mesurée, pas déduite** : on pose l'effet, puis
-on le relit par `0x0f`/`0x82` (§8). Les identifiants `0x05` et `0x07`, présents sur
-d'autres appareils de la marque, laissent l'effet **inchangé** sur celui-ci —
-la Vague posée juste avant restait relue à l'identique, paramètres compris.
-`0x06` n'a pas été essayé.
+**The "supported" column is measured, not inferred**: the effect is set, then
+read back through `0x0f`/`0x82` (§8). Identifiers `0x05` and `0x07`, present on
+other devices from the brand, leave the effect **unchanged** on this one —
+the Wave set just before was still read back identically, parameters included.
+`0x06` has not been tried.
 
-> ⚠️ **Et l'écriture de ces deux effets refusés est pourtant « acceptée » : état
-> `0x02`.** C'est la démonstration en direct du danger décrit au §8 — l'appareil
-> valide le couple classe/commande, **pas la valeur d'un argument**. Un identifiant
-> d'effet est un argument. Aucun octet d'état ne remplacera donc une relecture.
+> ⚠️ **And yet writing these two refused effects is "accepted": status
+> `0x02`.** This is the live demonstration of the danger described in §8 — the device
+> validates the class/command pair, **not the value of an argument**. An effect
+> identifier is an argument. So no status byte will ever replace a read-back.
 
-> **Correction d'une lecture initiale.** La septième trame de chaque cycle de mise à
-> jour n'est pas une commande de validation : c'est `0x02` avec effet `0x08`, donc le
-> **passage en mode custom**, émis après l'envoi des rangées.
+> **Correction of an initial reading.** The seventh frame of each update
+> cycle is not a commit command: it is `0x02` with effect `0x08`, hence the
+> **switch to custom mode**, sent after the rows.
 
-> **Résolu.** `Static` et `Breathing` n'avaient produit aucune trame pendant la
-> capture, et un premier balayage les avait manqués — il les posait **sans
-> couleur**, donc en noir, ce qui ne se distingue pas d'un effet inexistant à
-> l'œil. Avec `args[5]=01` suivi d'un triplet RGB, les deux répondent et se
-> relisent.
+> **Resolved.** `Static` and `Breathing` had produced no frame during the
+> capture, and a first sweep had missed them — it set them **with no
+> color**, hence in black, which cannot be told apart from a nonexistent effect
+> by eye. With `args[5]=01` followed by an RGB triplet, both respond and
+> read back.
 
-### `0x0f` / `0x03` — écriture d'une rangée
+### `0x0f` / `0x03` — writing a row
 
 ```
 args = 00 00 <rangée> <col_début> <col_fin>   puis (col_fin - col_début + 1) × (R, G, B)
 ```
 
-`0x47` = 71 = **5 octets d'arguments + 66 de couleur** pour une rangée complète (22 × 3).
+`0x47` = 71 = **5 argument bytes + 66 color bytes** for a full row (22 × 3).
 
-**L'écriture partielle fonctionne** — vérifié sur le matériel : écrire les colonnes 5
-à 10 de la rangée 2 n'affecte que ces six touches. Utile pour les effets localisés,
-qui évitent ainsi de réémettre toute la matrice.
+**Partial writes work** — verified on hardware: writing columns 5
+to 10 of row 2 affects only those six keys. Useful for localized effects,
+which thereby avoid re-sending the whole matrix.
 
-#### Ordre des composantes : **RGB**
+#### Component order: **RGB**
 
-| Couleur envoyée | Octets observés |
+| Color sent | Bytes observed |
 |---|---|
-| Rouge pur | `ff 00 00` |
-| Vert pur | `00 ff 00` |
-| Bleu pur | `00 00 ff` |
+| Pure red | `ff 00 00` |
+| Pure green | `00 ff 00` |
+| Pure blue | `00 00 ff` |
 
-> À ne pas confondre avec le **SDK Chroma**, dont l'API REST utilise `0x00BBGGRR`.
-> Supposer l'un depuis l'autre est une erreur.
+> Not to be confused with the **Chroma SDK**, whose REST API uses `0x00BBGGRR`.
+> Assuming one from the other is a mistake.
 
 ---
 
-## 5. Séquence d'une mise à jour complète
+## 5. Sequence of a full update
 
-| # | Commande | Contenu |
+| # | Command | Content |
 |---|---|---|
-| 1 → 6 | `0f` / `03` | rangées 0 à 5, colonnes 0→21 |
-| 7 | `0f` / `02` | effet `0x08` — passage en mode custom |
+| 1 → 6 | `0f` / `03` | rows 0 to 5, columns 0→21 |
+| 7 | `0f` / `02` | effect `0x08` — switch to custom mode |
 
-Un `0f`/`04` (luminosité) encadre généralement la séquence.
+A `0f`/`04` (brightness) usually brackets the sequence.
 
-### Ce que cette séquence coûte — mesuré le 12/09/2026
+### What this sequence costs — measured on 12/09/2026
 
-**13,1 ms en moyenne, 14,4 ms au pire**, sur 120 mises à jour enchaînées au plus
-vite, **sans une seule écriture refusée** et l'appareil toujours répondant après
-la rafale. Soit un plafond d'environ **76 images par seconde**.
+**13.1 ms on average, 14.4 ms at worst**, over 120 updates chained as fast
+as possible, **without a single refused write** and with the device still responding after
+the burst. That is a ceiling of about **76 frames per second**.
 
-C'est le **goulot d'étranglement de toute la chaîne**, et il est sur le bus, pas
-dans le calcul :
+It is the **bottleneck of the whole pipeline**, and it is on the bus, not
+in the computation:
 
-| Cadence | Période | Part prise par l'écriture | Reste pour l'effet |
+| Frame rate | Period | Share taken by the write | Left for the effect |
 |---|---|---|---|
-| 60 img/s | 16,7 ms | **78 %** | ~3,6 ms |
-| 30 img/s | 33,3 ms | **39 %** | ~20 ms |
+| 60 fps | 16.7 ms | **78%** | ~3.6 ms |
+| 30 fps | 33.3 ms | **39%** | ~20 ms |
 
-> ⚠️ **60 img/s ne tenait qu'en apparence.** L'écriture seule mangeait plus des
-> trois quarts de la période, laissant à l'effet moins que le budget de calcul
-> qu'on lui accorde — donc un effet **parfaitement dans les clous** faisait déjà
-> rater l'échéance, et la boucle retombait en silence à une cadence qu'elle
-> n'annonçait nulle part. La cadence du moteur a été ramenée à **30**.
+> ⚠️ **60 fps only held in appearance.** The write alone ate more than
+> three quarters of the period, leaving the effect less than the computation budget
+> granted to it — so an effect **well within its limits** already caused the
+> deadline to be missed, and the loop silently dropped to a frame rate it
+> announced nowhere. The engine's frame rate was brought back down to **30**.
 
-Deux réserves connues, si la cadence devait remonter :
+Two known reservations, should the frame rate need to go back up:
 
-- **on réécrit les 6 rangées à chaque image**, sans regarder ce qui a changé,
-  alors que l'écriture partielle est vérifiée sur le matériel (§4) ;
-- **la 7e trame est réémise à chaque image** alors qu'on est déjà en mode
-  custom — à elle seule ~1,9 ms sur les 13.
+- **all 6 rows are rewritten on every frame**, without looking at what changed,
+  even though partial writes are verified on hardware (§4);
+- **the 7th report frame is re-sent on every frame** even though the device is already in
+  custom mode — ~1.9 ms of the 13 on its own.
 
-### Trame réelle — rangée 0 entièrement rouge
+### Real frame — row 0 entirely red
 
 ```
 00 9f 00 00 00 47 0f 03 00 00 00 00 15
@@ -264,26 +264,26 @@ ff 00 00  ff 00 00  ff 00 00  ff 00 00
 5e 00
 ```
 
-`0x5e` = XOR des octets 2 à 87. C'est la valeur attendue par le test
-`checksum_matches_captured_frame` de `candeo-protocol`.
+`0x5e` = XOR of bytes 2 to 87. It is the value expected by the
+`checksum_matches_captured_frame` test of `candeo-protocol`.
 
 ---
 
-## 6. Matrice — 132 et 106 ne sont pas la même chose
+## 6. Matrix — 132 and 106 are not the same thing
 
-**6 rangées × 22 colonnes = 132 cases**, dont **106 portent une LED de touche**.
+**6 rows × 22 columns = 132 cells**, of which **106 carry a key LED**.
 
-| Chiffre | Signification |
+| Figure | Meaning |
 |---|---|
-| **132** | cases de la matrice, et ce que la zone déclare. **Taille d'une image.** |
-| **106** | cases portant une touche physique |
+| **132** | matrix cells, and what the zone declares. **Size of a frame.** |
+| **106** | cells carrying a physical key |
 
-> **Le piège.** Une image doit couvrir les **132** positions. En envoyer moins laisse
-> les dernières rangées figées sur leur valeur précédente — symptôme observé pendant
-> le relevé : la rangée du bas restée blanche pendant que le reste changeait de couleur.
+> **The trap.** A frame must cover all **132** positions. Sending fewer leaves
+> the last rows frozen at their previous value — symptom observed during
+> the survey: the bottom row stayed white while the rest changed color.
 
-> Un relevé antérieur annonçait 107 positions occupées : artefact de comptage, la
-> valeur sentinelle `0xFFFFFFFF` ayant été comptée comme un index distinct.
+> An earlier survey announced 107 occupied positions: a counting artifact, the
+> sentinel value `0xFFFFFFFF` having been counted as a distinct index.
 
 ```
 rangée 0 :   0  --   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  --  --  --  --  --   (16)
@@ -294,168 +294,168 @@ rangée 4 :  88  89  90  91  92  93  94  95  96  97  98  99  -- 101  -- 103  -- 
 rangée 5 : 110 111 112  --  --  -- 116  --  --  -- 120 121 122 123 124 125 126  -- 128 129  --  --   (13)
 ```
 
-### Correspondance index → touche
+### Index → key mapping
 
-Reconstituée en croisant la matrice avec la liste ordonnée des noms que le périphérique
-déclare. Les comptes par rangée tombent juste : 16 + 21 + 21 + 17 + 18 + 13 = **106**.
+Reconstructed by cross-referencing the matrix with the ordered list of names the device
+declares. The per-row counts add up exactly: 16 + 21 + 21 + 17 + 18 + 13 = **106**.
 
-| Rangée | Touches |
+| Row | Keys |
 |---|---|
-| 0 | Échap, F1→F12, ImprÉcran, ArrêtDéfil, Pause |
-| 1 | rangée chiffres, Retour arrière, Inser/Origine/PgPréc, VerrNum, `/ * −` |
-| 2 | Tab, rangée haute, Suppr/Fin/PgSuiv, pavé 7 8 9 + |
-| 3 | VerrMaj, rangée repos, Entrée, pavé 4 5 6 |
-| 4 | Maj gauche, touche ISO, rangée basse, Maj droite, ↑, pavé 1 2 3, Entrée pavé |
-| 5 | Ctrl/Win/Alt, Espace, AltGr/Fn/Menu/Ctrl, ← ↓ →, pavé 0 . |
+| 0 | Esc, F1→F12, PrtSc, ScrLk, Pause |
+| 1 | number row, Backspace, Ins/Home/PgUp, NumLock, `/ * −` |
+| 2 | Tab, top row, Del/End/PgDn, numpad 7 8 9 + |
+| 3 | CapsLock, home row, Enter, numpad 4 5 6 |
+| 4 | Left Shift, ISO key, bottom row, Right Shift, ↑, numpad 1 2 3, numpad Enter |
+| 5 | Ctrl/Win/Alt, Space, AltGr/Fn/Menu/Ctrl, ← ↓ →, numpad 0 . |
 
-> **L'Entrée ISO porte deux LED** : index **57** (rangée 2) et **79** (rangée 3). Un
-> dégradé vertical y est visible — c'est le matériel, pas un défaut de rendu.
+> **The ISO Enter carries two LEDs**: index **57** (row 2) and **79** (row 3). A
+> vertical gradient is visible there — that is the hardware, not a rendering defect.
 >
-> **La barre d'espace n'en porte qu'une** : index **116**, en `(5, 6)`, malgré ses
-> 6,25 unités de large.
+> **The space bar carries only one**: index **116**, at `(5, 6)`, despite being
+> 6.25 units wide.
 
-### Géométrie physique
+### Physical geometry
 
-**Le périphérique ne la déclare pas.** Seule la grille logique 6 × 22 est disponible.
-Le dessin réaliste utilisé par l'interface est écrit à la main depuis la disposition
-ISO pleine taille standard — voir `docs/design/studio.md`.
+**The device does not declare it.** Only the 6 × 22 logical grid is available.
+The realistic drawing used by the interface is written by hand from the standard
+full-size ISO layout — see `docs/design/studio.md`.
 
-L'expansion index par index de la table ci-dessus, et le rectangle de chaque touche,
-vivent dans `crates/candeo-device/src/layout.rs`. **Les deux n'ont pas le même statut** :
-les noms sont un relevé, la géométrie une convention. Seuls les premiers se vérifient
-contre l'appareil.
+The index-by-index expansion of the table above, and the rectangle of each key,
+live in `crates/candeo-device/src/layout.rs`. **The two do not have the same status**:
+the names are a survey, the geometry a convention. Only the former can be verified
+against the device.
 
 ---
 
-## 7. Modes exposés
+## 7. Exposed modes
 
-| Index SDK | Nom | Effet protocole | Animé par |
+| SDK index | Name | Protocol effect | Animated by |
 |---|---|---|---|
-| 0 | `Direct` | `0x08` | **l'hôte** |
+| 0 | `Direct` | `0x08` | **the host** |
 | 1 | `Off` | `0x00` | — |
 | 2 | `Static` | `0x01` + RGB | firmware |
 | 3 | `Breathing` | `0x02` + RGB | firmware |
 | 4 | `Spectrum Cycle` | `0x03` | firmware |
-| 5 | `Wave` | `0x04` + direction + vitesse | firmware |
+| 5 | `Wave` | `0x04` + direction + speed | firmware |
 
-Les six modes du SDK correspondent donc exactement aux six identifiants que
-l'appareil accepte — ni plus (`0x05` et `0x07` sont refusés), ni moins. La
-concordance vaut confirmation croisée des deux relevés.
+So the six SDK modes correspond exactly to the six identifiers that
+the device accepts — no more (`0x05` and `0x07` are refused), no fewer. The
+match amounts to a cross-confirmation of the two surveys.
 
-Les effets firmware **survivent à l'extinction du logiciel hôte** et ne coûtent aucun
-temps processeur. Le mode `Direct` impose une poussée continue d'images — c'est le
-coût d'un moteur d'effets logiciel, et la raison pour laquelle un effet utilisateur
-doit pouvoir tourner sans interface.
+Firmware effects **survive the host software shutting down** and cost no
+CPU time. `Direct` mode requires a continuous push of frames — that is the
+cost of a software effect engine, and the reason why a user effect
+must be able to run without a UI.
 
 ---
 
-## 8. Lire l'appareil — `GET_REPORT` et la classe `0x00`
+## 8. Reading the device — `GET_REPORT` and class `0x00`
 
-**Le périphérique répond.** C'est ce qui manquait pour distinguer une écriture
-*acceptée* d'une écriture *comprise* — la seule chose qui sépare aujourd'hui un
-clavier qui obéit d'un clavier qui jette nos trames en silence.
+**The device responds.** This is what was missing to tell an *accepted* write
+from an *understood* write — the only thing that today separates a
+keyboard that obeys from a keyboard that silently discards our frames.
 
-### Transport de lecture
+### Read transport
 
-`HidD_GetFeature` sous Windows, `hid_get_feature_report` via hidapi. **Même
-interface MI_03, même tampon de 91 octets** que l'écriture. On écrit la commande,
-puis on relit : la réponse réutilise la structure du §3, avec deux différences
-utiles — l'octet 0 porte un **état**, et les octets 6 et 7 **renvoient en écho**
-la classe et la commande, ce qui permet de vérifier qu'on lit bien la réponse
-qu'on attend et non la précédente.
+`HidD_GetFeature` on Windows, `hid_get_feature_report` via hidapi. **Same
+MI_03 interface, same 91-byte buffer** as writing. The command is written,
+then read back: the response reuses the structure from §3, with two useful
+differences — byte 0 carries a **status**, and bytes 6 and 7 **echo back**
+the class and the command, which makes it possible to check that we are indeed reading the response
+we expect and not the previous one.
 
-### L'octet d'état (offset 0)
+### The status byte (offset 0)
 
-| Valeur | Sens |
+| Value | Meaning |
 |---|---|
-| `0x00` | aucune |
-| `0x01` | occupé |
-| `0x02` | **compris** |
-| `0x03` | échec |
-| `0x04` | expiré |
-| `0x05` | **non pris en charge** |
+| `0x00` | none |
+| `0x01` | busy |
+| `0x02` | **understood** |
+| `0x03` | failure |
+| `0x04` | timed out |
+| `0x05` | **not supported** |
 
-**Vérifié qu'il discrimine réellement**, plutôt que supposé : une classe
-inexistante (`0xee`) et une commande inexistante sur une classe valide
-(`0x0f`/`0xee`) rendent toutes deux `0x05`, là où une commande valide rend
+**Verified that it actually discriminates**, rather than assumed: a nonexistent
+class (`0xee`) and a nonexistent command on a valid class
+(`0x0f`/`0xee`) both return `0x05`, whereas a valid command returns
 `0x02`.
 
-⚠️ **Limite mesurée** : une taille d'arguments aberrante sur une commande valide
-rend quand même `0x02`. L'appareil valide le **couple classe/commande**, pas la
-cohérence de ses arguments. Un contrôle de compatibilité ne peut donc affirmer
-que « cette commande existe », jamais « mes arguments sont bons ».
+⚠️ **Measured limit**: an aberrant argument size on a valid command
+still returns `0x02`. The device validates the **class/command pair**, not the
+consistency of its arguments. A compatibility check can therefore only assert
+"this command exists", never "my arguments are right".
 
-### Classe `0x00` — informations
+### Class `0x00` — information
 
-Relevé le 12/09/2026 sur notre exemplaire, micrologiciel v1.5.
+Surveyed on 12/09/2026 on our unit, firmware v1.5.
 
-| Commande | Réponse | Sens | Établi par |
+| Command | Response | Meaning | Established by |
 |---|---|---|---|
-| `0x81` | `01 05` | **version du micrologiciel — 1.05** | concordance avec la version déclarée par ailleurs |
-| `0x82` | *(masqué)* | **numéro de série** (15 car. ASCII) | format, et stabilité entre lectures |
-| `0x83` | `01 25` | **inconnu** | inconnu d'OpenRazer également |
-| `0x84` | `00 00` | **mode de l'appareil** — `0x00` normal, `0x03` pilote | voir ci-dessous |
-| `0x85` | `01 00` | **fréquence d'interrogation** — `01`=1000 Hz, `02`=500, `08`=125 | |
-| `0x86` | `04 80` | **disposition nationale** — `04` = `fr_FR` | vérifié : notre `layout.rs` est bien AZERTY |
-| `0x87` | `01 05` | **inconnu** | inconnu d'OpenRazer, « valeurs de retour variables » |
-| `0x80`, `0x88`–`0x8f` | — | `0x05` non pris en charge | |
+| `0x81` | `01 05` | **firmware version — 1.05** | match with the version declared elsewhere |
+| `0x82` | *(masked)* | **serial number** (15 ASCII chars) | format, and stability across reads |
+| `0x83` | `01 25` | **unknown** | unknown to OpenRazer as well |
+| `0x84` | `00 00` | **device mode** — `0x00` normal, `0x03` driver | see below |
+| `0x85` | `01 00` | **polling rate** — `01`=1000 Hz, `02`=500, `08`=125 | |
+| `0x86` | `04 80` | **locale layout** — `04` = `fr_FR` | verified: our `layout.rs` is indeed AZERTY |
+| `0x87` | `01 05` | **unknown** | unknown to OpenRazer, "variable return values" |
+| `0x80`, `0x88`–`0x8f` | — | `0x05` not supported | |
 
-La valeur rendue par `0x82` est exactement celle du §1 — c'est **la** source du
-numéro de série, et la seule.
+The value returned by `0x82` is exactly the one in §1 — it is **the** source of the
+serial number, and the only one.
 
-⚠️ **Le descripteur USB ne porte aucun numéro de série** (`serial_number()` est
-vide sur les quatre interfaces) — seule cette commande en donne un. Et
-`release_number` vaut `0x0200` sur tout le composite alors que le micrologiciel
-est en v1.5 : **le `bcdDevice` est une révision matérielle, pas une version de
-micrologiciel.** Ne pas les confondre.
+⚠️ **The USB descriptor carries no serial number** (`serial_number()` is
+empty on all four interfaces) — only this command provides one. And
+`release_number` is `0x0200` across the whole composite while the firmware
+is at v1.5: **the `bcdDevice` is a hardware revision, not a firmware
+version.** Do not confuse them.
 
-### Classe `0x0f` — relire l'éclairage
+### Class `0x0f` — reading the lighting back
 
-C'est la partie la plus utile du sens retour : **elle permet de vérifier un effet
-sans dépendre de l'œil**, ce qui manquait cruellement au premier balayage des
-identifiants.
+This is the most useful part of the return direction: **it makes it possible to verify an effect
+without relying on the eye**, which the first sweep of the
+identifiers sorely lacked.
 
-| Commande | Réponse observée | Sens |
+| Command | Observed response | Meaning |
 |---|---|---|
-| `0x82` | `00 00 <effet> <p1> <p2>` | **effet courant**, paramètres compris |
-| `0x84` | `00 00 ff` | **luminosité courante** |
-| `0x80` | `05 19 03 06 16` | descripteur — `06 16` = **6 rangées × 22 colonnes**, notre matrice |
-| `0x81` | `05 00 01 02 03 04 05 06 07 08 09` | énumération de 10 valeurs, **sens non établi** |
-| `0x86` | `00 01` | non établi |
+| `0x82` | `00 00 <effet> <p1> <p2>` | **current effect**, parameters included |
+| `0x84` | `00 00 ff` | **current brightness** |
+| `0x80` | `05 19 03 06 16` | descriptor — `06 16` = **6 rows × 22 columns**, our matrix |
+| `0x81` | `05 00 01 02 03 04 05 06 07 08 09` | enumeration of 10 values, **meaning not established** |
+| `0x86` | `00 01` | not established |
 
-⚠️ **`0x81` n'est PAS la liste des effets pris en charge**, même si elle en a
-l'air : elle contient `05` et `07`, que l'appareil refuse en pratique. C'est
-exactement le genre de coïncidence qu'il faut tester au lieu de conclure.
+⚠️ **`0x81` is NOT the list of supported effects**, even though it looks
+like it: it contains `05` and `07`, which the device refuses in practice. This is
+exactly the kind of coincidence that must be tested rather than concluded from.
 
-**Méthode de vérification d'un effet** : poser l'effet, attendre ~150 ms, relire
-par `0x82`. Si l'identifiant relu diffère de celui posé, l'appareil a **ignoré**
-la commande — quand bien même l'écriture aurait rendu `0x02`.
+**Effect verification method**: set the effect, wait ~150 ms, read it back
+via `0x82`. If the identifier read back differs from the one set, the device **ignored**
+the command — even if the write returned `0x02`.
 
-### Le mode de l'appareil — et pourquoi candeo n'y touche pas
+### The device mode — and why candeo leaves it alone
 
-`0x00`/`0x84` rend `0x00`, soit **mode normal**, et notre éclairage custom
-fonctionne parfaitement ainsi. OpenRazer, lui, bascule les appareils en **mode
-pilote** (`0x03`, via `0x00`/`0x04`) à l'initialisation de son démon.
+`0x00`/`0x84` returns `0x00`, i.e. **normal mode**, and our custom lighting
+works perfectly that way. OpenRazer, for its part, switches devices to **driver
+mode** (`0x03`, via `0x00`/`0x04`) when its daemon initializes.
 
-La raison est documentée chez eux, et elle explique pourquoi **nous ne devons pas
-l'imiter** : en mode pilote, le micrologiciel **cesse de traiter certaines
-touches lui-même** et se contente d'émettre des évènements HID que l'hôte est
-censé reprendre. Si personne n'écoute, ces touches ne font plus rien — cas
-constaté sur un Basilisk V3, dont le cycle DPI et le verrou de molette sont
-devenus inertes, corrigé en repassant en mode normal.
+The reason is documented on their side, and it explains why **we must not
+imitate it**: in driver mode, the firmware **stops handling some
+keys itself** and merely emits HID events that the host is
+expected to pick up. If nobody is listening, those keys no longer do anything — a case
+observed on a Basilisk V3, whose DPI cycle and scroll wheel lock
+became inert, fixed by switching back to normal mode.
 
-OpenRazer est un **pilote complet** : il gère les touches macro, le DPI, les
-profils, donc il a besoin que le micrologiciel lui cède la main. **candeo ne
-pilote que l'éclairage.** Basculer en mode pilote ne nous apporterait rien et
-casserait des touches que l'appareil gère très bien seul.
+OpenRazer is a **full driver**: it handles macro keys, DPI,
+profiles, so it needs the firmware to hand over control. **candeo only
+controls the lighting.** Switching to driver mode would bring us nothing and
+would break keys that the device handles very well on its own.
 
-> **Décision : ne jamais écrire `0x00`/`0x04`.** À porter comme mise en garde
-> explicite dans le SDK d'appareils (#34) — c'est typiquement l'étape qu'un
-> contributeur recopierait d'un pilote existant sans voir ce qu'elle coûte.
+> **Decision: never write `0x00`/`0x04`.** To be carried as an explicit
+> warning in the device SDK (#34) — this is typically the step a
+> contributor would copy from an existing driver without seeing what it costs.
 
 ---
 
-## 9. Reproduire le relevé
+## 9. Reproducing the survey
 
 ```powershell
 # 1. Repérer le hub portant le clavier
@@ -473,67 +473,67 @@ tshark -r capture.pcap -Y 'usb.device_address == 9 && usb.transfer_type == 0x02 
 tshark -r capture.pcap -Y 'frame.number == 113' -V | Select-String 'Data Fragment:'
 ```
 
-**Le point de méthode qui débloque tout** : envoyer des **couleurs pures et uniformes**,
-bien séparées dans le temps. `ff 00 00` répété 22 fois saute aux yeux dans un vidage
-hexadécimal, et la position des octets donne l'ordre des composantes sans le déduire.
+**The methodological point that unlocks everything**: send **pure, uniform colors**,
+well separated in time. `ff 00 00` repeated 22 times jumps out in a
+hex dump, and the byte positions give the component order without inferring it.
 
-### Pièges d'outillage
+### Tooling pitfalls
 
-- USBPcap n'attache son filtre aux hubs qu'**après redémarrage**.
-- `USBPcapCMD --extcap-interfaces` peut ne rien renvoyer, même en élévation. Passer
-  directement par `tshark -i \\.\USBPcapN`, qui fonctionne.
-- Les numéros de bus USB changent d'un démarrage à l'autre.
-
----
-
-## 10. Reste à établir
-
-- [x] **Contenu des réponses du périphérique (`GET_REPORT`)** — §8
-- [x] **Lire la version du micrologiciel** — `0x00`/`0x81`, §8
-- [x] **Obtenir un numéro de série** — `0x00`/`0x82`, le descripteur USB n'en porte aucun
-- [x] **Commandes exactes pour `Static` et `Breathing`** — `0x01` et `0x02`, taille `0x09`, `args[5]=01` puis RGB, §4
-- [x] **Relire l'effet courant** — `0x0f`/`0x82`, ce qui permet de vérifier sans l'œil
-- [x] **Quels identifiants d'effet l'appareil accepte** — les six du SDK ; `0x05` et `0x07` sont refusés
-- [ ] Signification des arguments 0 et 1 (offsets 8 et 9), constants à `0x00` — un pilote tiers les nomme *variable storage* et *identifiant de LED*, non vérifié
-- [ ] L'identifiant de transaction (`0x9f`) est-il vérifié par l'appareil ?
-- [ ] Plage réelle de la vitesse de `Wave` ; la direction est bornée à `00`–`02`
-- [ ] Identifiant d'effet `0x06` : jamais essayé
-- [x] **Débit maximal accepté avant décrochage** — voir ci-dessous
-- [ ] L'appareil accepte-t-il un rapport plus court que 90 octets ?
-- [ ] Sens de `0x0f`/`0x81` (énumération `00`…`09`) et `0x0f`/`0x86` (`00 01`)
-- [ ] Les trois premiers octets de `0x0f`/`0x80` (`05 19 03`), dont les deux suivants donnent bien 6×22
-- [ ] Sens de `0x00`/`0x83` (`01 25`) et `0x00`/`0x87` (`01 05`) — inconnus d'OpenRazer aussi
-- [ ] Second octet de la disposition, `0x86` → `04 80` : que vaut `0x80` ?
-- [x] **Une entrée HID fantôme `interface -1`** — collection virtuelle du pilote du fabricant (`RZVIRTUAL`), pas le clavier ; écartée par le filtre d'interface, §1
-- [ ] La relecture de `Statique` et `Respiration` par `0x0f`/`0x82` rend-elle la couleur, et à quelle position ? Tant que non établi, l'inspection à l'ouverture ne les réécrit pas
-- [ ] **Réécrire à l'identique l'effet et la luminosité courants est-il invisible ?** C'est l'hypothèse qui autorise l'inspection à émettre à chaque ouverture — à confirmer par `sonde_inspection_a_l_ouverture`, application fermée
+- USBPcap only attaches its filter to hubs **after a reboot**.
+- `USBPcapCMD --extcap-interfaces` may return nothing, even elevated. Go
+  directly through `tshark -i \\.\USBPcapN`, which works.
+- USB bus numbers change from one boot to the next.
 
 ---
 
-## 11. Journal
+## 10. Still to establish
 
-| Date | Événement |
+- [x] **Content of the device's responses (`GET_REPORT`)** — §8
+- [x] **Read the firmware version** — `0x00`/`0x81`, §8
+- [x] **Obtain a serial number** — `0x00`/`0x82`, the USB descriptor carries none
+- [x] **Exact commands for `Static` and `Breathing`** — `0x01` and `0x02`, size `0x09`, `args[5]=01` then RGB, §4
+- [x] **Read back the current effect** — `0x0f`/`0x82`, which makes it possible to verify without the eye
+- [x] **Which effect identifiers the device accepts** — the six from the SDK; `0x05` and `0x07` are refused
+- [ ] Meaning of arguments 0 and 1 (offsets 8 and 9), constant at `0x00` — a third-party driver names them *variable storage* and *LED identifier*, unverified
+- [ ] Is the transaction identifier (`0x9f`) checked by the device?
+- [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
+- [ ] Effect identifier `0x06`: never tried
+- [x] **Maximum throughput accepted before the device drops out** — see below
+- [ ] Does the device accept a report shorter than 90 bytes?
+- [ ] Meaning of `0x0f`/`0x81` (enumeration `00`…`09`) and `0x0f`/`0x86` (`00 01`)
+- [ ] The first three bytes of `0x0f`/`0x80` (`05 19 03`), whose next two do give 6×22
+- [ ] Meaning of `0x00`/`0x83` (`01 25`) and `0x00`/`0x87` (`01 05`) — unknown to OpenRazer too
+- [ ] Second byte of the locale layout, `0x86` → `04 80`: what does `0x80` mean?
+- [x] **A phantom HID entry `interface -1`** — virtual collection of the manufacturer's driver (`RZVIRTUAL`), not the keyboard; ruled out by the interface filter, §1
+- [ ] Does reading back `Statique` and `Respiration` via `0x0f`/`0x82` return the color, and at which position? Until established, the inspection on open does not rewrite them
+- [ ] **Is rewriting the current effect and brightness identically invisible?** That is the assumption that allows the inspection to send on every open — to be confirmed by `sonde_inspection_a_l_ouverture`, with the application closed
+
+---
+
+## 11. Log
+
+| Date | Event |
 |---|---|
-| 2026-09-11 | Identification matérielle, relevé des 6 modes via un SDK tiers |
-| 2026-09-11 | Installation de Wireshark 4.6.8 et USBPcap 1.5.4.0 |
-| 2026-09-12 | **Première capture.** Transport, structure, ordre RGB, indexation des rangées, somme de contrôle |
-| 2026-09-12 | Matrice 6×22 = 132 confirmée ; correction d'un envoi à 106 laissant la rangée 5 figée |
-| 2026-09-12 | **Jeu de commandes complet** : `0x02` effet, `0x03` rangée, `0x04` luminosité |
-| 2026-09-12 | **Validation en écriture directe** via `HidD_SetFeature`, sans logiciel tiers. Tampon de 91 octets et écriture partielle de rangée confirmés |
-| 2026-09-12 | Clarification 132 / 106 et correspondance index → touche |
-| 2026-09-12 | **Le périphérique répond.** `GET_REPORT` relevé : octet d'état, écho classe/commande, et vérification qu'un `0x05` distingue bien une commande inconnue d'une commande valide |
-| 2026-09-12 | **Classe `0x00` relevée** : micrologiciel (`0x81`), numéro de série (`0x82`), mode (`0x84`), fréquence d'interrogation (`0x85`), disposition nationale (`0x86`). `0x83` et `0x87` restent inconnus |
-| 2026-09-12 | Établi que `release_number` (`bcdDevice`, `0x0200`) **n'est pas** la version du micrologiciel (v1.5), et que le descripteur USB ne porte aucun numéro de série |
-| 2026-09-12 | **Décision : ne jamais basculer en mode pilote.** Il ferait cesser au micrologiciel le traitement de certaines touches, sans contrepartie pour un contrôleur d'éclairage |
-| 2026-09-12 | **`0x0f`/`0x82` relit l'effet courant** — vérification d'un effet sans dépendre de l'œil. `Static` (`0x01`) et `Breathing` (`0x02`) enfin établis : ils exigent une couleur, et le premier balayage les posait en noir |
-| 2026-09-12 | **Les identifiants `0x05` et `0x07` sont refusés** par cet appareil, alors que l'écriture rend `0x02`. Démonstration en direct qu'un octet d'état ne valide pas les arguments |
-| 2026-09-12 | **Débit mesuré** : 13,1 ms par mise à jour complète, plafond ~76 img/s, aucune écriture refusée. Le goulot est le bus, pas le calcul — la cadence du moteur passe de 60 à **30 img/s** |
-| 2026-09-13 | **L'entrée `interface -1` élucidée** par l'arbre des périphériques : collection HID virtuelle sous `RZVIRTUAL`, service `RzDev_0292` du pilote du fabricant — pas le clavier |
+| 2026-09-11 | Hardware identification, survey of the 6 modes via a third-party SDK |
+| 2026-09-11 | Installation of Wireshark 4.6.8 and USBPcap 1.5.4.0 |
+| 2026-09-12 | **First capture.** Transport, structure, RGB order, row indexing, checksum |
+| 2026-09-12 | 6×22 = 132 matrix confirmed; fix for a 106-position send that left row 5 frozen |
+| 2026-09-12 | **Full command set**: `0x02` effect, `0x03` row, `0x04` brightness |
+| 2026-09-12 | **Validation by direct write** via `HidD_SetFeature`, with no third-party software. 91-byte buffer and partial row write confirmed |
+| 2026-09-12 | Clarification of 132 / 106 and index → key mapping |
+| 2026-09-12 | **The device responds.** `GET_REPORT` surveyed: status byte, class/command echo, and verification that a `0x05` does distinguish an unknown command from a valid one |
+| 2026-09-12 | **Class `0x00` surveyed**: firmware (`0x81`), serial number (`0x82`), mode (`0x84`), polling rate (`0x85`), locale layout (`0x86`). `0x83` and `0x87` remain unknown |
+| 2026-09-12 | Established that `release_number` (`bcdDevice`, `0x0200`) **is not** the firmware version (v1.5), and that the USB descriptor carries no serial number |
+| 2026-09-12 | **Decision: never switch to driver mode.** It would make the firmware stop handling some keys, with nothing in return for a lighting controller |
+| 2026-09-12 | **`0x0f`/`0x82` reads back the current effect** — verifying an effect without relying on the eye. `Static` (`0x01`) and `Breathing` (`0x02`) finally established: they require a color, and the first sweep set them in black |
+| 2026-09-12 | **Identifiers `0x05` and `0x07` are refused** by this device, even though the write returns `0x02`. Live demonstration that a status byte does not validate the arguments |
+| 2026-09-12 | **Throughput measured**: 13.1 ms per full update, ceiling ~76 fps, no refused write. The bottleneck is the bus, not the computation — the engine frame rate goes from 60 to **30 fps** |
+| 2026-09-13 | **The `interface -1` entry explained** by the device tree: virtual HID collection under `RZVIRTUAL`, `RzDev_0292` service of the manufacturer's driver — not the keyboard |
 
 ## 12. Captures
 
-| Fichier | Contenu |
+| File | Content |
 |---|---|
-| `deathstalker-*.pcap` | référence : rouge / vert / bleu / noir / blanc |
-| `fix132-*.pcap` | validation de l'envoi complet à 132 positions |
-| `modes2-*.pcap` | bascules d'effet : Spectrum, Wave, Off, Direct |
+| `deathstalker-*.pcap` | reference: red / green / blue / black / white |
+| `fix132-*.pcap` | validation of the full 132-position send |
+| `modes2-*.pcap` | effect switches: Spectrum, Wave, Off, Direct |

@@ -1,18 +1,18 @@
-# candeo — application de bureau
+# candeo — desktop application
 
-La fenêtre et son hôte Tauri. Le reste de l'espace de travail vit ailleurs :
-`crates/candeo-protocol` construit les rapports HID, `crates/candeo-device` les
-envoie, `packages/effects-api` décrit l'API offerte à l'auteur d'effet.
+The window and its Tauri host. The rest of the workspace lives elsewhere:
+`crates/candeo-protocol` builds the HID reports, `crates/candeo-device` sends
+them, `packages/effects-api` describes the API offered to the effect author.
 
 ```
 src/         la fenêtre — Vue 3, TypeScript, l'éditeur Monaco
 src-tauri/   l'hôte Rust — commandes, moteur d'effets, journal, stockage
 ```
 
-## Lancer
+## Running
 
-Depuis la **racine** du dépôt, pas d'ici — les scripts passent par le filtre
-pnpm et les chemins de `tauri.conf.json` sont relatifs à `src-tauri/` :
+From the **root** of the repository, not from here — the scripts go through the pnpm
+filter and the paths in `tauri.conf.json` are relative to `src-tauri/`:
 
 ```sh
 pnpm dev             # fenêtre en développement, rechargement à chaud
@@ -21,14 +21,14 @@ pnpm tauri build     # application empaquetée
 pnpm check           # clippy et tests Rust
 ```
 
-## Où lire la suite
+## Where to read next
 
-- [`README.md`](../../README.md) à la racine — ce que fait candeo, et pourquoi.
-- [`docs/design/studio.md`](../../docs/design/studio.md) — les décisions
-  d'architecture de la fenêtre et de l'éditeur.
-- [`docs/design/effects-runtime.md`](../../docs/design/effects-runtime.md) — le
-  moteur d'effets, la boucle de rendu et le chemin des images.
-- [`docs/api/commands.md`](../../docs/api/commands.md) — chaque commande Tauri,
-  ses arguments et ses modes d'échec.
-- [`docs/protocol/`](../../docs/protocol/) — le relevé du protocole, d'où tout
-  le reste dérive.
+- [`README.md`](../../README.md) at the root — what candeo does, and why.
+- [`docs/design/studio.md`](../../docs/design/studio.md) — the architecture
+  decisions for the window and the editor.
+- [`docs/design/effects-runtime.md`](../../docs/design/effects-runtime.md) — the
+  effect engine, the render loop and the path frames take.
+- [`docs/api/commands.md`](../../docs/api/commands.md) — every Tauri command,
+  its arguments and its failure modes.
+- [`docs/protocol/`](../../docs/protocol/) — the protocol survey, from which everything
+  else derives.

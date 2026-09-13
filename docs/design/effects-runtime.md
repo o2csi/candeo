@@ -1,12 +1,12 @@
-# Cycle de vie d'un effet — de l'éditeur au clavier
+# Lifecycle of an effect — from the editor to the keyboard
 
-Ce document décrit ce qui se passe entre le moment où l'on tape du TypeScript et
-celui où une touche s'allume. Les décisions d'**interface** sont dans
-[`studio.md`](studio.md) ; celles-ci concernent l'exécution.
+This document describes what happens between the moment you type TypeScript and
+the moment a key lights up. The **interface** decisions are in
+[`studio.md`](studio.md); these concern execution.
 
 ---
 
-## 1. Vue d'ensemble
+## 1. Overview
 
 ```
   ┌─ WebView ──────────────────────┐        ┌─ Rust ────────────────────────────┐
@@ -23,118 +23,118 @@ celui où une touche s'allume. Les décisions d'**interface** sont dans
   └────────────────────────────────┘        └───────────────────────────────────┘
 ```
 
-Le sens descendant ① et le sens montant ② **ne sont pas le même mécanisme**, et
-c'est important : voir §4 et §5.
+The downward direction ① and the upward direction ② **are not the same mechanism**, and
+that matters: see §4 and §5.
 
 ---
 
-## 2. Descente — de l'éditeur au disque
+## 2. Downstream — from the editor to disk
 
-1. **Transpilation dans le front.** `ts.transpileModule()`, fourni par Monaco
-   (voir [`studio.md`](studio.md) §2), retire les types. Rien de plus : pas de
-   regroupement, pas de résolution d'imports.
-2. **Commande `install_effect`.** Le front envoie la **source TypeScript**, le
-   **JavaScript produit** et un manifeste (nom, paramètres déclarés).
-3. **Écriture sur disque**, sous le dossier décrit au §3.
+1. **Transpilation in the front end.** `ts.transpileModule()`, provided by Monaco
+   (see [`studio.md`](studio.md) §2), strips the types. Nothing more: no
+   bundling, no import resolution.
+2. **`install_effect` command.** The front end sends the **TypeScript source**, the
+   **generated JavaScript** and a manifest (name, declared parameters).
+3. **Write to disk**, under the folder described in §3.
 
-### Pourquoi stocker les deux
+### Why store both
 
-| Fichier | Rôle | Indispensable ? |
+| File | Role | Required? |
 |---|---|---|
-| `source.ts` | rouvrir l'effet dans l'éditeur | oui, sinon l'effet n'est plus modifiable |
-| `effect.js` | ce que le moteur exécute | **oui** |
-| `manifest.json` | nom, description, paramètres, version de l'API | oui |
-| `swatch.json` | le repère de couleurs de la bibliothèque | non — son absence donne une pastille neutre |
+| `source.ts` | reopen the effect in the editor | yes, otherwise the effect can no longer be edited |
+| `effect.js` | what the engine runs | **yes** |
+| `manifest.json` | name, description, parameters, API version | yes |
+| `swatch.json` | the library's color swatch | no — without it, a neutral dot is shown |
 
-Le `swatch.json` est le seul des quatre que **personne n'écrit** : il est prélevé
-en exécutant l'effet à l'installation. Déclaré, il dériverait dès la première
-modification du code. Le mécanisme est décrit dans
-[`../api/commands.md`](../api/commands.md), § « Le repère de couleurs ».
+The `swatch.json` is the only one of the four that **nobody writes**: it is sampled
+by running the effect at install time. Were it declared, it would drift from the first
+code change. The mechanism is described in
+[`../api/commands.md`](../api/commands.md), § "The color swatch".
 
-Le `.js` n'est pas un cache que l'on pourrait régénérer à la demande : le
-transpileur vit dans le front, donc **régénérer exigerait d'ouvrir la fenêtre**.
-Or un effet doit pouvoir démarrer sans interface — à l'ouverture de session, ou
-après un redémarrage. Le `.js` est donc un livrable, pas un artefact jetable.
+The `.js` is not a cache that could be regenerated on demand: the
+transpiler lives in the front end, so **regenerating would require opening the window**.
+Yet an effect must be able to start without a UI — at login, or
+after a reboot. The `.js` is therefore a deliverable, not a throwaway artifact.
 
 ---
 
-## 3. Où vivent les effets
+## 3. Where effects live
 
-> **Pas dans `Program Files`.** Ce dossier est en lecture seule pour un compte
-> standard, et son contenu est commun à tous les comptes de la machine. Un effet
-> est du contenu **écrit par l'utilisateur, propre à l'utilisateur**.
+> **Not in `Program Files`.** That folder is read-only for a
+> standard account, and its contents are shared by every account on the machine. An effect
+> is content **written by the user, specific to the user**.
 
-On ne construit pas ces chemins à la main : l'API de Tauri applique la convention
-de chaque système.
+These paths are not built by hand: Tauri's API applies each system's
+convention.
 
-| Appel Tauri | Windows | Linux | macOS |
+| Tauri call | Windows | Linux | macOS |
 |---|---|---|---|
 | `app_data_dir()` | `%APPDATA%\com.oorabona.candeo` | `~/.local/share/com.oorabona.candeo` | `~/Library/Application Support/…` |
 | `app_config_dir()` | `%APPDATA%\com.oorabona.candeo` | `~/.config/com.oorabona.candeo` | `~/Library/Application Support/…` |
 
-Sous Windows les deux se confondent ; sous Linux non, d'où l'intérêt de passer
-par l'API plutôt que par une constante.
+On Windows the two coincide; on Linux they do not, hence the point of going
+through the API rather than a constant.
 
-**Répartition retenue :**
+**Chosen split:**
 
 ```
 app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
 app_config_dir()/settings.json   préférences · appareils · effet appliqué · réglages
 ```
 
-L'effet est du **contenu** (`data`), le choix de l'effet actif est de la
-**configuration** (`config`). Distinction sans objet sous Windows, exacte sous
-Linux — et gratuite dans les deux cas.
+The effect is **content** (`data`), the choice of the active effect is
+**configuration** (`config`). A moot distinction on Windows, an accurate one on
+Linux — and free in both cases.
 
-L'état d'adoption de chaque appareil (§7) est de la configuration au même titre :
-c'est une décision de l'utilisateur sur sa machine, pas du contenu qu'on
-emporterait ailleurs.
+The adoption state of each device (§7) is configuration in the same way:
+it is a decision by the user about their machine, not content you would
+carry elsewhere.
 
-> Les effets **intégrés** ne sont pas sur disque : ils sont compilés dans le
-> binaire. Seuls les effets écrits par l'utilisateur ont un dossier. Leur repère
-> de couleurs vit donc en mémoire, calculé une fois par exécution : il est une
-> propriété du binaire, pas de la bibliothèque de l'utilisateur.
+> **Built-in** effects are not on disk: they are compiled into the
+> binary. Only effects written by the user have a folder. Their color
+> swatch therefore lives in memory, computed once per run: it is a
+> property of the binary, not of the user's library.
 
-### Les effets intégrés sont du JavaScript, pas du Rust
+### Built-in effects are JavaScript, not Rust
 
-Ils vivent dans `apps/desktop/src-tauri/src/builtins/`, un fichier `.js` chacun,
-embarqués par `include_str!` et chargés par le moteur comme n'importe quel effet.
+They live in `apps/desktop/src-tauri/src/builtins/`, one `.js` file each,
+embedded with `include_str!` and loaded by the engine like any other effect.
 
-Les écrire en Rust natif les rendrait plus rapides — et ne prouverait rien. Ils
-sont là pour être lus : le premier exemple qu'on ouvre doit être **exactement**
-ce qu'on peut écrire soi-même, même API, même `export default`. Un exemple qu'on
-ne peut pas reproduire n'est pas un exemple, c'est une démonstration.
+Writing them in native Rust would make them faster — and prove nothing. They
+are there to be read: the first example you open must be **exactly**
+what you can write yourself, same API, same `export default`. An example you
+cannot reproduce is not an example, it is a demo.
 
-Conséquence assumée : ils n'ont pas de `.ts`. Leur JavaScript est leur source,
-donc rien à transpiler à la compilation, et `read_effect_source` les rend tels
-qu'ils s'exécutent.
+An accepted consequence: they have no `.ts`. Their JavaScript is their source,
+so there is nothing to transpile at build time, and `read_effect_source` returns them as
+they run.
 
-Le manifeste, lui, est écrit deux fois — en Rust pour que lister la bibliothèque
-n'instancie aucun moteur, et dans le module parce que c'est le contrat de l'API.
-Un test charge chaque effet et compare les deux ; le module fait foi.
+The manifest, however, is written twice — in Rust so that listing the library
+instantiates no engine, and in the module because that is the API contract.
+A test loads each effect and compares the two; the module is authoritative.
 
-### Un identifiant intégré est réservé
+### A built-in identifier is reserved
 
-Les intégrés partagent l'espace de noms des effets utilisateur : même validation,
-même `id` dans `settings.json`. Deux garde-fous, dans cet ordre :
+Built-ins share the namespace of user effects: same validation,
+same `id` in `settings.json`. Two safeguards, in this order:
 
-1. `install_effect` **refuse** un nom qui dérive vers un identifiant intégré ;
-2. la résolution `id → JavaScript` consulte les intégrés **d'abord**.
+1. `install_effect` **refuses** a name that derives to a built-in identifier;
+2. the `id → JavaScript` resolution checks built-ins **first**.
 
-Le second n'est utile que si le premier a été contourné — un dossier copié à la
-main, une bibliothèque héritée d'une version où l'identifiant était libre. Le
-sens de la priorité découle de ce qu'on refuse : une entrée marquée `builtin`
-dans la galerie doit exécuter le code livré. La priorité inverse laisserait un
-effet utilisateur se glisser sous un nom connu, le manifeste de l'intégré affiché
-et un autre code exécuté.
+The second is only useful if the first has been bypassed — a folder copied by
+hand, a library inherited from a version where the identifier was free. The
+direction of the priority follows from what we refuse: an entry marked `builtin`
+in the gallery must run the shipped code. The reverse priority would let a
+user effect slip in under a known name, with the built-in's manifest displayed
+and other code running.
 
 ---
 
-## 4. Le moteur — une boucle par appareil, deux sorties chacune
+## 4. The engine — one loop per device, two outputs each
 
-Un fil Rust par appareil, indépendant de toute fenêtre. Chacun instancie son
-contexte `rquickjs`, charge son `effect.js`, et appelle sa fonction de rendu à
-cadence fixe.
+One Rust thread per device, independent of any window. Each instantiates its own
+`rquickjs` context, loads its `effect.js`, and calls its render function at a
+fixed frame rate.
 
 ```
    appareil A                              appareil B
@@ -149,425 +149,425 @@ cadence fixe.
     « envoyer » actif)      **cet** appareil)
 ```
 
-Les deux sorties sont **indépendantes**, et chacune peut être absente :
+The two outputs are **independent**, and either one can be absent:
 
-- fenêtre fermée → seule l'écriture HID subsiste ; aucune image n'est sérialisée ;
-- bascule « envoyer au clavier » désactivée → seul le simulateur est alimenté,
-  ce qui permet d'écrire un effet **sans posséder le clavier** ;
-- les deux actives → l'aperçu montre exactement les octets envoyés.
+- window closed → only the HID write remains; no frame is serialized;
+- "envoyer au clavier" (send to keyboard) toggle disabled → only the simulator is fed,
+  which makes it possible to write an effect **without owning the keyboard**;
+- both active → the preview shows exactly the bytes sent.
 
-C'est cette dernière propriété qui justifie le moteur unique — au sens : un seul
-endroit où le code d'effet s'exécute. Le simulateur n'interprète pas le code, il
-affiche le résultat.
+It is this last property that justifies the single engine — in the sense of: a single
+place where effect code runs. The simulator does not interpret the code, it
+displays the result.
 
-> ⚠️ **« Fenêtre fermée » n'a rien de gratuit, et ne l'a pas toujours été.** Un
-> fil indépendant de la fenêtre ne survit pas au processus, et le processus
-> s'arrêtait avec sa dernière fenêtre — rien n'empêchait
-> `RunEvent::ExitRequested`. Ce que ce paragraphe décrit n'a donc été vrai qu'à
-> partir de l'issue #46 : l'icône de zone de notification retient la sortie, et
-> la croix de la fenêtre **replie** au lieu de quitter. « Quitter candeo », dans
-> le menu de l'icône, est la seule chose qui arrête une boucle de rendu par la
-> fin du processus — et elle laisse l'éclairage tel quel plutôt que de
-> l'éteindre. Voir [`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs).
+> ⚠️ **"Window closed" is nothing to take for granted, and has not always held.** A
+> thread independent of the window does not outlive the process, and the process
+> used to stop with its last window — nothing prevented
+> `RunEvent::ExitRequested`. What this paragraph describes has therefore only been true
+> since issue #46: the tray icon holds back the exit, and
+> the window's close button **collapses to the tray** instead of quitting. "Quitter candeo" (Quit candeo), in
+> the icon's menu, is the only thing that stops a render loop by
+> ending the process — and it leaves the lighting as it is rather than
+> turning it off. See [`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs).
 
-### Un appareil, un effet
+### One device, one effect
 
-Chaque appareil porte sa boucle, donc sa cadence, ses paramètres, son état
-d'erreur, sa sortie et son `reachingKeyboard`. **Rien n'est partagé entre deux
-appareils**, et c'est ce qui fait qu'un appareil en panne n'en affecte aucun
-autre — l'invariant de l'adoption (§7), tenu cette fois en marche et non
-seulement à l'ouverture.
+Each device carries its own loop, hence its own frame rate, parameters, error
+state, output and `reachingKeyboard`. **Nothing is shared between two
+devices**, and that is what ensures a failing device affects no
+other — the adoption invariant (§7), held this time while running and not
+only at open.
 
-L'autre modèle — un effet couvrant plusieurs appareils, avec un gabarit
-composite — permettrait une vague traversant du clavier au tapis de souris. Il
-exige d'abord de décrire où les appareils se trouvent les uns par rapport aux
-autres, ce qu'on ne peut pas concevoir correctement avec un seul appareil sous la
-main.
+The other model — one effect spanning several devices, with a composite
+layout — would allow a wave traveling from the keyboard to the mouse pad. It
+first requires describing where the devices sit relative to one
+another, which cannot be designed properly with a single device at
+hand.
 
-**Il n'est pas fermé pour autant.** Une boucle reçoit **un gabarit** et **une
-sortie**, jamais « un clavier » : le trait `DeviceOut` est le seul point où elle
-touche du matériel. Le jour où un gabarit couvrira plusieurs appareils, c'est là
-que l'image se répartira — ni la boucle, ni le code des effets n'auront à changer.
+**It is not ruled out for all that.** A loop receives **a layout** and **an
+output**, never "a keyboard": the `DeviceOut` trait is the only point where it
+touches hardware. The day a layout spans several devices, that is
+where the frame will be split — neither the loop nor the effect code will have to change.
 
-C'est aussi ce joint qui rend l'invariant vérifiable : un test fait échouer
-**toutes** les écritures d'un appareil et constate que le voisin garde sa boucle,
-ses images, son état vierge — et qu'arrêter le premier n'arrête pas le second.
-Avec le `Keyboard` en dur, cela n'aurait été vérifiable qu'avec deux claviers sur
-le bureau, donc jamais.
+It is also this seam that makes the invariant verifiable: a test makes
+**all** writes to one device fail and observes that its neighbor keeps its loop,
+its frames, its clean state — and that stopping the first does not stop the second.
+With `Keyboard` hard-coded, this would only have been verifiable with two keyboards on
+the desk, so never.
 
-### L'ordre de prise des verrous
+### Lock acquisition order
 
-Un interblocage a déjà été attrapé : `list_devices` prenait le verrou du clavier
-puis celui des échecs, `ignore_device` l'inverse. Avec une table d'appareils et N
-boucles, la règle est explicite :
+A deadlock has already been caught: `list_devices` took the keyboard lock
+then the failures lock, `ignore_device` the reverse. With a device table and N
+loops, the rule is explicit:
 
-> **Aucun code ne tient deux verrous en même temps.** Une table est verrouillée le
-> temps d'y lire ou d'y poser un pointeur partagé — jamais le temps d'une écriture
-> HID, d'un démarrage de boucle ni d'une attente de fin.
+> **No code holds two locks at the same time.** A table is locked for as
+> long as it takes to read or store a shared pointer in it — never for the duration of an
+> HID write, a loop start or a wait for completion.
 
-Là où deux deviendraient inévitables, l'ordre est celui de la déclaration dans
-`AppState` : table des appareils → moteur → table des échecs → poignée d'un
-appareil → état partagé d'une boucle.
+Where two would become unavoidable, the order is that of declaration in
+`AppState`: device table → engine → failure table → a device's
+handle → a loop's shared state.
 
-Deux conséquences, et elles ne sont pas cosmétiques :
+Two consequences, and they are not cosmetic:
 
-- **le fil de rendu ne connaît que les deux derniers.** Il n'a aucun moyen de
-  prendre un verrou de l'application, donc aucun moyen d'en bloquer une commande ;
-- **la seule attente tenue verrou en main est celle de `stop`, et ce verrou est
-  propre à l'appareil.** L'arrêt attend la fin de la boucle — sans quoi enchaîner
-  deux effets laisserait un instant deux boucles écrire sur le même appareil —
-  mais cette attente ne retient aucune commande visant les autres. Une écriture
-  HID bloquée sur l'un ne gèlerait pas l'autre, ce qu'un verrou global du moteur
-  aurait réintroduit par la bande.
+- **the render thread only knows the last two.** It has no way to
+  take an application lock, hence no way to block a command with it;
+- **the only wait held under a lock is `stop`'s, and that lock
+  belongs to the device.** Stopping waits for the loop to finish — otherwise chaining
+  two effects would briefly leave two loops writing to the same device —
+  but that wait holds back no command targeting the others. An
+  HID write blocked on one would not freeze the other, which a global engine lock
+  would have reintroduced through the back door.
 
-### Résolution des imports
+### Import resolution
 
-`import { hsv, mix } from '@candeo/effects-api'` est résolu par le chargeur de
-modules de `rquickjs` vers un module **interne**, fourni par l'hôte. Pas de
-regroupement, pas de résolution de chemins, pas de `node_modules`.
+`import { hsv, mix } from '@candeo/effects-api'` is resolved by the module
+loader of `rquickjs` to an **internal** module, provided by the host. No
+bundling, no path resolution, no `node_modules`.
 
-Le `manifest.json` porte la version de l'API utilisée à l'écriture : c'est ce qui
-permettra de refuser proprement un effet écrit contre une API disparue, plutôt
-que de le laisser échouer à la première image.
+The `manifest.json` carries the API version used at write time: that is what
+will make it possible to cleanly refuse an effect written against an API that no longer exists, rather
+than letting it fail at the first frame.
 
 ---
 
-## 5. Remontée — un canal, pas un événement global
+## 5. Upstream — a channel, not a global event
 
-Tauri offre deux directions, et elles n'ont pas les mêmes primitives :
+Tauri offers two directions, and they do not have the same primitives:
 
-| Sens | Primitive | Forme |
+| Direction | Primitive | Shape |
 |---|---|---|
-| front → Rust | **commande** (`invoke`) | requête / réponse, attendue |
-| Rust → front | **événement** ou **canal** | poussée, sans réponse |
+| front end → Rust | **command** (`invoke`) | request / response, awaited |
+| Rust → front end | **event** or **channel** | push, no response |
 
-Une commande ne peut pas « rendre » 30 images par seconde : elle répond une fois.
-La remontée passe donc par un canal — `tauri::ipc::Channel`, créé par le front et
-passé en argument d'une commande d'abonnement, avec **l'appareil dont on veut les
-images**. Le simulateur suit celui qui est sélectionné ; changer de sélection
-ferme un canal et en ouvre un autre, plutôt que de multiplexer un flux unique.
+A command cannot "return" 30 frames per second: it responds once.
+The upstream path therefore goes through a channel — `tauri::ipc::Channel`, created by the front end and
+passed as an argument to a subscription command, along with **the device whose
+frames are wanted**. The simulator follows the selected one; changing the selection
+closes one channel and opens another, rather than multiplexing a single stream.
 
-**Canal plutôt qu'événement global** (`emit` / `listen`) pour trois raisons :
+**Channel rather than global event** (`emit` / `listen`) for three reasons:
 
-1. pas de diffusion à toutes les fenêtres ni de recherche dans un registre
-   d'écouteurs — la destination est connue ;
-2. la portée est explicite : le canal libéré, le flux s'arrête. Pas de fuite
-   d'abonnement à la fermeture de l'éditeur ;
-3. il transporte du binaire. `InvokeResponseBody::Raw` évite de sérialiser une
-   image en tableau JSON d'entiers, qui la ferait passer de **396 octets à plus
-   de 1,5 Ko de texte** — pour rien, 30 fois par seconde.
+1. no broadcast to every window nor lookup in a registry
+   of listeners — the destination is known;
+2. the scope is explicit: once the channel is released, the stream stops. No subscription
+   leak when the editor closes;
+3. it carries binary. `InvokeResponseBody::Raw` avoids serializing a
+   frame as a JSON array of integers, which would take it from **396 bytes to more
+   than 1.5 KB of text** — for nothing, 30 times per second.
 
-Rappel de proportion : 132 LED × 30 images/s = **3 960 couleurs par seconde**.
-Le choix du canal n'est pas une optimisation nécessaire, c'est simplement la
-primitive juste pour un flux ; autant la prendre.
+For scale: 132 LEDs × 30 frames/s = **3,960 colors per second**.
+Choosing the channel is not a necessary optimization, it is simply the
+right primitive for a stream; might as well use it.
 
 ---
 
-## 6. Portabilité de l'accès matériel
+## 6. Portability of hardware access
 
-`hidapi` couvre Windows, Linux, macOS et illumos — l'écriture de rapport de
-fonctionnalité y est la même. Ce qui change d'un système à l'autre :
+`hidapi` covers Windows, Linux, macOS and illumos — writing a feature
+report works the same there. What changes from one system to another:
 
 | | Windows | Linux |
 |---|---|---|
-| Dorsale par défaut | hidapi C (`hid.dll`) | `linux-static-hidraw` (compile du C, lie `libudev`) |
-| Dorsale pur Rust | `windows-native` | `linux-native` (crate `udev` + `nix`) |
-| Accès non privilégié | immédiat | **règle udev requise** |
+| Default backend | hidapi C (`hid.dll`) | `linux-static-hidraw` (compiles C, links `libudev`) |
+| Pure Rust backend | `windows-native` | `linux-native` (crate `udev` + `nix`) |
+| Unprivileged access | immediate | **udev rule required** |
 
-> **Compilé, ou supposé ?** Le dépôt distingue les deux. Un job `linux` de la
-> CI construit l'espace de travail complet sous `ubuntu-latest` : ce qui y passe
-> est *compilé*. Le reste — tout ce qui exige un clavier branché sur une machine
-> Linux — reste *supposé*, et est signalé comme tel ci-dessous.
+> **Compiled, or assumed?** The repository tells the two apart. A `linux` CI job
+> builds the full workspace on `ubuntu-latest`: what passes there
+> is *compiled*. The rest — everything that requires a keyboard plugged into a
+> Linux machine — remains *assumed*, and is flagged as such below.
 
-### Ce que la CI établit
+### What CI establishes
 
-Le job `linux` (`.github/workflows/ci.yml`) fait, dans cet ordre : dépendances
-système Debian de Tauri 2 plus `libudev-dev`, `cargo check --workspace
---all-targets`, `cargo test --workspace`, puis `tauri build --debug --bundles
-deb,rpm` et lecture des deux paquets produits.
+The `linux` job (`.github/workflows/ci.yml`) does, in this order: Tauri 2's Debian
+system dependencies plus `libudev-dev`, `cargo check --workspace
+--all-targets`, `cargo test --workspace`, then `tauri build --debug --bundles
+deb,rpm` and a read of the two packages produced.
 
-Il établit donc que :
+It therefore establishes that:
 
-- la dorsale `linux-static-hidraw` se compile et se lie ;
-- aucune partie de l'espace de travail — `candeo-protocol`, `candeo-device`,
-  `candeo-desktop` — ne dépend de Windows pour compiler ;
-- les tests passent à l'identique sur un système de fichiers sensible à la
-  casse ;
-- l'application s'empaquette en `.deb` et en `.rpm` ;
-- la règle udev est **réellement présente** dans les deux, à
-  `/usr/lib/udev/rules.d/60-candeo.rules`. La vérification lit les paquets
-  (`dpkg-deb -c`, `rpm -qpl`), elle ne relit pas la configuration — `deb` et
-  `rpm` étant deux déclarations distinctes, n'en vérifier qu'une laisserait
-  l'autre se tromper en silence.
+- the `linux-static-hidraw` backend compiles and links;
+- no part of the workspace — `candeo-protocol`, `candeo-device`,
+  `candeo-desktop` — depends on Windows to compile;
+- the tests pass identically on a case-sensitive file
+  system;
+- the application packages as `.deb` and `.rpm`;
+- the udev rule is **actually present** in both, at
+  `/usr/lib/udev/rules.d/60-candeo.rules`. The check reads the packages
+  (`dpkg-deb -c`, `rpm -qpl`), it does not reread the configuration — `deb` and
+  `rpm` being two separate declarations, checking only one would let
+  the other go wrong silently.
 
-### Ce qui reste supposé
+### What remains assumed
 
-Il n'y a pas d'USB derrière un coureur GitHub. Restent à confirmer sur une
-machine Linux munie du clavier :
+There is no USB behind a GitHub runner. Still to be confirmed on a
+Linux machine fitted with the keyboard:
 
-- que `send_feature_report` aboutisse par hidraw sur ce périphérique — l'API est
-  la même, le chemin noyau ne l'est pas ;
-- que `interface_number` distingue bien les interfaces du composite. Le code
-  choisit son périphérique là-dessus (§ `Keyboard::open`), et ouvrir la mauvaise
-  interface donne, sous Windows, un handle valide sur lequel toute écriture
-  échoue. La dorsale hidraw lit l'attribut `bInterfaceNumber` du parent USB, ce
-  qui devrait donner la même valeur — *devrait* ;
-- que `app_data_dir()` et `app_config_dir()` tombent bien dans
-  `~/.local/share/com.oorabona.candeo` et `~/.config/com.oorabona.candeo`. C'est
-  ce que documente Tauri, et le code ne construit aucun chemin lui-même (§3),
-  mais rien ici ne l'a observé.
+- that `send_feature_report` succeeds through hidraw on this device — the API is
+  the same, the kernel path is not;
+- that `interface_number` does distinguish the interfaces of the composite device. The code
+  picks its device on that basis (§ `Keyboard::open`), and opening the wrong
+  interface gives, on Windows, a valid handle on which every write
+  fails. The hidraw backend reads the `bInterfaceNumber` attribute of the USB parent, which
+  should give the same value — *should*;
+- that `app_data_dir()` and `app_config_dir()` do land in
+  `~/.local/share/com.oorabona.candeo` and `~/.config/com.oorabona.candeo`. That is
+  what Tauri documents, and the code builds no path itself (§3),
+  but nothing here has observed it.
 
-### La règle udev, et qui la livre
+### The udev rule, and who ships it
 
-`/dev/hidraw*` est créé en `0600 root:root`. La règle est dans le dépôt à
-[`packaging/linux/60-candeo.rules`](../../packaging/linux/60-candeo.rules) :
+`/dev/hidraw*` is created as `0600 root:root`. The rule is in the repository at
+[`packaging/linux/60-candeo.rules`](../../packaging/linux/60-candeo.rules):
 
 ```udev
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", MODE="0660", TAG+="uaccess"
 ```
 
-Trois points qui ne sont pas des détails :
+Three points that are not details:
 
-1. **`uaccess` plutôt qu'un groupe.** systemd-logind pose une ACL pour
-   l'utilisateur de la session locale active et la retire à la déconnexion. Un
-   groupe fixe (`plugdev`) donnerait l'accès en permanence, y compris à une
-   session distante.
-2. **Le préfixe 60.** La règle qui applique l'ACL est `70-uaccess.rules` : un
-   fichier numéroté au-dessus de 70 poserait le marqueur trop tard et ne ferait
-   rien.
-3. **`/usr/lib/udev/rules.d/`, pas `/etc/`.** Le paquet est un fournisseur ;
-   `/etc/udev/rules.d/` appartient à l'administrateur, qui doit pouvoir nous
-   contredire. C'est aussi là qu'il faut copier le fichier à la main quand on
-   lance candeo depuis les sources.
+1. **`uaccess` rather than a group.** systemd-logind sets an ACL for
+   the user of the active local session and removes it at logout. A
+   fixed group (`plugdev`) would grant access permanently, including to a remote
+   session.
+2. **The 60 prefix.** The rule that applies the ACL is `70-uaccess.rules`: a
+   file numbered above 70 would set the tag too late and would do
+   nothing.
+3. **`/usr/lib/udev/rules.d/`, not `/etc/`.** The package is a vendor;
+   `/etc/udev/rules.d/` belongs to the administrator, who must be able to override
+   us. It is also where the file must be copied by hand when
+   running candeo from source.
 
-La livraison passe par `bundle.linux.deb.files` et `bundle.linux.rpm.files` de
-`tauri.conf.json`. La clé est le chemin **dans le paquet**, la valeur le chemin
-de la source **relatif à `tauri.conf.json`** — pas l'inverse.
+Delivery goes through `bundle.linux.deb.files` and `bundle.linux.rpm.files` in
+`tauri.conf.json`. The key is the path **inside the package**, the value the source
+path **relative to `tauri.conf.json`** — not the other way round.
 
-### Dorsales `*-native` : évaluées, non adoptées
+### `*-native` backends: evaluated, not adopted
 
-L'intention était de retirer la dépendance à un compilateur C pour simplifier la
-compilation croisée. La lecture du `build.rs` d'`hidapi` 2.6.7 ne la soutient
-pas :
+The intent was to remove the dependency on a C compiler to simplify
+cross-compilation. Reading the `build.rs` of `hidapi` 2.6.7 does not back it
+up:
 
-- **Le gain est partiel.** `linux-static-hidraw` fait
-  `pkg_config::probe_library("libudev")` ; `linux-native` s'appuie sur la crate
-  `udev`, c'est-à-dire une liaison vers cette même `libudev`. Passer à la
-  dorsale native ne retire donc pas `libudev-dev` de la liste des dépendances,
-  seulement l'appel à `cc`. Seule `linux-native-basic-udev` s'en affranchirait,
-  via `basic-udev` — une crate en 0.1.
-- **Le compilateur C reste requis de toute façon.** `rquickjs` compile les
-  sources C de QuickJS ; `cc` est dans `Cargo.lock` pour cette raison seule. La
-  dépendance qu'on voulait supprimer ne partirait pas.
-- **La compilation croisée n'est pas simplifiée pour l'application.** Sous
-  Linux, Tauri se lie à webkit2gtk, GTK 3 et libsoup par `pkg-config` : il faut
-  déjà un sysroot complet. Le gain ne concernerait qu'un usage sans interface de
-  `candeo-device` seul.
-- **Le coût n'est pas nul.** Le `build.rs` d'`hidapi` s'arrête si deux dorsales
-  Linux sont actives (« Exactly one linux hidapi backend must be selected »).
-  Adopter `linux-native` impose donc `default-features = false` dans les deux
-  manifestes qui déclarent `hidapi`, et de réénumérer à la main les défauts des
-  autres systèmes.
-- **`windows-native` est hors de question pour l'instant.** Windows est le seul
-  système où le protocole a été validé sur le matériel. Changer sa dorsale
-  échangerait un chemin vérifié contre un chemin non vérifié, pour un gain nul :
-  MSVC est déjà là, le toolchain Rust l'exige.
+- **The gain is partial.** `linux-static-hidraw` does
+  `pkg_config::probe_library("libudev")`; `linux-native` relies on the crate
+  `udev`, that is, a binding to that same `libudev`. Switching to the
+  native backend therefore does not remove `libudev-dev` from the dependency list,
+  only the call to `cc`. Only `linux-native-basic-udev` would do without it,
+  via `basic-udev` — a crate at 0.1.
+- **The C compiler is required anyway.** `rquickjs` compiles the
+  QuickJS C sources; `cc` is in `Cargo.lock` for that reason alone. The
+  dependency we wanted to remove would not go away.
+- **Cross-compilation is not simplified for the application.** On
+  Linux, Tauri links to webkit2gtk, GTK 3 and libsoup through `pkg-config`: a full
+  sysroot is already needed. The gain would only concern a headless use of
+  `candeo-device` alone.
+- **The cost is not zero.** The `build.rs` of `hidapi` aborts if two
+  Linux backends are enabled ("Exactly one linux hidapi backend must be selected").
+  Adopting `linux-native` therefore forces `default-features = false` in both
+  manifests that declare `hidapi`, and re-listing by hand the defaults of the
+  other systems.
+- **`windows-native` is out of the question for now.** Windows is the only
+  system where the protocol has been validated on the hardware. Changing its backend
+  would trade a verified path for an unverified one, for zero gain:
+  MSVC is already there, the Rust toolchain requires it.
 
-**Décision : on garde les dorsales par défaut.** La CI prouve que le défaut
-compile sous Linux. À rouvrir si l'on veut un binaire statique sans interface —
-c'est le seul cas où le calcul changerait.
+**Decision: we keep the default backends.** CI proves that the default
+compiles on Linux. To be reopened if a headless static binary is wanted —
+that is the only case where the calculation would change.
 
 ---
 
-## 7. Adoption appareil par appareil
+## 7. Device-by-device adoption
 
-Il fallait cliquer « Connecter » à chaque lancement, et ne pas le faire ne
-produisait **aucun** signe : le simulateur s'animait, la case « envoyer au
-clavier » restait cochée, le clavier gardait son image. Ce silence a coûté une
-session entière de diagnostic — on a soupçonné le protocole, la cadence, le
-moteur, avant de trouver que rien n'était ouvert.
+You had to click "Connecter" (Connect) at every launch, and not doing so
+produced **no** sign: the simulator animated, the "envoyer au
+clavier" box stayed checked, the keyboard kept its frame. That silence cost an
+entire round of debugging — the protocol, the frame rate, the
+engine were all suspected, before finding that nothing was open.
 
-La réponse n'est pas d'ouvrir tout ce qu'on détecte.
+The answer is not to open everything that is detected.
 
-### Pourquoi pas simplement tout connecter
+### Why not simply connect everything
 
-Écrire sur un périphérique USB qu'on comprend mal n'est pas anodin, et à
-l'échelle d'un catalogue qui grandit — claviers, souris, mémoire, ventilateurs —
-adopter par défaut est la façon de casser le matériel de quelqu'un. Il y a aussi
-les appareils qu'on ne *veut* pas voir pilotés : un pilote constructeur déjà en
-place, ou un modèle dont le relevé est incertain.
+Writing to a USB device you understand poorly is not harmless, and at
+the scale of a growing catalog — keyboards, mice, memory, fans —
+adopting by default is how you break someone's hardware. There are also
+devices you do not *want* to see controlled: a vendor driver already in
+place, or a model whose survey is uncertain.
 
-### Trois états, décidés une fois et retenus
+### Three states, decided once and remembered
 
-| État | Au lancement |
+| State | At launch |
 |---|---|
-| `adopted` — piloté | ouvert automatiquement, sans rien demander |
-| `detected` — détecté | listé, mais **pas** ouvert |
-| `ignored` — ignoré | laissé tranquille, et il le reste |
+| `adopted` — controlled | opened automatically, without asking anything |
+| `detected` — detected | listed, but **not** opened |
+| `ignored` — ignored | left alone, and stays that way |
 
-Le défaut est `detected` : la cérémonie disparaît sans que rien ne soit pris en
-main sans accord. La forme exacte dans `settings.json` est dans
+The default is `detected`: the ceremony disappears without anything being taken
+over without consent. The exact shape in `settings.json` is in
 [`../api/commands.md`](../api/commands.md).
 
-### L'identité tient à VID / PID / série, à rien d'autre
+### Identity rests on VID / PID / serial, nothing else
 
-Le même clavier s'est déclaré `v1.4 / Unkown Variant` puis `v1.5 / Quartz`
-pendant le relevé du protocole. Une liaison qui apparie sur la variante ou le
-micrologiciel se rompt donc à la mise à jour, et l'appareil adopté redevient un
-inconnu — ce qui est exactement la cérémonie qu'on vient de supprimer.
+The same keyboard reported itself as `v1.4 / Unkown Variant` then `v1.5 / Quartz`
+during the protocol survey. A binding that matches on the variant or the
+firmware therefore breaks at the update, and the adopted device becomes an
+unknown again — which is exactly the ceremony just removed.
 
-La série n'est comparée que si **les deux côtés** en portent une : elle départage
-deux exemplaires du même modèle, mais une énumération muette — hidraw sans règle
-udev (§6) — ne doit pas désapparier un appareil déjà adopté.
+The serial number is only compared if **both sides** carry one: it tells apart
+two units of the same model, but a silent enumeration — hidraw without a
+udev rule (§6) — must not unpair an already adopted device.
 
-### L'échec d'un appareil n'en entraîne aucun autre
+### One device failing takes no other down
 
-C'est l'invariant du démarrage, et il est vérifié plutôt que supposé. La boucle
-d'ouverture ne connaît ni Tauri ni HID : la présence et l'ouverture lui arrivent
-en argument, ce qui rend l'invariant testable par un test ordinaire.
-`un_appareil_en_echec_n_en_bloque_aucun_autre` fait échouer l'ouverture du
-premier de deux appareils pilotés et vérifie trois choses :
+This is the startup invariant, and it is verified rather than assumed. The open
+loop knows neither Tauri nor HID: presence and opening reach it
+as arguments, which makes the invariant testable with an ordinary test.
+`un_appareil_en_echec_n_en_bloque_aucun_autre` makes opening the
+first of two controlled devices fail and checks three things:
 
-1. la boucle est allée jusqu'au second, qui est bien ouvert ;
-2. le message d'échec est resté sur le premier ;
-3. le compte rendu du second est vierge — l'erreur n'a pas débordé.
+1. the loop went on to the second, which is indeed open;
+2. the failure message stayed on the first;
+3. the second's report is clean — the error did not spill over.
 
-En exploitation, ces messages vivent dans une table indexée par VID/PID, et
-`list_devices` rend à chacun le sien. Un champ unique obligerait à choisir lequel
-afficher, et le suivant effacerait le précédent.
+In operation, these messages live in a table indexed by VID/PID, and
+`list_devices` gives each device its own. A single field would force choosing which one to
+display, and the next would overwrite the previous.
 
-**L'invariant vaut aussi en marche, pas seulement à l'ouverture.** Un appareil
-qu'on a réussi à ouvrir peut très bien refuser toute écriture ensuite — débranché,
-mis en veille, préempté par un pilote constructeur. `un_appareil_en_panne_n_en_affecte_aucun_autre`
-lance deux boucles réelles, fait échouer toutes les écritures de l'une, et vérifie
-que l'autre garde sa boucle, ses images et son état vierge — et qu'arrêter la
-première n'arrête pas la seconde. Voir §4.
+**The invariant also holds while running, not only at open.** A device
+that was opened successfully can very well refuse every write afterwards — unplugged,
+put to sleep, preempted by a vendor driver. `un_appareil_en_panne_n_en_affecte_aucun_autre`
+starts two real loops, makes all writes of one fail, and checks
+that the other keeps its loop, its frames and its clean state — and that stopping the
+first does not stop the second. See §4.
 
-### Ce que cela suppose de l'état
+### What this implies for the state
 
-`AppState` porte une **table** d'appareils ouverts, indexée comme l'adoption les
-identifie (issue #26). L'adoption est multiple, la poignée ouverte l'est aussi :
-tous les appareils pilotés et présents sont ouverts au démarrage, chacun avec sa
-boucle et son effet.
+`AppState` holds a **table** of open devices, indexed the way adoption
+identifies them (issue #26). Adoption is multiple, and so is the open handle:
+every controlled and present device is opened at startup, each with its own
+loop and its own effect.
 
-Refermer un appareil — ignoré, débranché — vide sa poignée sans la retirer de la
-table. La boucle qui l'alimentait en tient une copie : elle s'en aperçoit à
-l'image suivante, cesse d'écrire, et le dit par `reachingKeyboard`. C'est ce qui
-permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne dessus.
+Closing a device — ignored, unplugged — empties its handle without removing it from the
+table. The loop that fed it holds a copy: it notices at the
+next frame, stops writing, and says so through `reachingKeyboard`. That is what
+makes it possible to stop writing to a device without stopping the effect running on it.
 
 ---
 
-## 8. Reste à faire
+## 8. Still to do
 
-- [x] Commandes `install_effect`, `list_effects`, `delete_effect`
-- [x] Commandes `start_effect`, `stop_effect`, `set_effect_params`
-- [x] Commande d'abonnement renvoyant les images par `Channel`
-- [x] Fil de rendu `rquickjs` + module interne `@candeo/effects-api`
-- [x] Lecture et écriture de `settings.json`
-- [x] Effets intégrés, écrits contre l'API publique
-- [x] Repère de couleurs prélevé sur le rendu, à l'installation
-- [x] Règle udev, livrée par les paquets `deb` et `rpm`
-- [x] Compilation et empaquetage Linux vérifiés en intégration continue
-- [x] Adoption appareil par appareil, et ouverture des pilotés au démarrage
-- [x] Un effet par appareil : table d'appareils ouverts, une boucle chacun
-- [x] Retrait d'un effet depuis la bibliothèque, et remise à zéro de la
-      configuration (`reset_settings`) — deux gestes distincts, l'un sur le
-      contenu et l'autre sur la configuration, qui arrêtent l'un comme l'autre
-      les boucles concernées **avant** d'écrire
-- [x] Bornes d'exécution d'un effet : un temps de calcul par image et au
-      chargement, une mémoire par effet — un `while (true)` ou un tableau qui
-      grandit à chaque image deviennent une erreur d'image, pas un gel
-- [ ] Reprise de l'effet actif au démarrage
-- [ ] Vérification de la dorsale `hidraw` **sur matériel** — écriture de rapport
-      de fonctionnalité, filtrage par `interface_number`, chemins résolus par
-      Tauri. Demande un clavier branché sur une machine Linux.
+- [x] `install_effect`, `list_effects`, `delete_effect` commands
+- [x] `start_effect`, `stop_effect`, `set_effect_params` commands
+- [x] Subscription command returning frames through `Channel`
+- [x] `rquickjs` render thread + `@candeo/effects-api` internal module
+- [x] Reading and writing `settings.json`
+- [x] Built-in effects, written against the public API
+- [x] Color swatch sampled from the render, at install time
+- [x] udev rule, shipped by the `deb` and `rpm` packages
+- [x] Linux build and packaging verified in continuous integration
+- [x] Device-by-device adoption, and opening of controlled devices at startup
+- [x] One effect per device: table of open devices, one loop each
+- [x] Removing an effect from the library, and resetting the
+      configuration (`reset_settings`) — two distinct actions, one on
+      content and the other on configuration, both of which stop
+      the affected loops **before** writing
+- [x] Execution bounds for an effect: a compute time per frame and at
+      load, a memory limit per effect — a `while (true)` or an array that
+      grows every frame becomes a frame error, not a freeze
+- [ ] Resuming the active effect at startup
+- [ ] Verification of the `hidraw` backend **on hardware** — feature report
+      writes, filtering by `interface_number`, paths resolved by
+      Tauri. Requires a keyboard plugged into a Linux machine.
 
-### Ce que l'implémentation a précisé
+### What the implementation clarified
 
-- **Le manifeste est relevé dans le code, pas en exécutant l'effet.** Le front
-  n'exécute jamais de code utilisateur : `name`, `description` et `params` sont
-  lus dans l'arbre syntaxique par le compilateur que Monaco embarque déjà. Ces
-  trois champs doivent donc être des littéraux, ce qui est refusé à la
-  validation plutôt que découvert à la première image.
-- **Un effet exporte par défaut.** La colle importe l'espace de noms plutôt que
-  l'export par défaut : `import effect from 'effect'` échoue à la *liaison* du
-  module quand il manque, avec un message de QuickJS qu'on ne peut relier à
-  aucune ligne de son propre code.
-- **Chaque image repart du noir.** Un effet qui n'écrit qu'une partie du clavier
-  n'hérite pas en silence de l'image précédente : une image est complète par
-  définition.
-- **Les couleurs sont bornées côté JavaScript**, pas seulement dans `rgb()` :
-  rien n'oblige un effet à passer par l'API, il peut fabriquer `{r, g, b}` à la
-  main. Sans cela, c'est la conversion côté Rust qui échoue — loin de la cause.
-- **La boucle vise une échéance absolue**, pas `sleep(période)` : une image
-  lente ne doit pas décaler toutes les suivantes. En cas de retard, on repart de
-  maintenant plutôt que de rattraper en accéléré.
-- **Une exception ne tue rien.** Elle est rattrapée par image et exposée par
-  `engine_status`, puis effacée dès que l'effet se rétablit. Après trente images
-  consécutives en échec, la boucle s'arrête.
-- **Le repère de couleurs vient du moteur, pas du manifeste.** Quatre images à
-  des instants irrégulièrement espacés, et dans chacune la moyenne d'une bande
-  diagonale qui avance : c'est ce qui empêche un effet spatial et un effet
-  uniforme de se ressembler. Un prélèvement toujours au même endroit les
-  confondrait, une moyenne de l'image entière aussi.
-- **Tout ce qui exécute du code d'effet est borné**, en temps comme en mémoire.
-  C'était d'abord vrai du seul échantillonnage, parce qu'un `while (true)` y
-  empêchait une installation d'aboutir. Ça l'est maintenant de la boucle de
-  rendu, où l'absence de borne était pire : le drapeau `stop` est lu *entre* deux
-  images, un rendu qui ne revient pas ne le relit jamais — et comme un effet
-  tourne fenêtre fermée, la fermer ne sauve pas. Depuis que la croix replie au
-  lieu de quitter, elle le sauve encore moins : le dernier recours est
-  « Quitter candeo » dans le menu de l'icône, qui prend le processus entier.
-- **La forme des deux bornes n'est pas la même**, parce que le gestionnaire
-  d'interruption se pose sur le `Runtime` **une fois**. L'échantillonnage n'a
-  besoin que d'une échéance, capturée par valeur ; la boucle en change à chaque
-  image et partage donc une cellule qu'elle renouvelle avant chaque appel. Cette
-  cellule porte aussi de quoi savoir que c'est bien l'échéance qui a coupé :
-  QuickJS lève « InternalError: interrupted » quelle qu'en soit la raison.
-- **Un dépassement est une erreur d'image ordinaire.** Il emprunte le chemin des
-  exceptions ci-dessus, celui que trente images consécutives en échec
-  transforment en arrêt propre — aucun chemin nouveau. Le moteur y ajoute
-  seulement le nom de la cause, en français : « l'effet a dépassé son temps de
-  calcul » se relie à son code, une erreur de QuickJS non.
-- **Les budgets sont mesurés.** Un effet ordinaire coûte 0,23 ms par image en
-  `release`, un champ de cinq mille particules avec une seconde de traînée
-  1,1 ms. Le budget de 10 ms n'est donc pas une allocation de performance mais
-  **un détecteur de gel avec de la marge pour l'à-coup machine** : l'échéance se
-  mesure en temps réel, pas en temps de calcul, et un fil suspendu par
-  l'ordonnanceur consomme son budget sans rien exécuter. Le plafond vient
-  d'ailleurs : l'écriture HID prend 14,4 ms au pire dans la même période de
-  33,3 ms, et l'échéance ne serait ratée en silence qu'à partir d'environ 19 ms
-  de budget. La mémoire ne dépend pas du profil : 32 Mo, soit cinq fois l'effet
-  à état le plus démesuré qu'on sache écrire pour 132 LED.
-- **Le budget de débogage est distinct — 200 ms — et c'est un plafond, pas une
-  cible.** QuickJS est du C compilé au niveau d'optimisation du profil : non
-  optimisé, la même image passait de 0,23 ms à 6,3 ms. Depuis que
-  `[profile.dev.package."*"]` passe les dépendances en `opt-level = 2`, QuickJS
-  est optimisé en débogage aussi et l'écart devrait avoir fondu — **à
-  re-mesurer** avant d'unifier les deux valeurs.
-- **Un appareil a une ligne d'état dès qu'il a porté un effet, et la garde.**
-  `engine_status()` rend une entrée par appareil visé, `running` à faux une fois
-  l'effet arrêté. Retirer la ligne rendrait « cet appareil ne fait rien »
-  indistinguable de « je ne sais rien de cet appareil ».
-- **L'arrêt attend la fin, par appareil.** Le verrou attendu est celui de
-  l'appareil visé, jamais celui du moteur : une écriture HID bloquée sur l'un ne
-  doit pas retenir les commandes visant les autres, sans quoi l'invariant de §7
-  serait perdu au niveau au-dessus.
+- **The manifest is read from the code, not by running the effect.** The front end
+  never runs user code: `name`, `description` and `params` are
+  read from the syntax tree by the compiler that Monaco already bundles. These
+  three fields must therefore be literals, and anything else is refused at
+  validation rather than discovered at the first frame.
+- **An effect exports by default.** The glue imports the namespace rather than
+  the default export: `import effect from 'effect'` fails at module *linking*
+  when it is missing, with a QuickJS message that cannot be tied to
+  any line of your own code.
+- **Each frame starts from black.** An effect that writes only part of the keyboard
+  does not silently inherit the previous frame: a frame is complete by
+  definition.
+- **Colors are clamped on the JavaScript side**, not only in `rgb()`:
+  nothing forces an effect to go through the API, it can build `{r, g, b}` by
+  hand. Without this, it is the Rust-side conversion that fails — far from the cause.
+- **The loop targets an absolute deadline**, not `sleep(période)`: a
+  slow frame must not shift all the following ones. When running late, it restarts from
+  now rather than catching up at high speed.
+- **An exception kills nothing.** It is caught per frame and exposed through
+  `engine_status`, then cleared as soon as the effect recovers. After thirty
+  consecutive failed frames, the loop stops.
+- **The color swatch comes from the engine, not from the manifest.** Four frames at
+  irregularly spaced instants, and in each the average of a diagonal
+  band that moves forward: that is what keeps a spatial effect and a uniform
+  effect from looking alike. Sampling always at the same spot would
+  confuse them, and so would an average of the whole frame.
+- **Everything that runs effect code is bounded**, in time as in memory.
+  This was first true of sampling alone, because a `while (true)` there
+  prevented an installation from completing. It is now true of the render
+  loop, where the lack of a bound was worse: the `stop` flag is read *between* two
+  frames, a render that never returns never reads it again — and since an effect
+  runs with the window closed, closing the window does not rescue it. Since the close button collapses to the tray instead
+  of quitting, it rescues it even less: the last resort is
+  "Quitter candeo" in the icon's menu, which takes down the whole process.
+- **The two bounds do not have the same shape**, because the interrupt
+  handler is set on the `Runtime` **once**. Sampling only
+  needs one deadline, captured by value; the loop changes it every
+  frame and therefore shares a cell that it renews before each call. That
+  cell also carries what is needed to know that it really was the deadline that cut in:
+  QuickJS raises "InternalError: interrupted" whatever the reason.
+- **An overrun is an ordinary frame error.** It takes the
+  exception path above, the one that thirty consecutive failed frames
+  turn into a clean stop — no new path. The engine only adds
+  the name of the cause, in French: "l'effet a dépassé son temps de calcul" (the effect exceeded its compute
+  time) can be tied to its code, a QuickJS error cannot.
+- **The budgets are measured.** An ordinary effect costs 0.23 ms per frame in
+  `release`, a field of five thousand particles with a one-second trail
+  1.1 ms. The 10 ms budget is therefore not a performance allocation but
+  **a freeze detector with headroom for machine hiccups**: the deadline is
+  measured in wall-clock time, not CPU time, and a thread suspended by
+  the scheduler consumes its budget without executing anything. The ceiling comes
+  from elsewhere: the HID write takes 14.4 ms at worst within the same
+  33.3 ms period, and the deadline would only be missed silently from about 19 ms
+  of budget upward. Memory does not depend on the profile: 32 MB, five times the most
+  outlandish stateful effect we know how to write for 132 LEDs.
+- **The debug budget is separate — 200 ms — and it is a ceiling, not a
+  target.** QuickJS is C compiled at the profile's optimization level: un-optimized,
+  the same frame went from 0.23 ms to 6.3 ms. Since
+  `[profile.dev.package."*"]` sets dependencies to `opt-level = 2`, QuickJS
+  is optimized in debug too and the gap should have melted away — **to be
+  re-measured** before unifying the two values.
+- **A device gets a status line as soon as it has carried an effect, and keeps it.**
+  `engine_status()` returns one entry per targeted device, `running` false once
+  the effect is stopped. Removing the line would make "this device is doing nothing"
+  indistinguishable from "I know nothing about this device".
+- **Stopping waits for completion, per device.** The lock waited on is that of
+  the targeted device, never the engine's: an HID write blocked on one must
+  not hold back commands targeting the others, otherwise the invariant of §7
+  would be lost one level up.
 
-### Le seul essai qui traverse toute la chaîne
+### The only test that crosses the whole chain
 
-Tout le reste se vérifie sans matériel : les rapports, la matrice, le moteur,
-les effets intégrés. Reste qu'aucun de ces tests ne prouve qu'un octet atteint
-le clavier.
+Everything else is verified without hardware: the reports, the matrix, the engine,
+the built-in effects. Still, none of those tests proves that a byte reaches
+the keyboard.
 
 ```
 cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture
 ```
 
-`bout_en_bout_sur_le_vrai_clavier` ouvre le périphérique, fait tourner un effet
-intégré trois secondes sur **cet appareil**, vérifie que la boucle tient, qu'aucune
-image n'a levé et que les images atteignent bien le clavier (`reachingKeyboard`),
-puis s'arrête. Marqué `#[ignore]` : il exige un clavier branché, il n'a donc rien
-à faire en intégration continue.
+`bout_en_bout_sur_le_vrai_clavier` opens the device, runs a built-in
+effect for three seconds on **this device**, checks that the loop holds, that no
+frame threw and that frames do reach the keyboard (`reachingKeyboard`),
+then stops. Marked `#[ignore]`: it requires a plugged-in keyboard, so it has no place
+in continuous integration.
 
-**Il écrit vraiment sur le clavier** — c'est le but, et c'est visible.
+**It really writes to the keyboard** — that is the point, and it is visible.

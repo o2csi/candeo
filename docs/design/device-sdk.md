@@ -1,100 +1,98 @@
-# SDK d'appareils — contribuer un appareil qu'on est seul à posséder
+# Device SDK — contributing a device only you own
 
-Ce document prépare [#34]. Il ne décrit pas ce qui existe : il tranche le
-**vocabulaire** par lequel un appareil contribué dira ce qu'il sait faire, et les
-règles qui rendent une contribution **relisable par quelqu'un qui ne possède pas
-le matériel**.
+This document prepares [#34]. It does not describe what exists: it settles the
+**vocabulary** through which a contributed device will state what it can do, and
+the rules that make a contribution **reviewable by someone who does not own the
+hardware**.
 
-Il est écrit pour une personne précise : celle qui a un appareil que nous n'avons
-pas, qui veut le faire marcher, et qui devra convaincre un relecteur incapable de
-vérifier quoi que ce soit par lui-même.
+It is written for one specific person: the one who has a device we do not have,
+who wants to make it work, and who will have to convince a reviewer unable to
+verify anything by themselves.
 
-> **Ce qui n'est pas décidé ici.** Le format de fichier d'un gabarit, les octets
-> d'un protocole autre que celui du DeathStalker, et l'implémentation. Les blocs
-> de code ci-dessous montrent la **forme** d'une déclaration, pas une syntaxe
-> arrêtée.
-
----
-
-## 1. Trois choses, dont deux sont déjà des données
-
-Un appareil se réduit à une **identité** (VID/PID, interface du composite), un
-**gabarit** (positions adressables, noms, géométrie) et une façon de **construire
-ses rapports**. C'est l'analyse de [#34], et elle tient.
-
-Ce que ce document ajoute est qu'il en manque une quatrième, aujourd'hui absente
-et invisible : **ce que l'appareil sait faire**. `Layout` porte `name`, `vid`,
-`pid`, `interface`, `rows`, `cols`, `matrix`, `keys` — de quoi ouvrir le bon
-périphérique et lui pousser une image, rien qui permette de répondre à « cet
-effet a-t-il un sens ici ». Tant qu'il n'y a qu'un appareil, la question ne se
-pose pas : la réponse est oui, toujours. Elle se pose au deuxième.
-
-### Pourquoi une capacité et pas un modèle
-
-La tentation est de laisser un effet nommer les appareils qu'il vise. C'est le
-mauvais axe, et [#44] §5 en donne la raison définitive :
-
-> Une liste de modèles est un **monde clos**. Elle ne peut rien savoir du
-> matériel sorti après elle, et son auteur ne peut de toute façon pas l'essayer.
-> Une exigence de **capacité** est ouverte : elle se confronte à n'importe quel
-> gabarit, y compris ceux qui n'existent pas encore.
-
-La conséquence porte sur le SDK autant que sur les effets. **Contribuer un
-appareil, c'est déclarer ce qu'il sait faire** — après quoi un effet écrit
-aujourd'hui fonctionne sur un appareil ajouté dans deux ans sans que personne ne
-rouvre sa liste, et un appareil ayant une particularité peut l'exposer sans qu'un
-effet ait à coder un modèle en dur.
-
-⚠️ **Ce vocabulaire est une interface publique.** Un effet exporté le contient en
-toutes lettres ; le changer après coup casse des fichiers qui ne sont plus chez
-nous. C'est la raison d'être des trois critères d'admission du §3.
+> **What is not decided here.** The file format of a layout, the bytes of any
+> protocol other than the DeathStalker's, and the implementation. The code blocks
+> below show the **shape** of a declaration, not a settled syntax.
 
 ---
 
-## 2. La nature de l'appareil
+## 1. Three things, two of which are already data
 
-Le gabarit porte une **nature** — `keyboard`, `mouse`, `mousepad`, … — et chaque
-effet **déclare obligatoirement** celles qu'il vise. L'obligation est tranchée
-dans [#44] §5 et n'est pas rediscutée ici :
+A device boils down to an **identity** (VID/PID, interface of the composite
+device), a **layout** (addressable positions, names, geometry) and a way to
+**build its reports**. That is the analysis in [#34], and it holds.
 
-> Un champ facultatif produit du silence, pas une réponse : personne ne le
-> remplit, et « absent » finit par vouloir dire « je n'y ai pas pensé » autant
-> que « ça marche partout ».
+What this document adds is that a fourth one is missing, absent and invisible
+today: **what the device can do**. `Layout` carries `name`, `vid`,
+`pid`, `interface`, `rows`, `cols`, `matrix`, `keys` — enough to open the right
+device and push a frame to it, nothing that allows answering "does this
+effect make sense here". As long as there is only one device, the question does
+not arise: the answer is yes, always. It arises with the second one.
 
-### Pourquoi une nature, puisqu'il y a des capacités
+### Why a capability and not a model
 
-Parce que les deux répondent à des questions différentes, et qu'aucune ne
-remplace l'autre :
+The temptation is to let an effect name the devices it targets. That is the
+wrong axis, and [#44] §5 gives the definitive reason:
 
-| | Question | Qui décide |
+> A list of models is a **closed world**. It can know nothing about hardware
+> released after it, and its author cannot try it anyway. A **capability**
+> requirement is open: it can be matched against any layout, including those
+> that do not exist yet.
+
+The consequence applies to the SDK as much as to effects. **Contributing a
+device means declaring what it can do** — after which an effect written today
+works on a device added two years from now without anyone reopening its list, and
+a device with a peculiarity can expose it without an effect having to hard-code
+a model.
+
+⚠️ **This vocabulary is a public interface.** An exported effect contains it
+spelled out; changing it after the fact breaks files that are no longer in our
+hands. That is the reason for the three admission criteria in §3.
+
+---
+
+## 2. The kind of device
+
+The layout carries a **kind** — `keyboard`, `mouse`, `mousepad`, … — and every
+effect **must declare** the kinds it targets. The obligation was settled
+in [#44] §5 and is not reopened here:
+
+> An optional field produces silence, not an answer: nobody fills it in, and
+> "absent" ends up meaning "I did not think about it" as much as "it works
+> everywhere".
+
+### Why a kind, when there are capabilities
+
+Because the two answer different questions, and neither replaces the other:
+
+| | Question | Who decides |
 |---|---|---|
-| **Capacité** | Est-ce que ça **fonctionne** ici ? | la mécanique |
-| **Nature** | Est-ce que ça **a un sens** ici ? | l'auteur de l'effet |
+| **Capability** | Does it **work** here? | the mechanics |
+| **Kind** | Does it **make sense** here? | the effect's author |
 
-« Balayage » fonctionnerait très bien sur un tapis de souris muni d'une grille :
-aucune capacité ne le refuse. Son auteur peut malgré tout savoir que sa traînée
-suppose des rangées de touches et n'a pas l'air de grand-chose ailleurs. La
-nature est le seul endroit où il peut le dire.
+"Balayage" (Sweep) would work perfectly well on a mouse pad fitted with a grid:
+no capability refuses it. Its author may nonetheless know that its trail
+assumes rows of keys and does not look like much elsewhere. The kind is the only
+place where they can say so.
 
-Elle sert aussi à ce que le vocabulaire de capacités ne doit **surtout pas**
-avoir à exprimer : de quoi l'objet a l'air. Le simulateur dessine un clavier
-parce que c'en est un ([`studio.md`](studio.md) §4) ; il n'y a pas de capacité
-« ressemble à un clavier », et il ne faut pas essayer d'en écrire une.
+It also serves what the capability vocabulary must **above all not** have to
+express: what the object looks like. The simulator draws a keyboard because it
+is one ([`studio.md`](studio.md) §4); there is no "looks like a keyboard"
+capability, and one should not try to write it.
 
-### La liste est close, et ce n'est pas un monde clos
+### The list is closed, and it is not a closed world
 
-Ajouter une nature demande une ligne dans une liste du dépôt, donc une PR — la
-même que celle qui apporte l'appareil. C'est volontaire : `mouse` et `souris` et
-`pointing-device` écrits librement par trois contributeurs donneraient trois
-natures qu'aucun effet ne peut viser ensemble.
+Adding a kind takes one line in a list in the repository, hence a PR — the same
+one that brings the device. This is deliberate: `mouse` and `souris` and
+`pointing-device` written freely by three contributors would give three kinds
+that no effect can target together.
 
-> **Ce n'est pas la fermeture que [#44] dénonce.** Une liste de *modèles* se
-> périme parce que le matériel change ; une liste de *natures* ne se périme pas
-> parce que les catégories d'objets bougent d'un cran par décennie. Une souris
-> sortie demain se déclare `mouse` et tous les effets « souris » l'atteignent
-> sans qu'une ligne change. C'est exactement l'inverse d'une liste de VID/PID.
+> **This is not the closure that [#44] condemns.** A list of *models* goes stale
+> because hardware changes; a list of *kinds* does not go stale because
+> categories of objects shift one notch per decade. A mouse released tomorrow
+> declares itself `mouse` and every "mouse" effect reaches it without a line
+> changing. That is exactly the opposite of a VID/PID list.
 
-### « Toutes natures » s'écrit
+### "All kinds" is written out
 
 ```ts
 kinds: 'all',          // un choix, pas un oubli
@@ -104,241 +102,237 @@ kinds: ['mouse', 'mousepad'],
 
 ---
 
-## 3. Le vocabulaire de capacités
+## 3. The capability vocabulary
 
-### 3.1 Trois critères d'admission
+### 3.1 Three admission criteria
 
-Un terme n'entre au vocabulaire que s'il passe les trois. C'est ce qui empêche
-les deux dérives — un vocabulaire trop fin, impossible à remplir, et un
-vocabulaire trop grossier, auquel personne ne peut se fier.
+A term enters the vocabulary only if it passes all three. This is what prevents
+the two drifts — a vocabulary too fine-grained, impossible to fill in, and a
+vocabulary too coarse, that nobody can rely on.
 
-1. **Un effet en dépend.** Il existe, ou on peut nommer précisément, un effet qui
-   change de comportement — qui tourne ou refuse — selon la valeur du terme. Sans
-   ça le terme est du remplissage : il coûte une décision à chaque contributeur
-   et ne sert à personne.
-2. **Un contributeur peut répondre depuis son seul relevé.** Sans posséder un
-   autre appareil, sans lire le code d'un pilote tiers, sans deviner. Un terme
-   auquel on ne peut répondre est un terme auquel on répondra **faux**.
-3. **Son absence a un sens sûr.** Un gabarit écrit avant l'ajout du terme doit
-   rester correct. Sans cette règle le vocabulaire ne peut plus grandir, et c'est
-   la moitié de son intérêt qui disparaît.
+1. **An effect depends on it.** There exists, or one can name precisely, an
+   effect that changes behavior — runs or refuses — depending on the term's
+   value. Without that the term is filler: it costs every contributor a decision
+   and serves nobody.
+2. **A contributor can answer from their survey alone.** Without owning another
+   device, without reading a third-party driver's code, without guessing. A term
+   that cannot be answered is a term that will be answered **wrong**.
+3. **Its absence has a safe meaning.** A layout written before the term was added
+   must stay correct. Without this rule the vocabulary can no longer grow, and
+   half of its value disappears.
 
-### 3.2 Les six termes
+### 3.2 The six terms
 
-| Terme | Ce qu'il dit | L'effet qui en dépend |
+| Term | What it says | The effect that depends on it |
 |---|---|---|
-| `directFrame` | l'hôte peut poser une image | **tous** |
-| `color` | `rgb` ou `mono` | tout ce qui parle de teinte |
-| `matrix` | les positions forment une grille, le voisinage a un sens | Balayage, Onde matricielle |
-| `geometry` | chaque position a une place physique | Onde radiale |
-| `namedKeys` | chaque position porte le nom de sa touche | surligner un raccourci |
-| `zones` | des parties nommées hors grille | une pulsation de molette |
+| `directFrame` | the host can set a frame | **all of them** |
+| `color` | `rgb` or `mono` | anything that deals with hue |
+| `matrix` | positions form a grid, neighborhood has a meaning | "Balayage" (Sweep), "Onde matricielle" (Matrix wave) |
+| `geometry` | every position has a physical place | "Onde radiale" (Radial wave) |
+| `namedKeys` | every position carries the name of its key | highlighting a shortcut |
+| `zones` | named parts outside the grid | a wheel pulse |
 
 ---
 
-**`directFrame` — l'hôte peut poser une image.**
+**`directFrame` — the host can set a frame.**
 
-C'est le seul terme dont tout dépend, et le seul dont on pourrait croire qu'il
-est inutile puisque tous les effets l'exigent. Il gagne sa place par le cas
-contraire : un appareil dont le micrologiciel n'expose que ses propres effets
-existe, et mérite un gabarit — on veut le nommer, le lister, lui poser sa
-respiration matérielle. Ce qu'on ne veut pas, c'est y démarrer un effet, animer
-le simulateur, et laisser l'utilisateur regarder un appareil éteint. C'est
-précisément le silence qui a coûté une session entière de diagnostic
-([`effects-runtime.md`](effects-runtime.md) §7) ; il ne doit pas revenir par la
-porte d'un appareil contribué.
+It is the only term everything depends on, and the only one that might seem
+useless since every effect requires it. It earns its place through the opposite
+case: a device whose firmware only exposes its own effects exists, and deserves
+a layout — we want to name it, list it, set its hardware breathing effect. What
+we do not want is to start an effect on it, animate the simulator, and leave the
+user staring at a dark device. That is precisely the silence that cost a whole
+stretch of debugging ([`effects-runtime.md`](effects-runtime.md) §7); it must
+not come back in through a contributed device.
 
-**Rempli par** : le contributeur a trouvé le mode piloté par l'hôte, ou ne l'a
-pas trouvé. Sur le DeathStalker c'est l'effet `0x08` ([`deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §4).
-
----
-
-**`color` — `rgb` ou `mono`.**
-
-Le seul terme du lot qui ne se lit nulle part dans les données : un gabarit
-monochrome a la même matrice, les mêmes noms, la même géométrie. Il faut donc le
-déclarer, et c'est le seul.
-
-Un rétroéclairage blanc ou à couleur unique n'a rien d'exotique, et un effet dont
-le sujet **est** la teinte — Onde radiale, qui fait tourner `hsv` — n'y produit
-pas un résultat dégradé : il produit une surface de luminosité à peu près
-constante, c'est-à-dire rien. Mieux vaut que la galerie le dise.
-
-⚠️ **Absent vaut `rgb`**, parce que c'est ce que sont tous les gabarits
-existants. La règle générale est au §3.4 ; ce terme en est l'illustration.
+**Filled in by**: the contributor found the host-controlled mode, or did not
+find it. On the DeathStalker it is effect `0x08` ([`deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §4).
 
 ---
 
-**`matrix` — les positions forment une grille.**
+**`color` — `rgb` or `mono`.**
 
-Le terme le plus lourd de conséquences, parce qu'il est **déjà supposé partout et
-déclaré nulle part**. Les trois effets livrés lisent `key.row` :
+The only term in the set that cannot be read anywhere in the data: a monochrome
+layout has the same matrix, the same names, the same geometry. It therefore has
+to be declared, and it is the only one.
+
+A white or single-color backlight is nothing exotic, and an effect whose subject
+**is** hue — "Onde radiale", which rotates `hsv` — does not produce a degraded
+result there: it produces a surface of roughly constant brightness, that is,
+nothing. Better for the gallery to say so.
+
+⚠️ **Absent means `rgb`**, because that is what all existing layouts are. The
+general rule is in §3.4; this term illustrates it.
+
+---
+
+**`matrix` — positions form a grid.**
+
+The term with the heaviest consequences, because it is **already assumed
+everywhere and declared nowhere**. The three shipped effects read `key.row`:
 
 ```js
 const k = Math.max(0, 1 - Math.abs(key.row - head) / trail)   // balayage.js
 const d = Math.hypot(key.col - cx, key.row - cy)              // onde-matricielle.js
 ```
 
-Sur un appareil sans grille, `key.row` vaudrait `undefined`, la soustraction
-`NaN`, et la couleur serait bornée à zéro : **les trois effets livrés
-s'afficheraient en noir, sans une erreur.** C'est la démonstration que
-l'exigence doit être écrite, et qu'elle doit être écrite **maintenant**, tant
-que les effets concernés sont tous chez nous.
+On a device without a grid, `key.row` would be `undefined`, the subtraction
+`NaN`, and the color would be clamped to zero: **the three shipped effects
+would display black, without a single error.** This demonstrates that the
+requirement must be written, and that it must be written **now**, while the
+effects concerned are all in our hands.
 
-Une exigence quantifiée est permise ici — « au moins trois rangées », « au moins
-dix colonnes » pour un effet qui dessine une jauge — sous une règle stricte :
+A quantified requirement is allowed here — "at least three rows", "at least
+ten columns" for an effect that draws a gauge — under a strict rule:
 
-> **Un seuil ne porte que sur un nombre que le gabarit déclare déjà pour une
-> autre raison.** `rows` et `cols` sont dans `Layout` depuis le début. Autoriser
-> les seuils sur autre chose ferait entrer par la bande des grandeurs que
-> personne ne sait mesurer.
-
----
-
-**`geometry` — chaque position a une place physique.**
-
-Ce que le périphérique **ne déclare pas** : il n'expose que sa grille logique. Le
-rectangle de chaque touche est une transcription à la main de la disposition ISO.
-
-L'effet qui en dépend **existe** depuis [#60] : « Onde radiale » calcule sa
-distance sur les rectangles, et « Onde matricielle » — la version d'avant, gardée
-telle quelle — la calcule en `(rangée, colonne)`. Les deux sont livrées, et elles
-ne rendent pas la même image : dans la grille, le pavé numérique est à quatre
-colonnes du centre alors qu'il en est physiquement à l'autre bout, la barre
-d'espace occupe une case pour 6,25 u, et les trous comptent comme de la distance.
-Ronde dans une grille, déformée sur le bureau.
-
-Ce que le terme ajouterait, et qui manque encore : « Onde radiale » **lève** sur
-un gabarit non dessiné, au lieu d'être refusée avant d'être proposée. Voir §4.
-
-**Rempli par** : le contributeur a dessiné sa disposition, ou non. C'est du
-travail réel et facultatif ; ne pas le faire reste une contribution valable, qui
-perd seulement les effets spatiaux.
-
-C'est aussi ce dont le **simulateur** a besoin pour ressembler à l'appareil. Un
-gabarit sans géométrie n'est pas indessinable, il est dessiné en grille de
-carrés — ce que [`studio.md`](studio.md) §4 avait écarté pour l'appareil que nous
-avons, et qui redevient le moindre mal pour un appareil que nous n'avons pas.
+> **A threshold may only apply to a number the layout already declares for
+> another reason.** `rows` and `cols` have been in `Layout` from the start.
+> Allowing thresholds on anything else would sneak in quantities that nobody
+> knows how to measure.
 
 ---
 
-**`namedKeys` — chaque position porte un nom.**
+**`geometry` — every position has a physical place.**
 
-La correspondance index → touche du DeathStalker a demandé de croiser la matrice
-avec la liste ordonnée que le périphérique déclare (§6 du relevé). Ce n'est ni
-automatique ni donné, et un contributeur peut légitimement s'arrêter avant.
+What the device **does not declare**: it only exposes its logical grid. The
+rectangle of each key is a hand transcription of the ISO layout.
 
-L'effet qui en dépend est celui qui éclaire une **touche par son nom** plutôt que
-par sa position : surligner les touches d'un raccourci, allumer `WASD`, faire
-respirer la seule barre d'espace. Ces effets sont impossibles à écrire
-aujourd'hui de manière portable, et le terme est ce qui les rend possibles sans
-coder un modèle en dur.
+The effect that depends on it has **existed** since [#60]: "Onde radiale"
+computes its distance on the rectangles, and "Onde matricielle" — the earlier
+version, kept as is — computes it in `(rangée, colonne)`. Both are shipped, and
+they do not render the same frame: in the grid, the numpad is four columns from
+the center when it is physically at the other end, the space bar takes one cell
+for 6.25 u, and gaps count as distance. Round in a grid, distorted on the desk.
 
-⚠️ **Un nom n'est pas une identité.** Le DeathStalker relevé est en `fr_FR` ISO :
-ses noms sont `A`, `Z`, `ù`. Un effet qui cherche `W` sur un AZERTY le trouvera
-là où un QWERTY le met ailleurs. Le terme dit « il y a des noms », il ne promet
-aucune disposition ; ce que porte la disposition relève de la provenance (§5).
+What the term would add, and what is still missing: "Onde radiale" **throws** on
+an undrawn layout, instead of being refused before being offered. See §4.
+
+**Filled in by**: the contributor drew their layout, or not. It is real and
+optional work; not doing it still makes a valid contribution, which only loses
+the spatial effects.
+
+It is also what the **simulator** needs to look like the device. A layout
+without geometry is not undrawable, it is drawn as a grid of squares — which
+[`studio.md`](studio.md) §4 had ruled out for the device we have, and which
+becomes the lesser evil again for a device we do not have.
 
 ---
 
-**`zones` — des parties nommées hors grille.**
+**`namedKeys` — every position carries a name.**
 
-C'est le terme qui ouvre le SDK aux appareils qui ne sont pas des claviers, et
-c'est celui qui demande le plus de précautions, parce qu'un nom libre n'est
-utilisable par personne.
+The DeathStalker's index → key mapping required cross-referencing the matrix
+with the ordered list the device declares (§6 of the survey). It is neither
+automatic nor given, and a contributor can legitimately stop before that.
 
-> **Les rôles viennent d'une liste close** — `main`, `logo`, `wheel`, `strip`,
-> `underglow`, `wrist` — étendue par PR, comme les natures. Un effet qui exige
-> `wheel` a besoin que `wheel` veuille dire la même chose partout ; si le champ
-> est libre, `molette`, `wheel` et `scroll` coexistent et l'effet ne trouve
-> jamais rien. L'étiquette affichée, elle, est du texte libre.
+The effect that depends on it is one that lights a **key by its name** rather
+than by its position: highlighting the keys of a shortcut, lighting `WASD`,
+making only the space bar breathe. Such effects cannot be written portably
+today, and the term is what makes them possible without hard-coding a model.
 
-C'est ici que l'argument du monde ouvert se voit le mieux. Une pulsation de
-molette écrite aujourd'hui pour une souris fonctionnera sur un **clavier** de
-2028 muni d'une molette éclairée, sans qu'une ligne de l'effet change — parce
-qu'elle n'a jamais parlé de souris, seulement de molette.
+⚠️ **A name is not an identity.** The surveyed DeathStalker is `fr_FR` ISO:
+its names are `A`, `Z`, `ù`. An effect looking for `W` on an AZERTY will find it
+where a QWERTY puts it elsewhere. The term says "there are names", it promises
+no locale layout; what the locale layout carries belongs to provenance (§5).
 
-⚠️ **Un booléen par organe est la dérive à éviter.** `hasWheel`, `hasLogo`,
-`hasUnderglow`… est un vocabulaire infini que personne ne peut remplir ni tenir à
-jour. Une zone est une **position adressable qui porte un rôle** : rien de plus,
-et c'est ce qui la rend descriptible.
+---
 
-### 3.3 Ce qui n'entre pas au vocabulaire, et pourquoi
+**`zones` — named parts outside the grid.**
 
-Écarter est aussi une décision, et c'est celle qui tient le vocabulaire petit.
+This is the term that opens the SDK to devices that are not keyboards, and the
+one that requires the most care, because a free-form name is usable by nobody.
 
-| Écarté | Raison |
+> **Roles come from a closed list** — `main`, `logo`, `wheel`, `strip`,
+> `underglow`, `wrist` — extended by PR, like kinds. An effect that requires
+> `wheel` needs `wheel` to mean the same thing everywhere; if the field is
+> free-form, `molette`, `wheel` and `scroll` coexist and the effect never finds
+> anything. The displayed label, on the other hand, is free text.
+
+This is where the open-world argument shows best. A wheel pulse written today
+for a mouse will work on a 2028 **keyboard** fitted with a lit wheel, without a
+line of the effect changing — because it never talked about mice, only about
+wheels.
+
+⚠️ **One boolean per component is the drift to avoid.** `hasWheel`, `hasLogo`,
+`hasUnderglow`… is an infinite vocabulary that nobody can fill in or keep up to
+date. A zone is an **addressable position that carries a role**: nothing more,
+and that is what makes it describable.
+
+### 3.3 What stays out of the vocabulary, and why
+
+Ruling something out is also a decision, and it is the one that keeps the
+vocabulary small.
+
+| Ruled out | Reason |
 |---|---|
-| **écriture partielle de rangée** | vraie sur le DeathStalker, et **invisible d'un effet** : un effet écrit une image, il n'adresse jamais le bus. C'est une propriété de transport, pas une capacité. |
-| **luminosité matérielle** | l'hôte et l'interface en dépendent, aucun effet n'en dépend : une image porte déjà ses couleurs. |
-| **effets du micrologiciel** | énumérer `Static`, `Breathing`, `Wave`… par modèle recréerait un monde clos d'un autre genre. C'est du ressort de l'interface, pas des effets. |
-| **cadence soutenable** | c'est une **mesure**, pas une capacité — voir ci-dessous. |
-| **nombre de LED** | dérivé, et surtout piégeux : 132 positions pour 106 touches, et confondre les deux fige une rangée. Aucun effet ne doit brancher dessus. |
-| **VID / PID** | l'objet même du refus de [#44] §5. |
+| **partial row writes** | true on the DeathStalker, and **invisible to an effect**: an effect writes a frame, it never addresses the bus. It is a transport property, not a capability. |
+| **hardware brightness** | the host and the interface depend on it, no effect does: a frame already carries its colors. |
+| **firmware effects** | enumerating `Static`, `Breathing`, `Wave`… per model would recreate a closed world of another sort. It is the interface's business, not the effects'. |
+| **sustainable frame rate** | it is a **measurement**, not a capability — see below. |
+| **LED count** | derived, and above all a trap: 132 positions for 106 keys, and confusing the two freezes a row. No effect must branch on it. |
+| **VID / PID** | the very thing [#44] §5 refuses. |
 
-**Le cas de la cadence mérite son paragraphe.** Une mise à jour complète du
-DeathStalker coûte 13,1 ms, soit un plafond de ~76 images par seconde, et c'est
-ce qui a fait retomber le moteur de 60 à 30 (§5 du relevé). Un appareil contribué
-plus lent existera. Il faut donc bien que le gabarit porte ce chiffre — mais
-comme **mesure datée**, à côté de la provenance, pas comme capacité : l'hôte s'en
-sert pour régler sa boucle et pour avertir, et aucun effet n'a à s'en soucier. Un
-effet qui exigerait « au moins 30 images par seconde » ne serait pas refusé
-utilement ; il serait refusé bêtement, alors que ralenti il reste un effet.
+**The frame rate case deserves its own paragraph.** A full update of the
+DeathStalker costs 13.1 ms, a ceiling of ~76 frames per second, and that is
+what brought the engine down from 60 to 30 (§5 of the survey). A slower
+contributed device will exist. So the layout does need to carry that figure — but
+as a **dated measurement**, next to the provenance, not as a capability: the host
+uses it to tune its loop and to warn, and no effect has to care about it. An
+effect that required "at least 30 frames per second" would not be refused
+usefully; it would be refused stupidly, whereas slowed down it is still an effect.
 
-### 3.4 Comment le vocabulaire grandit sans rien casser
+### 3.4 How the vocabulary grows without breaking anything
 
-Deux règles, et elles n'ont pas le même prix.
+Two rules, and they do not have the same price.
 
-**Côté gabarit — un terme ajouté doit avoir un sens sûr quand il est absent.**
-`namedKeys` absent veut dire « pas de noms » : sûr. `color` absent veut dire
-`rgb`, parce que c'est ce que sont tous les gabarits écrits avant le terme —
-le défaut sûr n'est pas « rien », c'est **ce que l'existant supposait déjà**. Un
-terme sans défaut sûr ne peut pas être ajouté après coup, seulement à une rupture
-de version. C'est la contrainte qui doit être vérifiée **avant** d'ajouter un mot,
-pas découverte après.
+**On the layout side — an added term must have a safe meaning when absent.**
+`namedKeys` absent means "no names": safe. `color` absent means
+`rgb`, because that is what all layouts written before the term are —
+the safe default is not "nothing", it is **what the existing ones already
+assumed**. A term without a safe default cannot be added after the fact, only at
+a breaking version. This is the constraint that must be checked **before** adding
+a word, not discovered afterwards.
 
-**Côté effet — un terme inconnu se refuse avec une phrase.** Un effet venu d'une
-version plus récente peut exiger un terme que l'hôte ne connaît pas. Il est
-refusé, et il est refusé par une phrase qui nomme le terme, comme `apiVersion` en
-[#44] §4 — jamais par une erreur de moteur que personne ne relie à son code.
+**On the effect side — an unknown term is refused with a sentence.** An effect
+from a newer version may require a term the host does not know. It is
+refused, and it is refused by a sentence that names the term, like `apiVersion` in
+[#44] §4 — never by an engine error that nobody connects to their code.
 
-### 3.5 Le gabarit ne remplit presque rien : les capacités se **lisent**
+### 3.5 The layout fills in almost nothing: capabilities are **read**
 
-C'est le point qui fait tenir tout le reste, et c'est la réponse à « un
-vocabulaire trop fin devient impossible à remplir ».
+This is the point that holds everything else together, and it is the answer to
+"a vocabulary too fine-grained becomes impossible to fill in".
 
-**On ne déclare que ce qui ne se déduit pas.** Un contributeur ne remplit pas un
-questionnaire de capacités : il fournit les données qu'il a relevées, et le
-vocabulaire en est la lecture.
+**Only what cannot be deduced is declared.** A contributor does not fill in a
+capability questionnaire: they provide the data they surveyed, and the
+vocabulary is the reading of it.
 
-| Terme | D'où il vient |
+| Term | Where it comes from |
 |---|---|
-| `directFrame` | le pilote implémente « poser une image », ou non |
-| `matrix` | le gabarit porte une grille |
-| `geometry` | les positions portent un rectangle |
-| `namedKeys` | toutes les positions portent un nom non vide |
-| `zones` | le gabarit porte des zones |
-| `color` | **déclaré** — rien dans les données ne le révèle |
+| `directFrame` | the driver implements "set a frame", or not |
+| `matrix` | the layout carries a grid |
+| `geometry` | positions carry a rectangle |
+| `namedKeys` | all positions carry a non-empty name |
+| `zones` | the layout carries zones |
+| `color` | **declared** — nothing in the data reveals it |
 
-Un contributeur ne peut donc pas se tromper sur cinq termes sur six : il peut
-seulement en offrir moins, en fournissant moins. Et l'incitation va dans le bon
-sens — dessiner sa géométrie, nommer ses touches, c'est ouvrir sa contribution à
-plus d'effets. Personne n'a à arbitrer une case à cocher dont il ne comprend pas
-l'enjeu.
+A contributor therefore cannot get five terms out of six wrong: they can only
+offer fewer, by providing less. And the incentive points the right way — drawing
+one's geometry, naming one's keys, opens the contribution to more effects.
+Nobody has to decide on a checkbox whose stakes they do not understand.
 
-Ce qui reste déclaré à la main est donc minuscule : la nature, la profondeur de
-couleur, et la provenance du §5. Trois choses auxquelles on peut répondre sans
-rien deviner.
+What remains declared by hand is therefore tiny: the kind, the color depth, and
+the provenance of §5. Three things that can be answered without guessing
+anything.
 
 ---
 
-## 4. Deux déclarations, et leur confrontation
+## 4. Two declarations, matched against each other
 
-### Le DeathStalker V2 Pro
+### The DeathStalker V2 Pro
 
-Ce que deviendrait le gabarit existant. Les données sont celles de
-[`layout.rs`](../../crates/candeo-device/src/layout.rs), inchangées ; tout ce qui
-est nouveau tient dans les deux derniers blocs.
+What the existing layout would become. The data is that of
+[`layout.rs`](../../crates/candeo-device/src/layout.rs), unchanged; everything
+new fits in the last two blocks.
 
 ```rust
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
@@ -370,16 +364,16 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
 };
 ```
 
-Les capacités qui en découlent, sans qu'une ligne les énonce : `directFrame`,
-`matrix { rows: 6, cols: 22 }`, `geometry`, `namedKeys`, `color: rgb`, aucune
-zone.
+The capabilities that follow from it, without a line stating them: `directFrame`,
+`matrix { rows: 6, cols: 22 }`, `geometry`, `namedKeys`, `color: rgb`, no
+zones.
 
-### Une souris à trois zones
+### A three-zone mouse
 
-> ⚠️ **Ceci n'est pas un relevé.** Aucun exemplaire n'a été ouvert, aucune trame
-> capturée. C'est une illustration de la **forme** d'une déclaration sur un
-> appareil aussi éloigné que possible du seul que nous ayons. Les octets, les
-> identifiants et la cadence d'un appareil réel ne se devinent pas.
+> ⚠️ **This is not a survey.** No unit has been opened, no frame
+> captured. It is an illustration of the **shape** of a declaration for a
+> device as far as possible from the only one we have. The bytes, the
+> identifiers and the frame rate of a real device cannot be guessed.
 
 ```rust
 kind: DeviceKind::Mouse,
@@ -395,27 +389,27 @@ zones: &[
 color: Color::Rgb,
 ```
 
-Une image y fait **trois** couleurs au lieu de 132. Rien d'autre ne change : le
-moteur pousse toujours un tableau plat de `Rgb` dans `DeviceOut::present`, et le
-trait ne bouge pas d'une ligne. C'est le meilleur argument en faveur de cette
-forme — **elle n'ajoute aucun chemin de données, seulement de quoi savoir à qui
-on parle.**
+A frame there is **three** colors instead of 132. Nothing else changes: the
+engine still pushes a flat array of `Rgb` into `DeviceOut::present`, and the
+trait does not move by a single line. That is the best argument for this
+shape — **it adds no data path, only a way of knowing who we are talking
+to.**
 
-### Ce que ça donne à l'écran
+### What it looks like on screen
 
-| Effet | Exige | Clavier | Souris 3 zones |
+| Effect | Requires | Keyboard | 3-zone mouse |
 |---|---|---|---|
-| Respiration | `kinds: 'all'`, rien | ✅ | ✅ |
-| Balayage | `matrix { rowsMin: 3 }` | ✅ | ❌ pas de grille |
-| Onde matricielle | `matrix` | ✅ | ❌ pas de grille |
-| Onde radiale | `geometry` | ✅ | ❌ rien n'est dessiné |
-| Surligner un raccourci | `namedKeys` | ✅ | ❌ rien n'est nommé |
-| Pulsation de molette | `zones: ['wheel']` | ❌ pas de molette | ✅ |
+| "Respiration" (Breathing) | `kinds: 'all'`, nothing | ✅ | ✅ |
+| "Balayage" | `matrix { rowsMin: 3 }` | ✅ | ❌ no grid |
+| "Onde matricielle" | `matrix` | ✅ | ❌ no grid |
+| "Onde radiale" | `geometry` | ✅ | ❌ nothing is drawn |
+| Highlight a shortcut | `namedKeys` | ✅ | ❌ nothing is named |
+| Wheel pulse | `zones: ['wheel']` | ❌ no wheel | ✅ |
 
-La dernière ligne est celle qui compte : le jour où un clavier à molette
-éclairée arrive, sa case passe à ✅ **sans que l'effet soit rouvert**.
+The last row is the one that matters: the day a keyboard with a lit wheel
+arrives, its cell turns ✅ **without the effect being reopened**.
 
-### Côté effet
+### On the effect side
 
 ```ts
 export default defineEffect({
@@ -426,369 +420,367 @@ export default defineEffect({
 })
 ```
 
-**`requires` est obligatoire, comme `kinds`.** [#44] n'exigeait la déclaration que
-pour la nature ; ce document l'étend, et pour la même raison exactement — les
-trois effets livrés lisent `key.row` sans le dire, et s'afficheraient en noir sur
-un appareil sans grille. Un défaut implicite ne serait pas plus sûr : il serait
-seulement invisible. La migration coûte une ligne par effet, et cette ligne écrit
-une vérité qui était jusqu'ici supposée.
+**`requires` is mandatory, like `kinds`.** [#44] only required the declaration
+for the kind; this document extends it, and for exactly the same reason — the
+three shipped effects read `key.row` without saying so, and would display black on
+a device without a grid. An implicit default would not be safer: it would
+only be invisible. The migration costs one line per effect, and that line writes
+down a truth that was until now assumed.
 
-Ne rien exiger s'écrit, comme « toutes natures » :
+Requiring nothing is written out, like "all kinds":
 
 ```ts
   requires: 'none',
 ```
 
-### Une exigence tenue par l'hôte, pas par la politesse
+### A requirement enforced by the host, not by courtesy
 
-Rien n'empêche un effet de déclarer `requires: 'none'` et de lire `key.row` quand
-même. C'est la même situation que les écritures hors bornes de [#44] §4, et elle
-appelle la même réponse : **c'est l'hôte qui arrête, pas la politesse de
-l'auteur.**
+Nothing prevents an effect from declaring `requires: 'none'` and reading `key.row`
+anyway. It is the same situation as the out-of-bounds writes in [#44] §4, and it
+calls for the same answer: **it is the host that stops it, not the author's
+courtesy.**
 
-La piste : le moteur construit l'objet `layout` remis à QuickJS **d'après ce que
-l'effet a déclaré exiger**. Lire un champ non exigé devient alors une erreur
-d'image nommée — « cet effet lit `row` sans exiger `matrix` » — qui emprunte le
-chemin d'erreur existant, celui que trente images consécutives transforment en
-arrêt propre. Le coût est de quelques milliers d'accès interceptés par seconde à
-30 images, ce qui n'est rien.
+The lead: the engine builds the `layout` object handed to QuickJS **according to
+what the effect declared it requires**. Reading a field that was not required then
+becomes a named frame error — "this effect reads `row` without requiring
+`matrix`" — which takes the existing error path, the one that thirty consecutive
+frames turn into a clean stop. The cost is a few thousand intercepted accesses
+per second at 30 frames per second, which is nothing.
 
-Non tranché ici : c'est une piste d'implémentation, pas une décision d'interface.
-Ce qui est tranché, c'est que **l'écart entre ce qui est déclaré et ce qui est lu
-ne doit pas être silencieux**.
+Not settled here: this is an implementation lead, not an interface decision.
+What is settled is that **the gap between what is declared and what is read
+must not be silent**.
 
 ---
 
-## 5. La provenance : contre quoi le gabarit a été établi
+## 5. Provenance: what the layout was established against
 
-Un gabarit contribué **doit** dire sur quel micrologiciel il a été établi, et
-quand. Sans ça, un comportement bizarre chez un tiers est indébrouillable — et le
-contributeur n'aura plus son matériel sous la main pour trancher. C'est la
-demande de [#35], et c'est la seule chose que ce SDK exige et qui ne serve pas à
-faire marcher l'appareil : elle sert à comprendre plus tard.
+A contributed layout **must** state which firmware it was established on, and
+when. Without that, strange behavior at a third party's is impossible to debug —
+and the contributor will no longer have their hardware at hand to settle it. This
+is what [#35] asks for, and it is the only thing this SDK requires that does not
+serve to make the device work: it serves to understand later.
 
-### Ce qui est piégeux, et pourquoi le champ ne suffit pas seul
+### What is tricky, and why the field alone is not enough
 
-Le `release_number` de l'énumération HID vaut `0x0200` sur tout le composite
-pendant que le micrologiciel se déclare v1.5. C'est `bcdDevice`, **une révision
-matérielle figée** : `hidapi` ne donne pas ce qu'on cherche, et le seul chemin
-vers la vraie version est une commande de l'appareil — `0x00`/`0x81` ici.
+The `release_number` from HID enumeration is `0x0200` across the whole composite
+device while the firmware reports itself as v1.5. It is `bcdDevice`, **a frozen
+hardware revision**: `hidapi` does not give what we are looking for, and the only
+path to the real version is a device command — `0x00`/`0x81` here.
 
-Un contributeur pressé recopiera `release_number`, parce qu'il est là, qu'il
-ressemble à une version, et que rien ne le contredit. D'où le second champ :
+A contributor in a hurry will copy `release_number`, because it is there, it
+looks like a version, and nothing contradicts it. Hence the second field:
 
-> **`firmware_read_by` est aussi obligatoire que `firmware`.** « 1.05, lu par la
-> classe 0x00 commande 0x81 » est vérifiable et discutable. « 2.00 », seul, ne
-> l'est pas — et c'est précisément la valeur qu'on obtient en se trompant.
+> **`firmware_read_by` is as mandatory as `firmware`.** "1.05, read by
+> class 0x00 command 0x81" is verifiable and open to discussion. "2.00", alone,
+> is not — and it is precisely the value one gets by getting it wrong.
 
-### Les champs, et ce que chacun sauve
+### The fields, and what each one saves
 
-| Champ | Ce qu'il permet, le jour où ça cloche |
+| Field | What it allows, the day something goes wrong |
 |---|---|
-| `firmware` + `firmware_read_by` | distinguer « le code est faux » de « la version a changé » |
-| `surveyed_on` | dater le relevé face au journal de mises à jour du fabricant |
-| `method` | savoir si les octets ont été **vus sur le bus**, **écrits et relus**, ou **déduits** d'un appareil voisin |
-| `variant` | la disposition nationale : la matrice d'un ISO et d'un ANSI ne portent pas les mêmes touches |
-| `sustained_rate` | régler la boucle sur une mesure plutôt que sur l'appareil que nous avons |
-| `origin` | savoir, ligne par ligne, ce qui a été **relevé** et ce qui a été **dessiné** |
+| `firmware` + `firmware_read_by` | telling "the code is wrong" apart from "the version changed" |
+| `surveyed_on` | dating the survey against the manufacturer's update log |
+| `method` | knowing whether the bytes were **seen on the bus**, **written and read back**, or **inferred** from a sibling device |
+| `variant` | the locale layout: the matrices of an ISO and an ANSI do not carry the same keys |
+| `sustained_rate` | tuning the loop on a measurement rather than on the device we have |
+| `origin` | knowing, line by line, what was **surveyed** and what was **drawn** |
 
-### `origin` est le champ le plus utile en relecture
+### `origin` is the most useful field in review
 
-`layout.rs` dit déjà, en prose, que les noms viennent du relevé et la géométrie
-d'une convention : « les deux n'ont pas le même statut ». Aujourd'hui ce n'est
-qu'un commentaire. Porté en donnée, il dit à un relecteur **ce qu'il peut
-contester et ce qu'il doit croire sur parole**, et à l'interface ce qu'elle doit
-afficher à côté d'un appareil dont personne ici n'a vérifié le dessin.
+`layout.rs` already says, in prose, that the names come from the survey and the
+geometry from a convention: "the two do not have the same status". Today it is only a comment. Carried as data, it tells a
+reviewer **what they can challenge and what they must take on trust**, and tells
+the interface what it must display next to a device whose drawing nobody here
+has verified.
 
-Trois valeurs suffisent :
+Three values are enough:
 
-- `surveyed` — vu sur l'appareil, reproductible par la méthode du §9 du relevé ;
-- `convention` — construit à la main, exact au sens d'un usage ; seul l'œil le
-  dément ;
-- `inferred` — copié d'un appareil voisin, **jamais essayé**.
+- `surveyed` — seen on the device, reproducible by the method in §9 of the survey;
+- `convention` — built by hand, accurate in the sense of a common practice; only
+  the eye can disprove it;
+- `inferred` — copied from a sibling device, **never tried**.
 
-`inferred` est le plus important des trois, parce que c'est celui qu'on obtient
-en contribuant le second modèle d'une gamme sans le posséder. Il doit exister
-pour être écrit plutôt que caché.
+`inferred` is the most important of the three, because it is the one you get
+when contributing the second model of a product line without owning it. It must
+exist so that it is written down rather than hidden.
 
-### Ce que la provenance n'est pas
+### What provenance is not
 
-Une déclaration, comme l'`author` d'un effet ([#44] §1) : rien ne l'authentifie.
-La différence est qu'elle est **réfutable** — une version, une date et une
-méthode se confrontent à une observation ultérieure, là où un nom ne se confronte
-à rien. C'est ce qui justifie de l'exiger sans prétendre la vérifier.
+A declaration, like an effect's `author` ([#44] §1): nothing authenticates it.
+The difference is that it is **refutable** — a version, a date and a method can
+be matched against a later observation, whereas a name can be matched against
+nothing. That is what justifies requiring it without claiming to verify it.
 
-À la connexion, une version différente **avertit sans bloquer** ([#35]) : bloquer
-rendrait l'application inutile après une mise à jour de routine, alors que le
-protocole n'aura très probablement pas bougé. L'avertissement transforme une
-panne muette en soupçon énoncé — et c'est tout ce qu'on peut honnêtement en
-faire.
+On connection, a different version **warns without blocking** ([#35]): blocking
+would make the application useless after a routine update, when the protocol
+will very probably not have moved. The warning turns a silent failure into a
+stated suspicion — and that is all one can honestly do with it.
 
-> **Déjà en place pour le gabarit existant**, sans attendre ce SDK :
-> `Layout::surveyed_firmware` porte la version comme **deux nombres**
-> (`Firmware { major: 1, minor: 5 }`) et non comme la chaîne `"1.05"` écrite
-> ci-dessus — le relevé écrit tantôt « v1.5 » tantôt « 1.05 » pour les mêmes
-> octets, et comparer des chaînes ferait d'une différence de plume une différence
-> de version. L'inspection à l'ouverture est dans
+> **Already in place for the existing layout**, without waiting for this SDK:
+> `Layout::surveyed_firmware` carries the version as **two numbers**
+> (`Firmware { major: 1, minor: 5 }`) and not as the string `"1.05"` written
+> above — the survey writes "v1.5" in some places and "1.05" in others for the
+> same bytes, and comparing strings would turn a difference in wording into a
+> difference in version. The inspection on open is in
 > [`inspection.rs`](../../crates/candeo-device/src/inspection.rs).
 
 ---
 
-## 6. Le « mode pilote » : l'étape à ne pas recopier
+## 6. "Driver mode": the step not to copy
 
-C'est la mise en garde qui justifie à elle seule qu'un SDK existe, parce que
-c'est l'étape qu'un contributeur reprendrait d'un pilote existant **sans voir ce
-qu'elle coûte**, et qu'aucune relecture ne rattraperait si elle n'était pas
-nommée.
+This is the warning that on its own justifies an SDK existing, because it is the
+step a contributor would take over from an existing driver **without seeing what
+it costs**, and that no review would catch if it were not named.
 
-**Le fait** : sur le DeathStalker, `0x00`/`0x84` rend `0x00` — l'appareil est en
-**mode normal**, et notre éclairage custom fonctionne parfaitement ainsi.
-OpenRazer, lui, bascule ses appareils en **mode pilote** (`0x00`/`0x04` → `0x03`)
-à l'initialisation de son démon.
+**The fact**: on the DeathStalker, `0x00`/`0x84` returns `0x00` — the device is in
+**normal mode**, and our custom lighting works perfectly that way.
+OpenRazer, on the other hand, switches its devices into **driver mode** (`0x00`/`0x04` → `0x03`)
+when its daemon initializes.
 
-**Pourquoi c'est cohérent chez eux** : OpenRazer est un **pilote complet** — il
-gère les touches macro, le DPI, les profils. Il a besoin que le micrologiciel lui
-cède la main.
+**Why it makes sense for them**: OpenRazer is a **full driver** — it
+handles macro keys, DPI, profiles. It needs the firmware to hand
+over control.
 
-**Ce que ça coûte** : en mode pilote, le micrologiciel **cesse de traiter
-certaines touches lui-même** et se contente d'émettre des évènements HID que
-l'hôte est censé reprendre. Si personne n'écoute, ces touches ne font plus rien —
-constaté sur un Basilisk V3 dont le cycle DPI et le verrou de molette sont
-devenus inertes, et corrigé en repassant en mode normal.
+**What it costs**: in driver mode, the firmware **stops handling
+certain keys itself** and merely emits HID events that the host is
+supposed to pick up. If nobody listens, those keys no longer do anything —
+observed on a Basilisk V3 whose DPI cycle and wheel lock became
+inert, and fixed by switching back to normal mode.
 
-> **candeo ne pilote que l'éclairage.** Basculer ne nous apporte rien et casse des
-> touches que l'appareil gère très bien seul. **Ne jamais écrire `0x00`/`0x04`.**
+> **candeo only controls the lighting.** Switching brings us nothing and breaks
+> keys the device handles very well on its own. **Never write `0x00`/`0x04`.**
 
-### Ce que le SDK en fait — une règle, pas seulement un avertissement
+### What the SDK does with it — a rule, not just a warning
 
-Un paragraphe dans une documentation se recopie moins bien qu'une ligne de code.
-La mise en garde doit donc être **portée par la forme du SDK** :
+A paragraph in documentation gets copied less reliably than a line of code.
+The warning must therefore be **carried by the shape of the SDK**:
 
-> **Le SDK n'expose pas « envoyer ce rapport ». Il expose des intentions** :
-> poser une image, régler la luminosité, choisir un effet du micrologiciel.
+> **The SDK does not expose "send this report". It exposes intents**:
+> set a frame, set the brightness, pick a firmware effect.
 
-Il n'y a pas d'intention nommée « changer le mode de l'appareil ». Un
-contributeur qui recopie une séquence d'initialisation trouvée ailleurs n'a donc
-pas d'endroit où la mettre : il devrait **sortir du SDK** pour le faire, ce qui
-se voit en relecture au lieu de se fondre dans une suite d'octets.
+There is no intent named "change the device mode". A contributor who copies an
+initialization sequence found elsewhere therefore has nowhere to put it: they
+would have to **step outside the SDK** to do it, which shows up in review instead
+of blending into a string of bytes.
 
-Et l'asymétrie qui va avec :
+And the asymmetry that goes with it:
 
-| | Permis |
+| | Allowed |
 |---|---|
-| **Lecture** | large — la version, le numéro de série, le mode courant, le descripteur. Lire ne casse rien, et c'est ce qui alimente la provenance du §5. |
-| **Écriture** | les seules intentions d'éclairage, sur la seule interface que le gabarit déclare. |
+| **Read** | broad — the version, the serial number, the current mode, the descriptor. Reading breaks nothing, and it is what feeds the provenance of §5. |
+| **Write** | only lighting intents, only on the interface the layout declares. |
 
-Ce qui répond aussi à la question ouverte de [#34] — « un gabarit tiers ne doit
-pas pouvoir écrire n'importe quoi sur n'importe quelle interface » : **le pilote
-contribué n'ouvre rien**. L'hôte énumère, filtre sur `interface_number`, ouvre, et
-lui remet un canal déjà lié à cette interface. Un pilote qui ne voit jamais
-`HidApi` ne peut pas se tromper de périphérique, ni en découvrir un autre.
+This also answers the open question in [#34] — "a third-party layout must not be
+able to write anything to any interface": **the contributed driver opens
+nothing**. The host enumerates, filters on `interface_number`, opens, and
+hands it a channel already bound to that interface. A driver that never sees
+`HidApi` cannot pick the wrong device, nor discover another one.
 
 ---
 
-## 7. Livrer un appareil en données plutôt qu'en code
+## 7. Shipping a device as data rather than code
 
-[#34] posait la question ; le vocabulaire ci-dessus y répond presque seul. Un
-gabarit est déjà de la donnée pure, et les capacités s'en lisent (§3.5). Ce qui
-reste en code, c'est la construction des rapports.
+[#34] asked the question; the vocabulary above almost answers it on its own. A
+layout is already pure data, and capabilities are read from it (§3.5). What
+remains in code is building the reports.
 
-**La bonne unité n'est pas l'appareil, c'est la famille de protocole.** Le
-DeathStalker n'a rien de particulier : il parle le protocole Razer — rapport de
-fonctionnalité de 90 octets, classe `0x0f`, somme de contrôle par XOR des octets
-2 à 87, une commande par rangée. Un second clavier Razer ne demanderait **aucune
-ligne de code** : une famille, et des données.
+**The right unit is not the device, it is the protocol family.** The
+DeathStalker is nothing special: it speaks the Razer protocol — a 90-byte
+feature report, class `0x0f`, XOR checksum over bytes
+2 to 87, one command per row. A second Razer keyboard would require **not a
+single line of code**: a family, and data.
 
-Ce qui rend une famille paramétrable est exactement ce qui varie d'un modèle à
-l'autre au sein d'une marque — l'interface, la matrice, les identifiants d'effet
-pris en charge. Ce qui n'en varie pas — la structure du rapport, la plage de la
-somme de contrôle — reste dans le code de la famille, en un seul endroit, testé
-une fois contre une trame capturée.
+What makes a family parameterizable is exactly what varies from one model to
+another within a brand — the interface, the matrix, the supported effect
+identifiers. What does not vary — the report structure, the checksum
+range — stays in the family's code, in a single place, tested
+once against a captured frame.
 
-Les deux coûts de contribution deviennent alors très différents, et c'est
-souhaitable :
+The two contribution costs then become very different, and that is
+desirable:
 
-| Contribution | Coût |
+| Contribution | Cost |
 |---|---|
-| un appareil d'une famille connue | **des données** — relisable ligne à ligne |
-| une nouvelle famille | du code, et une trame capturée pour l'ancrer |
+| a device from a known family | **data** — reviewable line by line |
+| a new family | code, and a captured frame to anchor it |
 
-⚠️ **Le piège de la famille « presque »**. Un modèle dont la somme de contrôle
-couvre une autre plage, ou dont le rapport fait 64 octets, n'est pas une variante
-de paramètres : c'est une autre famille. Un gabarit de données qui aurait tort
-serait accepté par l'appareil, rendrait `Ok`, et n'allumerait rien — voir §8. La
-provenance `method: inferred` existe pour ce cas précis.
+⚠️ **The "almost" family trap**. A model whose checksum
+covers a different range, or whose report is 64 bytes, is not a parameter
+variant: it is another family. A data layout that was wrong
+would be accepted by the device, return `Ok`, and light nothing — see §8. The
+provenance `method: inferred` exists for exactly this case.
 
 ---
 
-## 8. Ce qu'on ne peut pas vérifier sans le matériel
+## 8. What cannot be verified without the hardware
 
-C'est la question la plus inconfortable de [#34], et la seule dont la réponse
-honnête est « beaucoup de choses ».
+This is the most uncomfortable question in [#34], and the only one whose honest
+answer is "a lot of things".
 
-### Le socle : accepté n'est pas compris
+### The foundation: accepted is not understood
 
-`reachingKeyboard` prouve que l'écriture a été **acceptée**, pas qu'elle a été
-**comprise**. Le relevé le démontre en direct : l'appareil valide le couple
-classe/commande, **pas la valeur des arguments**. Les identifiants d'effet `0x05`
-et `0x07` sont acceptés — état `0x02`, « compris » — et laissent l'effet
-**inchangé**. Une taille d'arguments aberrante passe aussi.
+`reachingKeyboard` proves the write was **accepted**, not that it was
+**understood**. The survey demonstrates it live: the device validates the
+class/command pair, **not the value of the arguments**. Effect identifiers `0x05`
+and `0x07` are accepted — status `0x02`, "understood" — and leave the effect
+**unchanged**. An absurd argument size gets through too.
 
-Tout ce qui suit en découle : sur un appareil qu'on n'a pas, **aucune couche ne
-signale un gabarit faux**. L'écriture aboutit, le voyant est au vert, et rien ne
-s'allume.
+Everything that follows stems from this: on a device we do not have, **no layer
+reports a wrong layout**. The write succeeds, the indicator is green, and nothing
+lights up.
 
-### La liste, sans adoucissement
+### The list, unsoftened
 
-| Invérifiable sans le matériel | Ce que ça donne quand c'est faux |
+| Unverifiable without the hardware | What it gives when it is wrong |
 |---|---|
-| l'interface porte bien l'éclairage | handle **valide**, toute écriture perdue |
-| les octets sont compris | `Ok`, appareil figé |
-| l'image couvre toute la matrice | les dernières rangées restent figées — le piège 132 / 106 |
-| la géométrie ressemble à l'appareil | un simulateur faux, que seul l'œil dément |
-| les noms correspondent aux gravures | un effet qui allume la mauvaise touche |
-| la cadence tient | des images perdues en silence |
-| aucune commande ne casse autre chose | le mode pilote du §6 |
+| the interface does carry the lighting | **valid** handle, every write lost |
+| the bytes are understood | `Ok`, device frozen |
+| the frame covers the whole matrix | the last rows stay frozen — the 132 / 106 trap |
+| the geometry looks like the device | a wrong simulator, that only the eye can disprove |
+| the names match the keycap legends | an effect that lights the wrong key |
+| the frame rate holds | frames silently dropped |
+| no command breaks something else | the driver mode of §6 |
 
-### Ce que l'intégration continue peut établir, elle
+### What continuous integration can establish
 
-Et c'est moins maigre qu'il n'y paraît, à condition d'y mettre la bonne pièce.
+And it is less meager than it seems, provided the right piece is put in.
 
-**La trame capturée jointe au gabarit.** C'est déjà ce que fait
-`checksum_matches_captured_frame` : une rangée réellement observée sur le bus, sa
-somme de contrôle attendue, et un test qui reconstruit la trame et compare. Une
-contribution en apporte au moins une. Elle ne prouve pas que l'appareil obéit —
-elle prouve que **le code du dépôt reproduit ce que le contributeur a vu**, ce
-qui est exactement la moitié qu'on peut tenir sans le matériel.
+**The captured frame attached to the layout.** This is already what
+`checksum_matches_captured_frame` does: a row actually observed on the bus, its
+expected checksum, and a test that rebuilds the frame and compares. A
+contribution brings at least one. It does not prove the device obeys —
+it proves that **the repository code reproduces what the contributor saw**, which
+is exactly the half that can be held without the hardware.
 
-Le reste se vérifie par cohérence interne, et les tests existants de `layout.rs`
-en donnent déjà le modèle — indices uniques, bijection entre matrice et touches,
-rectangles disjoints, comptes par rangée. Généralisés à tout gabarit, ils
-rattrapent la faute la plus probable d'une transcription à la main : le décalage
-d'une touche.
+The rest is verified through internal consistency, and the existing tests in `layout.rs`
+already provide the model — unique indices, bijection between matrix and keys,
+disjoint rectangles, counts per row. Generalized to every layout, they
+catch the most likely mistake of a hand transcription: a key shifted
+by one.
 
-S'y ajoute la cohérence entre données et capacités, qui devient vérifiable parce
-que les capacités sont lues et non déclarées : un gabarit qui prétend `geometry`
-sans rectangles n'est pas refusé à l'exécution, il est **impossible à écrire**.
+On top of that comes the consistency between data and capabilities, which becomes
+verifiable because capabilities are read and not declared: a layout that claims
+`geometry` without rectangles is not refused at runtime, it is **impossible to write**.
 
-### Ce que relire une contribution veut dire
+### What reviewing a contribution means
 
-La conséquence pour le relecteur est directe, et il vaut mieux l'écrire que la
-laisser se découvrir :
+The consequence for the reviewer is direct, and it is better to write it down than
+let it be discovered:
 
-> **On ne relit pas l'exactitude d'un relevé. On relit sa cohérence et sa
-> provenance.** Dire oui à une contribution matérielle, c'est dire « ceci est
-> cohérent, daté, et reproductible par quelqu'un qui aurait l'appareil » —
-> jamais « ceci est juste ».
+> **One does not review the accuracy of a survey. One reviews its consistency
+> and its provenance.** Saying yes to a hardware contribution means saying "this is
+> consistent, dated, and reproducible by someone who had the device" —
+> never "this is right".
 
-Les questions auxquelles un relecteur peut répondre :
+The questions a reviewer can answer:
 
-- la trame jointe est-elle **reconstruite** par le code, somme de contrôle
-  comprise ?
-- la provenance est-elle complète, et `firmware_read_by` nomme-t-il autre chose
-  que `release_number` ?
-- `origin` distingue-t-il ce qui est relevé de ce qui est dessiné ?
-- les écritures passent-elles toutes par les intentions du SDK (§6) ?
-- une commande sort-elle de l'éclairage ? Si oui, **pourquoi** ?
-- les capacités sont-elles bien lues des données, et non affirmées ?
+- is the attached frame **rebuilt** by the code, checksum
+  included?
+- is the provenance complete, and does `firmware_read_by` name something other
+  than `release_number`?
+- does `origin` distinguish what is surveyed from what is drawn?
+- do all writes go through the SDK intents (§6)?
+- does a command go beyond lighting? If so, **why**?
+- are the capabilities actually read from the data, and not asserted?
 
-Et celles auxquelles il ne peut pas répondre — donc qu'il ne doit pas feindre de
-trancher : est-ce que l'appareil obéit, est-ce que le dessin lui ressemble, est-ce
-que les noms sont les bons.
+And those they cannot answer — which they must therefore not pretend to
+settle: does the device obey, does the drawing look like it, are
+the names the right ones.
 
-### Ce que l'utilisateur doit en savoir
+### What the user needs to know
 
-Un appareil dont le relevé n'a été reproduit par personne d'autre que son auteur
-ne doit pas se présenter comme les autres. La provenance est déjà à l'écran
-([#35]) ; il suffit qu'elle dise aussi **qui a vu cet appareil fonctionner**.
+A device whose survey has been reproduced by nobody other than its author
+must not present itself like the others. Provenance is already on screen
+([#35]); it only needs to also say **who has seen this device work**.
 
-Et l'adoption reste ce qu'elle est : le défaut est `detected`, jamais `adopted`.
-« Écrire sur un périphérique USB qu'on comprend mal n'est pas anodin »
-([`effects-runtime.md`](effects-runtime.md) §7) — c'est encore plus vrai d'un
-appareil dont le gabarit vient d'ailleurs.
-
----
-
-## 9. Chargement : compilé, pas greffon
-
-Un greffon qui écrit en USB est une surface d'attaque, et [#34] demandait de
-trancher plutôt que de supposer. La raison de trancher **compilé** n'est pourtant
-pas d'abord la sécurité :
-
-**Un greffon échapperait à la seule vérification que nous ayons.** Tout le §8
-repose sur des tests exécutés par l'intégration continue sur le contenu du
-dépôt : la trame rejouée, la cohérence de la matrice, la présence de la
-provenance. Un gabarit chargé à l'exécution n'est passé par aucun de ces tests,
-et personne ne l'a relu. Il ne resterait de la contribution que ce qu'elle a de
-plus cher — l'écriture sur un bus — sans rien de ce qui la rend acceptable.
-
-S'y ajoute que la PR **est** le mécanisme de chargement : elle porte la relecture,
-la trame de référence, la provenance et l'historique. C'est ce qui a fait grandir
-OpenRGB, et ce n'est pas un hasard.
-
-À rouvrir si, et seulement si, le nombre de gabarits rend la compilation du
-catalogue déraisonnable. Ce n'est pas un problème que nous ayons avec un
-appareil, ni avec vingt.
+And adoption stays what it is: the default is `detected`, never `adopted`.
+"Writing to a USB device one poorly understands is not harmless"
+([`effects-runtime.md`](effects-runtime.md) §7) — it is even more true of a
+device whose layout comes from elsewhere.
 
 ---
 
-## 10. Ce que ça change dans le code existant
+## 9. Loading: compiled in, not a plugin
 
-Décrit, non écrit : l'implémentation est le corps de [#34].
+A plugin that writes over USB is an attack surface, and [#34] asked to
+decide rather than assume. Yet the reason for deciding on **compiled in** is not
+security first:
 
-- **`Layout` gagne une nature et une provenance**, et sa grille devient
-  facultative — un appareil sans voisinage n'a pas de `rows` et de `cols` à
-  inventer. `led_count` devient « positions de la grille + zones », et le contrat
-  « une image couvre toutes les positions » ne bouge pas.
-- **`Key` voit son nom et son rectangle devenir facultatifs**, ce qui est la
-  condition pour que `namedKeys` et `geometry` se lisent au lieu de se déclarer.
-- **`DeviceOut` ne change pas.** Le moteur reçoit déjà une sortie abstraite et un
-  gabarit, jamais un `Keyboard` : c'est ce joint qui rend tout ce document
-  additif.
-- **L'API des effets gagne `kinds` et `requires`**, obligatoires, et son `Key`
-  gagne un rôle de zone. Les effets livrés gagnent une ligne chacun. Son `Key`
-  porte déjà le rectangle, facultatif, depuis [#60] : c'est la moitié « côté
-  effet » de `geometry`, et elle n'attendait pas le reste.
-- **Le manifeste relevé dans l'arbre syntaxique** ([`effects-runtime.md`](effects-runtime.md))
-  doit lire ces deux champs comme il lit déjà `name` et `params` : des littéraux,
-  refusés à la validation plutôt que découverts à la première image.
-- **Le simulateur** doit savoir dessiner autre chose qu'un clavier ISO : une
-  grille de carrés sans géométrie, des pastilles nommées pour des zones.
+**A plugin would escape the only verification we have.** All of §8
+rests on tests run by continuous integration on the repository's
+content: the replayed frame, the matrix consistency, the presence of the
+provenance. A layout loaded at runtime has gone through none of these tests,
+and nobody has reviewed it. All that would remain of the contribution is its
+most costly part — writing to a bus — without any of what makes it acceptable.
+
+On top of that, the PR **is** the loading mechanism: it carries the review,
+the reference frame, the provenance and the history. That is what made
+OpenRGB grow, and it is no accident.
+
+To be reopened if, and only if, the number of layouts makes compiling the
+catalog unreasonable. That is not a problem we have with one
+device, nor with twenty.
 
 ---
 
-## 11. Questions ouvertes
+## 10. What this changes in the existing code
 
-- **La langue des identifiants.** Ce document propose `kinds`, `requires`,
-  `geometry`, `wheel` — de l'anglais, pour tenir avec `name`, `params`, `render`,
-  `rows`, `cols` et le reste de la surface publique. La prose reste française. À
-  confirmer, parce que c'est aussi coûteux à changer plus tard que le reste du
-  vocabulaire.
-- **Les zones et la grille cohabitent-elles vraiment ?** Un clavier à
-  sous-éclairage aurait les deux, et une image plate concaténerait les deux. Rien
-  ne s'y oppose ici, rien ne l'a essayé non plus.
-- **L'interception des lectures non déclarées** (§4) est une piste, pas une
-  décision. Son coût réel dans QuickJS n'a pas été mesuré.
-- **Une famille de protocole se décrit-elle en données ?** §7 la laisse en code.
-  La frontière exacte entre « paramètre de famille » et « nouvelle famille » ne
-  se tranchera qu'au deuxième protocole, et pas avant.
-- **Deux exemplaires du même modèle restent indistinguables** quand le descripteur
-  USB ne porte pas de numéro de série ([#35]). Le SDK n'y change rien, mais un
-  catalogue de gabarits rend le cas plus fréquent.
-- ~~**Une onde radiale physique** n'existe pas encore~~ — elle existe depuis
-  [#60], et le terme `geometry` est désormais soutenu par un fichier. Ce qu'elle
-  montre en passant : faute de pouvoir **exiger** la capacité, elle lève à la
-  première image plutôt que d'être écartée de la galerie. Le message nomme la
-  touche sans rectangle, donc rien n'est silencieux — mais c'est un refus qui
-  arrive trop tard, et c'est exactement la moitié que [#34] doit fermer.
+Described, not written: the implementation is the body of [#34].
+
+- **`Layout` gains a kind and a provenance**, and its grid becomes
+  optional — a device without a neighborhood has no `rows` and `cols` to
+  invent. `led_count` becomes "grid positions + zones", and the contract
+  "a frame covers all positions" does not move.
+- **`Key` has its name and its rectangle become optional**, which is the
+  condition for `namedKeys` and `geometry` to be read instead of declared.
+- **`DeviceOut` does not change.** The engine already receives an abstract output and a
+  layout, never a `Keyboard`: that seam is what makes this whole document
+  additive.
+- **The effects API gains `kinds` and `requires`**, mandatory, and its `Key`
+  gains a zone role. The shipped effects gain one line each. Its `Key`
+  already carries the rectangle, optional, since [#60]: that is the "effect
+  side" half of `geometry`, and it did not wait for the rest.
+- **The manifest read from the syntax tree** ([`effects-runtime.md`](effects-runtime.md))
+  must read these two fields the way it already reads `name` and `params`: literals,
+  refused at validation rather than discovered at the first frame.
+- **The simulator** must know how to draw something other than an ISO keyboard: a
+  grid of squares without geometry, named dots for zones.
 
 ---
 
-## 12. Ce que ce document ne résout pas
+## 11. Open questions
 
-Le relevé reste à faire par quelqu'un qui possède l'appareil. Aucun vocabulaire
-ne crée de connaissance : il évite seulement qu'elle soit perdue faute d'endroit
-où la mettre, et qu'elle soit fausse faute d'avoir été datée.
+- **The language of identifiers.** This document proposes `kinds`, `requires`,
+  `geometry`, `wheel` — English, to stay consistent with `name`, `params`, `render`,
+  `rows`, `cols` and the rest of the public surface. The prose stays in French. To
+  be confirmed, because it is as costly to change later as the rest of the
+  vocabulary.
+- **Do zones and the grid really coexist?** A keyboard with
+  underglow would have both, and a flat frame would concatenate both. Nothing
+  here stands in the way, and nothing has tried it either.
+- **Intercepting undeclared reads** (§4) is a lead, not a
+  decision. Its real cost in QuickJS has not been measured.
+- **Can a protocol family be described as data?** §7 leaves it in code.
+  The exact boundary between "family parameter" and "new family" will only
+  be settled with the second protocol, and not before.
+- **Two units of the same model remain indistinguishable** when the USB
+  descriptor carries no serial number ([#35]). The SDK changes nothing there, but a
+  catalog of layouts makes the case more frequent.
+- ~~**A physical radial wave** does not exist yet~~ — it has existed since
+  [#60], and the `geometry` term is now backed by a file. What it shows
+  along the way: unable to **require** the capability, it throws on the
+  first frame rather than being kept out of the gallery. The message names the
+  key without a rectangle, so nothing is silent — but it is a refusal that
+  comes too late, and that is exactly the half [#34] must close.
+
+---
+
+## 12. What this document does not solve
+
+The survey remains to be done by someone who owns the device. No vocabulary
+creates knowledge: it only prevents it from being lost for lack of a place
+to put it, and from being wrong for lack of having been dated.
 
 [#34]: https://github.com/oorabona/candeo/issues/34
 [#35]: https://github.com/oorabona/candeo/issues/35
