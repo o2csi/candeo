@@ -1,58 +1,56 @@
-//! Ce qu'on demande à un appareil **une fois**, à l'ouverture.
+//! What we ask a device **once**, when it is opened.
 //!
-//! # Pourquoi ce module existe
+//! # Why this module exists
 //!
-//! `reachingKeyboard` prouve qu'une écriture a été *acceptée* par le système, pas
-//! qu'elle a été *comprise* par l'appareil. Qu'une mise à jour du micrologiciel
-//! déplace un octet ou renumérote une commande, et `hidapi` accepterait toujours
-//! le transfert, `present()` rendrait `Ok`, et le clavier jetterait nos images en
-//! silence — un voyant vert au-dessus d'un clavier figé. Le relevé a établi que
-//! l'appareil **répond** (§8) : c'est ici qu'on lui fait dire ce qu'il est.
+//! `reachingKeyboard` proves that a write was *accepted* by the system, not that it
+//! was *understood* by the device. Should a firmware update move a byte or renumber
+//! a command, `hidapi` would still accept the transfer, `present()` would return
+//! `Ok`, and the keyboard would silently discard our frames — a green light above a
+//! frozen keyboard. The survey established that the device **answers** (§8): this
+//! is where we make it say what it is.
 //!
-//! # Ce que l'inspection établit, et ce qu'elle n'établit pas
+//! # What the inspection establishes, and what it does not
 //!
-//! | Question | Réponse | Portée |
+//! | Question | Answer | Scope |
 //! |---|---|---|
-//! | quel micrologiciel ? | `0x00`/`0x81` | comparé au relevé : **avertit, ne bloque pas** |
-//! | quel exemplaire ? | `0x00`/`0x82` | le descripteur USB n'en porte aucun |
-//! | cette commande existe-t-elle ? | état `0x05` ou `0x02` | le couple classe / commande, **rien de plus** |
+//! | which firmware? | `0x00`/`0x81` | compared with the survey: **warns, does not block** |
+//! | which unit? | `0x00`/`0x82` | the USB descriptor carries none |
+//! | does this command exist? | status `0x05` or `0x02` | the class / command pair, **nothing more** |
 //!
-//! ⚠️ **L'octet d'état ne valide jamais un argument.** Poser l'effet `0x05`, que
-//! ce clavier refuse, rend `0x02` « compris ». Une commande [`Verdict::Understood`]
-//! est donc une commande **connue**, et c'est tout : ce module ne peut pas dire
-//! « mes arguments sont bons », et rien de ce qu'il rend ne doit le laisser
-//! croire.
+//! ⚠️ **The status byte never validates an argument.** Setting effect `0x05`, which
+//! this keyboard refuses, returns `0x02` "understood". A [`Verdict::Understood`]
+//! command is therefore a **known** command, and that is all: this module cannot say
+//! "my arguments are right", and nothing it returns may suggest otherwise.
 //!
-//! # Émettre sans rien changer
+//! # Sending without changing anything
 //!
-//! Vérifier qu'une commande existe demande de l'**émettre**, et une commande
-//! d'éclairage émise se voit. On n'émet donc que ce qu'on sait réécrire **à
-//! l'identique** : on relit l'état courant, on le réécrit tel quel, on relit
-//! encore.
+//! Checking that a command exists requires **sending** it, and a lighting command
+//! that is sent shows. So we only send what we know how to rewrite **identically**:
+//! read the current state, rewrite it as is, read it again.
 //!
-//! - **luminosité** — relue par `0x0f`/`0x84`, réécrite telle quelle ;
-//! - **effet** — relu par `0x0f`/`0x82`, réécrit tel quel **seulement** s'il est de
-//!   ceux dont la relecture rend tous les arguments. `Statique` et `Respiration`
-//!   portent une couleur dont la place dans la relecture n'est pas établie : les
-//!   réécrire pourrait les éteindre, on s'abstient et on le dit. Au pire, un effet
-//!   animé par le micrologiciel repart du début de son cycle ;
-//! - **rangée** — **jamais émise.** Aucune relecture de couleur n'existe, donc
-//!   aucune rangée écrite n'est invisible.
+//! - **brightness** — read back through `0x0f`/`0x84`, rewritten as is;
+//! - **effect** — read back through `0x0f`/`0x82`, rewritten as is **only** if it is
+//!   one whose read-back returns every argument. `Static` and `Breathing` carry a
+//!   color whose position in the read-back is not established: rewriting them could
+//!   turn them off, so we refrain and say so. At worst, an effect animated by the
+//!   firmware restarts from the beginning of its cycle;
+//! - **row** — **never sent.** No color read-back exists, so no written row is
+//!   invisible.
 //!
-//! La seconde relecture ne détecte pas une commande **ignorée** — réécrire la
-//! valeur courante sans effet la laisse identique. Elle détecte une commande
-//! **comprise autrement** : un micrologiciel qui lirait l'argument ailleurs
-//! poserait une autre valeur, et c'est ce qu'on relirait.
+//! The second read-back does not detect an **ignored** command — rewriting the
+//! current value to no effect leaves it unchanged. It detects a command
+//! **understood differently**: a firmware reading the argument elsewhere would set
+//! another value, and that is what we would read back.
 //!
-//! Sans relecture réussie, aucune écriture ne part : chaque réécriture est
-//! conditionnée à la lecture qui la précède.
+//! Without a successful read-back, no write goes out: each rewrite depends on the
+//! read that precedes it.
 //!
-//! # Une fois, jamais dans la boucle
+//! # Once, never in the loop
 //!
-//! Relire coûte un aller-retour USB, et la boucle de rendu est serrée : l'écriture
-//! d'une image complète prend 13 à 14 ms dans une période de 33,3 ms. Le verdict
-//! est donc pris à l'ouverture et **gardé** : [`crate::Keyboard`] refuse ensuite
-//! d'envoyer une commande rendue `0x05`, sans rien relire.
+//! Reading back costs a USB round trip, and the render loop is tight: writing a full
+//! frame takes 13 to 14 ms in a 33.3 ms period. The verdict is therefore reached on
+//! open and **kept**: [`crate::Keyboard`] then refuses to send a command answered
+//! `0x05`, without reading anything back.
 
 use std::time::Duration;
 
@@ -62,24 +60,24 @@ use candeo_protocol::{
 
 use crate::Layout;
 
-/// Relectures accordées à une réponse « occupé ».
+/// Re-reads granted to a "busy" response.
 ///
-/// Jamais observé au relevé — les lectures immédiates y rendaient directement
-/// leur état — mais prévu par le protocole. Borné : une ouverture ne doit pas se
-/// suspendre sur un appareil qui se dirait occupé indéfiniment.
+/// Never observed during the survey — immediate reads returned their status
+/// straight away — but provided for by the protocol. Bounded: an open must not hang
+/// on a device that would claim to be busy indefinitely.
 const RELECTURES: u32 = 5;
 
-/// Attente entre deux relectures « occupé ». Cinq fois dix millisecondes restent
-/// sous la période d'une image, et ne sont payées qu'une fois par ouverture.
-const PATIENCE: Duration = Duration::from_millis(10);
+/// Wait between two "busy" re-reads. Five times ten milliseconds stays under a frame
+/// period, and is only paid once per open.
+const BUSY_DELAY: Duration = Duration::from_millis(10);
 
-/// Ce qu'une inspection demande d'un périphérique.
+/// What an inspection needs from a device.
 ///
-/// Un joint plutôt que `hidapi::HidDevice` en dur, pour la seule raison qui
-/// vaille : c'est ce qui rend le déroulé vérifiable **sans matériel** — un
-/// appareil qui refuse, qui répond occupé, qui comprend un argument de travers.
-/// Sans lui, ces cas ne se vérifieraient qu'avec le micrologiciel qui les
-/// produit, donc jamais avant qu'il ne sorte.
+/// A seam rather than a hard-wired `hidapi::HidDevice`, for the only reason that
+/// counts: it is what makes the sequence verifiable **without hardware** — a device
+/// that refuses, that answers busy, that understands an argument the wrong way.
+/// Without it, these cases could only be checked with the firmware that produces
+/// them, so never before it ships.
 pub(crate) trait Transport {
     fn send(&self, data: &[u8]) -> Result<(), String>;
     fn receive(&self, buf: &mut [u8]) -> Result<usize, String>;
@@ -95,30 +93,30 @@ impl Transport for hidapi::HidDevice {
     }
 }
 
-/// Ce que l'appareil a dit de lui-même à l'ouverture.
+/// What the device said about itself when it was opened.
 ///
-/// Chaque champ porte **sa** raison d'échec plutôt qu'un `Option` muet : « non
-/// lu » sans dire pourquoi est exactement le genre de silence qui envoie
-/// chercher une panne d'appareil là où il n'y a qu'une permission manquante.
+/// Each field carries **its own** failure reason rather than a silent `Option`:
+/// "not read" without saying why is exactly the kind of silence that sends someone
+/// hunting for a device fault where there is only a missing permission.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Inspection {
-    /// La version, ou pourquoi elle n'a pas été lue.
+    /// The version, or why it was not read.
     pub firmware: Result<Firmware, String>,
-    /// Le numéro de série, ou pourquoi il n'a pas été lu.
+    /// The serial number, or why it was not read.
     ///
-    /// ⚠️ **Il identifie un exemplaire précis.** Rien de ce qui se journalise ou
-    /// se copie dans un rapport de bogue ne doit le porter en clair.
+    /// ⚠️ **It identifies one specific unit.** Nothing that gets logged or copied
+    /// into a bug report may carry it in clear.
     pub serial: Result<String, String>,
-    /// Une vérification par commande d'écriture dont dépend l'éclairage.
+    /// One check per write command the lighting depends on.
     pub checks: Vec<Check>,
 }
 
-/// Écrit à la main, et pour une seule raison : **la série n'y figure pas.**
+/// Written by hand, for a single reason: **the serial is not in it.**
 ///
-/// Un `{:?}` glissé dans un `tracing::debug!` le jour où l'on cherche une panne
-/// est le chemin le plus court vers un numéro de série collé dans une issue.
-/// L'empreinte stable qui la remplace dans le journal vit côté application ;
-/// ici, on se contente de ne rien divulguer.
+/// A `{:?}` slipped into a `tracing::debug!` the day someone chases a fault is the
+/// shortest path to a serial number pasted into an issue. The stable fingerprint
+/// that replaces it in the log lives on the application side; here, we simply
+/// disclose nothing.
 impl std::fmt::Debug for Inspection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let serie = match &self.serial {
@@ -133,56 +131,56 @@ impl std::fmt::Debug for Inspection {
     }
 }
 
-/// Le verdict sur **une** commande.
+/// The verdict on **one** command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     pub command: CommandId,
-    /// Le nom qu'on lui donne en parlant à quelqu'un : « luminosité »…
+    /// The name used when talking to a person: "luminosité" (brightness)…
     pub name: &'static str,
     pub verdict: Verdict,
 }
 
-/// Ce que l'appareil a répondu à une commande émise à l'ouverture.
+/// What the device answered to a command sent on open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
-    /// Réécrite à l'identique, rendue `0x02`, et relue telle quelle.
+    /// Rewritten identically, answered `0x02`, and read back unchanged.
     ///
-    /// **Connue**, et rien de plus : l'octet d'état ne valide aucun argument.
+    /// **Known**, and nothing more: the status byte validates no argument.
     Understood,
-    /// L'appareil a rendu `0x05` : ce micrologiciel ne connaît pas la commande.
-    /// [`crate::Keyboard`] ne l'enverra plus.
+    /// The device answered `0x05`: this firmware does not know the command.
+    /// [`crate::Keyboard`] will not send it any more.
     Unsupported,
-    /// Rendue `0x02`, mais la relecture ne rend pas ce qui a été réécrit.
+    /// Answered `0x02`, but the read-back does not return what was rewritten.
     ///
-    /// Le seul cas où l'appareil dit « compris » et montre le contraire : il
-    /// interprète l'argument autrement qu'au relevé.
+    /// The only case where the device says "understood" and shows the opposite: it
+    /// interprets the argument differently than during the survey.
     ReadBackDiffers { wrote: String, read: String },
-    /// Pas émise, ou sans conclusion possible — et pourquoi.
+    /// Not sent, or no conclusion possible — and why.
     Unverified(String),
 }
 
 impl Inspection {
-    /// Vrai si l'appareil a déclaré ne pas connaître cette commande.
+    /// True if the device declared it does not know this command.
     ///
-    /// Seul [`Verdict::Unsupported`] refuse : une commande non vérifiée n'est pas
-    /// une commande refusée, et la bloquer rendrait l'appareil muet pour une
-    /// question à laquelle on n'a simplement pas pu répondre.
+    /// Only [`Verdict::Unsupported`] refuses: an unverified command is not a refused
+    /// command, and blocking it would silence the device over a question we simply
+    /// could not answer.
     pub fn refuses(&self, command: CommandId) -> bool {
         self.checks
             .iter()
             .any(|c| c.command == command && c.verdict == Verdict::Unsupported)
     }
 
-    /// Ce qui mérite d'être **vu**, dans la langue de l'interface.
+    /// What deserves to be **seen**, in the interface language.
     ///
-    /// Une liste vide veut dire « rien à signaler », **pas** « compatible » : une
-    /// commande non vérifiée n'y figure pas, parce que ce n'est pas une anomalie
-    /// — c'est la limite de ce qu'on peut demander sans rien changer au clavier.
+    /// An empty list means "nothing to report", **not** "compatible": an unverified
+    /// command is not listed, because it is not an anomaly — it is the limit of what
+    /// can be asked without changing anything on the keyboard.
     ///
-    /// Aucun avertissement ne bloque quoi que ce soit. Bloquer sur une version
-    /// différente rendrait l'application inutile après une mise à jour de
-    /// routine, alors que le protocole n'aura très probablement pas bougé ;
-    /// l'avertissement transforme une panne muette en soupçon énoncé.
+    /// No warning blocks anything. Blocking on a different version would make the
+    /// application useless after a routine update, when the protocol will most
+    /// likely not have changed; the warning turns a silent failure into a stated
+    /// suspicion.
     pub fn warnings(&self, layout: &Layout) -> Vec<String> {
         let releve = layout.surveyed_firmware;
         let mut out = Vec::new();
@@ -217,8 +215,8 @@ impl Inspection {
     }
 }
 
-/// Inspecte un appareil qu'on vient d'ouvrir. **Ne peut pas échouer** : chaque
-/// question sans réponse devient une raison, jamais une erreur d'ouverture.
+/// Inspects a device that was just opened. **Cannot fail**: every unanswered
+/// question becomes a reason, never an open error.
 pub(crate) fn inspect(t: &impl Transport) -> Inspection {
     let firmware = read(t, &Report::read_firmware())
         .and_then(|r| r.firmware().ok_or_else(|| "réponse vide".to_string()));
@@ -255,7 +253,7 @@ pub(crate) fn inspect(t: &impl Transport) -> Inspection {
 }
 
 fn check_brightness(t: &impl Transport) -> Verdict {
-    let niveau = match read(t, &Report::read_brightness()) {
+    let level = match read(t, &Report::read_brightness()) {
         Ok(r) => match r.brightness() {
             Some(n) => n,
             None => return Verdict::Unverified("luminosité relue sous une forme inconnue".into()),
@@ -264,16 +262,16 @@ fn check_brightness(t: &impl Transport) -> Verdict {
     };
     rewrite(
         t,
-        &Report::set_brightness(niveau),
+        &Report::set_brightness(level),
         &Report::read_brightness(),
-        niveau,
+        level,
         Response::brightness,
         |n| n.to_string(),
     )
 }
 
 fn check_effect(t: &impl Transport) -> Verdict {
-    let effet = match read(t, &Report::read_effect()) {
+    let effect = match read(t, &Report::read_effect()) {
         Ok(r) => match r.effect() {
             Some(e) => e,
             None => {
@@ -288,41 +286,41 @@ fn check_effect(t: &impl Transport) -> Verdict {
     };
     rewrite(
         t,
-        &Report::set_effect(effet),
+        &Report::set_effect(effect),
         &Report::read_effect(),
-        effet,
+        effect,
         Response::effect,
-        nommer,
+        effect_name,
     )
 }
 
-/// Réécrit une valeur relue, puis la relit.
+/// Rewrites a value that was read back, then reads it again.
 fn rewrite<T: PartialEq + Copy>(
     t: &impl Transport,
     write: &Report,
     reread: &Report,
-    avant: T,
+    before: T,
     decode: impl Fn(&Response) -> Option<T>,
-    dire: impl Fn(T) -> String,
+    render: impl Fn(T) -> String,
 ) -> Verdict {
-    let reponse = match exchange(t, write) {
+    let response = match exchange(t, write) {
         Ok(r) => r,
         Err(e) => return Verdict::Unverified(format!("réécriture sans réponse : {e}")),
     };
-    match reponse.status() {
+    match response.status() {
         Status::Understood => {}
         Status::Unsupported => return Verdict::Unsupported,
         autre => return Verdict::Unverified(format!("réécriture rendue {autre}")),
     }
     match read(t, reread) {
         Ok(r) => match decode(&r) {
-            Some(apres) if apres == avant => Verdict::Understood,
-            Some(apres) => Verdict::ReadBackDiffers {
-                wrote: dire(avant),
-                read: dire(apres),
+            Some(after) if after == before => Verdict::Understood,
+            Some(after) => Verdict::ReadBackDiffers {
+                wrote: render(before),
+                read: render(after),
             },
             None => Verdict::ReadBackDiffers {
-                wrote: dire(avant),
+                wrote: render(before),
                 read: "une forme inconnue".into(),
             },
         },
@@ -330,9 +328,9 @@ fn rewrite<T: PartialEq + Copy>(
     }
 }
 
-/// Un effet, tel qu'on le nomme à quelqu'un — pas le nom d'une variante Rust.
-fn nommer(effet: Effect) -> String {
-    match effet {
+/// An effect, as named to a person — not the name of a Rust variant.
+fn effect_name(effect: Effect) -> String {
+    match effect {
         Effect::Off => "éteint".into(),
         Effect::SpectrumCycle => "spectre".into(),
         Effect::Wave { direction, speed } => {
@@ -342,7 +340,7 @@ fn nommer(effet: Effect) -> String {
     }
 }
 
-/// Une lecture, qui n'a de valeur que comprise.
+/// A read, which is only worth anything once understood.
 fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
     let r = exchange(t, request)?;
     match r.status() {
@@ -351,12 +349,11 @@ fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
     }
 }
 
-/// Émet une commande et relit **sa** réponse, quel qu'en soit l'état.
+/// Sends a command and reads back **its** response, whatever its status.
 ///
-/// L'écho est vérifié : sans lui, une commande émise entre-temps sur la même
-/// interface — une boucle de rendu tenant une autre poignée — ferait lire sa
-/// réponse pour la nôtre. Mieux vaut ne pas conclure que conclure sur la
-/// réponse d'un autre.
+/// The echo is checked: without it, a command sent in the meantime on the same
+/// interface — a render loop holding another handle — would have its response read
+/// as ours. Better to conclude nothing than to conclude on someone else's response.
 fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
     t.send(&request.to_feature_buffer())
         .map_err(|e| format!("écriture refusée : {e}"))?;
@@ -368,7 +365,7 @@ fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
         let r = Response::from_feature_buffer(&buf, lus)
             .ok_or_else(|| format!("réponse tronquée : {lus} octets"))?;
         if r.status() == Status::Busy {
-            std::thread::sleep(PATIENCE);
+            std::thread::sleep(BUSY_DELAY);
             continue;
         }
         if !r.answers(request) {
@@ -392,111 +389,111 @@ mod tests {
     use super::*;
     use crate::DEATHSTALKER_V2_PRO;
 
-    /// Un appareil simulé, qui répond comme le relevé l'a décrit — sauf là où un
-    /// test lui demande de ne pas le faire.
-    struct Faux {
-        etat: RefCell<Etat>,
+    /// A simulated device that answers as the survey described — except where a
+    /// test asks it not to.
+    struct Fake {
+        state: RefCell<State>,
     }
 
-    struct Etat {
+    struct State {
         version: [u8; 2],
-        serie: &'static [u8],
-        /// Les six octets d'arguments de l'effet courant.
-        effet: [u8; 6],
-        luminosite: u8,
-        /// Commandes auxquelles l'appareil répond `0x05`.
-        inconnues: Vec<CommandId>,
-        /// Lit l'argument de luminosité un octet trop tôt — un micrologiciel qui
-        /// aurait déplacé l'argument.
-        luminosite_decalee: bool,
-        /// Réponses « occupé » à rendre avant la vraie.
-        occupe: u32,
-        /// Toute relecture échoue, comme sans accès en lecture.
-        sourd: bool,
-        /// Écho forcé, comme si une autre commande avait été émise entre-temps.
+        serial: &'static [u8],
+        /// The six argument bytes of the current effect.
+        effect: [u8; 6],
+        brightness: u8,
+        /// Commands the device answers `0x05` to.
+        unknown: Vec<CommandId>,
+        /// Reads the brightness argument one byte too early — a firmware that would
+        /// have moved the argument.
+        brightness_shifted: bool,
+        /// "Busy" responses to return before the real one.
+        busy: u32,
+        /// Every read fails, as without read access.
+        read_denied: bool,
+        /// Forced echo, as if another command had been sent in the meantime.
         echo: Option<CommandId>,
-        derniere: Option<Report>,
-        emises: Vec<CommandId>,
+        last: Option<Report>,
+        sent: Vec<CommandId>,
     }
 
-    impl Faux {
-        fn conforme() -> Self {
-            let spectre = Report::set_effect(Effect::SpectrumCycle).0;
-            let mut effet = [0u8; 6];
-            effet.copy_from_slice(&spectre[8..14]);
+    impl Fake {
+        fn as_surveyed() -> Self {
+            let spectrum = Report::set_effect(Effect::SpectrumCycle).0;
+            let mut effect = [0u8; 6];
+            effect.copy_from_slice(&spectrum[8..14]);
             Self {
-                etat: RefCell::new(Etat {
+                state: RefCell::new(State {
                     version: [0x01, 0x05],
-                    serie: b"XY24ABCDEFG0001",
-                    effet,
-                    luminosite: 0xff,
-                    inconnues: Vec::new(),
-                    luminosite_decalee: false,
-                    occupe: 0,
-                    sourd: false,
+                    serial: b"XY24ABCDEFG0001",
+                    effect,
+                    brightness: 0xff,
+                    unknown: Vec::new(),
+                    brightness_shifted: false,
+                    busy: 0,
+                    read_denied: false,
                     echo: None,
-                    derniere: None,
-                    emises: Vec::new(),
+                    last: None,
+                    sent: Vec::new(),
                 }),
             }
         }
 
-        fn avec(self, f: impl FnOnce(&mut Etat)) -> Self {
-            f(&mut self.etat.borrow_mut());
+        fn with(self, f: impl FnOnce(&mut State)) -> Self {
+            f(&mut self.state.borrow_mut());
             self
         }
 
-        fn emises(&self) -> Vec<CommandId> {
-            self.etat.borrow().emises.clone()
+        fn sent(&self) -> Vec<CommandId> {
+            self.state.borrow().sent.clone()
         }
     }
 
-    impl Transport for Faux {
+    impl Transport for Fake {
         fn send(&self, data: &[u8]) -> Result<(), String> {
             let mut r = [0u8; 90];
             r.copy_from_slice(&data[1..]);
             let report = Report(r);
             let id = report.id();
-            let mut e = self.etat.borrow_mut();
-            e.emises.push(id);
-            if !e.inconnues.contains(&id) {
+            let mut e = self.state.borrow_mut();
+            e.sent.push(id);
+            if !e.unknown.contains(&id) {
                 if id == SET_EFFECT {
-                    e.effet.copy_from_slice(&r[8..14]);
+                    e.effect.copy_from_slice(&r[8..14]);
                 }
                 if id == SET_BRIGHTNESS {
-                    e.luminosite = if e.luminosite_decalee { r[9] } else { r[10] };
+                    e.brightness = if e.brightness_shifted { r[9] } else { r[10] };
                 }
             }
-            e.derniere = Some(report);
+            e.last = Some(report);
             Ok(())
         }
 
         fn receive(&self, buf: &mut [u8]) -> Result<usize, String> {
-            let mut e = self.etat.borrow_mut();
-            if e.sourd {
+            let mut e = self.state.borrow_mut();
+            if e.read_denied {
                 return Err("accès en lecture refusé".into());
             }
-            let demande = e.derniere.as_ref().expect("lecture sans commande").id();
+            let request = e.last.as_ref().expect("read without a command").id();
             buf.fill(0);
-            if e.occupe > 0 {
-                e.occupe -= 1;
+            if e.busy > 0 {
+                e.busy -= 1;
                 buf[1] = 0x01;
                 return Ok(buf.len());
             }
-            let echo = e.echo.unwrap_or(demande);
+            let echo = e.echo.unwrap_or(request);
             buf[1 + 6] = echo.class;
             buf[1 + 7] = echo.command;
-            if e.inconnues.contains(&demande) {
+            if e.unknown.contains(&request) {
                 buf[1] = 0x05;
                 return Ok(buf.len());
             }
             buf[1] = 0x02;
             let args = &mut buf[1 + 8..];
-            match (demande.class, demande.command) {
+            match (request.class, request.command) {
                 (0x00, 0x81) => args[..2].copy_from_slice(&e.version),
-                (0x00, 0x82) => args[..e.serie.len()].copy_from_slice(e.serie),
-                (0x0f, 0x82) => args[..6].copy_from_slice(&e.effet),
-                (0x0f, 0x84) => args[2] = e.luminosite,
+                (0x00, 0x82) => args[..e.serial.len()].copy_from_slice(e.serial),
+                (0x0f, 0x82) => args[..6].copy_from_slice(&e.effect),
+                (0x0f, 0x84) => args[2] = e.brightness,
                 _ => {}
             }
             Ok(buf.len())
@@ -507,15 +504,15 @@ mod tests {
         &i.checks
             .iter()
             .find(|c| c.command == command)
-            .expect("commande non vérifiée")
+            .expect("command not checked")
             .verdict
     }
 
-    /// Le cas du relevé : v1.5, série lue, luminosité et effet connus.
+    /// The survey case: v1.5, serial read, brightness and effect known.
     #[test]
-    fn un_appareil_conforme_au_releve_ne_souleve_rien() {
-        let faux = Faux::conforme();
-        let i = inspect(&faux);
+    fn a_device_matching_the_survey_raises_nothing() {
+        let fake = Fake::as_surveyed();
+        let i = inspect(&fake);
 
         assert_eq!(i.firmware, Ok(Firmware { major: 1, minor: 5 }));
         assert_eq!(i.serial.as_deref(), Ok("XY24ABCDEFG0001"));
@@ -525,167 +522,164 @@ mod tests {
         assert!(!i.refuses(SET_EFFECT));
     }
 
-    /// **L'inspection ne change rien à ce que montre le clavier.** C'est la
-    /// condition pour avoir le droit d'émettre à chaque ouverture.
+    /// **The inspection changes nothing in what the keyboard shows.** That is the
+    /// condition for being allowed to send on every open.
     #[test]
-    fn l_inspection_laisse_le_clavier_tel_qu_elle_l_a_trouve() {
-        let vague = Report::set_effect(Effect::Wave {
+    fn inspection_leaves_the_keyboard_as_it_found_it() {
+        let wave = Report::set_effect(Effect::Wave {
             direction: 0x02,
             speed: 0x28,
         })
         .0;
-        let faux = Faux::conforme().avec(|e| {
-            e.effet.copy_from_slice(&vague[8..14]);
-            e.luminosite = 0x40;
+        let fake = Fake::as_surveyed().with(|e| {
+            e.effect.copy_from_slice(&wave[8..14]);
+            e.brightness = 0x40;
         });
-        let i = inspect(&faux);
+        let i = inspect(&fake);
 
         assert_eq!(verdict(&i, SET_EFFECT), &Verdict::Understood);
-        let e = faux.etat.borrow();
-        assert_eq!(e.effet[..], vague[8..14], "l'effet a changé");
-        assert_eq!(e.luminosite, 0x40, "la luminosité a changé");
+        let e = fake.state.borrow();
+        assert_eq!(e.effect[..], wave[8..14], "the effect changed");
+        assert_eq!(e.brightness, 0x40, "the brightness changed");
     }
 
-    /// Une autre version **avertit**, et rien d'autre : aucune commande n'est
-    /// refusée pour autant.
+    /// Another version **warns**, and nothing else: no command is refused because of
+    /// it.
     #[test]
-    fn une_autre_version_avertit_sans_bloquer() {
-        let faux = Faux::conforme().avec(|e| e.version = [0x01, 0x06]);
-        let i = inspect(&faux);
+    fn another_version_warns_without_blocking() {
+        let fake = Fake::as_surveyed().with(|e| e.version = [0x01, 0x06]);
+        let i = inspect(&fake);
 
-        let avertissements = i.warnings(&DEATHSTALKER_V2_PRO);
-        assert_eq!(avertissements.len(), 1, "{avertissements:?}");
-        assert!(avertissements[0].contains("v1.6"), "{avertissements:?}");
-        assert!(avertissements[0].contains("v1.5"), "{avertissements:?}");
+        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("v1.6"), "{warnings:?}");
+        assert!(warnings[0].contains("v1.5"), "{warnings:?}");
         assert!(!i.refuses(SET_EFFECT) && !i.refuses(SET_BRIGHTNESS));
     }
 
-    /// L'appareil dit ne pas connaître la commande : elle est nommée à l'écran,
-    /// et le clavier ne l'enverra plus.
+    /// The device says it does not know the command: it is named on screen, and the
+    /// keyboard will not send it any more.
     #[test]
-    fn une_commande_inconnue_est_nommee_et_refusee() {
-        let faux = Faux::conforme().avec(|e| e.inconnues.push(SET_EFFECT));
-        let i = inspect(&faux);
+    fn an_unknown_command_is_named_and_refused() {
+        let fake = Fake::as_surveyed().with(|e| e.unknown.push(SET_EFFECT));
+        let i = inspect(&fake);
 
         assert_eq!(verdict(&i, SET_EFFECT), &Verdict::Unsupported);
         assert!(i.refuses(SET_EFFECT));
         assert!(!i.refuses(SET_BRIGHTNESS));
-        let avertissements = i.warnings(&DEATHSTALKER_V2_PRO);
+        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
         assert!(
-            avertissements.iter().any(|a| a.contains("« effet »")),
-            "{avertissements:?}"
+            warnings.iter().any(|a| a.contains("« effet »")),
+            "{warnings:?}"
         );
     }
 
-    /// Un micrologiciel qui lirait l'argument ailleurs rendrait `0x02` et
-    /// poserait autre chose. C'est la seconde relecture qui le voit — l'octet
-    /// d'état, lui, n'en saurait rien.
+    /// A firmware reading the argument elsewhere would answer `0x02` and set
+    /// something else. The second read-back sees it — the status byte would know
+    /// nothing about it.
     #[test]
-    fn un_argument_compris_autrement_se_voit_a_la_relecture() {
-        let faux = Faux::conforme().avec(|e| e.luminosite_decalee = true);
-        let i = inspect(&faux);
+    fn an_argument_understood_differently_shows_on_read_back() {
+        let fake = Fake::as_surveyed().with(|e| e.brightness_shifted = true);
+        let i = inspect(&fake);
 
         assert!(matches!(
             verdict(&i, SET_BRIGHTNESS),
             Verdict::ReadBackDiffers { .. }
         ));
-        // Comprise autrement n'est pas inconnue : on avertit, on n'interdit pas.
+        // Understood differently is not unknown: we warn, we do not forbid.
         assert!(!i.refuses(SET_BRIGHTNESS));
         assert_eq!(i.warnings(&DEATHSTALKER_V2_PRO).len(), 1);
     }
 
-    /// `Statique` porte une couleur dont la place dans la relecture n'est pas
-    /// établie : le réécrire pourrait l'éteindre. Rien n'est émis.
+    /// `Static` carries a color whose position in the read-back is not established:
+    /// rewriting it could turn it off. Nothing is sent.
     #[test]
-    fn un_effet_colore_n_est_jamais_reecrit() {
-        let faux = Faux::conforme().avec(|e| e.effet = [0, 0, 0x01, 0, 0, 0x01]);
-        let i = inspect(&faux);
+    fn a_colored_effect_is_never_rewritten() {
+        let fake = Fake::as_surveyed().with(|e| e.effect = [0, 0, 0x01, 0, 0, 0x01]);
+        let i = inspect(&fake);
 
         assert!(matches!(verdict(&i, SET_EFFECT), Verdict::Unverified(_)));
         assert!(
-            !faux.emises().contains(&SET_EFFECT),
-            "l'effet a été réécrit"
+            !fake.sent().contains(&SET_EFFECT),
+            "the effect was rewritten"
         );
         assert!(
             i.warnings(&DEATHSTALKER_V2_PRO).is_empty(),
-            "une limite n'est pas une anomalie"
+            "a limit is not an anomaly"
         );
     }
 
-    /// Aucune rangée n'est invisible : l'inspection n'en écrit jamais.
+    /// No row is invisible: the inspection never writes one.
     #[test]
-    fn aucune_rangee_n_est_emise() {
-        let faux = Faux::conforme();
-        let i = inspect(&faux);
+    fn no_row_is_sent() {
+        let fake = Fake::as_surveyed();
+        let i = inspect(&fake);
 
-        assert!(!faux.emises().contains(&WRITE_ROW));
+        assert!(!fake.sent().contains(&WRITE_ROW));
         assert!(matches!(verdict(&i, WRITE_ROW), Verdict::Unverified(_)));
-        // Et une commande non vérifiée n'est pas refusée : le clavier doit
-        // pouvoir recevoir ses images.
+        // And an unverified command is not refused: the keyboard must still be able
+        // to receive its frames.
         assert!(!i.refuses(WRITE_ROW));
     }
 
-    /// **Le mode pilote ne s'écrit pas** (§8 du relevé) : dans la classe `0x00`,
-    /// l'inspection ne fait que lire.
+    /// **Driver mode is not written** (§8 of the survey): in class `0x00`, the
+    /// inspection only reads.
     #[test]
-    fn l_inspection_n_ecrit_rien_dans_la_classe_information() {
-        let faux = Faux::conforme();
-        inspect(&faux);
-        for id in faux.emises() {
+    fn inspection_writes_nothing_in_the_information_class() {
+        let fake = Fake::as_surveyed();
+        inspect(&fake);
+        for id in fake.sent() {
             assert!(
                 id.class != 0x00 || id.command >= 0x80,
-                "{id} écrit dans la classe information"
+                "{id} writes to the information class"
             );
         }
     }
 
-    /// Sans lecture possible — hidraw sans droit, pilote qui ne relaie pas —
-    /// **aucune écriture ne part** : chaque réécriture attend sa relecture.
+    /// Without any read — hidraw without permission, a driver that does not relay —
+    /// **no write goes out**: each rewrite waits for its read-back.
     #[test]
-    fn sans_relecture_aucune_ecriture_ne_part() {
-        let faux = Faux::conforme().avec(|e| e.sourd = true);
-        let i = inspect(&faux);
+    fn without_read_back_no_write_goes_out() {
+        let fake = Fake::as_surveyed().with(|e| e.read_denied = true);
+        let i = inspect(&fake);
 
         assert!(i.firmware.is_err());
         assert!(i.serial.is_err());
-        let emises = faux.emises();
-        assert!(!emises.contains(&SET_EFFECT), "{emises:?}");
-        assert!(!emises.contains(&SET_BRIGHTNESS), "{emises:?}");
-        // La version non lue se dit, puisqu'on ne peut plus la comparer.
-        let avertissements = i.warnings(&DEATHSTALKER_V2_PRO);
-        assert_eq!(avertissements.len(), 1, "{avertissements:?}");
-        assert!(avertissements[0].contains("non lue"));
+        let sent = fake.sent();
+        assert!(!sent.contains(&SET_EFFECT), "{sent:?}");
+        assert!(!sent.contains(&SET_BRIGHTNESS), "{sent:?}");
+        // The unread version is reported, since it can no longer be compared.
+        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("non lue"));
     }
 
-    /// Le numéro de série ne sort pas par un `{:?}` distrait.
+    /// The serial number does not leak through a careless `{:?}`.
     #[test]
-    fn le_format_de_debogage_ne_divulgue_pas_la_serie() {
-        let i = inspect(&Faux::conforme());
-        let texte = format!("{i:?}");
-        assert!(!texte.contains("XY24ABCDEFG0001"), "{texte}");
-        assert!(
-            texte.contains("v1.5") || texte.contains("major: 1"),
-            "{texte}"
-        );
+    fn debug_format_does_not_leak_the_serial() {
+        let i = inspect(&Fake::as_surveyed());
+        let text = format!("{i:?}");
+        assert!(!text.contains("XY24ABCDEFG0001"), "{text}");
+        assert!(text.contains("v1.5") || text.contains("major: 1"), "{text}");
     }
 
-    /// Prévu par le protocole, jamais observé : une réponse « occupé » se relit.
+    /// Provided for by the protocol, never observed: a "busy" response is read again.
     #[test]
-    fn une_reponse_occupee_se_relit() {
-        let faux = Faux::conforme().avec(|e| e.occupe = 2);
-        let i = inspect(&faux);
+    fn a_busy_response_is_read_again() {
+        let fake = Fake::as_surveyed().with(|e| e.busy = 2);
+        let i = inspect(&fake);
         assert_eq!(i.firmware, Ok(Firmware { major: 1, minor: 5 }));
     }
 
-    /// La réponse d'une autre commande n'est pas prise pour la nôtre, même quand
-    /// ses octets s'y prêteraient.
+    /// The response to another command is not taken for ours, even when its bytes
+    /// would fit.
     #[test]
-    fn la_reponse_d_une_autre_commande_ne_conclut_rien() {
-        let faux = Faux::conforme().avec(|e| e.echo = Some(WRITE_ROW));
-        let i = inspect(&faux);
+    fn a_response_to_another_command_concludes_nothing() {
+        let fake = Fake::as_surveyed().with(|e| e.echo = Some(WRITE_ROW));
+        let i = inspect(&fake);
 
         assert!(i.firmware.is_err());
         assert!(matches!(verdict(&i, SET_EFFECT), Verdict::Unverified(_)));
-        assert!(!faux.emises().contains(&SET_EFFECT));
+        assert!(!fake.sent().contains(&SET_EFFECT));
     }
 }

@@ -1,114 +1,111 @@
-//! Description physique des périphériques pris en charge.
+//! Physical description of the supported devices.
 
 use candeo_protocol::Firmware;
 
-/// Position sans LED dans la matrice.
+/// Matrix position without an LED.
 ///
-/// Interne : la sentinelle ne sert qu'à écrire et à lire [`Layout::matrix`], et
-/// tout ce qui sort d'ici l'a déjà traversée — [`Layout::lit_count`] l'écarte du
-/// compte, [`Layout::at`] la traduit en `None`. Un appelant qui lirait `matrix`
-/// directement en aurait besoin ; aucun ne le fait, et la valeur brute
-/// `u16::MAX` est écrite dans la documentation du champ pour celui qui s'y
-/// mettrait.
+/// Internal: the sentinel only serves to write and read [`Layout::matrix`], and
+/// everything leaving this module has already been through it —
+/// [`Layout::lit_count`] leaves it out of the count, [`Layout::at`] turns it into
+/// `None`. A caller reading `matrix` directly would need it; none does, and the raw
+/// value `u16::MAX` is written in the field's documentation for whoever would.
 pub(crate) const EMPTY: u16 = u16::MAX;
 
-/// Une touche : sa LED, son nom gravé, et son rectangle physique.
+/// A key: its LED, its printed legend, and its physical rectangle.
 ///
-/// Les coordonnées sont en **unités de pas de clavier** : 1 u = la largeur
-/// d'une touche alphabétique. L'origine est en haut à gauche, `y` croît vers
-/// le bas. Une touche occupe `[x, x + w[ × [y, y + h[`.
+/// Coordinates are in **keyboard pitch units**: 1 u = the width of an alphanumeric
+/// key. The origin is at the top left, `y` grows downwards. A key covers
+/// `[x, x + w[ × [y, y + h[`.
 ///
-/// # D'où viennent ces rectangles
+/// # Where these rectangles come from
 ///
-/// **Pas du périphérique.** Celui-ci n'expose que la grille logique 6 × 22 et
-/// ne déclare aucune dimension. Le dessin est une **transcription à la main**
-/// de la disposition ISO pleine taille standard, alignée à l'œil sur le
-/// clavier réel. Il est exact au sens d'une convention, pas d'un relevé : une
-/// erreur de dessin ne se détecte qu'en regardant le simulateur.
+/// **Not from the device.** It only exposes the 6 × 22 logical grid and declares no
+/// dimension. The drawing is a **hand transcription** of the standard full-size ISO
+/// layout, aligned by eye on the real keyboard. It is exact in the sense of a
+/// convention, not of a survey: a drawing mistake is only caught by looking at the
+/// simulator.
 ///
-/// Seuls [`Key::index`] et [`Key::name`] proviennent du relevé matériel, décrit
-/// dans `docs/protocol/deathstalker-v2-pro.md` §6.
+/// Only [`Key::index`] and [`Key::name`] come from the hardware survey, described in
+/// `docs/protocol/deathstalker-v2-pro.md` §6.
 pub struct Key {
-    /// Index de LED, tel qu'il apparaît dans [`Layout::matrix`].
+    /// LED index, as it appears in [`Layout::matrix`].
     pub index: u16,
-    /// Nom lisible, dans la variante French (ISO) que le clavier déclare.
+    /// Readable name, in the French (ISO) variant the keyboard declares.
     pub name: &'static str,
-    /// Bord gauche, en unités de pas de clavier.
+    /// Left edge, in keyboard pitch units.
     pub x: f32,
-    /// Bord supérieur.
+    /// Top edge.
     pub y: f32,
-    /// Largeur.
+    /// Width.
     pub w: f32,
-    /// Hauteur.
+    /// Height.
     pub h: f32,
 }
 
-/// Gabarit d'un périphérique : identification, transport et matrice.
+/// Layout of a device: identification, transport and matrix.
 pub struct Layout {
     pub name: &'static str,
     pub vid: u16,
     pub pid: u16,
-    /// Interface du composite USB portant l'éclairage.
+    /// Interface of the USB composite device that carries the lighting.
     pub interface: u8,
-    /// Micrologiciel contre lequel ce gabarit a été relevé.
+    /// Firmware this layout was surveyed against.
     ///
-    /// **Une donnée, pas une phrase dans un `.md`** : c'est ce que l'inspection
-    /// à l'ouverture compare à la version lue, et un écart doit pouvoir s'y dire
-    /// sans que personne ait à retrouver le relevé. Un gabarit contribué sans son
-    /// matériel sous la main (#34) n'aurait sinon aucun moyen de distinguer « le
-    /// code est faux » de « la version a changé ».
+    /// **Data, not a sentence in a `.md`**: it is what the inspection on open
+    /// compares with the version it reads, and a mismatch must be reportable
+    /// without anyone having to dig up the survey. A layout contributed without its
+    /// hardware at hand (#34) would otherwise have no way to tell "the code is
+    /// wrong" from "the version changed".
     ///
-    /// Lue par la commande de l'appareil (`0x00`/`0x81`), **jamais** recopiée de
-    /// `release_number` : l'énumération HID y rend le `bcdDevice`, une révision
-    /// matérielle figée qui ressemble à une version et n'en est pas une.
+    /// Read through the device command (`0x00`/`0x81`), **never** copied from
+    /// `release_number`: HID enumeration returns the `bcdDevice` there, a frozen
+    /// hardware revision that looks like a version and is not one.
     pub surveyed_firmware: Firmware,
     pub rows: u8,
     pub cols: u8,
-    /// Index de LED par position, ligne par ligne. `u16::MAX` = pas de LED.
+    /// LED index per position, row by row. `u16::MAX` = no LED.
     pub matrix: &'static [u16],
-    /// Nom et géométrie de chaque position occupée, dans l'ordre des index.
+    /// Name and geometry of each occupied position, in index order.
     pub keys: &'static [Key],
 }
 
 impl Layout {
-    /// Vrai si cette entrée d'énumération HID est **l'interface d'éclairage** de
-    /// ce gabarit.
+    /// True if this HID enumeration entry is **the lighting interface** of this
+    /// layout.
     ///
-    /// Une seule règle, pour l'ouverture comme pour la présence : les recopier à
-    /// deux endroits permettrait qu'un appareil soit dit branché sur une entrée
-    /// qu'on n'ouvrirait pas.
+    /// A single rule, for opening as for presence: copying it in two places would
+    /// let a device be reported as plugged in through an entry we would not open.
     ///
-    /// # L'entrée `interface -1` est écartée, et c'est ici
+    /// # The `interface -1` entry is ruled out, and here
     ///
-    /// L'énumération du DeathStalker porte, sur les mêmes VID et PID, une entrée
-    /// sans numéro d'interface (`-1`), sans nom de produit, et d'une révision
-    /// (`0x0101`) qui n'est pas celle du composite (`0x0200`). **Ce n'est pas le
-    /// clavier** : son parent dans l'arbre des périphériques est un nœud
-    /// `RZVIRTUAL`, créé par le pilote du fabricant (service `RzDev_0292`), et non
-    /// une interface USB — d'où l'absence de numéro. Voir le §1 du relevé. Elle
-    /// n'existe donc que là où ce pilote est installé, et rien ne garantit qu'elle
-    /// y garde cette forme.
+    /// The DeathStalker enumeration carries, on the same VID and PID, an entry with
+    /// no interface number (`-1`), no product name, and a revision (`0x0101`) that
+    /// is not the composite's (`0x0200`). **It is not the keyboard**: its parent in
+    /// the device tree is a `RZVIRTUAL` node, created by the vendor driver (service
+    /// `RzDev_0292`), not a USB interface — hence the missing number. See §1 of the
+    /// survey. It therefore only exists where that driver is installed, and nothing
+    /// guarantees it keeps this shape there.
     ///
-    /// Sous Windows, ouvrir la mauvaise entrée donne un handle **valide** sur
-    /// lequel toute écriture se perd. L'exiger égale à [`Self::interface`] suffit
-    /// à l'écarter, quelle qu'en soit la forme demain.
+    /// On Windows, opening the wrong entry yields a **valid** handle on which every
+    /// write is lost. Requiring it to equal [`Self::interface`] is enough to rule it
+    /// out, whatever shape it takes tomorrow.
     pub fn is_lighting_interface(&self, vid: u16, pid: u16, interface: i32) -> bool {
         vid == self.vid && pid == self.pid && interface == i32::from(self.interface)
     }
 
-    /// Nombre de positions de la matrice — **pas** le nombre de LED physiques.
+    /// Number of matrix positions — **not** the number of physical LEDs.
     ///
-    /// C'est cette valeur que doit couvrir une image complète.
+    /// This is the value a full frame must cover.
     pub const fn led_count(&self) -> usize {
         self.rows as usize * self.cols as usize
     }
 
-    /// Nombre de positions portant réellement une LED.
+    /// Number of positions that actually carry an LED.
     pub fn lit_count(&self) -> usize {
         self.matrix.iter().filter(|&&i| i != EMPTY).count()
     }
 
-    /// Index de LED à une position donnée.
+    /// LED index at a given position.
     pub fn at(&self, row: u8, col: u8) -> Option<u16> {
         let i = row as usize * self.cols as usize + col as usize;
         match self.matrix.get(i) {
@@ -117,17 +114,17 @@ impl Layout {
         }
     }
 
-    /// Touche portant un index de LED donné.
+    /// Key carrying a given LED index.
     ///
-    /// Chaque position allumée en a une : c'est l'invariant que vérifie le test
-    /// `every_lit_position_has_a_key`.
+    /// Every lit position has one: that is the invariant the
+    /// `every_lit_position_has_a_key` test checks.
     pub fn key(&self, index: u16) -> Option<&'static Key> {
         let keys: &'static [Key] = self.keys;
         keys.iter().find(|k| k.index == index)
     }
 }
 
-/// Touche standard, 1 u × 1 u.
+/// Standard key, 1 u × 1 u.
 const fn k(index: u16, name: &'static str, x: f32, y: f32) -> Key {
     Key {
         index,
@@ -139,7 +136,7 @@ const fn k(index: u16, name: &'static str, x: f32, y: f32) -> Key {
     }
 }
 
-/// Touche large, haute d'une rangée.
+/// Wide key, one row high.
 const fn kw(index: u16, name: &'static str, x: f32, y: f32, w: f32) -> Key {
     Key {
         index,
@@ -151,7 +148,7 @@ const fn kw(index: u16, name: &'static str, x: f32, y: f32, w: f32) -> Key {
     }
 }
 
-/// Touche débordant sur deux rangées — le `+` et l'`Entrée` du pavé numérique.
+/// Key spanning two rows — the numeric keypad `+` and Enter.
 const fn kh(index: u16, name: &'static str, x: f32, y: f32, w: f32, h: f32) -> Key {
     Key {
         index,
@@ -163,27 +160,25 @@ const fn kh(index: u16, name: &'static str, x: f32, y: f32, w: f32, h: f32) -> K
     }
 }
 
-/// Razer DeathStalker V2 Pro, filaire.
+/// Razer DeathStalker V2 Pro, wired.
 ///
-/// Matrice relevée par interrogation du périphérique : 6 × 22 = **132**
-/// positions — la taille d'une image — dont **106** portent une LED.
+/// Matrix surveyed by querying the device: 6 × 22 = **132** positions — the size
+/// of a frame — of which **106** carry an LED.
 ///
-/// Les deux chiffres ne sont pas interchangeables : en envoyer 106 laisse les
-/// dernières rangées figées sur leur valeur précédente. Voir
-/// `docs/protocol/deathstalker-v2-pro.md` §6.
+/// The two numbers are not interchangeable: sending 106 leaves the last rows frozen
+/// on their previous value. See `docs/protocol/deathstalker-v2-pro.md` §6.
 ///
-/// La géométrie de [`Layout::keys`] est une transcription manuelle de la
-/// disposition ISO pleine taille : le périphérique ne déclare rien de tel. Voir
-/// [`Key`]. Le dessin fait 22,5 u de large et 6,5 u de haut : bloc principal de
-/// 0 à 15 u, pavé de navigation de 15,25 à 18,25 u, pavé numérique de 18,5 à
-/// 22,5 u.
+/// The geometry of [`Layout::keys`] is a manual transcription of the full-size ISO
+/// layout: the device declares nothing of the kind. See [`Key`]. The drawing is
+/// 22.5 u wide and 6.5 u high: main block from 0 to 15 u, navigation cluster from
+/// 15.25 to 18.25 u, numeric keypad from 18.5 to 22.5 u.
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     name: "Razer DeathStalker V2 Pro (filaire)",
     vid: 0x1532,
     pid: 0x0292,
     interface: 3,
-    // `01 05`, relu par `0x00`/`0x81` le 12/09/2026 — la version que l'appareil
-    // déclare par ailleurs. Voir le §8 du relevé.
+    // `01 05`, read back through `0x00`/`0x81` on 12/09/2026 — the version the
+    // device also declares elsewhere. See §8 of the survey.
     surveyed_firmware: Firmware { major: 1, minor: 5 },
     rows: 6,
     cols: 22,
@@ -199,14 +194,14 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     ],
     #[rustfmt::skip]
     keys: &[
-        // Rangée 0 — fonctions. Trois blocs de quatre, puis le trio d'impression. (16)
+        // Row 0 — function keys. Three blocks of four, then the print trio. (16)
         k(  0, "Échap",       0.0,  0.0),
         k(  2, "F1",          2.0,  0.0), k(  3, "F2",     3.0,  0.0), k(  4, "F3",     4.0,  0.0), k(  5, "F4",  5.0,  0.0),
         k(  6, "F5",          6.5,  0.0), k(  7, "F6",     7.5,  0.0), k(  8, "F7",     8.5,  0.0), k(  9, "F8",  9.5,  0.0),
         k( 10, "F9",         11.0,  0.0), k( 11, "F10",   12.0,  0.0), k( 12, "F11",   13.0,  0.0), k( 13, "F12", 14.0,  0.0),
         k( 14, "ImprÉcran",  15.25, 0.0), k( 15, "ArrêtDéfil", 16.25, 0.0), k( 16, "Pause", 17.25, 0.0),
 
-        // Rangée 1 — chiffres AZERTY, Retour arrière de 2 u, navigation, haut du pavé. (21)
+        // Row 1 — AZERTY digits, 2 u Backspace, navigation, top of the keypad. (21)
         k( 22, "²",           0.0,  1.5), k( 23, "&",      1.0,  1.5), k( 24, "é",      2.0,  1.5),
         k( 25, "\"",          3.0,  1.5), k( 26, "'",      4.0,  1.5), k( 27, "(",      5.0,  1.5),
         k( 28, "-",           6.0,  1.5), k( 29, "è",      7.0,  1.5), k( 30, "_",      8.0,  1.5),
@@ -216,7 +211,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
         k( 39, "VerrNum",    18.5,  1.5), k( 40, "Pavé /", 19.5,  1.5), k( 41, "Pavé *", 20.5,  1.5),
         k( 42, "Pavé −",     21.5,  1.5),
 
-        // Rangée 2 — Tab de 1,5 u, rangée haute, HAUT de l'Entrée en L, navigation, pavé. (21)
+        // Row 2 — 1.5 u Tab, top row, TOP of the L-shaped Enter, navigation, keypad. (21)
         kw(44, "Tab",         0.0,  2.5, 1.5),
         k( 45, "A",           1.5,  2.5), k( 46, "Z",      2.5,  2.5), k( 47, "E",      3.5,  2.5),
         k( 48, "R",           4.5,  2.5), k( 49, "T",      5.5,  2.5), k( 50, "Y",      6.5,  2.5),
@@ -227,7 +222,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
         k( 61, "Pavé 7",     18.5,  2.5), k( 62, "Pavé 8", 19.5, 2.5), k( 63, "Pavé 9", 20.5,  2.5),
         kh(64, "Pavé +",     21.5,  2.5, 1.0, 2.0),
 
-        // Rangée 3 — VerrMaj de 1,75 u, rangée de repos, BAS de l'Entrée en L, pavé. (17)
+        // Row 3 — 1.75 u Caps Lock, home row, BOTTOM of the L-shaped Enter, keypad. (17)
         kw(66, "VerrMaj",     0.0,  3.5, 1.75),
         k( 67, "Q",           1.75, 3.5), k( 68, "S",      2.75, 3.5), k( 69, "D",      3.75, 3.5),
         k( 70, "F",           4.75, 3.5), k( 71, "G",      5.75, 3.5), k( 72, "H",      6.75, 3.5),
@@ -236,7 +231,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
         kw(79, "Entrée",     13.75, 3.5, 1.25),
         k( 83, "Pavé 4",     18.5,  3.5), k( 84, "Pavé 5", 19.5, 3.5), k( 85, "Pavé 6", 20.5,  3.5),
 
-        // Rangée 4 — Maj gauche courte (1,25 u) + touche ISO, rangée basse, ↑, pavé. (18)
+        // Row 4 — short left Shift (1.25 u) + ISO key, bottom row, ↑, keypad. (18)
         kw(88, "Maj gauche",  0.0,  4.5, 1.25),
         k( 89, "<",           1.25, 4.5),
         k( 90, "W",           2.25, 4.5), k( 91, "X",      3.25, 4.5), k( 92, "C",      4.25, 4.5),
@@ -248,7 +243,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
         k(105, "Pavé 1",     18.5,  4.5), k(106, "Pavé 2", 19.5, 4.5), k(107, "Pavé 3", 20.5,  4.5),
         kh(108, "Pavé Entrée", 21.5, 4.5, 1.0, 2.0),
 
-        // Rangée 5 — modificateurs de 1,25 u, Espace de 6,25 u, flèches en T inversé. (13)
+        // Row 5 — 1.25 u modifiers, 6.25 u Space, inverted-T arrows. (13)
         kw(110, "Ctrl gauche", 0.0,  5.5, 1.25),
         kw(111, "Win",         1.25, 5.5, 1.25),
         kw(112, "Alt",         2.5,  5.5, 1.25),
@@ -267,18 +262,18 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
 mod tests {
     use super::*;
 
-    /// L'énumération relevée le 12/09/2026, entrée par entrée : seule `MI_03`
-    /// porte l'éclairage. L'entrée `-1`, sur les mêmes VID et PID, ne doit être
-    /// ni ouverte ni comptée comme présente.
+    /// The enumeration surveyed on 12/09/2026, entry by entry: only `MI_03` carries
+    /// the lighting. The `-1` entry, on the same VID and PID, must be neither
+    /// opened nor counted as present.
     #[test]
-    fn seule_l_interface_d_eclairage_est_retenue() {
+    fn only_the_lighting_interface_is_kept() {
         let l = &DEATHSTALKER_V2_PRO;
-        let retenues: Vec<i32> = [-1, 0, 1, 2, 3]
+        let kept: Vec<i32> = [-1, 0, 1, 2, 3]
             .into_iter()
             .filter(|&i| l.is_lighting_interface(0x1532, 0x0292, i))
             .collect();
-        assert_eq!(retenues, vec![3]);
-        assert!(!l.is_lighting_interface(0x1532, 0x0290, 3), "autre produit");
+        assert_eq!(kept, vec![3]);
+        assert!(!l.is_lighting_interface(0x1532, 0x0290, 3), "other product");
     }
 
     #[test]
@@ -288,31 +283,28 @@ mod tests {
         assert_eq!(l.led_count(), 132);
     }
 
-    /// Deux chiffres coexistent et ne désignent pas la même chose.
+    /// Two numbers coexist and do not mean the same thing.
     ///
-    /// - **132** : les cases de la matrice 6×22, et le nombre de LED que la
-    ///   zone déclare. C'est la taille d'une image — en envoyer moins laisse
-    ///   les dernières rangées figées.
-    /// - **106** : les cases portant réellement une LED de touche.
+    /// - **132**: the cells of the 6×22 matrix, and the LED count the zone
+    ///   declares. It is the size of a frame — sending less leaves the last rows
+    ///   frozen.
+    /// - **106**: the cells that actually carry a key LED.
     ///
-    /// Confirmé par réinterrogation du matériel. Un relevé antérieur annonçait
-    /// 107 positions occupées : c'était un artefact de comptage, la valeur
-    /// sentinelle [`EMPTY`] ayant été comptée comme un index distinct.
+    /// Confirmed by querying the hardware again. An earlier survey reported 107
+    /// occupied positions: it was a counting artifact, the [`EMPTY`] sentinel value
+    /// having been counted as a distinct index.
     #[test]
     fn counts_match_device_report() {
-        assert_eq!(DEATHSTALKER_V2_PRO.led_count(), 132, "taille d'une image");
-        assert_eq!(DEATHSTALKER_V2_PRO.lit_count(), 106, "touches éclairées");
+        assert_eq!(DEATHSTALKER_V2_PRO.led_count(), 132, "frame size");
+        assert_eq!(DEATHSTALKER_V2_PRO.lit_count(), 106, "lit keys");
     }
 
-    /// Aucun index de LED ne doit apparaître à deux positions.
+    /// No LED index may appear at two positions.
     #[test]
     fn led_indices_are_unique() {
         let mut seen = std::collections::HashSet::new();
         for &i in DEATHSTALKER_V2_PRO.matrix.iter().filter(|&&i| i != EMPTY) {
-            assert!(
-                seen.insert(i),
-                "index {i} présent deux fois dans la matrice"
-            );
+            assert!(seen.insert(i), "index {i} appears twice in the matrix");
         }
     }
 
@@ -320,15 +312,15 @@ mod tests {
     fn known_positions_resolve() {
         let l = &DEATHSTALKER_V2_PRO;
         assert_eq!(l.at(0, 0), Some(0));
-        assert_eq!(l.at(0, 1), None, "trou après Échap");
+        assert_eq!(l.at(0, 1), None, "gap after Escape");
         assert_eq!(l.at(1, 0), Some(22));
         assert_eq!(l.at(5, 0), Some(110));
     }
 
-    /// Le compte de touches par rangée, tel que relevé sur le matériel.
+    /// The key count per row, as surveyed on the hardware.
     ///
-    /// C'est le contrôle le plus simple d'une transcription : la somme fait
-    /// 106, et une rangée décalée d'une touche le fait voir immédiatement.
+    /// It is the simplest check of a transcription: the sum is 106, and a row off
+    /// by one key shows it immediately.
     #[test]
     fn rows_have_expected_key_counts() {
         let l = &DEATHSTALKER_V2_PRO;
@@ -339,14 +331,14 @@ mod tests {
             let lit = (0..l.cols)
                 .filter(|&c| l.at(row as u8, c).is_some())
                 .count();
-            assert_eq!(lit, n, "rangée {row}");
+            assert_eq!(lit, n, "row {row}");
         }
     }
 
-    /// La table des touches et la matrice décrivent le même clavier.
+    /// The key table and the matrix describe the same keyboard.
     ///
-    /// Dans les deux sens : toute position allumée a un nom et une géométrie,
-    /// et aucune touche ne décrit une position qui n'existe pas.
+    /// Both ways: every lit position has a name and a geometry, and no key
+    /// describes a position that does not exist.
     #[test]
     fn every_lit_position_has_a_key() {
         let l = &DEATHSTALKER_V2_PRO;
@@ -358,16 +350,16 @@ mod tests {
                 };
                 let key = l
                     .key(index)
-                    .unwrap_or_else(|| panic!("index {index} en ({row}, {col}) sans touche"));
-                assert!(!key.name.is_empty(), "index {index} sans nom");
-                assert!(key.w > 0.0 && key.h > 0.0, "index {index} sans surface");
+                    .unwrap_or_else(|| panic!("index {index} at ({row}, {col}) has no key"));
+                assert!(!key.name.is_empty(), "index {index} has no name");
+                assert!(key.w > 0.0 && key.h > 0.0, "index {index} has no area");
             }
         }
 
         for key in l.keys {
             assert!(
                 l.matrix.contains(&key.index),
-                "« {} » (index {}) absent de la matrice",
+                "\"{}\" (index {}) missing from the matrix",
                 key.name,
                 key.index
             );
@@ -375,11 +367,11 @@ mod tests {
         assert_eq!(l.keys.len(), l.lit_count());
     }
 
-    /// Deux touches ne peuvent pas occuper le même espace.
+    /// Two keys cannot occupy the same space.
     ///
-    /// L'Entrée ISO n'est pas une exception : ses deux LED sont modélisées par
-    /// les deux rectangles **jointifs** qui composent le L, pas par un
-    /// rectangle dupliqué. Voir [`iso_enter_tiles_the_l_shape`].
+    /// The ISO Enter is no exception: its two LEDs are modeled by the two
+    /// **adjoining** rectangles that make up the L, not by a duplicated rectangle.
+    /// See [`iso_enter_tiles_the_l_shape`].
     #[test]
     fn key_rectangles_do_not_overlap() {
         let keys = DEATHSTALKER_V2_PRO.keys;
@@ -389,59 +381,61 @@ mod tests {
                     a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
                 assert!(
                     disjoint,
-                    "« {} » ({}) et « {} » ({}) se chevauchent",
+                    "\"{}\" ({}) and \"{}\" ({}) overlap",
                     a.name, a.index, b.name, b.index
                 );
             }
         }
     }
 
-    /// L'Entrée ISO porte **deux** LED : 57 en rangée 2, 79 en rangée 3.
+    /// The ISO Enter carries **two** LEDs: 57 in row 2, 79 in row 3.
     ///
-    /// C'est le matériel, pas un défaut de relevé — un dégradé vertical y est
-    /// visible. On modélise donc une touche par LED, chacune couvrant la partie
-    /// du L qu'elle éclaire : le bras haut large de 1,5 u, le bras bas de
-    /// 1,25 u décalé vers la droite. Leur union est exactement l'Entrée en L,
-    /// et leur intersection est vide.
+    /// That is the hardware, not a survey defect — a vertical gradient is visible on
+    /// it. So we model one key per LED, each covering the part of the L it lights:
+    /// the upper arm 1.5 u wide, the lower arm 1.25 u wide and shifted to the right.
+    /// Their union is exactly the L-shaped Enter, and their intersection is empty.
     #[test]
     fn iso_enter_tiles_the_l_shape() {
         let l = &DEATHSTALKER_V2_PRO;
-        let haut = l.key(57).expect("Entrée rangée 2");
-        let bas = l.key(79).expect("Entrée rangée 3");
+        let upper = l.key(57).expect("Enter, row 2");
+        let lower = l.key(79).expect("Enter, row 3");
 
-        assert_eq!(haut.name, "Entrée");
-        assert_eq!(bas.name, "Entrée");
+        assert_eq!(upper.name, "Entrée");
+        assert_eq!(lower.name, "Entrée");
         assert_eq!(l.at(2, 13), Some(57));
         assert_eq!(l.at(3, 13), Some(79));
 
-        // Les deux bras s'appuient sur le même bord droit — celui du bloc
-        // principal, à 15 u — et se touchent sans se recouvrir.
-        assert_eq!(haut.x + haut.w, 15.0);
-        assert_eq!(bas.x + bas.w, 15.0);
-        assert_eq!(haut.y + haut.h, bas.y);
-        assert!(bas.x > haut.x, "l'encoche du L est à gauche du bras bas");
+        // Both arms rest on the same right edge — that of the main block, at 15 u —
+        // and touch without overlapping.
+        assert_eq!(upper.x + upper.w, 15.0);
+        assert_eq!(lower.x + lower.w, 15.0);
+        assert_eq!(upper.y + upper.h, lower.y);
+        assert!(
+            lower.x > upper.x,
+            "the notch of the L is left of the lower arm"
+        );
     }
 
-    /// La barre d'espace fait 6,25 u mais n'a qu'**une** LED, en (5, 6).
+    /// The space bar is 6.25 u wide but has only **one** LED, at (5, 6).
     #[test]
     fn space_bar_is_wide_but_single() {
         let l = &DEATHSTALKER_V2_PRO;
         assert_eq!(l.at(5, 6), Some(116));
 
-        let espace = l.key(116).expect("Espace");
-        assert_eq!(espace.name, "Espace");
-        assert_eq!(espace.w, 6.25);
+        let space = l.key(116).expect("space bar");
+        assert_eq!(space.name, "Espace");
+        assert_eq!(space.w, 6.25);
         assert_eq!(l.keys.iter().filter(|k| k.name == "Espace").count(), 1);
     }
 
-    /// Le dessin tient dans l'encombrement d'un ISO pleine taille.
+    /// The drawing fits within the footprint of a full-size ISO keyboard.
     #[test]
     fn drawing_fits_a_full_size_iso() {
         let keys = DEATHSTALKER_V2_PRO.keys;
         let width = keys.iter().fold(0.0f32, |m, k| m.max(k.x + k.w));
         let height = keys.iter().fold(0.0f32, |m, k| m.max(k.y + k.h));
-        assert_eq!(width, 22.5, "largeur totale, pavé numérique compris");
-        assert_eq!(height, 6.5, "hauteur totale, rangée de fonctions comprise");
+        assert_eq!(width, 22.5, "total width, numeric keypad included");
+        assert_eq!(height, 6.5, "total height, function row included");
         assert!(keys.iter().all(|k| k.x >= 0.0 && k.y >= 0.0));
     }
 }
