@@ -13,7 +13,7 @@
 //! ## Deux déclarations, un seul contenu
 //!
 //! Le manifeste est écrit ici, en Rust, pour que lister la bibliothèque ne
-//! coûte pas l'instanciation de quatre contextes QuickJS ; le module, lui, le
+//! coûte pas l'instanciation de cinq contextes QuickJS ; le module, lui, le
 //! déclare aussi dans son `export default`, parce que c'est le contrat de
 //! l'API. Le test `runtime::tests::les_manifestes_integres_correspondent_aux_modules`
 //! interdit la divergence : c'est le module qui fait foi.
@@ -38,15 +38,28 @@ pub struct Builtin {
 
 /// Les effets livrés, dans l'ordre où la galerie les présente.
 ///
-/// Quatre, et volontairement pas davantage : ils sont là pour être lus. Deux
-/// variantes d'un même mouvement n'apprendraient rien de plus et rendraient la
-/// galerie moins lisible qu'elle ne l'est vide.
-pub static ALL: [Builtin; 4] = [
+/// Cinq, et la règle n'a pas bougé : ils sont là pour être lus, et deux
+/// variantes d'un même mouvement n'apprendraient rien de plus. Les deux ondes
+/// n'en sont pas une — elles mesurent **deux espaces différents**, l'une la
+/// distance physique des capuchons, l'autre le nombre de cases de matrice. La
+/// différence ne se voit que côte à côte, et c'est pour qu'elle se voie
+/// qu'elles se suivent ici.
+pub static ALL: [Builtin; 5] = [
     Builtin {
         id: "onde-radiale",
         js: include_str!("onde-radiale.js"),
         name: "Onde radiale",
-        description: "Une onde de teinte se propage depuis le centre du clavier",
+        description: "Une onde de teinte se propage en cercles, à la distance physique des touches",
+        params: r#"{
+            "speed": { "kind": "number", "label": "Vitesse", "min": 0, "max": 400, "default": 120 },
+            "scale": { "kind": "number", "label": "Échelle", "min": 1, "max": 60, "default": 18 }
+        }"#,
+    },
+    Builtin {
+        id: "onde-matricielle",
+        js: include_str!("onde-matricielle.js"),
+        name: "Onde matricielle",
+        description: "Une onde de teinte se propage de proche en proche dans la matrice",
         params: r#"{
             "speed": { "kind": "number", "label": "Vitesse", "min": 0, "max": 400, "default": 120 },
             "scale": { "kind": "number", "label": "Échelle", "min": 1, "max": 60, "default": 18 }
@@ -108,7 +121,7 @@ pub fn find(id: &str) -> Option<&'static Builtin> {
 /// autrement. L'écrire dans le dossier de données créerait un cache à invalider
 /// à chaque mise à jour — une date de version à comparer, un fichier à réécrire,
 /// et une occasion de montrer le repère de la version précédente. Tout cela pour
-/// quatre effets dont l'échantillonnage coûte quelques millisecondes.
+/// cinq effets dont l'échantillonnage coûte quelques millisecondes.
 ///
 /// L'écrire à la main dans ce fichier est exclu par le principe même du repère :
 /// il doit venir de l'exécution, sans quoi il finirait par mentir.
@@ -116,7 +129,7 @@ pub fn find(id: &str) -> Option<&'static Builtin> {
 /// Reste donc la mémoire : calculé à la première demande, retenu pour la durée
 /// du processus. C'est la seule initialisation paresseuse du module — les
 /// manifestes, eux, sont reconstruits à chaque appel parce qu'ils ne coûtent que
-/// quatre petits objets JSON, là où ceci instancie quatre moteurs QuickJS.
+/// cinq petits objets JSON, là où ceci instancie cinq moteurs QuickJS.
 ///
 /// Le gabarit est celui par défaut, et non celui du clavier branché : un repère
 /// qui dépendrait du matériel présent ne serait pas comparable d'une machine à

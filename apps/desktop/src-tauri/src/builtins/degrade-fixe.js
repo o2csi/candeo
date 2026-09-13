@@ -2,6 +2,14 @@
 //
 // Son `render` n'utilise pas `time` : un effet n'est pas tenu d'être une
 // animation. C'est aussi celui qu'on garde allumé en travaillant.
+//
+// Il interpole sur la **colonne de matrice**, et il a été relu à l'occasion
+// d'« Onde radiale » sans être changé. Ce qu'un dégradé promet, c'est un ordre —
+// « cette couleur d'un côté, celle-là de l'autre » — pas une distance, et
+// l'ordre des colonnes est celui des touches. Ce qui se déplace de quelques
+// dixièmes, c'est la rangée du bas, où trois touches larges se partagent quatre
+// colonnes ; on le voit en cherchant, et le rendre exact reviendrait à exiger la
+// géométrie pour un effet qui n'en a pas besoin.
 
 import { defineEffect, mix } from '@candeo/effects-api'
 

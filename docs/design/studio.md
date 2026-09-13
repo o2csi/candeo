@@ -107,7 +107,15 @@ un `number` en `number`, sans transtypage, ce qui serait de toute façon
 impossible dans un fichier exécuté tel quel.
 
 Vérifié avec le compilateur embarqué par Monaco : l'API, le modèle de départ et
-les quatre effets intégrés rendent **zéro diagnostic** en `strict` complet.
+les cinq effets intégrés rendent **zéro diagnostic** en `strict` complet.
+
+C'est aussi ce qui contraint la forme de l'API. La géométrie des touches est
+**facultative** — capacité `geometry`, [`device-sdk.md`](device-sdk.md) §3.2 —
+donc `key.x` est `number | undefined`, et `key.x - cx` serait un diagnostic dans
+un effet intégré ouvert ici. D'où `center` et `bounds` : elles rendent un
+rectangle non facultatif, ou lèvent en nommant la touche qui n'en a pas. Un
+effet spatial reste donc lisible **et** propre en `strict`, sans qu'on ait à
+prétendre que tous les gabarits sont dessinés.
 
 ### Les ouvriers sont empaquetés, pas téléchargés
 

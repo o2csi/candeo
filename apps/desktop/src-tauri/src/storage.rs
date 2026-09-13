@@ -1032,7 +1032,7 @@ impl Store {
 
 /// Effets compilés dans le binaire, sous la forme qu'attend la galerie.
 ///
-/// Le manifeste est reconstruit à chaque appel plutôt que gardé : quatre petits
+/// Le manifeste est reconstruit à chaque appel plutôt que gardé : cinq petits
 /// objets JSON, contre une initialisation paresseuse et son verrou. Un JSON de
 /// paramètres invalide donnerait ici un manifeste sans paramètres, ce que le
 /// test `les_parametres_integres_sont_du_json_valide` interdit — mieux vaut un
