@@ -527,12 +527,12 @@ pub(crate) fn fingerprint(serial: &str) -> String {
 
 /// The fingerprint of a serial that may not exist.
 ///
-/// "aucune" (none) is not a degenerate case: it is what hidraw returns under
+/// "none" is not a degenerate case: it is what hidraw returns under
 /// Linux when the udev rule does not grant read access to attributes, and telling
 /// it apart from a present serial is what avoids hunting for a device failure
 /// where there is only a missing permission.
 pub(crate) fn fingerprint_of(serial: Option<&str>) -> String {
-    serial.map_or_else(|| "aucune".to_string(), fingerprint)
+    serial.map_or_else(|| "none".to_string(), fingerprint)
 }
 
 // ---------------------------------------------------------------- commands
@@ -655,7 +655,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let mut out = String::new();
     let line = |out: &mut String, key: &str, value: &str| {
         out.push_str(key);
-        out.push_str(" : ");
+        out.push_str(": ");
         out.push_str(value);
         out.push('\n');
     };
@@ -663,7 +663,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     line(&mut out, "candeo", &app.package_info().version.to_string());
     line(
         &mut out,
-        "système",
+        "system",
         &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
     );
     // Settings and HID are gathered separately, and neither is unwrapped: being
@@ -675,16 +675,16 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let log = journal_status(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
     line(
         &mut out,
-        "journal",
+        "log",
         &format!(
-            "niveau {} ({}){}",
+            "level {} ({}){}",
             // The applied level, not the saved one: it is what explains what the
             // file contains, or does not.
             log.level
                 .map_or_else(|| "directive".to_string(), |l| l.to_string()),
-            log.dir.as_deref().unwrap_or("aucun fichier"),
+            log.dir.as_deref().unwrap_or("no file"),
             if log.forced_by_env {
-                format!(", imposé par {VARIABLE}")
+                format!(", forced by {VARIABLE}")
             } else {
                 String::new()
             }
@@ -697,15 +697,15 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     // button then becomes an exit again. See [`crate::tray`].
     line(
         &mut out,
-        "zone de notification",
+        "tray",
         if crate::tray::installed() {
-            "posée — fermer la fenêtre replie, « Quitter candeo » quitte"
+            "installed: closing the window hides it, the tray menu quits"
         } else {
-            "absente — fermer la fenêtre arrête les effets"
+            "missing: closing the window stops effects"
         },
     );
 
-    out.push_str("\nAppareils\n");
+    out.push_str("\nDevices\n");
     for layout in crate::LAYOUTS {
         let device = DeviceRef::of(layout);
         let plugged_in = api
@@ -725,12 +725,12 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             &mut out,
             &format!("  {} {}", layout.name, device),
             &format!(
-                "{} · {} · série {} · gabarit {}×{} ({} cases, {} touches)",
+                "{} · {} · serial {} · layout {}×{} ({} cells, {} keys)",
                 match plugged_in {
-                    Some(_) => "branché",
-                    None => "débranché",
+                    Some(_) => "plugged in",
+                    None => "unplugged",
                 },
-                saved_state.unwrap_or("état inconnu"),
+                saved_state.unwrap_or("unknown state"),
                 fingerprint_of(serial.as_deref()),
                 layout.rows,
                 layout.cols,
@@ -747,12 +747,12 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         if let Ok(s) = &settings {
             line(
                 &mut out,
-                "    retenu",
+                "    saved",
                 &format!(
-                    "effet {} · luminosité {}",
-                    s.active_effect(layout.vid, layout.pid).unwrap_or("aucun"),
+                    "effect {} · brightness {}",
+                    s.active_effect(layout.vid, layout.pid).unwrap_or("none"),
                     match s.brightness(layout.vid, layout.pid, serial.as_deref()) {
-                        crate::storage::DEFAULT_BRIGHTNESS => "pleine (défaut)".to_string(),
+                        crate::storage::DEFAULT_BRIGHTNESS => "full (default)".to_string(),
                         n => n.to_string(),
                     }
                 ),
@@ -765,15 +765,15 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         // the unit plugged in since may no longer be the same.
         line(
             &mut out,
-            "    micrologiciel",
+            "    firmware",
             &format!(
-                "{} · gabarit relevé sur {}",
+                "{} · layout surveyed on {}",
                 match &inspection {
-                    None => "non lu, appareil fermé".to_string(),
+                    None => "not read, device closed".to_string(),
                     Some(i) => i
                         .firmware
                         .as_ref()
-                        .map_or_else(|e| format!("non lu ({e})"), ToString::to_string),
+                        .map_or_else(|e| format!("not read ({e})"), ToString::to_string),
                 },
                 layout.surveyed_firmware
             ),
@@ -781,7 +781,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         if let Some(i) = &inspection {
             line(
                 &mut out,
-                "    commandes",
+                "    commands",
                 &i.checks
                     .iter()
                     .map(|c| format!("{} {}", c.name, verdict(&c.verdict)))
@@ -789,54 +789,46 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                     .join(" · "),
             );
             if let Err(e) = &i.serial {
-                line(
-                    &mut out,
-                    "    série par le protocole",
-                    &format!("non lue ({e})"),
-                );
+                line(&mut out, "    protocol serial", &format!("not read ({e})"));
             }
             for warning in i.warnings(layout) {
-                line(&mut out, "    avertissement", &warning);
+                line(&mut out, "    warning", &warning);
             }
         }
     }
     if let Err(e) = &api {
-        line(&mut out, "  énumération USB", e);
+        line(&mut out, "  USB enumeration", e);
     }
     if let Err(e) = &settings {
-        line(&mut out, "  réglages", e);
+        line(&mut out, "  settings", e);
     }
 
-    out.push_str("\nMoteur\n");
+    out.push_str("\nEngine\n");
     let report = state.engine.report();
     let engine = report.devices;
     if engine.is_empty() {
-        out.push_str("  aucun appareil visé depuis le démarrage\n");
+        out.push_str("  no device targeted since startup\n");
     }
     for s in engine {
         line(
             &mut out,
             &format!("  {}", s.device),
             &format!(
-                "{} · effet {} · sortie {} · atteint {}{}{}",
+                "{} · effect {} · output {} · reaching {}{}{}",
                 if s.status.running {
-                    "en cours"
+                    "running"
                 } else {
-                    "arrêté"
+                    "stopped"
                 },
-                s.status.effect_id.as_deref().unwrap_or("aucun"),
-                if s.status.to_keyboard {
-                    "ouverte"
-                } else {
-                    "coupée"
-                },
+                s.status.effect_id.as_deref().unwrap_or("none"),
+                if s.status.to_keyboard { "on" } else { "off" },
                 s.status.reaching_keyboard,
                 s.status
                     .error
-                    .map_or(String::new(), |e| format!(" · erreur d'effet : {e}")),
+                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
                 s.status
                     .device_error
-                    .map_or(String::new(), |e| format!(" · erreur d'écriture : {e}")),
+                    .map_or(String::new(), |e| format!(" · write error: {e}")),
             ),
         );
     }
@@ -847,16 +839,16 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     // above would read as an omission if nothing named it here.
     line(
         &mut out,
-        "  aperçu",
+        "  preview",
         &match report.preview {
-            None => "aucun — rien n'est prévisualisé".to_string(),
+            None => "none".to_string(),
             Some(p) => format!(
-                "{} · effet {} · gabarit emprunté {} · aucune sortie clavier{}",
-                if p.running { "en cours" } else { "arrêté" },
-                p.effect_id.as_deref().unwrap_or("aucun"),
+                "{} · effect {} · borrowed layout {} · no keyboard output{}",
+                if p.running { "running" } else { "stopped" },
+                p.effect_id.as_deref().unwrap_or("none"),
                 p.layout_of,
                 p.error
-                    .map_or(String::new(), |e| format!(" · erreur d'effet : {e}")),
+                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
             ),
         },
     );
@@ -871,27 +863,27 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
 /// this line the day a fourth state exists.
 fn decision(state: crate::storage::DeviceState) -> &'static str {
     match state {
-        crate::storage::DeviceState::Detected => "détecté",
-        crate::storage::DeviceState::Adopted => "piloté",
-        crate::storage::DeviceState::Ignored => "ignoré",
+        crate::storage::DeviceState::Detected => "detected",
+        crate::storage::DeviceState::Adopted => "controlled",
+        crate::storage::DeviceState::Ignored => "ignored",
     }
 }
 
 /// The verdict of a command, in the language of the bug report.
 ///
-/// "connue" (known) and not "comprise" (understood): the status byte confirms
+/// "known" and not "understood": the status byte confirms
 /// that the class / command pair exists, never that its arguments are right. A
 /// diagnostic saying "compatible" would send people looking elsewhere for an
 /// argument failure.
 fn verdict(v: &candeo_device::Verdict) -> String {
     use candeo_device::Verdict;
     match v {
-        Verdict::Understood => "connue (0x02), relue à l'identique".to_string(),
-        Verdict::Unsupported => "inconnue (0x05), plus envoyée".to_string(),
+        Verdict::Understood => "known (0x02), read back identical".to_string(),
+        Verdict::Unsupported => "unknown (0x05), no longer sent".to_string(),
         Verdict::ReadBackDiffers { wrote, read } => {
-            format!("acceptée, mais relue {read} après réécriture de {wrote}")
+            format!("accepted, but read back {read} after rewriting {wrote}")
         }
-        Verdict::Unverified(raison) => format!("non vérifiée ({raison})"),
+        Verdict::Unverified(reason) => format!("unverified ({reason})"),
     }
 }
 
@@ -1217,24 +1209,24 @@ mod tests {
     /// permission.
     #[test]
     fn silent_enumeration_reads_differently_from_a_fingerprint() {
-        assert_eq!(fingerprint_of(None), "aucune");
+        assert_eq!(fingerprint_of(None), "none");
         assert_eq!(fingerprint_of(Some("XY01")), fingerprint("XY01"));
     }
 
     // -------------------------------------------------------- firmware
 
     /// The status byte validates no argument: the diagnostic must never let
-    /// "compatible" or "compris" (understood) be read where the device only said
+    /// "compatible" or "understood" be read where the device only said
     /// that it knew the command.
     #[test]
     fn diagnostic_does_not_oversell_a_known_command() {
         use candeo_device::Verdict;
         let text = verdict(&Verdict::Understood);
-        assert!(text.contains("connue"), "{text}");
-        for word in ["compatible", "compris"] {
+        assert!(text.contains("known"), "{text}");
+        for word in ["compatible", "understood"] {
             assert!(!text.contains(word), "\"{word}\" in \"{text}\"");
         }
-        assert!(verdict(&Verdict::Unsupported).contains("plus envoyée"));
+        assert!(verdict(&Verdict::Unsupported).contains("no longer sent"));
     }
 
     // -------------------------------------------------------- serialization
