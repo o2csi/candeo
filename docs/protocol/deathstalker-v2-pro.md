@@ -48,6 +48,24 @@ champ `wIndex = 3` de chaque requête.
 > Sur un composite, ouvrir la mauvaise interface donne un handle **valide** sur lequel
 > toute écriture échoue — sans erreur explicite. Filtrer sur `interface_number`.
 
+### L'entrée `interface -1` — ce n'est pas le clavier
+
+L'énumération HID porte, sur les mêmes VID et PID, une entrée **sans numéro
+d'interface** (`-1`), sans nom de produit, de révision `0x0101` là où tout le
+composite déclare `0x0200`, en page d'usage `0x000c`/`0x0001` (contrôle
+consommateur).
+
+Établi le 13/09/2026 par l'arbre des périphériques Windows : son chemin est
+`HID#VID_1532&PID_0292&MI_00&Col03&Col01#9&…`, et son **parent** est
+`RZVIRTUAL\VID_1532&PID_0292&MI_00&Col03`, un nœud créé par le service
+`RzDev_0292` du pilote du fabricant — lui-même enfant de l'interface USB `MI_01`.
+Ce n'est donc pas une interface USB, d'où l'absence de numéro que `hidapi` puisse
+lire : c'est une collection HID **virtuelle**, qui n'existe que là où ce pilote est
+installé.
+
+candeo l'écarte par la règle qui vaut déjà pour toutes les autres : l'interface
+doit être celle du gabarit (`Layout::is_lighting_interface`).
+
 ---
 
 ## 2. Transport
@@ -486,7 +504,9 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 - [ ] Les trois premiers octets de `0x0f`/`0x80` (`05 19 03`), dont les deux suivants donnent bien 6×22
 - [ ] Sens de `0x00`/`0x83` (`01 25`) et `0x00`/`0x87` (`01 05`) — inconnus d'OpenRazer aussi
 - [ ] Second octet de la disposition, `0x86` → `04 80` : que vaut `0x80` ?
-- [ ] Une entrée HID fantôme `interface -1`, `release_number 0x0101`, sans nom de produit, sur les mêmes VID/PID — à écarter de l'énumération ou à comprendre
+- [x] **Une entrée HID fantôme `interface -1`** — collection virtuelle du pilote du fabricant (`RZVIRTUAL`), pas le clavier ; écartée par le filtre d'interface, §1
+- [ ] La relecture de `Statique` et `Respiration` par `0x0f`/`0x82` rend-elle la couleur, et à quelle position ? Tant que non établi, l'inspection à l'ouverture ne les réécrit pas
+- [ ] **Réécrire à l'identique l'effet et la luminosité courants est-il invisible ?** C'est l'hypothèse qui autorise l'inspection à émettre à chaque ouverture — à confirmer par `sonde_inspection_a_l_ouverture`, application fermée
 
 ---
 
@@ -508,6 +528,7 @@ hexadécimal, et la position des octets donne l'ordre des composantes sans le d�
 | 2026-09-12 | **`0x0f`/`0x82` relit l'effet courant** — vérification d'un effet sans dépendre de l'œil. `Static` (`0x01`) et `Breathing` (`0x02`) enfin établis : ils exigent une couleur, et le premier balayage les posait en noir |
 | 2026-09-12 | **Les identifiants `0x05` et `0x07` sont refusés** par cet appareil, alors que l'écriture rend `0x02`. Démonstration en direct qu'un octet d'état ne valide pas les arguments |
 | 2026-09-12 | **Débit mesuré** : 13,1 ms par mise à jour complète, plafond ~76 img/s, aucune écriture refusée. Le goulot est le bus, pas le calcul — la cadence du moteur passe de 60 à **30 img/s** |
+| 2026-09-13 | **L'entrée `interface -1` élucidée** par l'arbre des périphériques : collection HID virtuelle sous `RZVIRTUAL`, service `RzDev_0292` du pilote du fabricant — pas le clavier |
 
 ## 12. Captures
 
