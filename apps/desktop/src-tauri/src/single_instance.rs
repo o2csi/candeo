@@ -1,102 +1,102 @@
-//! Une seule instance de candeo à la fois.
+//! One instance of candeo at a time.
 //!
-//! Deux processus ne se partagent ni le clavier ni les réglages, et les deux
-//! pannes se lisent mal :
+//! Two processes share neither the keyboard nor the settings, and both failures
+//! are hard to read:
 //!
-//! - **Le matériel.** Chacun ouvrirait sa poignée HID et ferait tourner ses
-//!   propres boucles à 30 img/s sur la même interface. Le clavier papillonnerait
-//!   entre deux effets sans qu'aucune des deux fenêtres ne montre quoi que ce
-//!   soit d'anormal : chacune affiche *son* rendu au simulateur, et il est juste.
-//! - **Les réglages.** [`crate::storage::Store::write_settings`] écrit dans un
-//!   temporaire de nom **fixe** puis renomme. Le nom peut rester fixe parce que
-//!   les commandes Tauri synchrones s'exécutent sur le fil principal — mais ce
-//!   raisonnement vaut *à l'intérieur* d'un processus. À deux, l'un renommerait
-//!   ce que l'autre est en train d'écrire : le renommage resterait atomique, ce
-//!   qu'il publie ne le serait plus.
+//! - **The hardware.** Each would open its own HID handle and run its own loops
+//!   at 30 fps on the same interface. The keyboard would flicker between two
+//!   effects without either window showing anything unusual: each one displays
+//!   *its own* render in the simulator, and that render is correct.
+//! - **The settings.** [`crate::storage::Store::write_settings`] writes to a
+//!   temporary file with a **fixed** name, then renames it. The name can stay
+//!   fixed because synchronous Tauri commands run on the main thread — but that
+//!   reasoning holds *within* one process. With two, one would rename what the
+//!   other is still writing: the rename would stay atomic, what it publishes
+//!   would not.
 //!
-//! **L'instance unique est donc ce qui rend sûre la simplification du nom de
-//! temporaire.** Les deux décisions se tiennent, et ne se défont pas l'une sans
-//! l'autre : rendre candeo multi-instance obligerait à reprendre ce nom, et
-//! reprendre ce nom sans cela n'achèterait rien.
+//! **The single instance is therefore what makes the fixed temporary name
+//! safe.** The two decisions hold together, and do not come apart one without
+//! the other: making candeo multi-instance would force revisiting that name,
+//! and revisiting that name without it would buy nothing.
 //!
-//! # Ce que ça ne protège pas
+//! # What this does not protect against
 //!
-//! Le runtime du constructeur — ou n'importe quel autre logiciel d'éclairage —
-//! écrit sur le même clavier, et rien ici ne peut l'en empêcher. C'est un
-//! problème distinct, et plutôt une mention dans la documentation qu'une
-//! fonctionnalité.
+//! The manufacturer's runtime — or any other lighting software — writes to the
+//! same keyboard, and nothing here can prevent it. That is a separate problem,
+//! better handled by a note in the documentation than by a feature.
 
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 
-/// Étiquette de la fenêtre principale.
+/// Label of the main window.
 ///
-/// Elle est écrite à trois endroits que rien ne relie à la compilation : ici,
-/// dans `tauri.conf.json` — une fenêtre sans `label` prend « main », c'est le
-/// défaut de Tauri — et dans `capabilities/default.json`, qui n'accorde ses
-/// permissions qu'à elle. Le test en fin de module confronte les trois.
+/// It is written in three places that nothing links at compile time: here, in
+/// `tauri.conf.json` — a window without a `label` gets "main", Tauri's default —
+/// and in `capabilities/default.json`, which grants its permissions to that
+/// window only. The test at the end of the module checks the three against each
+/// other.
 pub(crate) const MAIN_WINDOW: &str = "main";
 
-/// Le plugin d'instance unique, **à enregistrer avant tous les autres**.
+/// The single-instance plugin, **to be registered before all the others**.
 ///
-/// C'est pendant l'initialisation du plugin que le second processus se découvre
-/// en trop, prévient l'instance vivante et s'arrête. Les plugins sont initialisés
-/// dans l'ordre d'enregistrement, et tous le sont avant la création des fenêtres
-/// comme avant le `setup` de l'application : le mettre en tête, c'est mourir
-/// avant d'avoir ouvert la moindre poignée HID. Plus bas dans la liste, le
-/// processus de trop toucherait au clavier le temps de s'apercevoir qu'il est de
-/// trop — exactement ce qu'on cherche à empêcher.
+/// It is during the plugin's initialization that the second process finds out
+/// it is one too many, notifies the running instance and exits. Plugins are
+/// initialized in registration order, and all of them before the windows are
+/// created and before the application's `setup`: putting it first means dying
+/// before opening a single HID handle. Further down the list, the extra process
+/// would touch the keyboard in the time it takes to find out it is extra —
+/// exactly what this is meant to prevent.
 pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
     tauri_plugin_single_instance::init(|app, _args, _cwd| {
-        // Les arguments et le répertoire courant du second lancement sont
-        // ignorés : candeo n'a pas de ligne de commande. Le jour où il en aura
-        // une — ouvrir un effet, par exemple — c'est ici qu'elle serait relayée à
-        // l'instance vivante.
+        // The second launch's arguments and working directory are ignored:
+        // candeo has no command line. The day it has one — opening an effect,
+        // for instance — this is where it would be relayed to the running
+        // instance.
         if let Err(e) = reveal(app) {
-            // Une trace, et rien de plus. Le processus de trop est déjà mort, il
-            // n'y a plus personne à qui refuser quoi que ce soit ; paniquer
-            // emporterait l'instance survivante et les effets qu'elle fait
-            // tourner, pour une fenêtre qui n'est pas venue au premier plan.
+            // A log line, and nothing more. The extra process is already gone,
+            // there is nobody left to refuse anything to; panicking would take
+            // down the surviving instance and the effects it runs, over a window
+            // that did not come to the foreground.
             //
-            // `warn` : dégradé mais fonctionnel — l'exclusion a joué, seule la
-            // remontée de fenêtre a manqué. C'est la nuance que l'ancien
-            // `eprintln!` ne pouvait pas porter, faute d'être lisible en
-            // `release` : le binaire est compilé sans console.
-            tracing::warn!("instance unique : {e}");
+            // `warn`: degraded but working — the exclusion worked, only raising
+            // the window failed. That is the nuance the former `eprintln!` could
+            // not carry, since it could not be read in `release`: the binary is
+            // built without a console.
+            tracing::warn!("single instance: {e}");
         }
     })
 }
 
-/// Remet la fenêtre principale sous les yeux de qui la réclame.
+/// Brings the main window back in front of whoever asks for it.
 ///
-/// Sans cela, le second lancement disparaîtrait en silence, et un lancement sans
-/// effet visible se lit comme un refus de démarrer.
+/// Without this, the second launch would vanish silently, and a launch with no
+/// visible effect reads as a refusal to start.
 ///
-/// Deux appelants désormais, et c'est délibérément le même chemin : le second
-/// lancement, et « Ouvrir la fenêtre » de la zone de notification
-/// ([`crate::tray`]). Les deux demandent exactement la même chose — une fenêtre
-/// masquée à montrer, ou une fenêtre détruite à rouvrir depuis sa déclaration —
-/// et en écrire deux versions les ferait diverger à la première correction.
+/// Two callers now, and deliberately the same path: the second launch, and
+/// "Ouvrir la fenêtre" (Open window) in the system tray ([`crate::tray`]). Both
+/// ask for exactly the same thing — a hidden window to show, or a destroyed
+/// window to reopen from its declaration — and writing two versions would make
+/// them diverge at the first fix.
 pub(crate) fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let window = match app.get_webview_window(MAIN_WINDOW) {
         Some(window) => window,
         None => reopen(app)?,
     };
 
-    // La fenêtre revient : son instantané peut dater de la dernière fois qu'on
-    // l'a repliée, c'est-à-dire d'il y a des jours. Prévenir avant de la montrer
-    // plutôt qu'après est sans importance — l'événement est asynchrone — mais le
-    // faire ici couvre les deux appelants d'un coup. Une fenêtre qu'on vient de
-    // **rouvrir**, elle, ne l'entendra pas : elle n'a pas encore chargé son
-    // JavaScript, et elle n'en a pas besoin — elle lit tout au montage.
-    crate::tray::signaler(app);
+    // The window is coming back: its snapshot may date from the last time it
+    // was hidden, that is, from days ago. Notifying before showing it rather
+    // than after makes no difference — the event is asynchronous — but doing it
+    // here covers both callers at once. A window that was just **reopened** will
+    // not hear it: it has not loaded its JavaScript yet, and it does not need
+    // to — it reads everything on mount.
+    crate::tray::notify_state_changed(app);
 
-    // Les trois, parce qu'aucune n'implique les autres : une fenêtre masquée que
-    // l'on ne fait que mettre au premier plan reste invisible, une fenêtre
-    // réduite que l'on montre reste réduite, et une fenêtre visible derrière une
-    // autre y reste tant qu'on ne lui donne pas le focus. On ne cherche pas à
-    // savoir laquelle des trois s'appliquait : les demander toutes coûte moins
-    // que de relever l'état de la fenêtre pour en déduire la même chose.
+    // All three, because none implies the others: a hidden window that is only
+    // brought to the foreground stays invisible, a minimized window that is
+    // shown stays minimized, and a visible window behind another one stays
+    // there until it is given focus. There is no attempt to find out which of
+    // the three applied: asking for all of them costs less than reading the
+    // window's state to deduce the same thing.
     window
         .show()
         .and_then(|()| window.unminimize())
@@ -104,34 +104,35 @@ pub(crate) fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .map_err(|e| format!("fenêtre « {MAIN_WINDOW} » non ramenée au premier plan : {e}"))
 }
 
-/// Rouvre la fenêtre principale **à partir de sa déclaration**.
+/// Reopens the main window **from its declaration**.
 ///
-/// La fenêtre n'est construite nulle part dans ce code : elle est déclarée dans
-/// `tauri.conf.json`, et Tauri la bâtit au démarrage. La rouvrir, c'est donc
-/// relire cette déclaration — pas recopier ici une taille et un titre, qui
-/// feraient une seconde source de vérité et divergeraient dès la première fenêtre
-/// redimensionnée dans la configuration. Elle reprend au passage son étiquette,
-/// donc les permissions que la capability n'accorde qu'à elle.
+/// The window is built nowhere in this code: it is declared in
+/// `tauri.conf.json`, and Tauri builds it at startup. Reopening it therefore
+/// means re-reading that declaration — not copying a size and a title here,
+/// which would make a second source of truth and diverge as soon as the window
+/// is resized in the configuration. Along the way it gets its label back, and
+/// with it the permissions the capability grants to that window only.
 ///
-/// Cette branche a servi de filet pendant tout le temps où le processus
-/// s'arrêtait avec sa dernière fenêtre ; elle est devenue le chemin nominal le
-/// jour où [`crate::tray`] a séparé les deux — fenêtre fermée, effets toujours
-/// en cours dans leurs fils, qui ne dépendent pas d'elle.
+/// This branch was a safety net for as long as the process ended with its last
+/// window; it became the nominal path the day [`crate::tray`] separated the
+/// two — window closed, effects still running in their threads, which do not
+/// depend on it.
 ///
-/// Aujourd'hui la croix **replie** au lieu de détruire, et c'est donc [`reveal`]
-/// qui rend la main la plupart du temps. Reste le cas qui justifie d'écrire
-/// ceci : une fenêtre déclarée `create: false` — un démarrage replié, que rien
-/// n'empêche de configurer — n'existe pas encore quand on demande à la voir.
+/// Today the close button **hides** the window instead of destroying it, so
+/// most of the time [`reveal`] finds it and never gets here. What remains is
+/// the case that justifies writing this: a window declared `create: false` — a
+/// hidden start, which nothing prevents configuring — does not exist yet when
+/// someone asks to see it.
 fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
     let config = app
         .config()
         .app
         .windows
         .iter()
-        // Sur l'étiquette seule, et surtout pas sur le `create` que Tauri
-        // consulte au démarrage : une fenêtre déclarée `create: false` — c'est
-        // ainsi qu'on démarrerait replié dans la zone de notification — reste
-        // exactement celle qu'il faut ouvrir quand quelqu'un relance candeo.
+        // On the label alone, and above all not on the `create` flag Tauri
+        // reads at startup: a window declared `create: false` — which is how
+        // candeo would start hidden in the system tray — is still exactly the
+        // one to open when someone launches candeo again.
         .find(|w| w.label == MAIN_WINDOW)
         .cloned()
         .ok_or_else(|| format!("aucune fenêtre « {MAIN_WINDOW} » déclarée dans tauri.conf.json"))?;
@@ -147,40 +148,40 @@ fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
 mod tests {
     use super::*;
 
-    /// Les trois écritures de l'étiquette doivent rester d'accord.
+    /// The three spellings of the label must stay in agreement.
     ///
-    /// Rien ne les relie à la compilation : renommer la fenêtre dans
-    /// `tauri.conf.json` compilerait sans un mot et donnerait une panne muette —
-    /// [`reveal`] ne retrouverait plus jamais la fenêtre existante, en rouvrirait
-    /// une à chaque relancement, et celle-ci n'aurait aucune des permissions que
-    /// la capability réserve à « main ».
+    /// Nothing links them at compile time: renaming the window in
+    /// `tauri.conf.json` would compile without a word and yield a silent
+    /// failure — [`reveal`] would never find the existing window again, would
+    /// open a new one on every relaunch, and that one would have none of the
+    /// permissions the capability reserves for "main".
     #[test]
-    fn l_etiquette_de_la_fenetre_est_la_meme_partout() {
+    fn the_window_label_is_the_same_everywhere() {
         let config: serde_json::Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
-        let declarees: Vec<&str> = config["app"]["windows"]
+        let declared: Vec<&str> = config["app"]["windows"]
             .as_array()
-            .expect("aucune fenêtre déclarée")
+            .expect("no window declared")
             .iter()
-            // Une fenêtre sans `label` prend « main » : c'est ce défaut de Tauri
-            // dont dépendent les deux autres écritures, et il est donc rejoué ici
-            // plutôt que supposé absent.
+            // A window without a `label` gets "main": the other two spellings
+            // depend on that Tauri default, so it is replayed here rather than
+            // assumed absent.
             .map(|w| w["label"].as_str().unwrap_or(MAIN_WINDOW))
             .collect();
         assert!(
-            declarees.contains(&MAIN_WINDOW),
-            "fenêtres déclarées : {declarees:?}"
+            declared.contains(&MAIN_WINDOW),
+            "declared windows: {declared:?}"
         );
 
         let capability: serde_json::Value =
             serde_json::from_str(include_str!("../capabilities/default.json"))
                 .expect("capabilities/default.json");
-        let visees = capability["windows"]
+        let targeted = capability["windows"]
             .as_array()
-            .expect("la capability ne vise aucune fenêtre");
+            .expect("the capability targets no window");
         assert!(
-            visees.iter().any(|w| w.as_str() == Some(MAIN_WINDOW)),
-            "la capability ne vise pas « {MAIN_WINDOW} » : {visees:?}"
+            targeted.iter().any(|w| w.as_str() == Some(MAIN_WINDOW)),
+            "the capability does not target \"{MAIN_WINDOW}\": {targeted:?}"
         );
     }
 }

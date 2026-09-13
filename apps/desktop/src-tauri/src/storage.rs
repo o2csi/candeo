@@ -1,53 +1,51 @@
-//! Stockage des effets et des réglages.
+//! Storage for effects and settings.
 //!
-//! Deux emplacements distincts, décrits dans
-//! [`docs/design/effects-runtime.md`](../../../../docs/design/effects-runtime.md) §3 :
+//! Two separate locations, described in
+//! [`docs/design/effects-runtime.md`](../../../../docs/design/effects-runtime.md) §3:
 //!
 //! ```text
 //! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
-//! app_config_dir()/settings.json   préférences · appareils · effet appliqué · réglages
+//! app_config_dir()/settings.json   preferences · devices · applied effect · effect parameters
 //! ```
 //!
-//! L'effet est du **contenu**, le choix de l'effet actif est de la
-//! **configuration**. Sous Windows les deux dossiers se confondent, sous Linux
-//! non — d'où le passage par l'API de Tauri plutôt que par une constante.
+//! The effect is **content**; the choice of the active effect is
+//! **configuration**. On Windows both directories are the same, on Linux they
+//! are not — hence going through the Tauri API rather than a constant.
 //!
-//! # La forme du fichier : les préférences d'un côté, les appareils de l'autre
+//! # The shape of the file: preferences on one side, devices on the other
 //!
-//! `settings.json` porte deux choses qui ne se rangent pas ensemble : ce qui vaut
-//! pour l'application entière ([`Preferences`]) et ce qui est **indexé par
-//! appareil** (`devices`, `activeEffects`, `effectParams`). Les mélanger à la
-//! racine, c'est ce qui a produit les trois vestiges mono-appareil qu'on retire
-//! ici : `activeEffect`, `device` et `brightness` décrivaient **un** effet, **un**
-//! appareil et **un** niveau, alors que le moteur fait tourner un effet par
-//! appareil depuis l'issue #26. Ce n'était pas la mauvaise valeur, c'était la
-//! mauvaise **forme** — et la réveiller telle quelle aurait donné un fichier qui
-//! décrit mal la réalité.
+//! `settings.json` holds two things that do not belong together: what applies to
+//! the whole application ([`Preferences`]) and what is **indexed by device**
+//! (`devices`, `activeEffects`, `effectParams`). Mixing them at the root is what
+//! produced the three single-device leftovers removed here: `activeEffect`,
+//! `device` and `brightness` described **one** effect, **one** device and **one**
+//! level, while the engine has run one effect per device since issue #26. It was
+//! not the wrong value, it was the wrong **shape** — and bringing it back as it
+//! was would have produced a file that misdescribes reality.
 //!
-//! La règle qui en découle vaut pour tout ce qu'on ajoutera : **une préférence
-//! globale va dans `preferences`, tout ce qui dépend d'un clavier va dans une
-//! liste indexée.** La langue, le jour où elle arrivera, n'a donc rien à
-//! arbitrer.
+//! The rule that follows holds for everything added later: **a global preference
+//! goes in `preferences`, anything that depends on a keyboard goes in an indexed
+//! list.** The language, when it arrives, therefore has nothing to decide.
 //!
-//! Toute la manipulation de fichiers vit dans [`Store`], qui reçoit ses chemins
-//! de base en argument ; les commandes Tauri ne font que les résoudre. C'est ce
-//! qui permet de tout tester dans un dossier temporaire, sans application.
+//! All file handling lives in [`Store`], which receives its base paths as
+//! arguments; the Tauri commands only resolve them. That is what makes it all
+//! testable in a temporary directory, without an application.
 //!
-//! # Les effets intégrés font partie de la bibliothèque
+//! # Built-in effects are part of the library
 //!
-//! Ils n'ont pas de dossier — ils sont compilés dans le binaire, voir
-//! [`crate::builtins`] — mais l'appelant n'a pas à le savoir : lister, lire le
-//! JavaScript ou la source les trouve comme les autres.
+//! They have no directory — they are compiled into the binary, see
+//! [`crate::builtins`] — but the caller does not need to know: listing, reading
+//! the JavaScript or the source finds them like the others.
 //!
-//! **En cas d'homonymie, l'intégré l'emporte**, et l'homonymie est de toute
-//! façon refusée à l'installation. Le sens de la priorité n'est pas arbitraire :
-//! une entrée marquée `builtin` dans la galerie doit exécuter le code livré, et
-//! rien d'autre. L'inverse laisserait un effet utilisateur se glisser sous un
-//! nom connu, avec le manifeste de l'intégré affiché à l'écran et un autre code
-//! exécuté — c'est exactement ce qu'on refuse. La réservation à l'installation
-//! rend la situation impossible ; la priorité à la lecture est la seconde
-//! barrière, pour un dossier arrivé par un autre chemin (copie manuelle,
-//! bibliothèque héritée d'une version où l'identifiant était libre).
+//! **On a name clash, the built-in wins**, and the clash is refused at install
+//! anyway. The direction of the priority is not arbitrary: an entry marked
+//! `builtin` in the gallery must run the shipped code, and nothing else. The
+//! reverse would let a user effect slip in under a known name, with the
+//! built-in's manifest shown on screen and other code running — exactly what we
+//! refuse. Reserving the id at install makes the situation impossible; the
+//! priority at read time is the second barrier, for a directory that arrived by
+//! another path (manual copy, library inherited from a version where the id was
+//! free).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -60,342 +58,337 @@ use crate::journal::LogLevel;
 use crate::runtime::swatch::{self, Swatch};
 use crate::{AppState, CmdResult, DeviceRef};
 
-/// Version de l'API d'effets fournie par cette version de l'application.
+/// Version of the effects API provided by this version of the application.
 ///
-/// Un manifeste déclare la version contre laquelle l'effet a été écrit : c'est
-/// ce qui permettra de refuser proprement un effet écrit contre une API
-/// disparue, plutôt que de le laisser échouer à la première image.
+/// A manifest declares the version the effect was written against: that is what
+/// will allow cleanly refusing an effect written against an API that no longer
+/// exists, rather than letting it fail on the first frame.
 pub const EFFECTS_API_VERSION: u32 = 1;
 
-/// Longueur maximale d'un identifiant d'effet, donc d'un nom de dossier.
+/// Maximum length of an effect id, and so of a directory name.
 const MAX_ID_LEN: usize = 64;
 
 const SOURCE_FILE: &str = "source.ts";
 const JS_FILE: &str = "effect.js";
 const MANIFEST_FILE: &str = "manifest.json";
-/// Repère de couleurs, à côté du manifeste. Voir [`crate::runtime::swatch`].
+/// Color swatch, next to the manifest. See [`crate::runtime::swatch`].
 const SWATCH_FILE: &str = "swatch.json";
 
-/// Noms réservés par Windows : un dossier ainsi nommé est refusé par le
-/// système, dans n'importe quel répertoire.
+/// Names reserved by Windows: a directory with such a name is refused by the
+/// system, in any directory.
 const RESERVED_NAMES: &[&str] = &[
     "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
-// ---------------------------------------------------------------- types exposés
+// ---------------------------------------------------------------- exposed types
 
-/// Manifeste d'un effet, écrit tel quel dans `manifest.json`.
+/// An effect's manifest, written as is to `manifest.json`.
 ///
-/// camelCase comme les autres types exposés : le manifeste vient de l'éditeur
-/// et y retourne, et `params` contient déjà du JSON écrit côté TypeScript. Un
-/// seul champ en snake_case au milieu ne se verrait qu'à l'exécution.
+/// camelCase like the other exposed types: the manifest comes from the editor
+/// and goes back to it, and `params` already holds JSON written on the
+/// TypeScript side. A single snake_case field in the middle would only show at
+/// run time.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Paramètres déclarés, tels que l'interface les présentera.
+    /// Declared parameters, as the interface will present them.
     ///
-    /// Conservés en JSON brut : leur forme est celle de `ParamSpec` côté
-    /// TypeScript, elle évolue avec l'éditeur, et le Rust ne les interprète
-    /// pas. Les typer ici créerait une seconde source de vérité sans emploi.
+    /// Kept as raw JSON: their shape is that of `ParamSpec` on the TypeScript
+    /// side, it evolves with the editor, and the Rust side does not interpret
+    /// them. Typing them here would create a second, unused source of truth.
     #[serde(default)]
     pub params: serde_json::Map<String, serde_json::Value>,
-    /// Version de l'API d'effets utilisée à l'écriture.
+    /// Version of the effects API used when writing it.
     pub api_version: u32,
 }
 
-/// Nature d'un effet : écrit par l'utilisateur, ou compilé dans le binaire.
+/// Kind of effect: written by the user, or compiled into the binary.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum EffectKind {
-    /// Fourni avec l'application, sans dossier sur disque.
+    /// Shipped with the application, with no directory on disk.
     Builtin,
-    /// Installé par l'utilisateur, sous `effects/<id>/`.
+    /// Installed by the user, under `effects/<id>/`.
     User,
 }
 
-/// Entrée de la bibliothèque : le manifeste, plus ce qui n'en fait pas partie.
+/// Library entry: the manifest, plus what is not part of it.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectEntry {
     pub id: String,
     pub kind: EffectKind,
-    /// Repère de couleurs, **prélevé en exécutant l'effet**.
+    /// Color swatch, **sampled by running the effect**.
     ///
-    /// Il n'est pas dans le manifeste, et ce n'est pas un détail de rangement :
-    /// le manifeste est ce que l'auteur déclare, le repère est ce que l'effet
-    /// fait. Les confondre rouvrirait la porte à un repère écrit à la main,
-    /// donc à un repère qui ment.
+    /// It is not in the manifest, and that is not a filing detail: the manifest
+    /// is what the author declares, the swatch is what the effect does. Mixing
+    /// them would reopen the door to a hand-written swatch, and so to a swatch
+    /// that lies.
     ///
-    /// Porté par l'entrée pour que la liste suffise à l'afficher : une vignette
-    /// qui demanderait un second appel par effet ferait autant d'allers-retours
-    /// que la bibliothèque compte d'entrées.
+    /// Carried by the entry so that the list is enough to show it: a thumbnail
+    /// needing a second call per effect would make as many round trips as the
+    /// library has entries.
     ///
-    /// Vide quand il n'a pas pu être calculé — voir [`crate::runtime::swatch`].
-    /// L'interface retombe alors sur une pastille neutre.
+    /// Empty when it could not be computed — see [`crate::runtime::swatch`].
+    /// The interface then falls back to a neutral dot.
     pub swatch: Swatch,
     #[serde(flatten)]
     pub manifest: Manifest,
 }
 
-/// Luminosité d'un clavier qu'on vient de brancher : pleine.
+/// Brightness of a keyboard that was just plugged in: full.
 ///
-/// C'est le défaut le moins surprenant, et c'est aussi la valeur que le fichier
-/// **n'écrit pas** — voir [`DeviceRecord::brightness`].
-pub const BRIGHTNESS_DEFAUT: u8 = 255;
+/// It is the least surprising default, and it is also the value the file
+/// **does not write** — see [`DeviceRecord::brightness`].
+pub const DEFAULT_BRIGHTNESS: u8 = 255;
 
-/// Décision prise pour un appareil, une fois, et retenue.
+/// Decision made for a device, once, and kept.
 ///
-/// Le défaut est [`Detected`](DeviceState::Detected) : **un appareil jamais vu
-/// n'est pas piloté**. Écrire sur un périphérique USB qu'on comprend mal n'est
-/// pas anodin, et à l'échelle d'un catalogue qui grandit — claviers, souris,
-/// mémoire, ventilateurs — adopter par défaut est la façon de casser le
-/// matériel de quelqu'un.
+/// The default is [`Detected`](DeviceState::Detected): **a device never seen
+/// before is not controlled**. Writing to a USB device we barely understand is
+/// not harmless, and for a catalog that grows — keyboards, mice, memory, fans —
+/// adopting by default is how you break someone's hardware.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceState {
-    /// Listé, mais **pas** ouvert. C'est l'état de tout appareil sur lequel
-    /// personne ne s'est encore prononcé.
+    /// Listed, but **not** opened. The state of every device nobody has made a
+    /// decision about yet.
     #[default]
     Detected,
-    /// Ouvert automatiquement au démarrage, sans rien demander.
+    /// Opened automatically at startup, without asking anything.
     Adopted,
-    /// Laissé tranquille, et il le reste.
+    /// Left alone, and stays that way.
     Ignored,
 }
 
-/// Ce que `settings.json` retient d'un appareil : son identité, et la décision.
+/// What `settings.json` keeps about a device: its identity, and the decision.
 ///
-/// # L'identité, c'est VID / PID / numéro de série
+/// # Identity is VID / PID / serial number
 ///
-/// **Ni la variante, ni le micrologiciel.** Le même clavier s'est déclaré
-/// `v1.4 / Unkown Variant` puis `v1.5 / Quartz` pendant le relevé du protocole :
-/// une liaison qui apparie sur ces champs se rompt à la mise à jour, et
-/// l'appareil adopté redevient un inconnu du jour au lendemain.
+/// **Neither the variant nor the firmware.** The same keyboard reported itself as
+/// `v1.4 / Unkown Variant` then `v1.5 / Quartz` during the protocol survey: a
+/// binding that matches on those fields breaks on update, and the adopted device
+/// becomes a stranger overnight.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRecord {
     pub vid: u16,
     pub pid: u16,
-    /// Numéro de série, quand le système en déclare un.
+    /// Serial number, when the system reports one.
     ///
-    /// Absent du fichier plutôt qu'à `null` : la majorité des entrées n'en
-    /// auront pas, et une clé vide répétée n'apprend rien à qui relit ses
-    /// réglages.
+    /// Absent from the file rather than `null`: most entries will not have one,
+    /// and a repeated empty key tells nothing to whoever rereads their settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial: Option<String>,
     pub state: DeviceState,
-    /// Luminosité retenue pour **cet** appareil.
+    /// Brightness kept for **this** device.
     ///
-    /// # Pourquoi ici plutôt qu'à la racine
+    /// # Why here rather than at the root
     ///
-    /// Elle l'est déjà partout ailleurs : `Keyboard::set_brightness` est une
-    /// commande de l'appareil (`0x0f`/`0x04`), distincte de l'effet en cours, et
-    /// `set_brightness(device, level)` prend un [`DeviceRef`] depuis le premier
-    /// jour. Le scalaire global de `Settings` était le seul endroit qui disait le
-    /// contraire — et deux claviers n'ont aucune raison de partager un niveau.
+    /// It already is everywhere else: `Keyboard::set_brightness` is a device
+    /// command (`0x0f`/`0x04`), separate from the running effect, and
+    /// `set_brightness(device, level)` has taken a [`DeviceRef`] since day one.
+    /// The global scalar in `Settings` was the only place that said otherwise —
+    /// and two keyboards have no reason to share a level.
     ///
-    /// # `None` veut dire « le défaut », pas « éteint »
+    /// # `None` means "the default", not "off"
     ///
-    /// Le fichier ne porte alors rien du tout : écrire [`BRIGHTNESS_DEFAUT`] par
-    /// appareil simplement branché le ferait grossir d'entrées qui ne décident de
-    /// rien. Même économie que `devices` et `effectParams` — une entrée n'existe
-    /// que si quelqu'un a bougé quelque chose. C'est aussi pourquoi une entrée
-    /// redevenue `detected` **sans** luminosité disparaît : voir
-    /// [`Self::inerte`].
+    /// The file then holds nothing at all: writing [`DEFAULT_BRIGHTNESS`] for
+    /// every device merely plugged in would grow it with entries that decide
+    /// nothing. Same economy as `devices` and `effectParams` — an entry exists
+    /// only if someone moved something. It is also why an entry back to
+    /// `detected` **without** brightness disappears: see [`Self::is_inert`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
 }
 
 impl DeviceRecord {
-    /// Vrai si cette entrée ne retient plus aucune décision.
+    /// True if this entry no longer keeps any decision.
     ///
-    /// `detected` sans luminosité dit exactement ce que dit l'**absence**
-    /// d'entrée. La garder n'apprendrait rien à qui relit ses réglages, et
-    /// ferait grossir le fichier d'une ligne par appareil effleuré une fois.
-    fn inerte(&self) -> bool {
+    /// `detected` without brightness says exactly what the **absence** of an
+    /// entry says. Keeping it would tell nothing to whoever rereads their
+    /// settings, and would grow the file by one line per device touched once.
+    fn is_inert(&self) -> bool {
         self.state == DeviceState::Detected && self.brightness.is_none()
     }
 
-    /// Vrai si cette entrée désigne l'appareil énuméré.
+    /// True if this entry designates the enumerated device.
     ///
-    /// Le VID et le PID doivent correspondre ; la série n'est comparée que si
-    /// **les deux côtés** en portent une. Ce n'est pas du laxisme, c'est le
-    /// seul arbitrage qui tienne dans les deux sens :
+    /// VID and PID must match; the serial is compared only if **both sides**
+    /// carry one. This is not laxity, it is the only rule that holds both ways:
     ///
-    /// - la série départage deux exemplaires du même modèle — sans elle, adopter
-    ///   l'un adopterait l'autre ;
-    /// - mais une énumération muette — hidraw sans règle udev, un concentrateur
-    ///   qui ne relaie rien — ne doit pas désapparier un appareil déjà adopté,
-    ///   sans quoi la décision serait à reprendre à chaque branchement.
+    /// - the serial tells apart two units of the same model — without it,
+    ///   adopting one would adopt the other;
+    /// - but a silent enumeration — hidraw without a udev rule, a hub that
+    ///   passes nothing on — must not unmatch an already adopted device,
+    ///   otherwise the decision would have to be made again on every plug-in.
     pub fn matches(&self, vid: u16, pid: u16, serial: Option<&str>) -> bool {
         if self.vid != vid || self.pid != pid {
             return false;
         }
         match (self.serial.as_deref(), serial) {
-            (Some(mien), Some(sien)) => mien == sien,
+            (Some(ours), Some(theirs)) => ours == theirs,
             _ => true,
         }
     }
 }
 
-/// L'effet **appliqué** sur un appareil, celui qui pilote ses LED.
+/// The effect **applied** on a device, the one driving its LEDs.
 ///
-/// # Une liste, pas un scalaire
+/// # A list, not a scalar
 ///
-/// Le champ qui précédait — `activeEffect: Option<String>` — décrivait **un**
-/// effet actif, alors que le moteur en fait tourner un par appareil depuis
-/// l'issue #26. Aucune valeur ne pouvait rendre ce champ juste : c'est sa forme
-/// qui était fausse. Une entrée par appareil, absente tant que rien n'a été
-/// appliqué, est la seule qui décrive ce que le moteur fait réellement.
+/// The field before it — `activeEffect: Option<String>` — described **one**
+/// active effect, while the engine has run one per device since issue #26. No
+/// value could make that field right: its shape was wrong. One entry per
+/// device, absent until something has been applied, is the only one that
+/// describes what the engine actually does.
 ///
-/// # Ce n'est pas ce qu'on regarde
+/// # It is not what is being previewed
 ///
-/// **L'aperçu n'écrit jamais ici.** Prévisualiser un effet ne le retient pas :
-/// c'est « Appliquer » qui décide, et c'est le geste qui envoie au clavier. Voir
-/// [`crate::runtime::start_preview`], qui n'a aucun accès au disque.
+/// **Preview never writes here.** Previewing an effect does not keep it: "Apply"
+/// decides, and it is the action that sends to the keyboard. See
+/// [`crate::runtime::start_preview`], which has no access to the disk.
 ///
-/// # La clé est le [`DeviceRef`], sans numéro de série
+/// # The key is the [`DeviceRef`], without serial number
 ///
-/// Même raison que [`EffectParamsRecord`] : les boucles du moteur sont indexées
-/// par VID/PID, deux exemplaires du même modèle en partagent une, et les
-/// distinguer ici promettrait une séparation que le moteur ne tient pas.
+/// Same reason as [`EffectParamsRecord`]: the engine loops are indexed by
+/// VID/PID, two units of the same model share one, and telling them apart here
+/// would promise a separation the engine does not keep.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveEffectRecord {
     pub vid: u16,
     pub pid: u16,
-    /// Identifiant de l'effet appliqué.
+    /// Id of the applied effect.
     pub effect: String,
 }
 
-/// Réglages d'un effet, retenus pour **un** appareil.
+/// An effect's parameters, kept for **one** device.
 ///
-/// # Pourquoi l'appareil et l'effet ensemble
+/// # Why device and effect together
 ///
-/// « La vague, mais plus lente » se règle sur un clavier donné : le même effet
-/// n'a aucune raison de tourner à la même vitesse sur deux appareils, et deux
-/// effets du même appareil n'ont pas les mêmes paramètres. La clé est donc la
-/// paire, et changer d'effet puis revenir retrouve ses réglages.
+/// "The wave, but slower" is tuned on a given keyboard: the same effect has no
+/// reason to run at the same speed on two devices, and two effects on the same
+/// device do not have the same parameters. The key is therefore the pair, and
+/// switching effects then coming back finds its parameters again.
 ///
-/// # Sans le numéro de série, contrairement à [`DeviceRecord`]
+/// # Without the serial number, unlike [`DeviceRecord`]
 ///
-/// Délibéré : toutes les commandes du moteur visent un [`DeviceRef`], c'est-à-dire
-/// un VID et un PID. Deux exemplaires du même modèle partagent déjà leur boucle
-/// de rendu — les distinguer *ici* promettrait une séparation que le reste de
-/// l'application ne tient pas, et le réglage semblerait perdu une fois sur deux.
-/// L'adoption, elle, décide d'ouvrir un appareil précis : elle a besoin de la
-/// série, et c'est pourquoi elle la porte.
+/// Deliberate: every engine command targets a [`DeviceRef`], that is a VID and a
+/// PID. Two units of the same model already share their render loop — telling
+/// them apart *here* would promise a separation the rest of the application does
+/// not keep, and the setting would seem lost one time out of two. Adoption, on
+/// the other hand, decides to open a specific device: it needs the serial, and
+/// that is why it carries it.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectParamsRecord {
     pub vid: u16,
     pub pid: u16,
-    /// Identifiant de l'effet réglé.
+    /// Id of the tuned effect.
     pub effect: String,
-    /// Les valeurs, telles que l'interface les envoie au moteur.
+    /// The values, as the interface sends them to the engine.
     ///
-    /// JSON brut, comme [`Manifest::params`] : leur forme est celle de
-    /// `ParamValue` côté TypeScript — un nombre, une chaîne, un booléen ou une
-    /// couleur `{r,g,b}` — et le Rust ne les interprète pas. Les typer ici
-    /// créerait une seconde source de vérité, qui divergerait au premier type
-    /// de paramètre ajouté.
+    /// Raw JSON, like [`Manifest::params`]: their shape is that of `ParamValue`
+    /// on the TypeScript side — a number, a string, a boolean or a `{r,g,b}`
+    /// color — and the Rust side does not interpret them. Typing them here would
+    /// create a second source of truth, which would diverge at the first
+    /// parameter type added.
     pub values: serde_json::Map<String, serde_json::Value>,
 }
 
-/// Ce qui vaut pour l'application entière, et pour aucun appareil en
-/// particulier.
+/// What applies to the whole application, and to no device in particular.
 ///
-/// Un objet à part plutôt que des champs à la racine : c'est le rangement qui
-/// empêche la confusion dont ce module vient de sortir. Tout ce qui dépend d'un
-/// clavier vit dans une liste indexée ; ce qui n'en dépend pas vit ici, et la
-/// langue — quand elle arrivera — n'aura rien à arbitrer.
+/// A separate object rather than fields at the root: this layout is what
+/// prevents the confusion this module just came out of. Anything that depends on
+/// a keyboard lives in an indexed list; what does not lives here, and the
+/// language — when it arrives — will have nothing to decide.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
-    /// Niveau du journal, quand quelqu'un l'a changé depuis l'application.
+    /// Log level, when someone changed it from the application.
     ///
-    /// `None` — donc absent du fichier — veut dire « le défaut », et non « pas de
-    /// journal » : écrire le défaut ferait croire à une décision là où il n'y en
-    /// a pas eu, et figerait au passage un choix que la prochaine version
-    /// pourrait vouloir revoir.
+    /// `None` — and so absent from the file — means "the default", not "no
+    /// log": writing the default would suggest a decision where there was none,
+    /// and would freeze along the way a choice the next version might want to
+    /// revisit.
     ///
-    /// **Il survit au redémarrage**, et c'est un arbitrage : le retour
-    /// automatique au défaut protégerait du disque plein, la persistance sert
-    /// celui qui traque un défaut **au démarrage** — l'adoption des appareils en
-    /// est un — à qui l'on ne peut pas demander de remonter le niveau après coup.
-    /// Le prix est payé par la mention qu'en fait l'interface. Voir
-    /// [`crate::journal`].
+    /// **It survives a restart**, and that is a trade-off: automatically going
+    /// back to the default would protect against a full disk, persistence serves
+    /// whoever is tracking a bug **at startup** — device adoption is one — who
+    /// cannot be asked to raise the level after the fact. The price is paid by
+    /// the notice the interface shows about it. See [`crate::journal`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
 }
 
-/// Réglages persistants.
+/// Persistent settings.
 ///
-/// `#[serde(default)]` sur la structure entière : un `settings.json` écrit par
-/// une version antérieure, à qui il manque un champ ajouté depuis, se relit
-/// sans erreur au lieu de rendre l'application muette au démarrage.
+/// `#[serde(default)]` on the whole struct: a `settings.json` written by an
+/// earlier version, missing a field added since, reloads without error instead
+/// of leaving the application silent at startup.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    /// Ce qui ne dépend d'aucun appareil. Voir [`Preferences`].
+    /// What depends on no device. See [`Preferences`].
     pub preferences: Preferences,
-    /// Décisions prises appareil par appareil, luminosité comprise.
+    /// Decisions made device by device, brightness included.
     ///
-    /// Ne contient que celles qui **diffèrent du défaut** : un appareil absent
-    /// de cette liste est `detected` et à pleine luminosité, ce qui est
-    /// exactement l'état d'un appareil jamais rencontré. Le fichier ne grossit
-    /// donc pas d'une entrée à chaque périphérique branché une fois.
+    /// Holds only those that **differ from the default**: a device absent from
+    /// this list is `detected` and at full brightness, which is exactly the state
+    /// of a device never encountered. The file therefore does not grow by one
+    /// entry for each device plugged in once.
     pub devices: Vec<DeviceRecord>,
-    /// L'effet **appliqué** sur chaque appareil. Voir [`ActiveEffectRecord`].
+    /// The effect **applied** on each device. See [`ActiveEffectRecord`].
     ///
-    /// Même économie que le reste : pas d'entrée tant que rien n'a été appliqué,
-    /// et l'entrée part quand l'effet s'arrête ou qu'il est supprimé.
+    /// Same economy as the rest: no entry until something has been applied, and
+    /// the entry goes when the effect stops or is deleted.
     pub active_effects: Vec<ActiveEffectRecord>,
-    /// Réglages d'effet retenus, par appareil et par effet.
+    /// Effect parameters kept, per device and per effect.
     ///
-    /// Même économie que `devices` : une entrée n'existe que si quelqu'un a
-    /// **déplacé** un curseur. Rétablir les valeurs déclarées la retire, plutôt
-    /// que d'écrire une copie des défauts que la prochaine version de l'effet
-    /// contredirait.
+    /// Same economy as `devices`: an entry exists only if someone **moved** a
+    /// slider. Restoring the declared values removes it, rather than writing a
+    /// copy of the defaults that the next version of the effect would
+    /// contradict.
     pub effect_params: Vec<EffectParamsRecord>,
-    /// Le niveau du journal tel qu'une version antérieure l'écrivait, **à la
-    /// racine**.
+    /// The log level as an earlier version wrote it, **at the root**.
     ///
-    /// Lu, jamais réécrit (`skip_serializing`) : [`Store::read_settings`] le
-    /// verse dans [`Preferences`], et il disparaît du fichier à la première
-    /// écriture. Sans cette passerelle, déplacer `logLevel` aurait ramené au
-    /// défaut le niveau de celui qui était **en train** de chercher une panne —
-    /// c'est-à-dire au pire moment, puisque c'est le seul où ce réglage sert.
+    /// Read, never written back (`skip_serializing`): [`Store::read_settings`]
+    /// moves it into [`Preferences`], and it disappears from the file on the first
+    /// write. Without this bridge, moving `logLevel` would have reset to the
+    /// default the level of whoever was **in the middle of** chasing a failure —
+    /// that is, at the worst moment, since it is the only one where this setting
+    /// matters.
     ///
-    /// L'alternative écartée : ne rien faire et l'assumer. Elle coûtait douze
-    /// lignes de moins et une session de diagnostic perdue. À retirer quand plus
-    /// aucun `settings.json` antérieur à la v2.1 ne circule.
+    /// The rejected alternative: do nothing and accept it. It cost twelve fewer
+    /// lines and one lost debugging run. To remove once no `settings.json` older
+    /// than v2.1 is around any more.
     #[serde(default, rename = "logLevel", skip_serializing)]
-    log_level_herite: Option<LogLevel>,
+    legacy_log_level: Option<LogLevel>,
 }
 
 impl Settings {
-    /// Verse dans [`Preferences`] ce qu'un fichier antérieur portait à la racine.
+    /// Moves into [`Preferences`] what an earlier file carried at the root.
     ///
-    /// Ce qui est déjà rangé l'emporte : un fichier écrit par cette version a
-    /// raison contre une clé héritée qu'un éditeur de texte y aurait laissée.
-    fn absorber_l_heritage(&mut self) {
-        if let Some(niveau) = self.log_level_herite.take() {
-            self.preferences.log_level.get_or_insert(niveau);
+    /// What is already in place wins: a file written by this version is right
+    /// against a legacy key a text editor may have left in it.
+    fn absorb_legacy(&mut self) {
+        if let Some(legacy_level) = self.legacy_log_level.take() {
+            self.preferences.log_level.get_or_insert(legacy_level);
         }
     }
 
-    /// Rang de l'entrée décrivant cet appareil, s'il y en a une.
+    /// Index of the entry describing this device, if there is one.
     ///
-    /// L'identité exacte d'abord — série comprise, `None` comprise —, puis la
-    /// règle tolérante de [`DeviceRecord::matches`]. L'ordre compte : une entrée
-    /// sans série ne doit pas décider à la place de celle qui en porte une,
-    /// sinon deux exemplaires du même modèle se confondraient dès qu'un seul
-    /// d'entre eux aurait été adopté sans série.
+    /// Exact identity first — serial included, `None` included — then the
+    /// tolerant rule of [`DeviceRecord::matches`]. The order matters: an entry
+    /// without a serial must not decide in place of one that carries a serial,
+    /// otherwise two units of the same model would be mixed up as soon as one of
+    /// them had been adopted without a serial.
     fn position(&self, vid: u16, pid: u16, serial: Option<&str>) -> Option<usize> {
         self.devices
             .iter()
@@ -407,14 +400,14 @@ impl Settings {
             })
     }
 
-    /// Décision retenue pour cet appareil, ou [`DeviceState::Detected`].
+    /// Decision kept for this device, or [`DeviceState::Detected`].
     pub fn device_state(&self, vid: u16, pid: u16, serial: Option<&str>) -> DeviceState {
         self.position(vid, pid, serial)
             .map(|i| self.devices[i].state)
             .unwrap_or_default()
     }
 
-    /// Retient une décision pour cet appareil.
+    /// Keeps a decision for this device.
     pub fn set_device_state(
         &mut self,
         vid: u16,
@@ -426,9 +419,9 @@ impl Settings {
             Some(i) => {
                 let record = &mut self.devices[i];
                 record.state = state;
-                // La série se complète si on vient de l'apprendre, mais ne
-                // s'efface jamais : une énumération muette ne doit pas faire
-                // perdre à l'entrée ce qui la distingue de l'exemplaire voisin.
+                // The serial is filled in if we just learned it, but never
+                // erased: a silent enumeration must not make the entry lose
+                // what tells it apart from the unit next to it.
                 if record.serial.is_none() {
                     record.serial = serial.map(str::to_owned);
                 }
@@ -441,43 +434,43 @@ impl Settings {
                 brightness: None,
             }),
         }
-        self.elaguer();
+        self.prune();
     }
 
-    /// La luminosité retenue pour cet appareil, ou [`BRIGHTNESS_DEFAUT`].
+    /// The brightness kept for this device, or [`DEFAULT_BRIGHTNESS`].
     pub fn brightness(&self, vid: u16, pid: u16, serial: Option<&str>) -> u8 {
         self.position(vid, pid, serial)
             .and_then(|i| self.devices[i].brightness)
-            .unwrap_or(BRIGHTNESS_DEFAUT)
+            .unwrap_or(DEFAULT_BRIGHTNESS)
     }
 
-    /// Retient une luminosité. [`BRIGHTNESS_DEFAUT`] **oublie** l'entrée.
+    /// Keeps a brightness. [`DEFAULT_BRIGHTNESS`] **forgets** the entry.
     ///
-    /// Le parallèle de « rétablir les valeurs déclarées » pour les réglages
-    /// d'effet : remonter le curseur à fond ne doit pas écrire 255 dans le
-    /// fichier, il doit y retirer la ligne. Un appareil dont c'était la seule
-    /// décision disparaît alors complètement — voir [`DeviceRecord::inerte`].
+    /// The counterpart of "restore the declared values" for effect parameters:
+    /// pushing the slider all the way up must not write 255 to the file, it must
+    /// remove the line. A device for which this was the only decision then
+    /// disappears entirely — see [`DeviceRecord::is_inert`].
     ///
-    /// Rend vrai si quelque chose a changé, pour qu'on ne repasse pas par le
-    /// fichier temporaire et son renommage quand il n'y a rien à y écrire.
+    /// Returns true if something changed, so the temporary file and its rename
+    /// are skipped when there is nothing to write.
     pub fn set_brightness(&mut self, vid: u16, pid: u16, serial: Option<&str>, level: u8) -> bool {
-        let retenu = (level != BRIGHTNESS_DEFAUT).then_some(level);
+        let kept = (level != DEFAULT_BRIGHTNESS).then_some(level);
         match self.position(vid, pid, serial) {
             Some(i) => {
-                if self.devices[i].brightness == retenu {
+                if self.devices[i].brightness == kept {
                     return false;
                 }
-                self.devices[i].brightness = retenu;
-                // Même règle que [`Self::set_device_state`] : la série se
-                // complète si on vient de l'apprendre, elle ne s'efface jamais.
+                self.devices[i].brightness = kept;
+                // Same rule as [`Self::set_device_state`]: the serial is filled
+                // in if we just learned it, it is never erased.
                 if self.devices[i].serial.is_none() {
                     self.devices[i].serial = serial.map(str::to_owned);
                 }
             }
             None => {
-                // Le défaut, sur un appareil dont on ne retient rien : il n'y a
-                // aucune entrée à créer pour n'y rien mettre.
-                let Some(level) = retenu else { return false };
+                // The default, on a device we keep nothing about: there is no
+                // entry to create just to put nothing in it.
+                let Some(level) = kept else { return false };
                 self.devices.push(DeviceRecord {
                     vid,
                     pid,
@@ -487,16 +480,16 @@ impl Settings {
                 });
             }
         }
-        self.elaguer();
+        self.prune();
         true
     }
 
-    /// Retire les entrées d'appareil qui ne retiennent plus rien.
-    fn elaguer(&mut self) {
-        self.devices.retain(|r| !r.inerte());
+    /// Removes device entries that no longer keep anything.
+    fn prune(&mut self) {
+        self.devices.retain(|r| !r.is_inert());
     }
 
-    /// L'effet appliqué sur cet appareil, s'il y en a un.
+    /// The effect applied on this device, if there is one.
     pub fn active_effect(&self, vid: u16, pid: u16) -> Option<&str> {
         self.active_effects
             .iter()
@@ -504,11 +497,11 @@ impl Settings {
             .map(|r| r.effect.as_str())
     }
 
-    /// Retient l'effet appliqué, ou l'oublie avec `None`.
+    /// Keeps the applied effect, or forgets it with `None`.
     ///
-    /// Rend vrai si quelque chose a changé : relancer deux fois le même effet sur
-    /// le même clavier — ce que fait un double-clic — ne doit pas réécrire le
-    /// fichier.
+    /// Returns true if something changed: starting the same effect twice on the
+    /// same keyboard — which is what a double-click does — must not rewrite the
+    /// file.
     pub fn set_active_effect(&mut self, vid: u16, pid: u16, effect: Option<&str>) -> bool {
         let position = self
             .active_effects
@@ -537,7 +530,7 @@ impl Settings {
         }
     }
 
-    /// Les réglages retenus pour cet effet sur cet appareil, s'il y en a.
+    /// The parameters kept for this effect on this device, if any.
     pub fn effect_params(
         &self,
         vid: u16,
@@ -550,11 +543,11 @@ impl Settings {
             .map(|r| &r.values)
     }
 
-    /// Retient des réglages. Une table **vide** efface l'entrée.
+    /// Keeps parameters. An **empty** map erases the entry.
     ///
-    /// C'est ce qui fait de « rétablir les valeurs déclarées » un oubli et non
-    /// une copie : l'effet repart alors de son manifeste, y compris si une
-    /// version ultérieure en change les défauts.
+    /// That is what makes "restore the declared values" a forget and not a copy:
+    /// the effect then starts again from its manifest, including when a later
+    /// version changes its defaults.
     pub fn set_effect_params(
         &mut self,
         vid: u16,
@@ -582,99 +575,97 @@ impl Settings {
         }
     }
 
-    /// Oublie un effet **partout** : ses réglages, et son application.
+    /// Forgets an effect **everywhere**: its parameters, and where it is applied.
     ///
-    /// Appelée quand l'effet est supprimé. Sans cela ses réglages resteraient
-    /// dans `settings.json` pour un identifiant que plus rien ne désigne, et le
-    /// fichier ne ferait que grossir.
+    /// Called when the effect is deleted. Without it, its parameters would stay
+    /// in `settings.json` for an id nothing designates any more, and the file
+    /// would only grow.
     ///
-    /// # Pourquoi l'application part avec, et pas seulement les réglages
+    /// # Why where it is applied goes too, and not only the parameters
     ///
-    /// C'est le piège que l'issue #48 avait relevé et que #64 tranche ici :
-    /// `delete_effect` laissait un **identifiant pendant**. Tant que le champ
-    /// était mort, la question ne se posait pas ; maintenant qu'`activeEffects`
-    /// est écrit, elle se pose, et les deux réponses possibles n'ont pas le même
-    /// prix :
+    /// This is the trap issue #48 had pointed out and that #64 settles here:
+    /// `delete_effect` left a **dangling id**. As long as the field was dead, the
+    /// question did not arise; now that `activeEffects` is written, it does, and
+    /// the two possible answers do not cost the same:
     ///
-    /// - **purger à la suppression** — retenu : le fichier ne contient jamais un
-    ///   identifiant que la bibliothèque ne connaît pas, et cet invariant se
-    ///   vérifie sans faire tourner quoi que ce soit ;
-    /// - se replier en silence au démarrage — écarté *comme seule mesure* : un
-    ///   silence au lancement est exactement le genre de panne qui coûte une
-    ///   session, et l'identifiant survivrait à autant de démarrages qu'on veut.
+    /// - **purge on delete** — chosen: the file never holds an id the library
+    ///   does not know, and that invariant can be checked without running
+    ///   anything;
+    /// - silently fall back at startup — rejected *as the only measure*: a silent
+    ///   failure at launch is exactly the kind of breakage that costs a debugging
+    ///   run, and the id would survive as many startups as you like.
     ///
-    /// Le repli reste nécessaire en **seconde** barrière — un dossier d'effet
-    /// retiré à la main ne passe pas par ici — mais il n'est plus le seul.
+    /// The fallback is still needed as a **second** barrier — an effect directory
+    /// removed by hand does not go through here — but it is no longer the only
+    /// one.
     ///
-    /// Rend vrai si quelque chose a été retiré, pour qu'on ne réécrive pas le
-    /// fichier quand il n'y a rien à y changer.
+    /// Returns true if something was removed, so the file is not rewritten when
+    /// there is nothing to change in it.
     pub fn forget_effect(&mut self, effect: &str) -> bool {
-        let avant = self.effect_params.len() + self.active_effects.len();
+        let before = self.effect_params.len() + self.active_effects.len();
         self.effect_params.retain(|r| r.effect != effect);
         self.active_effects.retain(|r| r.effect != effect);
-        self.effect_params.len() + self.active_effects.len() != avant
+        self.effect_params.len() + self.active_effects.len() != before
     }
 }
 
-/// Les valeurs sur lesquelles un effet doit démarrer : ce qu'il **déclare**,
-/// recouvert par ce qu'on a **retenu** pour cet appareil.
+/// The values an effect must start with: what it **declares**, overridden by
+/// what was **kept** for this device.
 ///
-/// # Pourquoi ce calcul existe en Rust
+/// # Why this computation exists in Rust
 ///
-/// La fenêtre le fait déjà, en deux morceaux — `startingParams` pour les défauts
-/// du manifeste, `merge` pour le recouvrement. Mais l'icône de zone de
-/// notification lance un effet **sans fenêtre** : elle ne peut rien emprunter au
-/// TypeScript, et lancer un effet avec un objet de paramètres vide ne donnerait
-/// pas le même éclairage que le même clic fait depuis la galerie. Voir
-/// [`crate::tray`].
+/// The window already does it, in two pieces — `startingParams` for the manifest
+/// defaults, `merge` for the override. But the tray icon starts an effect **with
+/// no window**: it cannot borrow anything from the TypeScript, and starting an
+/// effect with an empty parameter object would not give the same lighting as the
+/// same click made from the gallery. See [`crate::tray`].
 ///
-/// Les deux écritures de la règle doivent donc rester d'accord. Ce qu'elles
-/// disent, et c'est la seule chose à retenir : **bornée aux paramètres
-/// déclarés**. Un réglage retenu pour un paramètre que l'effet n'a plus disparaît
-/// de lui-même, au lieu de voyager indéfiniment vers une boucle qui ne le lit
-/// plus — et un paramètre déclaré sans valeur retenue prend son défaut, jamais
-/// rien.
+/// Both implementations of the rule must therefore stay in agreement. What they
+/// say, and it is the only thing to remember: **limited to declared
+/// parameters**. A value kept for a parameter the effect no longer has
+/// disappears on its own, instead of travelling indefinitely to a loop that no
+/// longer reads it — and a declared parameter with no kept value takes its
+/// default, never nothing.
 ///
-/// Un manifeste dont un paramètre ne déclare pas de `default` est laissé de
-/// côté : `params` est du JSON brut que le Rust n'interprète pas (voir
-/// [`Manifest::params`]), et inventer une valeur pour une sorte de paramètre
-/// qu'on ne connaît pas serait pire que de laisser l'effet appliquer la sienne.
+/// A manifest parameter that declares no `default` is left out: `params` is raw
+/// JSON the Rust side does not interpret (see [`Manifest::params`]), and
+/// inventing a value for a kind of parameter we do not know would be worse than
+/// letting the effect apply its own.
 pub(crate) fn starting_params(
     manifest: &Manifest,
-    retenus: Option<&serde_json::Map<String, serde_json::Value>>,
+    stored: Option<&serde_json::Map<String, serde_json::Value>>,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut out = serde_json::Map::new();
     for (id, spec) in &manifest.params {
-        if let Some(defaut) = spec.get("default") {
-            out.insert(id.clone(), defaut.clone());
+        if let Some(default_value) = spec.get("default") {
+            out.insert(id.clone(), default_value.clone());
         }
     }
-    if let Some(retenus) = retenus {
-        for (id, valeur) in retenus {
-            // Seulement ce que le manifeste déclare encore : c'est le même
-            // bornage que côté fenêtre, et c'est lui qui fait disparaître un
-            // réglage devenu orphelin.
+    if let Some(stored) = stored {
+        for (id, value) in stored {
+            // Only what the manifest still declares: the same limit as on the
+            // window side, and it is what makes an orphaned value disappear.
             if manifest.params.contains_key(id) {
-                out.insert(id.clone(), valeur.clone());
+                out.insert(id.clone(), value.clone());
             }
         }
     }
     out
 }
 
-// ---------------------------------------------------------------- identifiants
+// ---------------------------------------------------------------- ids
 
-/// Vrai si `id` est un nom de périphérique réservé par Windows.
+/// True if `id` is a device name reserved by Windows.
 fn is_reserved(id: &str) -> bool {
     RESERVED_NAMES.contains(&id)
 }
 
-/// Vérifie qu'un identifiant peut servir de nom de dossier sans risque.
+/// Checks that an id can safely be used as a directory name.
 ///
-/// Le contrôle est une **liste blanche** : `a-z`, `0-9` et le tiret. Tout le
-/// reste est refusé, ce qui écarte d'un coup `..`, les séparateurs de chemin,
-/// les deux-points d'un lecteur Windows et les caractères de contrôle — sans
-/// dépendre d'une liste noire qu'on oublierait de compléter.
+/// The check is an **allow list**: `a-z`, `0-9` and the hyphen. Everything else
+/// is refused, which rules out at once `..`, path separators, the colon of a
+/// Windows drive and control characters — without depending on a deny list we
+/// would forget to extend.
 pub(crate) fn validate_id(id: &str) -> CmdResult<()> {
     if id.is_empty() {
         return Err("identifiant d'effet vide".into());
@@ -706,15 +697,15 @@ pub(crate) fn validate_id(id: &str) -> CmdResult<()> {
     Ok(())
 }
 
-/// Dérive un identifiant sûr à partir d'un nom saisi par l'utilisateur.
+/// Derives a safe id from a name typed by the user.
 ///
-/// On ne fait jamais confiance au nom : on ne le valide pas, on le **remplace**
-/// par ce qu'il a de représentable. Le résultat satisfait toujours
-/// [`validate_id`] — c'est ce que vérifie le test `des_noms_hostiles_donnent_un_identifiant_sur`.
+/// The name is never trusted: it is not validated, it is **replaced** by what it
+/// has that can be represented. The result always satisfies [`validate_id`] —
+/// that is what the test `hostile_names_yield_a_safe_id` checks.
 ///
-/// Deux effets portant le même nom obtiennent le même identifiant, donc le
-/// second écrase le premier : réenregistrer un effet depuis l'éditeur le met à
-/// jour au lieu d'en accumuler des copies.
+/// Two effects with the same name get the same id, so the second overwrites the
+/// first: saving an effect again from the editor updates it instead of piling up
+/// copies.
 pub fn derive_id(name: &str) -> String {
     let mut id = String::new();
     for ch in name.chars() {
@@ -736,19 +727,19 @@ pub fn derive_id(name: &str) -> String {
     id.to_string()
 }
 
-// ---------------------------------------------------------------- stockage
+// ---------------------------------------------------------------- storage
 
-/// Accès disque aux effets et aux réglages.
+/// Disk access to effects and settings.
 ///
-/// Les chemins de base arrivent de l'extérieur : rien ici ne connaît Tauri, ce
-/// qui rend l'ensemble testable dans un dossier temporaire.
+/// The base paths come from outside: nothing here knows about Tauri, which makes
+/// the whole thing testable in a temporary directory.
 pub struct Store {
     effects_dir: PathBuf,
     settings_file: PathBuf,
 }
 
 impl Store {
-    /// `data_dir` porte le contenu, `config_dir` la configuration.
+    /// `data_dir` holds the content, `config_dir` the configuration.
     pub fn new(data_dir: &Path, config_dir: &Path) -> Self {
         Self {
             effects_dir: data_dir.join("effects"),
@@ -756,13 +747,13 @@ impl Store {
         }
     }
 
-    /// Écrit `effects/<id>/` et renvoie l'identifiant retenu.
+    /// Writes `effects/<id>/` and returns the id used.
     ///
-    /// Les trois fichiers sont écrits ensemble : `source.ts` pour rouvrir
-    /// l'effet dans l'éditeur, `effect.js` pour l'exécuter, `manifest.json`
-    /// pour le décrire. Le `.js` n'est pas un cache régénérable — le
-    /// transpileur vit dans Monaco, donc le reconstruire exigerait d'ouvrir la
-    /// fenêtre, alors qu'un effet doit pouvoir démarrer sans interface.
+    /// The three files are written together: `source.ts` to reopen the effect in
+    /// the editor, `effect.js` to run it, `manifest.json` to describe it. The
+    /// `.js` is not a regenerable cache — the transpiler lives in Monaco, so
+    /// rebuilding it would require opening the window, while an effect must be
+    /// able to start without an interface.
     pub fn install_effect(
         &self,
         source_ts: &str,
@@ -783,10 +774,10 @@ impl Store {
         }
 
         let id = derive_id(&manifest.name);
-        // Les identifiants intégrés sont réservés. Accepter l'homonymie
-        // obligerait à arbitrer ensuite, à chaque lecture, entre deux effets
-        // portant le même identifiant — et la bibliothèque en montrerait deux
-        // sous la même clé. Le refus est immédiat et se dit en une phrase.
+        // Built-in ids are reserved. Accepting the clash would force a choice
+        // afterwards, on every read, between two effects with the same id — and
+        // the library would show two of them under the same key. The refusal is
+        // immediate and fits in one sentence.
         if builtins::find(&id).is_some() {
             return Err(format!(
                 "« {id} » est l'identifiant d'un effet intégré ; donnez un autre nom au vôtre"
@@ -802,23 +793,22 @@ impl Store {
         write(&dir.join(JS_FILE), js)?;
         write(&dir.join(MANIFEST_FILE), &json)?;
 
-        // Le repère est prélevé **ici**, une fois, et non à chaque affichage de
-        // la liste : c'est une vignette qui ne bouge pas tant que l'effet ne
-        // bouge pas. Réenregistrer un effet repasse par ce point, donc le
-        // recalcule — un effet devenu bleu ne garde pas sa vignette rouge.
+        // The swatch is sampled **here**, once, and not every time the list is
+        // shown: it is a thumbnail that does not move as long as the effect does
+        // not. Saving an effect again goes through this point, so recomputes it —
+        // an effect that turned blue does not keep its red thumbnail.
         write_swatch(&dir, js);
 
         Ok(id)
     }
 
-    /// Le JavaScript exécutable d'un effet, **intégré ou installé**.
+    /// An effect's executable JavaScript, **built-in or installed**.
     ///
-    /// C'est ce que le moteur charge. Les intégrés sont consultés d'abord :
-    /// voir la priorité justifiée en tête de module.
+    /// This is what the engine loads. Built-ins are looked up first: see the
+    /// priority justified at the top of the module.
     ///
-    /// Pour un effet utilisateur, c'est aussi la raison pour laquelle le `.js`
-    /// est écrit sur disque à l'installation — le lire ne demande ni l'éditeur,
-    /// ni la fenêtre.
+    /// For a user effect, it is also why the `.js` is written to disk at install —
+    /// reading it needs neither the editor nor the window.
     pub fn effect_js(&self, id: &str) -> CmdResult<String> {
         if let Some(b) = builtins::find(id) {
             return Ok(b.js.to_string());
@@ -826,12 +816,12 @@ impl Store {
         self.read_file(id, JS_FILE)
     }
 
-    /// La source d'un effet, pour la rouvrir dans l'éditeur.
+    /// An effect's source, to reopen it in the editor.
     ///
-    /// Un effet intégré n'a pas de `.ts` : son JavaScript **est** sa source. Le
-    /// rendre lisible depuis l'éditeur est tout l'intérêt de le livrer — on
-    /// part d'un effet qui marche, on le modifie, on l'enregistre sous un autre
-    /// nom (l'identifiant intégré, lui, est réservé).
+    /// A built-in effect has no `.ts`: its JavaScript **is** its source. Making it
+    /// readable from the editor is the whole point of shipping it — you start from
+    /// an effect that works, change it, and save it under another name (the
+    /// built-in id is reserved).
     pub fn effect_source(&self, id: &str) -> CmdResult<String> {
         if let Some(b) = builtins::find(id) {
             return Ok(b.js.to_string());
@@ -848,16 +838,16 @@ impl Store {
         })
     }
 
-    /// Bibliothèque complète : effets intégrés **et** effets utilisateur.
+    /// Full library: built-in effects **and** user effects.
     ///
-    /// Les intégrés sont compilés dans le binaire et n'ont pas de dossier ;
-    /// ils apparaissent malgré tout, distingués par [`EffectKind`], pour que
-    /// l'interface n'ait qu'une seule liste à afficher.
+    /// Built-ins are compiled into the binary and have no directory; they show up
+    /// anyway, told apart by [`EffectKind`], so the interface has a single list to
+    /// display.
     pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
         let mut effects = builtin_effects();
 
-        // Dossier absent : premier lancement, aucun effet installé. Ce n'est
-        // pas une erreur.
+        // Missing directory: first launch, no effect installed. This is not an
+        // error.
         let entries = match fs::read_dir(&self.effects_dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(effects),
@@ -876,17 +866,17 @@ impl Store {
             let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            // Un dossier abîmé ou étranger est ignoré plutôt que de faire
-            // échouer toute la liste : une bibliothèque de vingt effets ne doit
-            // pas disparaître parce que l'un d'eux a un manifeste illisible.
+            // A damaged or foreign directory is skipped rather than failing the
+            // whole list: a library of twenty effects must not disappear because
+            // one of them has an unreadable manifest.
             if validate_id(&id).is_err() {
                 continue;
             }
-            // Un dossier qui usurpe l'identifiant d'un intégré est écarté : la
-            // liste est indexée par identifiant, elle ne peut pas en contenir
-            // deux, et c'est l'intégré qui démarrerait de toute façon. L'y
-            // laisser afficherait un effet qui ne s'exécutera jamais. Il reste
-            // supprimable — `delete_effect` ne consulte que le disque.
+            // A directory that takes over a built-in's id is left out: the list
+            // is indexed by id, it cannot hold two of them, and the built-in
+            // would start anyway. Leaving it in would show an effect that will
+            // never run. It can still be deleted — `delete_effect` only looks at
+            // the disk.
             if builtins::find(&id).is_some() {
                 continue;
             }
@@ -904,25 +894,25 @@ impl Store {
             });
         }
 
-        // Ordre stable : le système de fichiers n'en garantit aucun, et une
-        // galerie qui se réordonne à chaque ouverture est illisible.
+        // Stable order: the file system guarantees none, and a gallery that
+        // reorders itself on every opening is unreadable.
         installed.sort_by(|a, b| a.id.cmp(&b.id));
         effects.append(&mut installed);
         Ok(effects)
     }
 
-    /// Dit si cet effet peut être supprimé, **sans rien supprimer**.
+    /// Tells whether this effect can be deleted, **without deleting anything**.
     ///
-    /// Le dossier est consulté **avant** le cas des intégrés : c'est ce qui laisse
-    /// retirer un dossier qui usurperait un identifiant intégré, invisible dans la
-    /// liste et inexécutable, mais bien présent sur disque. L'ordre est l'inverse
-    /// de celui de la résolution à l'exécution ([`Self::effect_js`]), qui consulte
-    /// les intégrés d'abord pour qu'un effet livré ne puisse pas être usurpé. Les
-    /// deux asymétries servent le même but et ne doivent pas être alignées.
+    /// The directory is checked **before** the built-in case: that is what allows
+    /// removing a directory that takes over a built-in id, invisible in the list
+    /// and never run, but present on disk. The order is the reverse of the one
+    /// used to resolve at run time ([`Self::effect_js`]), which checks built-ins
+    /// first so a shipped effect cannot be taken over. Both asymmetries serve the
+    /// same goal and must not be aligned.
     ///
-    /// Séparé de [`Self::delete_effect`] parce que la commande arrête les boucles
-    /// **entre** le refus et l'effacement : refuser après coup ferait payer à un
-    /// effet intégré qui tourne le prix d'un arrêt qu'on ne lui devait pas.
+    /// Separate from [`Self::delete_effect`] because the command stops the loops
+    /// **between** the refusal and the erasure: refusing afterwards would make a
+    /// running built-in effect pay for a stop it was not owed.
     pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
         validate_id(id)?;
         if self.effects_dir.join(id).is_dir() {
@@ -936,23 +926,23 @@ impl Store {
         Err(format!("aucun effet installé sous l'identifiant « {id} »"))
     }
 
-    /// Supprime `effects/<id>/`.
+    /// Deletes `effects/<id>/`.
     pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
-        // Revérifié plutôt que supposé : entre le refus de la commande et cet
-        // appel, le dossier a pu disparaître — et c'est ici qu'on le dit.
+        // Checked again rather than assumed: between the command's refusal and
+        // this call, the directory may have disappeared — and this is where it is
+        // reported.
         self.check_deletable(id)?;
         let dir = self.effects_dir.join(id);
         fs::remove_dir_all(&dir)
             .map_err(|e| format!("suppression de {} impossible : {e}", dir.display()))
     }
 
-    /// Lit `settings.json`, ou renvoie les valeurs par défaut s'il n'existe pas.
+    /// Reads `settings.json`, or returns the default values if it does not exist.
     pub fn read_settings(&self) -> CmdResult<Settings> {
         let raw = match fs::read_to_string(&self.settings_file) {
             Ok(raw) => raw,
-            // Premier lancement : pas de fichier, donc les défauts. Une erreur
-            // ici obligerait l'interface à traiter le cas nominal comme un
-            // incident.
+            // First launch: no file, so the defaults. An error here would force
+            // the interface to treat the nominal case as an incident.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
             Err(e) => {
                 return Err(format!(
@@ -967,34 +957,33 @@ impl Store {
                 self.settings_file.display()
             )
         })?;
-        // Ici et nulle part ailleurs : c'est le seul chemin par lequel un fichier
-        // entre dans l'application, donc le seul endroit où une clé héritée peut
-        // être traduite une fois pour toutes.
-        settings.absorber_l_heritage();
+        // Here and nowhere else: this is the only path by which a file enters the
+        // application, so the only place where a legacy key can be translated
+        // once and for all.
+        settings.absorb_legacy();
         Ok(settings)
     }
 
-    /// Écrit `settings.json`.
+    /// Writes `settings.json`.
     ///
-    /// Passage par un fichier temporaire puis renommage : une coupure en cours
-    /// d'écriture laisserait sinon des réglages tronqués, donc une application
-    /// qui ne démarre plus.
+    /// Goes through a temporary file then a rename: a power cut in the middle of
+    /// writing would otherwise leave truncated settings, and so an application
+    /// that no longer starts.
     ///
-    /// Un seul nom de temporaire, et il peut le rester : les commandes Tauri
-    /// **synchrones** s'exécutent sur le fil principal, donc deux séquences
-    /// lire-modifier-écrire ne s'entrelacent pas. Un nom unique par écriture a
-    /// été essayé puis retiré — il défendait contre un entrelacement que rien ne
-    /// produit, et laissait un fichier derrière lui à chaque échec, là où un nom
-    /// fixe est simplement réécrit à la tentative suivante.
+    /// A single temporary name, and it can stay that way: **synchronous** Tauri
+    /// commands run on the main thread, so two read-modify-write sequences do not
+    /// interleave. A unique name per write was tried then removed — it defended
+    /// against an interleaving nothing produces, and left a file behind on every
+    /// failure, where a fixed name is simply overwritten on the next attempt.
     ///
-    /// ⚠️ **Ce raisonnement vaut à l'intérieur d'un processus, pas entre deux.**
-    /// Deux candeo écriraient dans le *même* `settings.json.tmp`, et l'un
-    /// renommerait ce que l'autre est en train d'écrire : le renommage resterait
-    /// atomique, mais ce qu'il publierait ne le serait plus — des réglages
-    /// tronqués, ou ceux du voisin. Ce qui tient ce nom fixe, c'est donc
-    /// [`crate::single_instance`], et les deux décisions ne se défont pas l'une
-    /// sans l'autre : rendre candeo multi-instance obligerait à reprendre ce nom,
-    /// et le reprendre sans cela n'achèterait rien.
+    /// ⚠️ **This reasoning holds within one process, not between two.** Two candeo
+    /// instances would write to the *same* `settings.json.tmp`, and one would
+    /// rename what the other is writing: the rename would stay atomic, but what it
+    /// published would not — truncated settings, or the other instance's. What
+    /// keeps this name fixed is therefore [`crate::single_instance`], and the two
+    /// decisions are not undone one without the other: making candeo
+    /// multi-instance would require revisiting this name, and revisiting it
+    /// without that would buy nothing.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
             return Err("chemin de réglages sans dossier parent".into());
@@ -1013,30 +1002,30 @@ impl Store {
         })
     }
 
-    /// Réécrit `settings.json` avec les valeurs par défaut.
+    /// Rewrites `settings.json` with the default values.
     ///
-    /// **Ne touche à aucun effet**, et ne saurait pas le faire : elle n'écrit que
-    /// dans `settings_file`. C'est la distinction que porte tout ce module — un
-    /// effet est du contenu, le choix de l'effet actif est de la configuration —
-    /// et c'est ici qu'elle protège quelque chose : celui qui veut seulement
-    /// désadopter un clavier ne doit pas perdre du code écrit à la main.
+    /// **Touches no effect**, and could not: it only writes to `settings_file`.
+    /// This is the distinction the whole module carries — an effect is content,
+    /// the choice of the active effect is configuration — and here it protects
+    /// something: whoever only wants to un-adopt a keyboard must not lose
+    /// hand-written code.
     ///
-    /// Le fichier est réécrit plutôt qu'effacé. Les deux se relisent pareil —
-    /// [`Self::read_settings`] rend les défauts quand il n'y a pas de fichier —
-    /// mais un fichier qui disparaît ressemble à un dégât, là où un fichier remis
-    /// à plat se lit et se compare.
+    /// The file is rewritten rather than deleted. Both read back the same —
+    /// [`Self::read_settings`] returns the defaults when there is no file — but a
+    /// file that disappears looks like damage, whereas a file reset to defaults
+    /// can be read and compared.
     pub fn reset_settings(&self) -> CmdResult<()> {
         self.write_settings(&Settings::default())
     }
 }
 
-/// Effets compilés dans le binaire, sous la forme qu'attend la galerie.
+/// Effects compiled into the binary, in the shape the gallery expects.
 ///
-/// Le manifeste est reconstruit à chaque appel plutôt que gardé : cinq petits
-/// objets JSON, contre une initialisation paresseuse et son verrou. Un JSON de
-/// paramètres invalide donnerait ici un manifeste sans paramètres, ce que le
-/// test `les_parametres_integres_sont_du_json_valide` interdit — mieux vaut un
-/// test qui échoue qu'une panique au démarrage de l'application.
+/// The manifest is rebuilt on every call rather than kept: five small JSON
+/// objects, against a lazy initialization and its lock. Invalid parameter JSON
+/// would give a manifest without parameters here, which a test in
+/// [`crate::builtins`] forbids — better a failing test than a panic at
+/// application startup.
 fn builtin_effects() -> Vec<EffectEntry> {
     builtins::ALL
         .iter()
@@ -1044,9 +1033,8 @@ fn builtin_effects() -> Vec<EffectEntry> {
         .map(|(b, swatch)| EffectEntry {
             id: b.id.to_string(),
             kind: EffectKind::Builtin,
-            // Les intégrés n'ont pas de dossier : leur repère vit en mémoire,
-            // calculé une fois par exécution. Le pourquoi est dans
-            // [`builtins::swatches`].
+            // Built-ins have no directory: their swatch lives in memory,
+            // computed once per run. The why is in [`builtins::swatches`].
             swatch: swatch.clone(),
             manifest: Manifest {
                 name: b.name.to_string(),
@@ -1058,21 +1046,21 @@ fn builtin_effects() -> Vec<EffectEntry> {
         .collect()
 }
 
-/// Échantillonne le repère de l'effet et l'écrit à côté de son manifeste — ou
-/// efface celui qui s'y trouvait.
+/// Samples the effect's swatch and writes it next to its manifest — or erases the
+/// one that was there.
 ///
-/// **Rien ne remonte, pas même une erreur.** Un repère est un agrément : il ne
-/// doit jamais empêcher l'installation d'un effet par ailleurs valide. Un effet
-/// qui lève, ne charge pas ou boucle pendant l'échantillonnage s'installe donc
-/// normalement, simplement sans vignette.
+/// **Nothing is reported, not even an error.** A swatch is a nicety: it must never
+/// prevent installing an otherwise valid effect. An effect that throws, does not
+/// load or loops during sampling therefore installs normally, just without a
+/// thumbnail.
 ///
-/// L'effacement compte autant que l'écriture : un effet modifié qui ne
-/// s'échantillonne plus garderait sinon l'ancien fichier et afficherait les
-/// couleurs d'une version qui n'existe plus.
+/// Erasing matters as much as writing: a modified effect that no longer samples
+/// would otherwise keep the old file and show the colors of a version that no
+/// longer exists.
 fn write_swatch(dir: &Path, js: &str) {
-    // Le gabarit par défaut, jamais celui du clavier branché : un repère qui
-    // dépendrait du matériel présent à l'installation ne serait comparable ni
-    // d'un effet à l'autre, ni d'une machine à l'autre.
+    // The default layout, never the one of the plugged-in keyboard: a swatch that
+    // depended on the hardware present at install would be comparable neither
+    // from one effect to another, nor from one machine to another.
     let swatch = swatch::sample(js, crate::default_layout());
     let path = dir.join(SWATCH_FILE);
 
@@ -1085,16 +1073,15 @@ fn write_swatch(dir: &Path, js: &str) {
     }
 }
 
-/// Le repère d'un effet installé, vide à défaut.
+/// The swatch of an installed effect, empty if there is none.
 ///
-/// Aucun recalcul ici : lister la bibliothèque doit rester une lecture de
-/// disque. Échantillonner à l'affichage ferait dépendre l'ouverture de la
-/// galerie du comportement de tous les effets installés — et un repère ne change
-/// pas entre deux affichages.
+/// No recomputation here: listing the library must remain a disk read. Sampling
+/// at display time would make opening the gallery depend on the behavior of every
+/// installed effect — and a swatch does not change between two displays.
 ///
-/// Un effet installé par une version antérieure n'a donc pas de repère tant
-/// qu'il n'est pas réenregistré. C'est le prix de cette règle, et il est payé
-/// par une pastille neutre, pas par une erreur.
+/// An effect installed by an earlier version therefore has no swatch until it is
+/// saved again. That is the price of this rule, and it is paid with a neutral
+/// dot, not with an error.
 fn read_swatch(dir: &Path) -> Swatch {
     fs::read_to_string(dir.join(SWATCH_FILE))
         .ok()
@@ -1111,10 +1098,10 @@ fn write(path: &Path, contents: &str) -> CmdResult<()> {
         .map_err(|e| format!("écriture de {} impossible : {e}", path.display()))
 }
 
-// ---------------------------------------------------------------- commandes
+// ---------------------------------------------------------------- commands
 
-/// Résout les emplacements du système. Aucun chemin n'est écrit en dur : sous
-/// Windows les deux appels renvoient le même dossier, sous Linux non.
+/// Resolves the system locations. No path is hard-coded: on Windows both calls
+/// return the same directory, on Linux they do not.
 pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     let data = app
         .path()
@@ -1127,7 +1114,7 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     Ok(Store::new(&data, &config))
 }
 
-/// Installe un effet et renvoie son identifiant.
+/// Installs an effect and returns its id.
 #[tauri::command]
 pub fn install_effect(
     app: AppHandle,
@@ -1138,39 +1125,38 @@ pub fn install_effect(
     store(&app)?.install_effect(&source_ts, &js, &manifest)
 }
 
-/// Effets intégrés et installés, avec leur nature.
+/// Built-in and installed effects, with their kind.
 #[tauri::command]
 pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
 }
 
-/// Supprime un effet, **et tout ce que `settings.json` retenait de lui** : ses
-/// réglages, et son application sur les appareils.
+/// Deletes an effect, **and everything `settings.json` kept about it**: its
+/// parameters, and where it is applied on devices.
 ///
-/// Les deux vont ensemble : laisser les réglages derrière ferait grossir
-/// `settings.json` d'entrées désignant un identifiant que plus rien ne nomme, et
-/// un effet réinstallé plus tard sous le même nom hériterait en silence des
-/// réglages de son homonyme disparu. Laisser l'**application** derrière laisserait
-/// en plus un identifiant pendant, que le jour où l'on reprendra l'effet au
-/// démarrage on essaierait de lancer — voir [`Settings::forget_effect`], où ce
-/// choix est arbitré.
+/// Both go together: leaving the parameters behind would grow `settings.json`
+/// with entries pointing at an id nothing names any more, and an effect
+/// reinstalled later under the same name would silently inherit the parameters of
+/// its vanished namesake. Leaving the **applied effect** behind would also leave a
+/// dangling id, which we would try to start the day the effect is resumed at
+/// startup — see [`Settings::forget_effect`], where this choice is made.
 ///
-/// L'oubli vient **après** la suppression : si celle-ci échoue, l'effet est
-/// toujours là et ses réglages doivent l'être aussi.
+/// Forgetting comes **after** the deletion: if the deletion fails, the effect is
+/// still there and its parameters must be too.
 ///
-/// # Trois temps, dans cet ordre
+/// # Three steps, in this order
 ///
-/// 1. **le refus**, avant tout le reste : un effet intégré ou un identifiant qui
-///    ne désigne rien s'entend dire non sans que rien n'ait été arrêté ;
-/// 2. **l'arrêt des boucles**, sur tous les appareils où l'effet tourne, et
-///    avant l'effacement : le moteur exécute un `effect.js` lu au démarrage et
-///    gardé en mémoire, il continuerait donc sans erreur visible sur un dossier
-///    disparu ;
-/// 3. **l'effacement**, puis l'oubli des réglages.
+/// 1. **the refusal**, before everything else: a built-in effect or an id that
+///    designates nothing gets a no without anything having been stopped;
+/// 2. **stopping the loops**, on every device where the effect runs, and before
+///    the erasure: the engine runs an `effect.js` read at startup and kept in
+///    memory, so it would carry on with no visible error on a directory that is
+///    gone;
+/// 3. **the erasure**, then forgetting the parameters.
 ///
-/// L'arrêt côté Rust plutôt que dans la fenêtre : c'est le seul endroit qui le
-/// garantisse quel que soit l'appelant, et l'invariant — aucune boucle ne fait
-/// tourner un effet supprimé — ne tient que s'il tient partout.
+/// Stopping on the Rust side rather than in the window: it is the only place that
+/// guarantees it whoever the caller is, and the invariant — no loop runs a deleted
+/// effect — only holds if it holds everywhere.
 #[tauri::command]
 pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let store = store(&app)?;
@@ -1185,11 +1171,11 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     Ok(())
 }
 
-/// Rend la source d'un effet, pour la rouvrir dans l'éditeur.
+/// Returns an effect's source, to reopen it in the editor.
 ///
-/// C'est la contrepartie d'`install_effect` : sans elle, un effet installé ne
-/// serait plus modifiable — c'est précisément pourquoi le `.ts` est écrit sur
-/// disque à côté du `.js`. Un effet intégré rend son JavaScript, qui est sa
+/// It is the counterpart of `install_effect`: without it, an installed effect
+/// could no longer be modified — which is precisely why the `.ts` is written to
+/// disk next to the `.js`. A built-in effect returns its JavaScript, which is its
 /// source.
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
@@ -1206,61 +1192,57 @@ pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
     store(&app)?.write_settings(&settings)
 }
 
-/// Remet la configuration au défaut, et repose les appareils.
+/// Resets the configuration to the default, and releases the devices.
 ///
-/// # Ce que ça ne fait pas
+/// # What it does not do
 ///
-/// **Aucun effet n'est touché.** Les effets écrits vivent dans
-/// `app_data_dir()/effects/`, la configuration dans `settings.json` : deux
-/// emplacements, deux gestes. Retirer un effet est une autre commande,
-/// [`delete_effect`], une par effet — confondre les deux ferait perdre du code
-/// écrit à la main à qui voulait seulement désadopter un clavier.
+/// **No effect is touched.** Written effects live in `app_data_dir()/effects/`,
+/// the configuration in `settings.json`: two locations, two actions. Removing an
+/// effect is another command, [`delete_effect`], one per effect — mixing the two
+/// would make whoever only wanted to un-adopt a keyboard lose hand-written code.
 ///
-/// Ce n'est pas non plus un endroit où libérer des ressources côté effets :
-/// chaque boucle porte son `Runtime` et son `Context` QuickJS, et les deux sont
-/// détruits avec elle — tout le tas JavaScript part avec.
+/// Nor is it a place to free resources on the effects side: each loop owns its
+/// QuickJS `Runtime` and `Context`, and both are destroyed with it — the whole
+/// JavaScript heap goes with them.
 ///
-/// # L'ordre
+/// # The order
 ///
-/// Les appareils sont reposés **avant** l'écriture : remettre la table des
-/// appareils à zéro pendant qu'un effet tourne laisserait des boucles que plus
-/// aucune décision ne désigne. Voir [`crate::release_devices`] pour le détail de
-/// ce que « reposer » veut dire.
+/// Devices are released **before** the write: resetting the device table while an
+/// effect runs would leave loops that no decision designates any more. See
+/// [`crate::release_devices`] for what "release" means in detail.
 ///
-/// Le magasin est résolu en premier, avant même l'arrêt : un dossier de
-/// configuration introuvable doit se dire sans avoir rien éteint.
+/// The store is resolved first, even before stopping: a configuration directory
+/// that cannot be found must be reported without having turned anything off.
 ///
-/// Le niveau du journal repart au défaut avec le reste, **et tout de suite** : il
-/// vient d'être effacé du fichier, le laisser appliqué jusqu'au prochain
-/// lancement ferait mentir l'écran qui l'affiche.
+/// The log level goes back to the default with the rest, **and right away**: it
+/// was just erased from the file, and leaving it applied until the next launch
+/// would make the screen showing it lie.
 #[tauri::command]
 pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
     let store = store(&app)?;
     crate::release_devices(&state);
     store.reset_settings()?;
-    crate::journal::revenir_au_defaut();
+    crate::journal::reset_level_to_default();
     Ok(())
 }
 
-/// Retient les réglages d'un effet pour un appareil, sans toucher au reste.
+/// Keeps an effect's parameters for a device, without touching the rest.
 ///
-/// Une commande dédiée plutôt qu'un `set_settings` depuis l'interface : la
-/// lecture, la modification et l'écriture se font ici, d'un seul tenant.
+/// A dedicated command rather than a `set_settings` from the interface: the read,
+/// the change and the write happen here, in one go.
 ///
-/// Ce n'est pas une précaution contre un entrelacement — les commandes
-/// synchrones s'exécutent sur le fil principal, elles ne se chevauchent pas.
-/// C'est une précaution contre une **copie périmée** : la fenêtre lit les
-/// réglages une fois, au montage de l'écran, et un `set_settings` posté au
-/// premier mouvement de curseur renverrait cet instantané tel quel, effaçant
-/// tout ce qui aurait été décidé depuis. Ce n'est pas un cas d'école — le Rust
-/// écrit `settings.json` à chaque `adopt_device`, et adopter un appareil est
-/// justement ce qu'on fait entre deux réglages.
+/// It is not a guard against interleaving — synchronous commands run on the main
+/// thread, they do not overlap. It is a guard against a **stale copy**: the window
+/// reads the settings once, when the screen mounts, and a `set_settings` posted on
+/// the first slider move would send that snapshot back as is, erasing everything
+/// decided since. This is not a textbook case — the Rust side writes
+/// `settings.json` on every `adopt_device`, and adopting a device is exactly what
+/// one does between two adjustments.
 ///
-/// Elle ne change **rien** à l'effet en cours : ajuster à chaud, c'est
-/// [`crate::runtime::set_effect_params`]. Les deux sont séparées parce qu'elles
-/// n'ont ni la même cadence ni la même destination — des dizaines d'appels par
-/// seconde vers la boucle de rendu, un seul vers le disque quand le curseur
-/// s'arrête.
+/// It changes **nothing** in the running effect: adjusting live is
+/// [`crate::runtime::set_effect_params`]. The two are separate because they have
+/// neither the same rate nor the same destination — dozens of calls per second to
+/// the render loop, a single one to disk when the slider stops.
 #[tauri::command]
 pub fn remember_effect_params(
     app: AppHandle,
@@ -1272,11 +1254,11 @@ pub fn remember_effect_params(
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
 
-    // Rien de neuf : on ne réécrit pas le fichier. Un curseur qu'on déplace puis
-    // qu'on ramène repasse par ici, et l'aller-retour entre deux effets aussi —
-    // une écriture disque par passage n'apprendrait rien à personne.
-    let retenus = settings.effect_params(device.vid, device.pid, &effect);
-    if retenus == Some(&params) || (retenus.is_none() && params.is_empty()) {
+    // Nothing new: the file is not rewritten. A slider moved then brought back
+    // comes through here, and so does switching back and forth between two
+    // effects — one disk write per pass would tell nobody anything.
+    let stored = settings.effect_params(device.vid, device.pid, &effect);
+    if stored == Some(&params) || (stored.is_none() && params.is_empty()) {
         return Ok(());
     }
 
@@ -1292,17 +1274,17 @@ mod tests {
 
     use super::*;
 
-    /// Deux dossiers distincts, comme sous Linux : un test qui les
-    /// confondrait laisserait passer une confusion données / configuration.
-    fn store_temporaire() -> (tempfile::TempDir, Store) {
-        let tmp = tempfile::tempdir().expect("dossier temporaire");
+    /// Two separate directories, as on Linux: a test that merged them would let a
+    /// data / configuration mix-up slip through.
+    fn temp_store() -> (tempfile::TempDir, Store) {
+        let tmp = tempfile::tempdir().expect("temp dir");
         let store = Store::new(&tmp.path().join("data"), &tmp.path().join("config"));
         (tmp, store)
     }
 
-    /// La part installée de la bibliothèque. Les intégrés y sont toujours
-    /// présents : les tests d'installation parlent des autres.
-    fn installes(store: &Store) -> Vec<EffectEntry> {
+    /// The installed part of the library. Built-ins are always there: the install
+    /// tests are about the others.
+    fn installed_effects(store: &Store) -> Vec<EffectEntry> {
         store
             .list_effects()
             .unwrap()
@@ -1311,22 +1293,22 @@ mod tests {
             .collect()
     }
 
-    /// Écrit un dossier d'effet à la main, sans passer par `install_effect`.
-    /// C'est la seule façon d'obtenir un identifiant réservé sur disque — et
-    /// donc de vérifier ce qui se passe alors.
-    fn poser_un_dossier(tmp: &tempfile::TempDir, id: &str, js: &str) {
+    /// Writes an effect directory by hand, without going through
+    /// `install_effect`. It is the only way to get a reserved id on disk — and so
+    /// to check what happens then.
+    fn plant_effect_dir(tmp: &tempfile::TempDir, id: &str, js: &str) {
         let dir = tmp.path().join("data").join("effects").join(id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(JS_FILE), js).unwrap();
         fs::write(dir.join(SOURCE_FILE), js).unwrap();
         fs::write(
             dir.join(MANIFEST_FILE),
-            serde_json::to_string(&manifeste("Usurpateur")).unwrap(),
+            serde_json::to_string(&test_manifest("Usurpateur")).unwrap(),
         )
         .unwrap();
     }
 
-    fn manifeste(name: &str) -> Manifest {
+    fn test_manifest(name: &str) -> Manifest {
         Manifest {
             name: name.into(),
             description: "Une onde de teinte se propage depuis le centre".into(),
@@ -1341,9 +1323,9 @@ mod tests {
     }
 
     #[test]
-    fn installation_puis_lecture_font_un_aller_retour() {
-        let (tmp, store) = store_temporaire();
-        let manifest = manifeste("Onde circulaire");
+    fn install_then_read_round_trips() {
+        let (tmp, store) = temp_store();
+        let manifest = test_manifest("Onde circulaire");
 
         let id = store
             .install_effect(
@@ -1362,10 +1344,10 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dir.join("effect.js")).unwrap(),
             "export const x = 1",
-            "le .js est un livrable, pas un cache : il doit être sur disque"
+            "the .js is a deliverable, not a cache: it must be on disk"
         );
 
-        let effects = installes(&store);
+        let effects = installed_effects(&store);
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id, id);
         assert_eq!(effects[0].manifest, manifest);
@@ -1373,27 +1355,27 @@ mod tests {
     }
 
     #[test]
-    fn reinstaller_le_meme_nom_met_a_jour_au_lieu_de_dupliquer() {
-        let (_tmp, store) = store_temporaire();
+    fn reinstalling_the_same_name_updates_instead_of_duplicating() {
+        let (_tmp, store) = temp_store();
         store
-            .install_effect("v1", "v1", &manifeste("Onde"))
+            .install_effect("v1", "v1", &test_manifest("Onde"))
             .unwrap();
         store
-            .install_effect("v2", "v2", &manifeste("Onde"))
+            .install_effect("v2", "v2", &test_manifest("Onde"))
             .unwrap();
 
-        assert_eq!(installes(&store).len(), 1);
+        assert_eq!(installed_effects(&store).len(), 1);
     }
 
     #[test]
-    fn la_bibliotheque_ne_contient_que_les_integres_avant_installation() {
-        let (_tmp, store) = store_temporaire();
+    fn library_holds_only_builtins_before_any_install() {
+        let (_tmp, store) = temp_store();
         let effects = store.list_effects().unwrap();
 
         assert_eq!(effects.len(), builtins::ALL.len());
         assert!(effects.iter().all(|e| e.kind == EffectKind::Builtin));
-        // La galerie n'est jamais vide au premier lancement : c'est tout
-        // l'objet des effets livrés.
+        // The gallery is never empty on first launch: that is the whole point
+        // of shipped effects.
         assert!(!effects.is_empty());
 
         for (entry, b) in effects.iter().zip(&builtins::ALL) {
@@ -1402,23 +1384,19 @@ mod tests {
             assert_eq!(entry.manifest.api_version, EFFECTS_API_VERSION);
             assert!(
                 !entry.manifest.params.is_empty(),
-                "« {} » : paramètres perdus à la lecture du JSON",
+                "\"{}\": parameters lost while reading the JSON",
                 b.id
             );
-            // Les intégrés n'ont pas de dossier, mais ils ont un repère : il est
-            // calculé en mémoire, à la première lecture de la bibliothèque.
-            assert!(
-                !entry.swatch.is_empty(),
-                "« {} » : aucun repère de couleurs",
-                b.id
-            );
+            // Built-ins have no directory, but they do have a swatch: it is
+            // computed in memory, the first time the library is read.
+            assert!(!entry.swatch.is_empty(), "\"{}\": no color swatch", b.id);
         }
     }
 
-    // ------------------------------------------------------------ repère
+    // ------------------------------------------------------------ swatch
 
-    /// Un effet d'une seule couleur : son repère est cette couleur, quatre fois.
-    fn effet_uni(hex: &str) -> String {
+    /// A single-color effect: its swatch is that color, four times.
+    fn solid_effect(hex: &str) -> String {
         format!(
             "export default {{ name: 'Uni', render({{ layout, frame }}) {{ \
              for (const key of layout.keys) frame.set(key, {{ r: 0x{}, g: 0x{}, b: 0x{} }}) }} }}",
@@ -1428,7 +1406,7 @@ mod tests {
         )
     }
 
-    fn swatch_sur_disque(tmp: &tempfile::TempDir, id: &str) -> Option<String> {
+    fn swatch_on_disk(tmp: &tempfile::TempDir, id: &str) -> Option<String> {
         let path = tmp
             .path()
             .join("data")
@@ -1438,206 +1416,206 @@ mod tests {
         fs::read_to_string(path).ok()
     }
 
-    /// Le repère est écrit à l'installation, à côté du manifeste, et la liste le
-    /// rend sans second appel.
+    /// The swatch is written at install, next to the manifest, and the list
+    /// returns it without a second call.
     #[test]
-    fn l_installation_preleve_le_repere_sur_l_effet() {
-        let (tmp, store) = store_temporaire();
+    fn install_samples_the_swatch_from_the_effect() {
+        let (tmp, store) = temp_store();
         let id = store
-            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .install_effect("", &solid_effect("00ff00"), &test_manifest("Uni"))
             .unwrap();
 
         assert_eq!(
-            swatch_sur_disque(&tmp, &id).as_deref(),
+            swatch_on_disk(&tmp, &id).as_deref(),
             Some(r##"["#00ff00","#00ff00","#00ff00","#00ff00"]"##),
-            "le repère doit être rangé à côté du manifeste"
+            "the swatch must be stored next to the manifest"
         );
-        assert_eq!(installes(&store)[0].swatch, vec!["#00ff00"; 4]);
+        assert_eq!(installed_effects(&store)[0].swatch, vec!["#00ff00"; 4]);
     }
 
-    /// Réenregistrer un effet modifié refait son repère : c'est toute la raison
-    /// de l'échantillonner plutôt que de le déclarer. Un effet devenu rouge ne
-    /// peut pas garder sa vignette verte.
+    /// Saving a modified effect again redoes its swatch: that is the whole reason
+    /// for sampling it rather than declaring it. An effect that turned red cannot
+    /// keep its green thumbnail.
     #[test]
-    fn reenregistrer_un_effet_refait_son_repere() {
-        let (_tmp, store) = store_temporaire();
+    fn saving_an_effect_again_resamples_its_swatch() {
+        let (_tmp, store) = temp_store();
         store
-            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .install_effect("", &solid_effect("00ff00"), &test_manifest("Uni"))
             .unwrap();
         store
-            .install_effect("", &effet_uni("ff0000"), &manifeste("Uni"))
+            .install_effect("", &solid_effect("ff0000"), &test_manifest("Uni"))
             .unwrap();
 
-        assert_eq!(installes(&store)[0].swatch, vec!["#ff0000"; 4]);
+        assert_eq!(installed_effects(&store)[0].swatch, vec!["#ff0000"; 4]);
     }
 
-    /// **Un repère qu'on n'arrive pas à calculer n'empêche pas l'installation.**
-    /// C'est du code utilisateur : il a le droit d'être cassé, et l'effet doit
-    /// tout de même se ranger — sans quoi on ne pourrait même plus le rouvrir
-    /// dans l'éditeur pour le réparer.
+    /// **A swatch that cannot be computed does not prevent the install.** It is
+    /// user code: it is allowed to be broken, and the effect must still be stored —
+    /// otherwise it could not even be reopened in the editor to fix it.
     #[test]
-    fn un_effet_qui_leve_s_installe_quand_meme_sans_repere() {
-        let (tmp, store) = store_temporaire();
+    fn a_throwing_effect_still_installs_without_a_swatch() {
+        let (tmp, store) = temp_store();
         let js = "export default { name: 'Cassé', render() { throw new Error('boum') } }";
 
         let id = store
-            .install_effect("source", js, &manifeste("Cassé"))
+            .install_effect("source", js, &test_manifest("Cassé"))
             .unwrap();
 
-        assert_eq!(store.effect_js(&id).unwrap(), js, "l'effet doit être écrit");
-        assert_eq!(swatch_sur_disque(&tmp, &id), None);
-        assert!(installes(&store)[0].swatch.is_empty());
+        assert_eq!(
+            store.effect_js(&id).unwrap(),
+            js,
+            "the effect must be written"
+        );
+        assert_eq!(swatch_on_disk(&tmp, &id), None);
+        assert!(installed_effects(&store)[0].swatch.is_empty());
     }
 
-    /// Et le repère précédent est **effacé**, pas conservé : afficher les
-    /// couleurs d'une version qui n'existe plus serait pire que n'en afficher
-    /// aucune.
+    /// And the previous swatch is **erased**, not kept: showing the colors of a
+    /// version that no longer exists would be worse than showing none.
     #[test]
-    fn un_effet_devenu_casse_perd_son_repere() {
-        let (tmp, store) = store_temporaire();
+    fn an_effect_that_breaks_loses_its_swatch() {
+        let (tmp, store) = temp_store();
         let id = store
-            .install_effect("", &effet_uni("00ff00"), &manifeste("Uni"))
+            .install_effect("", &solid_effect("00ff00"), &test_manifest("Uni"))
             .unwrap();
-        assert!(swatch_sur_disque(&tmp, &id).is_some());
+        assert!(swatch_on_disk(&tmp, &id).is_some());
 
         store
             .install_effect(
                 "",
                 "export default { render() { throw 1 } }",
-                &manifeste("Uni"),
+                &test_manifest("Uni"),
             )
             .unwrap();
 
-        assert_eq!(swatch_sur_disque(&tmp, &id), None);
-        assert!(installes(&store)[0].swatch.is_empty());
+        assert_eq!(swatch_on_disk(&tmp, &id), None);
+        assert!(installed_effects(&store)[0].swatch.is_empty());
     }
 
     #[test]
-    fn suppression_retire_le_dossier() {
-        let (tmp, store) = store_temporaire();
-        let id = store.install_effect("", "", &manifeste("Onde")).unwrap();
+    fn delete_removes_the_directory() {
+        let (tmp, store) = temp_store();
+        let id = store
+            .install_effect("", "", &test_manifest("Onde"))
+            .unwrap();
 
         store.delete_effect(&id).unwrap();
         assert!(!tmp.path().join("data").join("effects").join(&id).exists());
-        assert!(installes(&store).is_empty());
+        assert!(installed_effects(&store).is_empty());
 
         let err = store.delete_effect(&id).unwrap_err();
-        assert!(err.contains("aucun effet installé"), "message : {err}");
+        assert!(err.contains("aucun effet installé"), "message: {err}");
     }
 
-    /// Le refus doit s'obtenir **sans rien supprimer**.
+    /// The refusal must be obtained **without deleting anything**.
     ///
-    /// C'est ce qui permet à la commande d'arrêter les boucles entre le refus et
-    /// l'effacement : un effet intégré qui tourne s'entend dire non sans avoir
-    /// payé l'arrêt de sa boucle au passage.
+    /// That is what lets the command stop the loops between the refusal and the
+    /// erasure: a running built-in effect gets a no without paying for its loop
+    /// being stopped along the way.
     #[test]
-    fn le_refus_de_suppression_s_obtient_sans_rien_supprimer() {
-        let (tmp, store) = store_temporaire();
-        let id = store.install_effect("", "", &manifeste("Onde")).unwrap();
+    fn delete_refusal_is_obtained_without_deleting_anything() {
+        let (tmp, store) = temp_store();
+        let id = store
+            .install_effect("", "", &test_manifest("Onde"))
+            .unwrap();
 
         store.check_deletable(&id).unwrap();
         assert!(
             tmp.path().join("data").join("effects").join(&id).is_dir(),
-            "la vérification a emporté le dossier"
+            "the check took the directory away"
         );
 
         let err = store.check_deletable(builtins::ALL[0].id).unwrap_err();
-        assert!(err.contains("effet intégré"), "message : {err}");
+        assert!(err.contains("effet intégré"), "message: {err}");
 
         let err = store.check_deletable("jamais-installe").unwrap_err();
-        assert!(err.contains("aucun effet installé"), "message : {err}");
+        assert!(err.contains("aucun effet installé"), "message: {err}");
     }
 
-    // ------------------------------------------------------------ intégrés
+    // ------------------------------------------------------------ built-ins
 
-    /// Le moteur demande le JavaScript par identifiant : les intégrés doivent
-    /// donc se résoudre sans dossier, sinon ils ne démarreraient jamais.
+    /// The engine asks for the JavaScript by id: built-ins must therefore resolve
+    /// without a directory, otherwise they would never start.
     #[test]
-    fn un_effet_integre_se_lit_sans_dossier() {
-        let (_tmp, store) = store_temporaire();
+    fn a_builtin_effect_reads_without_a_directory() {
+        let (_tmp, store) = temp_store();
 
         for b in &builtins::ALL {
             assert_eq!(store.effect_js(b.id).unwrap(), b.js);
-            // La source aussi : un effet livré est là pour être lu et modifié,
-            // et son JavaScript *est* sa source.
+            // The source too: a shipped effect is there to be read and modified,
+            // and its JavaScript *is* its source.
             assert_eq!(store.effect_source(b.id).unwrap(), b.js);
         }
     }
 
-    /// L'usurpation, dans les deux sens : par l'installation, puis par un
-    /// dossier posé à la main.
+    /// Taking over an id, both ways: through install, then through a directory
+    /// planted by hand.
     #[test]
-    fn un_effet_utilisateur_ne_peut_pas_usurper_un_identifiant_integre() {
-        let (tmp, store) = store_temporaire();
+    fn a_user_effect_cannot_take_over_a_builtin_id() {
+        let (tmp, store) = temp_store();
 
-        for integre in &builtins::ALL {
-            // Un nom qui dérive exactement vers l'identifiant visé : c'est ce
-            // que taperait quelqu'un qui a lu la galerie.
+        for builtin in &builtins::ALL {
+            // A name that derives exactly to the targeted id: what someone who
+            // read the gallery would type.
             let err = store
-                .install_effect("", "", &manifeste(integre.id))
+                .install_effect("", "", &test_manifest(builtin.id))
                 .unwrap_err();
-            assert!(err.contains("effet intégré"), "message : {err}");
+            assert!(err.contains("effet intégré"), "message: {err}");
             assert!(
                 !tmp.path()
                     .join("data")
                     .join("effects")
-                    .join(integre.id)
+                    .join(builtin.id)
                     .exists(),
-                "« {} » : le refus est arrivé après l'écriture",
-                integre.id
+                "\"{}\": the refusal came after the write",
+                builtin.id
             );
 
-            // Le dossier posé à la main ne prend pas la main non plus : c'est
-            // toujours le code livré qui s'exécute, et la galerie n'affiche
-            // qu'une entrée sous cet identifiant — celle de l'intégré.
-            poser_un_dossier(&tmp, integre.id, "export default { render() {} }");
-            assert_eq!(store.effect_js(integre.id).unwrap(), integre.js);
-            assert_eq!(store.effect_source(integre.id).unwrap(), integre.js);
+            // The directory planted by hand does not take over either: the
+            // shipped code is still what runs, and the gallery shows only one
+            // entry under that id — the built-in's.
+            plant_effect_dir(&tmp, builtin.id, "export default { render() {} }");
+            assert_eq!(store.effect_js(builtin.id).unwrap(), builtin.js);
+            assert_eq!(store.effect_source(builtin.id).unwrap(), builtin.js);
 
-            let entrees: Vec<_> = store
+            let matching: Vec<_> = store
                 .list_effects()
                 .unwrap()
                 .into_iter()
-                .filter(|e| e.id == integre.id)
+                .filter(|e| e.id == builtin.id)
                 .collect();
-            assert_eq!(
-                entrees.len(),
-                1,
-                "« {} » : deux fois dans la liste",
-                integre.id
-            );
-            assert_eq!(entrees[0].kind, EffectKind::Builtin);
-            assert_eq!(entrees[0].manifest.name, integre.name);
+            assert_eq!(matching.len(), 1, "\"{}\": listed twice", builtin.id);
+            assert_eq!(matching[0].kind, EffectKind::Builtin);
+            assert_eq!(matching[0].manifest.name, builtin.name);
         }
     }
 
-    /// Un intégré ne se supprime pas — mais un dossier qui en usurpe
-    /// l'identifiant, si : sans quoi il resterait sur disque, invisible et
-    /// inamovible.
+    /// A built-in cannot be deleted — but a directory taking over its id can:
+    /// otherwise it would stay on disk, invisible and impossible to remove.
     #[test]
-    fn un_effet_integre_ne_se_supprime_pas_mais_son_usurpateur_oui() {
-        let (tmp, store) = store_temporaire();
+    fn a_builtin_cannot_be_deleted_but_its_impostor_can() {
+        let (tmp, store) = temp_store();
         let id = builtins::ALL[0].id;
 
         let err = store.delete_effect(id).unwrap_err();
-        assert!(err.contains("effet intégré"), "message : {err}");
+        assert!(err.contains("effet intégré"), "message: {err}");
 
-        poser_un_dossier(&tmp, id, "export default { render() {} }");
-        // Le disque d'abord, y compris pour le refus préalable de la commande :
-        // s'il consultait les intégrés en premier, l'usurpateur serait refusé
-        // avant même d'arriver à la suppression.
+        plant_effect_dir(&tmp, id, "export default { render() {} }");
+        // The disk first, including for the command's prior refusal: if it
+        // checked built-ins first, the impostor would be refused before even
+        // reaching the deletion.
         store.check_deletable(id).unwrap();
         store.delete_effect(id).unwrap();
         assert!(!tmp.path().join("data").join("effects").join(id).exists());
     }
 
     #[test]
-    fn les_identifiants_dangereux_sont_refuses() {
-        let (tmp, store) = store_temporaire();
-        // Un dossier voisin de `effects/`, qu'aucune remontée ne doit atteindre.
-        let voisin = tmp.path().join("data").join("secrets");
-        fs::create_dir_all(&voisin).unwrap();
-        let trop_long = "x".repeat(MAX_ID_LEN + 1);
+    fn dangerous_ids_are_refused() {
+        let (tmp, store) = temp_store();
+        // A directory next to `effects/`, which no traversal must reach.
+        let sibling = tmp.path().join("data").join("secrets");
+        fs::create_dir_all(&sibling).unwrap();
+        let too_long = "x".repeat(MAX_ID_LEN + 1);
 
         for id in [
             "",
@@ -1653,30 +1631,30 @@ mod tests {
             "nul",
             "com1",
             "LPT1",
-            "Onde",       // majuscules : hors liste blanche
-            "onde effet", // espace
-            "onde.js",    // point
+            "Onde",       // uppercase: outside the allow list
+            "onde effet", // space
+            "onde.js",    // dot
             "-onde",
             "onde-",
-            trop_long.as_str(),
+            too_long.as_str(),
         ] {
             let Err(err) = store.delete_effect(id) else {
-                panic!("« {id} » aurait dû être refusé");
+                panic!("\"{id}\" should have been refused");
             };
-            // Le refus doit venir de la validation, pas du disque : si le
-            // message parle d'effet introuvable, c'est que l'identifiant a été
-            // pris pour un chemin acceptable.
+            // The refusal must come from validation, not from the disk: if the
+            // message talks about an effect not found, the id was taken for an
+            // acceptable path.
             assert!(
                 !err.contains("aucun effet") && !err.contains("suppression"),
-                "« {id} » a atteint le disque : {err}"
+                "\"{id}\" reached the disk: {err}"
             );
         }
-        assert!(voisin.is_dir(), "un dossier voisin a été touché");
+        assert!(sibling.is_dir(), "a sibling directory was touched");
     }
 
     #[test]
-    fn des_noms_hostiles_donnent_un_identifiant_sur() {
-        let trop_long = "a".repeat(200);
+    fn hostile_names_yield_a_safe_id() {
+        let too_long = "a".repeat(200);
 
         for name in [
             "../../etc/passwd",
@@ -1687,10 +1665,10 @@ mod tests {
             "Onde / Vague : v2",
             "🙂🙂🙂",
             "Ondulation",
-            trop_long.as_str(),
+            too_long.as_str(),
         ] {
             let id = derive_id(name);
-            validate_id(&id).unwrap_or_else(|e| panic!("« {name} » → « {id} » : {e}"));
+            validate_id(&id).unwrap_or_else(|e| panic!("\"{name}\" -> \"{id}\": {e}"));
         }
         assert_eq!(derive_id("Onde / Vague : v2"), "onde-vague-v2");
         assert_eq!(derive_id("🙂🙂🙂"), "effet");
@@ -1698,34 +1676,36 @@ mod tests {
     }
 
     #[test]
-    fn un_effet_ecrit_pour_une_api_future_est_refuse() {
-        let (_tmp, store) = store_temporaire();
-        let mut manifest = manifeste("Onde");
+    fn an_effect_written_for_a_future_api_is_refused() {
+        let (_tmp, store) = temp_store();
+        let mut manifest = test_manifest("Onde");
         manifest.api_version = EFFECTS_API_VERSION + 1;
 
         let err = store.install_effect("", "", &manifest).unwrap_err();
-        assert!(err.contains("API d'effets"), "message : {err}");
+        assert!(err.contains("API d'effets"), "message: {err}");
 
         manifest.api_version = 0;
         assert!(store.install_effect("", "", &manifest).is_err());
     }
 
     #[test]
-    fn un_effet_sans_nom_est_refuse() {
-        let (_tmp, store) = store_temporaire();
-        let err = store.install_effect("", "", &manifeste("   ")).unwrap_err();
-        assert!(err.contains("nom"), "message : {err}");
+    fn an_effect_without_a_name_is_refused() {
+        let (_tmp, store) = temp_store();
+        let err = store
+            .install_effect("", "", &test_manifest("   "))
+            .unwrap_err();
+        assert!(err.contains("nom"), "message: {err}");
     }
 
     #[test]
-    fn sans_fichier_les_reglages_valent_le_defaut() {
-        let (_tmp, store) = store_temporaire();
+    fn without_a_file_settings_are_the_default() {
+        let (_tmp, store) = temp_store();
         assert_eq!(store.read_settings().unwrap(), Settings::default());
     }
 
     #[test]
-    fn les_reglages_font_un_aller_retour() {
-        let (tmp, store) = store_temporaire();
+    fn settings_round_trip() {
+        let (tmp, store) = temp_store();
         let settings = Settings {
             preferences: Preferences {
                 log_level: Some(LogLevel::Debug),
@@ -1746,22 +1726,22 @@ mod tests {
                 vid: 0x1532,
                 pid: 0x0292,
                 effect: "respiration".into(),
-                values: valeurs(&[("period", serde_json::json!(12.5))]),
+                values: to_map(&[("period", serde_json::json!(12.5))]),
             }],
-            log_level_herite: None,
+            legacy_log_level: None,
         };
 
         store.write_settings(&settings).unwrap();
         assert_eq!(store.read_settings().unwrap(), settings);
         assert!(
             tmp.path().join("config").join("settings.json").is_file(),
-            "les réglages vont dans le dossier de configuration, pas dans celui des données"
+            "settings go to the configuration directory, not the data directory"
         );
     }
 
     #[test]
-    fn un_reglage_absent_du_fichier_reprend_sa_valeur_par_defaut() {
-        let (tmp, store) = store_temporaire();
+    fn a_setting_missing_from_the_file_takes_its_default() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(
@@ -1776,13 +1756,13 @@ mod tests {
         assert_eq!(settings.preferences, Preferences::default());
     }
 
-    /// **Les trois vestiges mono-appareil ont disparu du fichier.** Les garder
-    /// aurait produit un `settings.json` qui décrit un effet actif, un appareil
-    /// choisi et un niveau de luminosité là où le moteur en fait tourner un par
-    /// appareil depuis l'issue #26.
+    /// **The three single-device leftovers are gone from the file.** Keeping them
+    /// would have produced a `settings.json` describing one active effect, one
+    /// chosen device and one brightness level, while the engine has run one per
+    /// device since issue #26.
     #[test]
-    fn le_fichier_ne_porte_plus_de_champ_mono_appareil() {
-        let (_tmp, store) = store_temporaire();
+    fn the_file_no_longer_has_single_device_fields() {
+        let (_tmp, store) = temp_store();
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
         settings.set_active_effect(VID, PID, Some("onde"));
@@ -1790,18 +1770,18 @@ mod tests {
         store.write_settings(&settings).unwrap();
 
         let json = serde_json::to_string(&settings).unwrap();
-        for mort in [r#""activeEffect""#, r#""device":"#, r#""brightness":40,"#] {
-            assert!(!json.contains(mort), "« {mort} » subsiste : {json}");
+        for dead in [r#""activeEffect""#, r#""device":"#, r#""brightness":40,"#] {
+            assert!(!json.contains(dead), "\"{dead}\" remains: {json}");
         }
-        // Ce qui les remplace est bien là, et indexé par appareil.
+        // What replaces them is there, and indexed by device.
         assert!(json.contains(r#""activeEffects":[{"vid":5426,"pid":658,"effect":"onde"}]"#));
         assert!(json.contains(r#""brightness":40"#));
     }
 
-    /// La luminosité est une décision **de l'appareil** : deux claviers ne
-    /// partagent pas un niveau, et c'est tout l'objet du déplacement.
+    /// Brightness is a decision **of the device**: two keyboards do not share a
+    /// level, and that is the whole point of the move.
     #[test]
-    fn la_luminosite_est_retenue_appareil_par_appareil() {
+    fn brightness_is_stored_per_device() {
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
         settings.set_device_state(VID, PID + 1, Some("ZZ02"), DeviceState::Adopted);
@@ -1810,47 +1790,48 @@ mod tests {
         assert_eq!(settings.brightness(VID, PID, Some("XY01")), 40);
         assert_eq!(
             settings.brightness(VID, PID + 1, Some("ZZ02")),
-            BRIGHTNESS_DEFAUT,
-            "le niveau du premier a débordé sur le second"
+            DEFAULT_BRIGHTNESS,
+            "the first device's level spilled over onto the second"
         );
 
-        // Rien de neuf : pas de réécriture du fichier pour la même valeur.
+        // Nothing new: no file rewrite for the same value.
         assert!(!settings.set_brightness(VID, PID, Some("XY01"), 40));
     }
 
-    /// Le défaut ne s'écrit pas, et **retirer** est ce que fait le retour au
-    /// maximum : le pendant de « rétablir les valeurs déclarées » côté effets.
+    /// The default is not written, and going back to the maximum is what
+    /// **removes**: the counterpart of "restore the declared values" on the
+    /// effects side.
     #[test]
-    fn la_luminosite_par_defaut_ne_laisse_aucune_entree() {
+    fn default_brightness_leaves_no_entry() {
         let mut settings = Settings::default();
 
-        // Sur un appareil dont on ne retient rien : aucune entrée n'est créée.
-        assert!(!settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT));
+        // On a device we keep nothing about: no entry is created.
+        assert!(!settings.set_brightness(VID, PID, None, DEFAULT_BRIGHTNESS));
         assert!(settings.devices.is_empty());
 
-        // Réglée puis ramenée au maximum : l'entrée naît puis disparaît, parce
-        // qu'elle ne retenait que ça.
+        // Set then brought back to the maximum: the entry appears then
+        // disappears, because that was all it kept.
         assert!(settings.set_brightness(VID, PID, None, 40));
         assert_eq!(settings.devices.len(), 1);
-        assert!(settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT));
+        assert!(settings.set_brightness(VID, PID, None, DEFAULT_BRIGHTNESS));
         assert!(
             settings.devices.is_empty(),
-            "une entrée qui ne décide plus rien est restée : {:?}",
+            "an entry that no longer decides anything stayed: {:?}",
             settings.devices
         );
 
-        // Mais une décision d'adoption, elle, retient l'entrée.
+        // But an adoption decision does keep the entry.
         settings.set_device_state(VID, PID, None, DeviceState::Ignored);
         settings.set_brightness(VID, PID, None, 40);
-        settings.set_brightness(VID, PID, None, BRIGHTNESS_DEFAUT);
+        settings.set_brightness(VID, PID, None, DEFAULT_BRIGHTNESS);
         assert_eq!(settings.devices.len(), 1);
         assert_eq!(settings.device_state(VID, PID, None), DeviceState::Ignored);
     }
 
-    /// L'effet appliqué est une liste indexée, pas un scalaire : deux claviers
-    /// portent deux effets, et c'est exactement ce que le moteur fait.
+    /// The applied effect is an indexed list, not a scalar: two keyboards carry
+    /// two effects, which is exactly what the engine does.
     #[test]
-    fn l_effet_applique_est_retenu_par_appareil() {
+    fn the_applied_effect_is_stored_per_device() {
         let mut settings = Settings::default();
 
         assert!(settings.set_active_effect(VID, PID, Some("onde")));
@@ -1858,33 +1839,34 @@ mod tests {
         assert_eq!(settings.active_effect(VID, PID), Some("onde"));
         assert_eq!(settings.active_effect(VID, PID + 1), Some("respiration"));
 
-        // Relancer le même effet ne réécrit pas le fichier : c'est un double-clic.
+        // Starting the same effect again does not rewrite the file: it is a
+        // double-click.
         assert!(!settings.set_active_effect(VID, PID, Some("onde")));
-        // Changer d'effet remplace l'entrée, il n'en empile pas une seconde.
+        // Switching effects replaces the entry, it does not stack a second one.
         assert!(settings.set_active_effect(VID, PID, Some("balayage")));
         assert_eq!(settings.active_effects.len(), 2);
 
-        // Arrêter oublie, plutôt que de laisser un identifiant qui ne décrit rien.
+        // Stopping forgets, rather than leaving an id that describes nothing.
         assert!(settings.set_active_effect(VID, PID, None));
         assert_eq!(settings.active_effect(VID, PID), None);
         assert_eq!(settings.active_effects.len(), 1);
         assert!(!settings.set_active_effect(VID, PID, None));
     }
 
-    /// Le niveau du journal **survit au redémarrage** — c'est l'arbitrage retenu
-    /// pour qui traque un défaut au démarrage — mais tant que personne ne l'a
-    /// changé, il n'apparaît pas dans le fichier : écrire le défaut ferait croire
-    /// à une décision là où il n'y en a pas eu.
+    /// The log level **survives a restart** — the trade-off chosen for whoever
+    /// tracks a bug at startup — but as long as nobody has changed it, it does not
+    /// appear in the file: writing the default would suggest a decision where
+    /// there was none.
     #[test]
-    fn le_niveau_de_journal_se_retient_et_ne_s_ecrit_que_choisi() {
-        let (tmp, store) = store_temporaire();
-        let fichier = tmp.path().join("config").join("settings.json");
+    fn log_level_is_kept_and_written_only_when_chosen() {
+        let (tmp, store) = temp_store();
+        let settings_path = tmp.path().join("config").join("settings.json");
 
         store.write_settings(&Settings::default()).unwrap();
-        let ecrit = fs::read_to_string(&fichier).unwrap();
+        let written = fs::read_to_string(&settings_path).unwrap();
         assert!(
-            !ecrit.contains("logLevel"),
-            "le défaut a été écrit : {ecrit}"
+            !written.contains("logLevel"),
+            "the default was written: {written}"
         );
 
         let settings = Settings {
@@ -1894,7 +1876,7 @@ mod tests {
             ..Settings::default()
         };
         store.write_settings(&settings).unwrap();
-        assert!(fs::read_to_string(&fichier)
+        assert!(fs::read_to_string(&settings_path)
             .unwrap()
             .contains(r#""logLevel": "trace""#));
         assert_eq!(
@@ -1903,13 +1885,12 @@ mod tests {
         );
     }
 
-    /// **La passerelle de la v2.1.** `logLevel` a quitté la racine pour
-    /// [`Preferences`] ; un fichier antérieur doit y arriver quand même, sans
-    /// quoi le niveau retomberait au défaut sous celui qui était justement en
-    /// train de chercher une panne.
+    /// **The v2.1 bridge.** `logLevel` left the root for [`Preferences`]; an
+    /// earlier file must still get there, otherwise the level would drop back to
+    /// the default under whoever was precisely chasing a failure.
     #[test]
-    fn un_niveau_de_journal_ecrit_a_la_racine_est_recupere() {
-        let (tmp, store) = store_temporaire();
+    fn a_log_level_written_at_the_root_is_recovered() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(config.join("settings.json"), r#"{"logLevel":"debug"}"#).unwrap();
@@ -1917,23 +1898,22 @@ mod tests {
         let settings = store.read_settings().unwrap();
         assert_eq!(settings.preferences.log_level, Some(LogLevel::Debug));
 
-        // Et il ne repart pas à la racine : la passerelle traduit une fois.
+        // And it does not go back to the root: the bridge translates once.
         store.write_settings(&settings).unwrap();
-        let ecrit = fs::read_to_string(config.join("settings.json")).unwrap();
-        assert!(ecrit.contains(r#""preferences""#), "écrit : {ecrit}");
+        let written = fs::read_to_string(config.join("settings.json")).unwrap();
+        assert!(written.contains(r#""preferences""#), "written: {written}");
         assert_eq!(
-            ecrit.matches(r#""logLevel""#).count(),
+            written.matches(r#""logLevel""#).count(),
             1,
-            "le niveau est écrit deux fois : {ecrit}"
+            "the level is written twice: {written}"
         );
     }
 
-    /// Ce qui est déjà rangé l'emporte sur la clé héritée : un fichier écrit par
-    /// cette version a raison contre une racine qu'un éditeur de texte y aurait
-    /// laissée.
+    /// What is already in place wins over the legacy key: a file written by this
+    /// version is right against a root key a text editor may have left in it.
     #[test]
-    fn les_preferences_l_emportent_sur_la_cle_heritee() {
-        let (tmp, store) = store_temporaire();
+    fn preferences_win_over_the_legacy_key() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(
@@ -1949,32 +1929,32 @@ mod tests {
     }
 
     #[test]
-    fn des_reglages_illisibles_donnent_un_message_lisible() {
-        let (tmp, store) = store_temporaire();
+    fn unreadable_settings_give_a_readable_message() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(config.join("settings.json"), "{ ceci n'est pas du JSON").unwrap();
 
         let err = store.read_settings().unwrap_err();
-        assert!(err.contains("réglages illisibles"), "message : {err}");
+        assert!(err.contains("réglages illisibles"), "message: {err}");
     }
 
-    /// **La distinction que tout ce module tient**, vérifiée là où elle coûte le
-    /// plus cher à perdre : remettre la configuration au défaut ne vide pas la
-    /// bibliothèque. Qui veut seulement désadopter un clavier ne doit pas y
-    /// laisser du code écrit à la main.
+    /// **The distinction this whole module keeps**, checked where it is most
+    /// costly to lose: resetting the configuration to the default does not empty
+    /// the library. Whoever only wants to un-adopt a keyboard must not lose
+    /// hand-written code in the process.
     #[test]
-    fn la_remise_a_zero_oublie_la_configuration_et_garde_les_effets() {
-        let (tmp, store) = store_temporaire();
+    fn reset_forgets_configuration_and_keeps_effects() {
+        let (tmp, store) = temp_store();
         let id = store
-            .install_effect("la source", "le js", &manifeste("Onde"))
+            .install_effect("la source", "le js", &test_manifest("Onde"))
             .unwrap();
 
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
         settings.set_brightness(VID, PID, Some("XY01"), 12);
         settings.set_active_effect(VID, PID, Some(&id));
-        settings.set_effect_params(VID, PID, &id, valeurs(&[("speed", serde_json::json!(3))]));
+        settings.set_effect_params(VID, PID, &id, to_map(&[("speed", serde_json::json!(3))]));
         store.write_settings(&settings).unwrap();
 
         store.reset_settings().unwrap();
@@ -1982,12 +1962,12 @@ mod tests {
         assert_eq!(store.read_settings().unwrap(), Settings::default());
         assert!(
             tmp.path().join("config").join("settings.json").is_file(),
-            "le fichier a disparu au lieu d'être remis à plat"
+            "the file disappeared instead of being reset"
         );
 
-        // Et la bibliothèque est intacte, source comprise : c'est elle qu'on ne
-        // peut pas réinstaller.
-        assert_eq!(installes(&store).len(), 1);
+        // And the library is intact, source included: that is what cannot be
+        // reinstalled.
+        assert_eq!(installed_effects(&store).len(), 1);
         assert_eq!(store.effect_source(&id).unwrap(), "la source");
         assert_eq!(store.effect_js(&id).unwrap(), "le js");
     }
@@ -1997,9 +1977,10 @@ mod tests {
     const VID: u16 = 0x1532;
     const PID: u16 = 0x0292;
 
-    /// Le défaut, et c'est le cœur de la décision : brancher n'est pas adopter.
+    /// The default, and it is the heart of the decision: plugging in is not
+    /// adopting.
     #[test]
-    fn un_appareil_jamais_vu_est_detecte_pas_pilote() {
+    fn a_never_seen_device_is_detected_not_controlled() {
         let settings = Settings::default();
         assert_eq!(
             settings.device_state(VID, PID, Some("XY01")),
@@ -2009,8 +1990,8 @@ mod tests {
     }
 
     #[test]
-    fn une_decision_se_retient_puis_se_change() {
-        let (_tmp, store) = store_temporaire();
+    fn a_decision_is_stored_then_changed() {
+        let (_tmp, store) = temp_store();
         let mut settings = Settings::default();
 
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
@@ -2025,20 +2006,21 @@ mod tests {
 
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Ignored);
         store.write_settings(&settings).unwrap();
-        let relu = store.read_settings().unwrap();
+        let reloaded = store.read_settings().unwrap();
         assert_eq!(
-            relu.device_state(VID, PID, Some("XY01")),
+            reloaded.device_state(VID, PID, Some("XY01")),
             DeviceState::Ignored
         );
-        // Changer d'avis modifie l'entrée, il n'en empile pas une seconde :
-        // sinon la plus ancienne finirait par répondre à la place de la bonne.
-        assert_eq!(relu.devices.len(), 1);
+        // Changing one's mind modifies the entry, it does not stack a second one:
+        // otherwise the oldest would end up answering in place of the right one.
+        assert_eq!(reloaded.devices.len(), 1);
     }
 
-    /// La série est l'identité, et elle sert à ça : deux claviers identiques,
-    /// une seule décision. Sans elle, adopter l'un adopterait l'autre.
+    /// The serial is the identity, and this is what it is for: two identical
+    /// keyboards, a single decision. Without it, adopting one would adopt the
+    /// other.
     #[test]
-    fn deux_exemplaires_du_meme_modele_se_distinguent_par_la_serie() {
+    fn two_units_of_the_same_model_differ_by_serial() {
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
 
@@ -2049,7 +2031,7 @@ mod tests {
         assert_eq!(
             settings.device_state(VID, PID, Some("XY02")),
             DeviceState::Detected,
-            "le second exemplaire a hérité de la décision prise pour le premier"
+            "the second unit inherited the decision made for the first"
         );
 
         settings.set_device_state(VID, PID, Some("XY02"), DeviceState::Ignored);
@@ -2060,26 +2042,26 @@ mod tests {
         );
     }
 
-    /// L'autre sens : une énumération qui ne déclare pas de série — hidraw sans
-    /// règle udev — retrouve quand même l'appareil adopté. Reprendre la décision
-    /// à chaque branchement serait exactement la cérémonie qu'on supprime.
+    /// The other way: an enumeration that reports no serial — hidraw without a
+    /// udev rule — still finds the adopted device. Making the decision again on
+    /// every plug-in would be exactly the ceremony being removed.
     #[test]
-    fn une_enumeration_muette_retrouve_l_appareil_adopte() {
+    fn a_silent_enumeration_finds_the_adopted_device() {
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
 
         assert_eq!(settings.device_state(VID, PID, None), DeviceState::Adopted);
 
-        // Et la série ne s'efface pas au passage, sans quoi le second
-        // exemplaire deviendrait indiscernable du premier.
+        // And the serial is not erased along the way, otherwise the second unit
+        // would become indistinguishable from the first.
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
         assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
     }
 
-    /// Une décision prise sans série se complète dès qu'on l'apprend, plutôt
-    /// que de laisser une entrée large à côté d'une entrée précise.
+    /// A decision made without a serial is completed as soon as the serial is
+    /// learned, rather than leaving a broad entry next to a precise one.
     #[test]
-    fn la_serie_complete_une_entree_qui_n_en_avait_pas() {
+    fn the_serial_completes_an_entry_that_had_none() {
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
@@ -2088,18 +2070,18 @@ mod tests {
         assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
     }
 
-    /// Le fichier d'une version antérieure ne connaît ni `devices` ni la forme
-    /// actuelle. Il doit se relire sans erreur, et la réécriture ne doit pas
-    /// perdre ce qu'on vient d'y décider.
+    /// A file from an earlier version knows neither `devices` nor the current
+    /// shape. It must reload without error, and rewriting it must not lose what
+    /// was just decided.
     ///
-    /// Ce qui **ne survit pas**, et c'est le sujet de l'issue #64 : les trois
-    /// champs mono-appareil. `activeEffect` et `device` n'étaient lus ni écrits
-    /// par personne, et `brightness` à la racine décrivait un niveau partagé que
-    /// deux claviers n'ont aucune raison d'avoir. Les récupérer aurait demandé de
-    /// choisir *quel* appareil ils désignaient — question sans réponse.
+    /// What **does not survive**, and it is the subject of issue #64: the three
+    /// single-device fields. `activeEffect` and `device` were neither read nor
+    /// written by anyone, and `brightness` at the root described a shared level
+    /// two keyboards have no reason to have. Recovering them would have required
+    /// choosing *which* device they designated — a question with no answer.
     #[test]
-    fn un_fichier_anterieur_se_relit_et_garde_ses_reglages() {
-        let (tmp, store) = store_temporaire();
+    fn an_older_file_reloads_and_keeps_its_settings() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(
@@ -2114,99 +2096,96 @@ mod tests {
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
         store.write_settings(&settings).unwrap();
 
-        let relu = store.read_settings().unwrap();
-        assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
-        assert_eq!(relu.brightness(VID, PID, None), BRIGHTNESS_DEFAUT);
+        let reloaded = store.read_settings().unwrap();
+        assert_eq!(reloaded.device_state(VID, PID, None), DeviceState::Adopted);
+        assert_eq!(reloaded.brightness(VID, PID, None), DEFAULT_BRIGHTNESS);
     }
 
-    /// Les champs partent en camelCase, comme tous les DTO, et une entrée sans
-    /// série ni luminosité n'écrit pas de clé vide.
+    /// Fields go out in camelCase, like every DTO, and an entry without serial or
+    /// brightness writes no empty key.
     #[test]
-    fn les_appareils_se_serialisent_en_camel_case() {
+    fn devices_serialize_in_camel_case() {
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
         let json = serde_json::to_string(&settings).unwrap();
 
         assert!(json.contains(r#""devices":[{"vid":5426,"pid":658,"state":"adopted"}]"#));
         assert!(json.contains(r#""activeEffects":[]"#));
-        assert!(!json.contains("serial"), "clé vide écrite : {json}");
-        assert!(!json.contains("brightness"), "défaut écrit : {json}");
+        assert!(!json.contains("serial"), "empty key written: {json}");
+        assert!(!json.contains("brightness"), "default written: {json}");
     }
 
-    // ------------------------------------------------- réglages d'effet
+    // ------------------------------------------------- effect parameters
 
-    /// Une table de valeurs, écrite comme l'interface l'envoie.
-    fn valeurs(paires: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
-        paires
+    /// A map of values, written the way the interface sends it.
+    fn to_map(pairs: &[(&str, serde_json::Value)]) -> serde_json::Map<String, serde_json::Value> {
+        pairs
             .iter()
             .map(|(k, v)| ((*k).to_owned(), v.clone()))
             .collect()
     }
 
-    /// Le cœur de l'issue #28 : changer d'effet puis revenir ne perd rien, et
-    /// deux appareils ne se marchent pas dessus.
+    /// The heart of issue #28: switching effects then coming back loses nothing,
+    /// and two devices do not step on each other.
     #[test]
-    fn les_reglages_sont_retenus_par_appareil_et_par_effet() {
+    fn params_are_stored_per_device_and_per_effect() {
         let mut settings = Settings::default();
-        let lent = valeurs(&[("speed", serde_json::json!(0.5))]);
-        let rapide = valeurs(&[("speed", serde_json::json!(9.0))]);
+        let slow = to_map(&[("speed", serde_json::json!(0.5))]);
+        let fast = to_map(&[("speed", serde_json::json!(9.0))]);
 
-        settings.set_effect_params(VID, PID, "balayage", lent.clone());
-        settings.set_effect_params(VID, PID, "respiration", rapide.clone());
-        // Même effet, autre appareil : une entrée de plus, pas un écrasement.
-        settings.set_effect_params(VID, PID + 1, "balayage", rapide.clone());
+        settings.set_effect_params(VID, PID, "balayage", slow.clone());
+        settings.set_effect_params(VID, PID, "respiration", fast.clone());
+        // Same effect, another device: one more entry, not an overwrite.
+        settings.set_effect_params(VID, PID + 1, "balayage", fast.clone());
 
-        assert_eq!(settings.effect_params(VID, PID, "balayage"), Some(&lent));
-        assert_eq!(
-            settings.effect_params(VID, PID, "respiration"),
-            Some(&rapide)
-        );
+        assert_eq!(settings.effect_params(VID, PID, "balayage"), Some(&slow));
+        assert_eq!(settings.effect_params(VID, PID, "respiration"), Some(&fast));
         assert_eq!(
             settings.effect_params(VID, PID + 1, "balayage"),
-            Some(&rapide)
+            Some(&fast)
         );
         assert_eq!(settings.effect_params(VID, PID, "onde-radiale"), None);
     }
 
-    /// Bouger le même curseur cent fois n'écrit pas cent entrées : c'est
-    /// exactement ce que produit un glissement de souris.
+    /// Moving the same slider a hundred times does not write a hundred entries:
+    /// that is exactly what a mouse drag produces.
     #[test]
-    fn regler_deux_fois_le_meme_effet_remplace_l_entree() {
+    fn tuning_the_same_effect_twice_replaces_the_entry() {
         let mut settings = Settings::default();
         for i in 0..5 {
-            settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", i.into())]));
+            settings.set_effect_params(VID, PID, "balayage", to_map(&[("speed", i.into())]));
         }
 
         assert_eq!(settings.effect_params.len(), 1);
         assert_eq!(
             settings.effect_params(VID, PID, "balayage"),
-            Some(&valeurs(&[("speed", serde_json::json!(4))]))
+            Some(&to_map(&[("speed", serde_json::json!(4))]))
         );
     }
 
-    /// Rétablir les valeurs déclarées **oublie**, au lieu d'en écrire une copie :
-    /// l'effet repart de son manifeste, y compris si une version ultérieure en
-    /// change les défauts.
+    /// Restoring the declared values **forgets**, instead of writing a copy of
+    /// them: the effect starts again from its manifest, including when a later
+    /// version changes its defaults.
     #[test]
-    fn retablir_les_valeurs_declarees_retire_l_entree() {
+    fn restoring_declared_values_removes_the_entry() {
         let mut settings = Settings::default();
-        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID, "balayage", to_map(&[("speed", 3.into())]));
         settings.set_effect_params(VID, PID, "balayage", serde_json::Map::new());
 
         assert!(settings.effect_params.is_empty());
         assert_eq!(settings.effect_params(VID, PID, "balayage"), None);
 
-        // Et oublier ce qui n'a jamais été réglé ne crée pas d'entrée vide.
+        // And forgetting what was never set does not create an empty entry.
         settings.set_effect_params(VID, PID, "onde-radiale", serde_json::Map::new());
         assert!(settings.effect_params.is_empty());
     }
 
-    /// Le fichier d'une version antérieure ne connaît pas `effectParams`. Il se
-    /// relit — c'est ce que `#[serde(default)]` sur la structure garantit — et
-    /// la réécriture ne perd ni l'adoption ni la luminosité.
+    /// A file from an earlier version does not know `effectParams`. It reloads —
+    /// that is what `#[serde(default)]` on the struct guarantees — and rewriting it
+    /// loses neither the adoption nor the brightness.
     #[test]
-    fn un_fichier_sans_reglages_d_effet_se_relit_et_les_accueille() {
-        let (tmp, store) = store_temporaire();
+    fn a_file_without_effect_params_reloads_and_accepts_them() {
+        let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::write(
@@ -2218,26 +2197,26 @@ mod tests {
         let mut settings = store.read_settings().unwrap();
         assert!(settings.effect_params.is_empty());
 
-        let reglages = valeurs(&[
+        let chosen = to_map(&[
             ("speed", serde_json::json!(0.5)),
             ("color", serde_json::json!({ "r": 0, "g": 180, "b": 255 })),
         ]);
-        settings.set_effect_params(VID, PID, "balayage", reglages.clone());
+        settings.set_effect_params(VID, PID, "balayage", chosen.clone());
         store.write_settings(&settings).unwrap();
 
-        let relu = store.read_settings().unwrap();
-        assert_eq!(relu.effect_params(VID, PID, "balayage"), Some(&reglages));
-        assert_eq!(relu.brightness(VID, PID, None), 90);
-        assert_eq!(relu.device_state(VID, PID, None), DeviceState::Adopted);
+        let reloaded = store.read_settings().unwrap();
+        assert_eq!(reloaded.effect_params(VID, PID, "balayage"), Some(&chosen));
+        assert_eq!(reloaded.brightness(VID, PID, None), 90);
+        assert_eq!(reloaded.device_state(VID, PID, None), DeviceState::Adopted);
     }
 
-    /// Les quatre sortes de `ParamSpec` survivent au disque telles quelles : le
-    /// Rust ne les interprète pas, il ne doit pas non plus les abîmer. Une
-    /// couleur est un objet `{r,g,b}`, pas une chaîne.
+    /// The four kinds of `ParamSpec` survive the disk as they are: the Rust side
+    /// does not interpret them, and it must not damage them either. A color is a
+    /// `{r,g,b}` object, not a string.
     #[test]
-    fn les_quatre_sortes_de_valeurs_font_un_aller_retour() {
-        let (_tmp, store) = store_temporaire();
-        let reglages = valeurs(&[
+    fn the_four_kinds_of_values_round_trip() {
+        let (_tmp, store) = temp_store();
+        let chosen = to_map(&[
             ("speed", serde_json::json!(0.5)),
             ("bounce", serde_json::json!(true)),
             ("axis", serde_json::json!("vertical")),
@@ -2245,7 +2224,7 @@ mod tests {
         ]);
 
         let mut settings = Settings::default();
-        settings.set_effect_params(VID, PID, "balayage", reglages.clone());
+        settings.set_effect_params(VID, PID, "balayage", chosen.clone());
         store.write_settings(&settings).unwrap();
 
         assert_eq!(
@@ -2253,20 +2232,20 @@ mod tests {
                 .read_settings()
                 .unwrap()
                 .effect_params(VID, PID, "balayage"),
-            Some(&reglages)
+            Some(&chosen)
         );
     }
 
-    /// Supprimer un effet emporte ses réglages, sur tous les appareils, et
-    /// n'emporte que les siens. Sans quoi `settings.json` garderait des entrées
-    /// pour un identifiant que plus rien ne désigne — et un effet réinstallé
-    /// plus tard sous le même nom hériterait des réglages de son homonyme.
+    /// Deleting an effect takes its parameters away, on every device, and only
+    /// its own. Otherwise `settings.json` would keep entries for an id nothing
+    /// designates any more — and an effect reinstalled later under the same name
+    /// would inherit the parameters of its namesake.
     #[test]
-    fn oublier_un_effet_retire_ses_reglages_partout() {
+    fn forgetting_an_effect_removes_its_params_everywhere() {
         let mut settings = Settings::default();
-        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
-        settings.set_effect_params(VID, PID + 1, "balayage", valeurs(&[("speed", 9.into())]));
-        settings.set_effect_params(VID, PID, "respiration", valeurs(&[("period", 12.into())]));
+        settings.set_effect_params(VID, PID, "balayage", to_map(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID + 1, "balayage", to_map(&[("speed", 9.into())]));
+        settings.set_effect_params(VID, PID, "respiration", to_map(&[("period", 12.into())]));
 
         assert!(settings.forget_effect("balayage"));
         assert_eq!(settings.effect_params.len(), 1);
@@ -2274,17 +2253,17 @@ mod tests {
         assert_eq!(settings.effect_params(VID, PID + 1, "balayage"), None);
         assert!(settings.effect_params(VID, PID, "respiration").is_some());
 
-        // Rien à retirer : le fichier n'a aucune raison d'être réécrit.
+        // Nothing to remove: the file has no reason to be rewritten.
         assert!(!settings.forget_effect("balayage"));
         assert!(!settings.forget_effect("jamais-regle"));
     }
 
-    /// **Le piège de l'issue #48, tranché.** Supprimer l'effet appliqué doit
-    /// purger son identifiant, sinon `settings.json` désignerait comme appliqué
-    /// un effet que la bibliothèque ne connaît plus — et le jour où l'on
-    /// reprendra l'effet au démarrage, on tenterait de lancer un effet absent.
+    /// **The trap of issue #48, settled.** Deleting the applied effect must purge
+    /// its id, otherwise `settings.json` would name as applied an effect the
+    /// library no longer knows — and the day the effect is resumed at startup, we
+    /// would try to start an effect that is not there.
     #[test]
-    fn oublier_un_effet_purge_aussi_son_application() {
+    fn forgetting_an_effect_also_purges_where_it_is_applied() {
         let mut settings = Settings::default();
         settings.set_active_effect(VID, PID, Some("a-supprimer"));
         settings.set_active_effect(VID, PID + 1, Some("a-supprimer"));
@@ -2296,29 +2275,29 @@ mod tests {
         assert_eq!(
             settings.active_effect(VID, PID + 2),
             Some("epargne"),
-            "la suppression a emporté l'effet d'un autre appareil"
+            "the deletion took away another device's effect"
         );
     }
 
-    /// Les réglages d'effet partent en camelCase comme le reste des DTO.
+    /// Effect parameters go out in camelCase like the rest of the DTOs.
     #[test]
-    fn les_reglages_d_effet_se_serialisent_en_camel_case() {
+    fn effect_params_serialize_in_camel_case() {
         let mut settings = Settings::default();
-        settings.set_effect_params(VID, PID, "balayage", valeurs(&[("speed", 3.into())]));
+        settings.set_effect_params(VID, PID, "balayage", to_map(&[("speed", 3.into())]));
         let json = serde_json::to_string(&settings).unwrap();
 
         assert!(
             json.contains(
                 r#""effectParams":[{"vid":5426,"pid":658,"effect":"balayage","values":{"speed":3}}]"#
             ),
-            "sérialisation : {json}"
+            "serialization: {json}"
         );
     }
 
-    // ------------------------------------------------- valeurs de départ
+    // ------------------------------------------------- starting values
 
-    /// Un manifeste déclarant trois paramètres, dont un sans `default`.
-    fn declare() -> Manifest {
+    /// A manifest declaring three parameters, one of them without `default`.
+    fn declared_manifest() -> Manifest {
         Manifest {
             name: "Balayage".into(),
             description: String::new(),
@@ -2334,143 +2313,143 @@ mod tests {
         }
     }
 
-    /// **Le cas nominal de l'icône de zone de notification** : lancer un effet
-    /// sans fenêtre doit donner le même éclairage que le lancer depuis la
-    /// galerie — donc les défauts du manifeste, recouverts par ce qu'on a retenu.
+    /// **The nominal case of the tray icon**: starting an effect with no window
+    /// must give the same lighting as starting it from the gallery — so the
+    /// manifest defaults, overridden by what was kept.
     #[test]
-    fn les_valeurs_de_depart_partent_du_manifeste_et_sont_recouvertes() {
-        let retenus = valeurs(&[("speed", serde_json::json!(40))]);
-        let depart = starting_params(&declare(), Some(&retenus));
+    fn starting_values_come_from_the_manifest_and_are_overridden() {
+        let stored = to_map(&[("speed", serde_json::json!(40))]);
+        let starting = starting_params(&declared_manifest(), Some(&stored));
 
-        assert_eq!(depart.get("speed"), Some(&serde_json::json!(40)));
-        assert_eq!(depart.get("bounce"), Some(&serde_json::json!(false)));
+        assert_eq!(starting.get("speed"), Some(&serde_json::json!(40)));
+        assert_eq!(starting.get("bounce"), Some(&serde_json::json!(false)));
     }
 
-    /// Sans rien de retenu, ce que l'effet déclare, et rien de plus : un
-    /// paramètre sans `default` est laissé à l'effet plutôt que deviné.
+    /// With nothing kept, what the effect declares, and nothing more: a parameter
+    /// without `default` is left to the effect rather than guessed.
     #[test]
-    fn un_parametre_sans_defaut_n_est_pas_invente() {
-        let depart = starting_params(&declare(), None);
+    fn a_param_without_default_is_not_invented() {
+        let starting = starting_params(&declared_manifest(), None);
 
-        assert_eq!(depart.len(), 2, "valeurs de départ : {depart:?}");
-        assert!(!depart.contains_key("muet"));
+        assert_eq!(starting.len(), 2, "starting values: {starting:?}");
+        assert!(!starting.contains_key("muet"));
     }
 
-    /// **Bornée aux paramètres déclarés**, comme côté fenêtre : un réglage
-    /// retenu pour un paramètre que l'effet n'a plus disparaît de lui-même, au
-    /// lieu de voyager vers une boucle qui ne le lit plus.
+    /// **Limited to declared parameters**, as on the window side: a value kept for
+    /// a parameter the effect no longer has disappears on its own, instead of
+    /// travelling to a loop that no longer reads it.
     #[test]
-    fn un_reglage_orphelin_ne_part_pas_vers_la_boucle() {
-        let retenus = valeurs(&[
+    fn an_orphan_setting_does_not_reach_the_loop() {
+        let stored = to_map(&[
             ("speed", serde_json::json!(40)),
             ("disparu", serde_json::json!(7)),
         ]);
-        let depart = starting_params(&declare(), Some(&retenus));
+        let starting = starting_params(&declared_manifest(), Some(&stored));
 
-        assert!(!depart.contains_key("disparu"));
-        assert_eq!(depart.get("speed"), Some(&serde_json::json!(40)));
+        assert!(!starting.contains_key("disparu"));
+        assert_eq!(starting.get("speed"), Some(&serde_json::json!(40)));
     }
 
-    // ------------------------------------------------- miroirs TypeScript
+    // ------------------------------------------------- TypeScript mirrors
 
-    /// Le miroir, relu tel quel.
+    /// The mirror, read as is.
     const CANDEO_TS: &str = include_str!("../../src/api/candeo.ts");
 
-    /// Les noms de champs d'une interface de `candeo.ts`.
+    /// The field names of an interface in `candeo.ts`.
     ///
-    /// Une lecture au ras du texte, et c'est assez : on ne cherche pas à
-    /// comprendre TypeScript, seulement à relever l'identifiant en tête des
-    /// lignes d'un bloc `export interface X { … }`. Une ligne de commentaire n'en
-    /// porte pas — le filtre sur les caractères d'identifiant l'écarte, y compris
-    /// quand la phrase contient un deux-points.
-    fn champs_ts(nom: &str) -> BTreeSet<String> {
-        let entete = format!("export interface {nom} {{");
-        let debut = CANDEO_TS
-            .find(&entete)
-            .unwrap_or_else(|| panic!("« {entete} » introuvable dans src/api/candeo.ts"));
-        let corps = &CANDEO_TS[debut..];
-        let fin = corps
+    /// A plain text scan, and that is enough: there is no attempt to understand
+    /// TypeScript, only to pick the identifier at the start of the lines of an
+    /// `export interface X { … }` block. A comment line carries none — the filter
+    /// on identifier characters rules it out, including when the sentence contains
+    /// a colon.
+    fn ts_fields(nom: &str) -> BTreeSet<String> {
+        let header = format!("export interface {nom} {{");
+        let begin = CANDEO_TS
+            .find(&header)
+            .unwrap_or_else(|| panic!("\"{header}\" not found in src/api/candeo.ts"));
+        let body = &CANDEO_TS[begin..];
+        let end = body
             .find("\n}")
-            .unwrap_or_else(|| panic!("interface « {nom} » non refermée"));
-        corps[..fin]
+            .unwrap_or_else(|| panic!("interface \"{nom}\" is not closed"));
+        body[..end]
             .lines()
             .skip(1)
-            .filter_map(|ligne| {
-                let (champ, _) = ligne.trim().split_once(':')?;
-                let champ = champ.trim_end_matches('?');
-                (!champ.is_empty() && champ.chars().all(|c| c.is_ascii_alphanumeric()))
-                    .then(|| champ.to_string())
+            .filter_map(|line| {
+                let (field, _) = line.trim().split_once(':')?;
+                let field = field.trim_end_matches('?');
+                (!field.is_empty() && field.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .then(|| field.to_string())
             })
             .collect()
     }
 
-    /// Confronte les champs **sérialisés** d'une structure à ceux que `candeo.ts`
-    /// déclare pour son miroir.
+    /// Compares the **serialized** fields of a struct with those `candeo.ts`
+    /// declares for its mirror.
     ///
-    /// La sérialisation plutôt que la déclaration : c'est elle qui dit ce qui
-    /// atterrit vraiment dans `settings.json`, `rename_all` et `skip_serializing`
-    /// compris. `log_level_herite` en est donc absent de plein droit — il est lu,
-    /// jamais réécrit — et le miroir n'a pas à le porter.
-    fn miroir(nom_ts: &str, valeur: &impl Serialize) {
-        let json = serde_json::to_value(valeur).expect("sérialisation");
+    /// Serialization rather than the declaration: it is what tells what actually
+    /// lands in `settings.json`, `rename_all` and `skip_serializing` included.
+    /// `legacy_log_level` is therefore rightly absent — it is read, never written
+    /// back — and the mirror does not have to carry it.
+    fn mirror(ts_name: &str, value: &impl Serialize) {
+        let json = serde_json::to_value(value).expect("serialization");
         let rust: BTreeSet<String> = json
             .as_object()
-            .unwrap_or_else(|| panic!("« {nom_ts} » ne se sérialise pas en objet"))
+            .unwrap_or_else(|| panic!("\"{ts_name}\" does not serialize to an object"))
             .keys()
             .cloned()
             .collect();
-        let ts = champs_ts(nom_ts);
+        let ts = ts_fields(ts_name);
 
-        let absents_du_ts: Vec<&String> = rust.difference(&ts).collect();
-        let absents_du_rust: Vec<&String> = ts.difference(&rust).collect();
+        let missing_from_ts: Vec<&String> = rust.difference(&ts).collect();
+        let missing_from_rust: Vec<&String> = ts.difference(&rust).collect();
         assert!(
-            absents_du_ts.is_empty() && absents_du_rust.is_empty(),
-            "« {nom_ts} » a divergé de son miroir :\n  \
-             absents de src/api/candeo.ts : {absents_du_ts:?}\n  \
-             absents de storage.rs : {absents_du_rust:?}"
+            missing_from_ts.is_empty() && missing_from_rust.is_empty(),
+            "\"{ts_name}\" diverged from its mirror:\n  \
+             missing from src/api/candeo.ts: {missing_from_ts:?}\n  \
+             missing from storage.rs: {missing_from_rust:?}"
         );
     }
 
-    /// `Settings` est écrit des deux côtés de l'IPC, et rien ne relie les deux à
-    /// la compilation.
+    /// `Settings` is written on both sides of the IPC, and nothing ties the two
+    /// together at compile time.
     ///
-    /// Un champ ajouté ici et oublié dans `candeo.ts` ne se voit pas à la
-    /// lecture — `#[serde(default)]` le comble — mais la fenêtre qui relit puis
-    /// réécrit le fichier **efface ce que son type ne nomme pas**. Le champ qui a
-    /// failli partir ainsi est `logLevel`, c'est-à-dire précisément celui dont
-    /// dépend l'initialisation du journal : la perte se serait manifestée au
-    /// démarrage suivant, chez celui qui venait de monter le niveau pour
-    /// comprendre une panne — le seul moment où ce réglage sert.
+    /// A field added here and forgotten in `candeo.ts` does not show on read —
+    /// `#[serde(default)]` fills it in — but the window that reads then rewrites
+    /// the file **erases what its type does not name**. The field that nearly went
+    /// that way is `logLevel`, precisely the one the log initialization depends
+    /// on: the loss would have shown at the next startup, for whoever had just
+    /// raised the level to understand a failure — the only moment this setting
+    /// matters.
     ///
-    /// Même garde que `ETAT_CHANGE` et l'étiquette de la fenêtre : le mot
-    /// « miroir » est une promesse, celle-ci la tient.
+    /// Same guard as `STATE_CHANGED` and the window label: the word "mirror" is a
+    /// promise, and this keeps it.
     #[test]
-    fn les_reglages_ont_les_memes_champs_des_deux_cotes() {
-        // Tous les `Option` renseignés : un champ omis par
-        // `skip_serializing_if` manquerait à la confrontation, et le test
-        // laisserait passer exactement ce qu'il surveille.
+    fn settings_have_the_same_fields_on_both_sides() {
+        // Every `Option` filled in: a field omitted by `skip_serializing_if`
+        // would be missing from the comparison, and the test would let through
+        // exactly what it watches for.
         let preferences = Preferences {
             log_level: Some(LogLevel::Debug),
         };
-        miroir("Preferences", &preferences);
-        miroir(
+        mirror("Preferences", &preferences);
+        mirror(
             "Settings",
             &Settings {
                 preferences,
                 ..Settings::default()
             },
         );
-        miroir(
+        mirror(
             "DeviceRecord",
             &DeviceRecord {
                 vid: 0x1532,
                 pid: 0x0290,
                 serial: Some("SN".into()),
                 state: DeviceState::Adopted,
-                brightness: Some(BRIGHTNESS_DEFAUT),
+                brightness: Some(DEFAULT_BRIGHTNESS),
             },
         );
-        miroir(
+        mirror(
             "ActiveEffectRecord",
             &ActiveEffectRecord {
                 vid: 0x1532,
@@ -2478,7 +2457,7 @@ mod tests {
                 effect: "onde".into(),
             },
         );
-        miroir(
+        mirror(
             "EffectParamsRecord",
             &EffectParamsRecord {
                 vid: 0x1532,
@@ -2489,32 +2468,31 @@ mod tests {
         );
     }
 
-    /// La divergence de `EFFECTS_API_VERSION` n'était rattrapée que dans **un**
-    /// sens.
+    /// A drift of `EFFECTS_API_VERSION` was only caught in **one** direction.
     ///
-    /// Un manifeste qui annonce une version plus récente que le Rust est refusé à
-    /// l'installation, et c'est ce que le commentaire de `candeo.ts` appelle « pas
-    /// silencieux ». Mais dans l'autre sens rien ne se déclenche : si le Rust
-    /// passait à 2 sans le TypeScript, l'éditeur continuerait d'estampiller
-    /// `apiVersion: 1` sur des effets écrits contre la nouvelle API, et la
-    /// comparaison les accepterait tous — 1 est bien inférieur à 2. Les effets
-    /// seraient installés sous une version qu'ils ne respectent pas, et le jour où
-    /// cette version servirait à refuser quelque chose, elle refuserait de travers.
+    /// A manifest announcing a version newer than the Rust side is refused at
+    /// install, and that is what the comment in `candeo.ts` calls "not silent".
+    /// But in the other direction nothing fires: if the Rust side moved to 2
+    /// without the TypeScript, the editor would keep stamping
+    /// `apiVersion: 1` on effects written against the new API, and the comparison
+    /// would accept them all — 1 is indeed lower than 2. The effects would be
+    /// installed under a version they do not follow, and the day that version was
+    /// used to refuse something, it would refuse the wrong things.
     #[test]
-    fn la_version_de_l_api_d_effets_est_la_meme_des_deux_cotes() {
-        let brut = CANDEO_TS
+    fn effects_api_version_is_the_same_on_both_sides() {
+        let raw_version = CANDEO_TS
             .lines()
             .find_map(|l| l.trim().strip_prefix("export const EFFECTS_API_VERSION = "))
-            .expect("« export const EFFECTS_API_VERSION » introuvable dans src/api/candeo.ts")
+            .expect("\"export const EFFECTS_API_VERSION\" not found in src/api/candeo.ts")
             .trim()
             .trim_end_matches(';');
-        let declaree: u32 = brut
+        let declared: u32 = raw_version
             .parse()
-            .unwrap_or_else(|e| panic!("version illisible « {brut} » dans candeo.ts : {e}"));
+            .unwrap_or_else(|e| panic!("unreadable version \"{raw_version}\" in candeo.ts: {e}"));
 
         assert_eq!(
-            declaree, EFFECTS_API_VERSION,
-            "src/api/candeo.ts annonce la version {declaree}, storage.rs la {EFFECTS_API_VERSION}"
+            declared, EFFECTS_API_VERSION,
+            "src/api/candeo.ts announces version {declared}, storage.rs {EFFECTS_API_VERSION}"
         );
     }
 }

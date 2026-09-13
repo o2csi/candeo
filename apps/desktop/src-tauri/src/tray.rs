@@ -14,7 +14,7 @@
 //! come apart one without the other: an icon without interception would still
 //! let the application die, an interception without an icon would leave a live
 //! process that nothing controls any more — and that nothing can quit.
-//! Hence [`installee`], and the two interceptions in [`crate::run`] that
+//! Hence [`installed`], and the two interceptions in [`crate::run`] that
 //! consult it: **as long as there is no icon, the close button remains an exit**.
 //!
 //! # What the window's close button does
@@ -31,7 +31,7 @@
 //!
 //! # What quitting does not do: turn the keyboard off
 //!
-//! See [`quitter`]. It is a choice, and the reasoning is given there.
+//! See [`quit`]. It is a choice, and the reasoning is given there.
 //!
 //! # The menu is a view, never a source
 //!
@@ -69,7 +69,7 @@ use crate::storage::{self, DeviceState, EffectEntry};
 use crate::{journal, single_instance, AppState, CmdResult, DeviceRef};
 
 /// The icon's id, used to find it again and give it a new menu.
-const ICONE: &str = "candeo";
+const ICON_ID: &str = "candeo";
 
 /// What the window must learn when the state changed **without it**.
 ///
@@ -81,7 +81,7 @@ const ICONE: &str = "candeo";
 /// Written here **and** in `src/api/candeo.ts`; the test at the end of the module
 /// checks the two against each other, otherwise renaming the event would compile
 /// without a word and yield a window that never resynchronizes again.
-pub(crate) const ETAT_CHANGE: &str = "candeo://etat-change";
+pub(crate) const STATE_CHANGED: &str = "candeo://etat-change";
 
 /// True when the icon is actually in place.
 ///
@@ -90,19 +90,19 @@ pub(crate) const ETAT_CHANGE: &str = "candeo://etat-change";
 /// bundle, a desktop environment without a tray area — only the window is left
 /// to control the application. Preventing the exit then, or hiding the window on
 /// its close button, would leave a process that no ordinary gesture terminates.
-static INSTALLEE: AtomicBool = AtomicBool::new(false);
+static INSTALLED: AtomicBool = AtomicBool::new(false);
 
 /// Last menu build failure, so that only the transition is logged.
 ///
 /// The menu is rebuilt **on every hover of the icon**. An unreadable
 /// `settings.json` or a broken USB enumeration would produce one line per mouse
 /// pass: the same flood as per-frame logging, at a different rate, and the same
-/// rule shuts it. See [`journal::bascule`].
-static DERNIER_ECHEC: Mutex<Option<String>> = Mutex::new(None);
+/// rule shuts it. See [`journal::transition`].
+static LAST_FAILURE: Mutex<Option<String>> = Mutex::new(None);
 
 /// True if the icon is there, hence if the application outlives its windows.
-pub(crate) fn installee() -> bool {
-    INSTALLEE.load(Ordering::Relaxed)
+pub(crate) fn installed() -> bool {
+    INSTALLED.load(Ordering::Relaxed)
 }
 
 /// Tells the window that the state changed without it.
@@ -113,8 +113,8 @@ pub(crate) fn installee() -> bool {
 ///
 /// Failure is swallowed: nobody listens when no window is open, and that is the
 /// nominal case for this module.
-pub(crate) fn signaler<R: Runtime>(app: &AppHandle<R>) {
-    let _ = app.emit(ETAT_CHANGE, ());
+pub(crate) fn notify_state_changed<R: Runtime>(app: &AppHandle<R>) {
+    let _ = app.emit(STATE_CHANGED, ());
 }
 
 // ---------------------------------------------------------------- items
@@ -124,23 +124,28 @@ pub(crate) fn signaler<R: Runtime>(app: &AppHandle<R>) {
 /// A type, and not a string compared by hand in the handler: muda carries only a
 /// text identifier, and this is the one place in the code where a typo would
 /// show neither at compile time nor at run time — the item would simply do
-/// nothing. Going through [`Action::identifiant`] and [`Action::depuis`] brings
+/// nothing. Going through [`Action::to_id`] and [`Action::from_id`] brings
 /// that binding back under the compiler, and the round-trip test checks it
 /// without any clicking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Action {
     /// Bring the window back into view.
-    Ouvrir,
+    OpenWindow,
     /// **The only clean exit.**
-    Quitter,
+    QuitApp,
     /// Start this effect on this device.
-    Effet { device: DeviceRef, effet: String },
+    ///
+    /// `effet` keeps its name: [`Action::to_id`] interpolates it by name.
+    Start { device: DeviceRef, effet: String },
     /// Toggle this device's keyboard output.
-    Sortie { device: DeviceRef },
+    ToggleOutput { device: DeviceRef },
     /// The firmware's `Effect::Off` on this device.
-    Eteindre { device: DeviceRef },
+    TurnOff { device: DeviceRef },
 }
 
+// Each constant is named after the value it holds, and three of them are
+// interpolated by name into the identifiers `Action::to_id` writes: renaming
+// them would change those strings.
 const OUVRIR: &str = "ouvrir";
 const QUITTER: &str = "quitter";
 const EFFET: &str = "effet";
@@ -161,11 +166,12 @@ const SEP: char = ':';
 /// Not the `Display` of [`DeviceRef`]: that one is made for a human reading a
 /// log (`0x1532:0x0292`), and what is written here must simply parse back
 /// without ambiguity.
-fn cle(device: DeviceRef) -> String {
+fn hex_id(device: DeviceRef) -> String {
     format!("{:04x}{SEP}{:04x}", device.vid, device.pid)
 }
 
-fn appareil(vid: &str, pid: &str) -> Option<DeviceRef> {
+/// The device named by the two fields [`hex_id`] wrote.
+fn device(vid: &str, pid: &str) -> Option<DeviceRef> {
     Some(DeviceRef {
         vid: u16::from_str_radix(vid, 16).ok()?,
         pid: u16::from_str_radix(pid, 16).ok()?,
@@ -173,13 +179,13 @@ fn appareil(vid: &str, pid: &str) -> Option<DeviceRef> {
 }
 
 impl Action {
-    fn identifiant(&self) -> String {
+    fn to_id(&self) -> String {
         match self {
-            Self::Ouvrir => OUVRIR.to_owned(),
-            Self::Quitter => QUITTER.to_owned(),
-            Self::Effet { device, effet } => format!("{EFFET}{SEP}{}{SEP}{effet}", cle(*device)),
-            Self::Sortie { device } => format!("{SORTIE}{SEP}{}", cle(*device)),
-            Self::Eteindre { device } => format!("{ETEINDRE}{SEP}{}", cle(*device)),
+            Self::OpenWindow => OUVRIR.to_owned(),
+            Self::QuitApp => QUITTER.to_owned(),
+            Self::Start { device, effet } => format!("{EFFET}{SEP}{}{SEP}{effet}", hex_id(*device)),
+            Self::ToggleOutput { device } => format!("{SORTIE}{SEP}{}", hex_id(*device)),
+            Self::TurnOff { device } => format!("{ETEINDRE}{SEP}{}", hex_id(*device)),
         }
     }
 
@@ -188,28 +194,28 @@ impl Action {
     /// `None` rather than a panic: the handler is **global** — it receives the
     /// events of every menu in the application — and an item from elsewhere is
     /// not a programming error.
-    fn depuis(id: &str) -> Option<Self> {
+    fn from_id(id: &str) -> Option<Self> {
         match id {
-            OUVRIR => return Some(Self::Ouvrir),
-            QUITTER => return Some(Self::Quitter),
+            OUVRIR => return Some(Self::OpenWindow),
+            QUITTER => return Some(Self::QuitApp),
             _ => {}
         }
 
-        let (verbe, reste) = id.split_once(SEP)?;
-        let (vid, reste) = reste.split_once(SEP)?;
-        match verbe {
+        let (verb, rest) = id.split_once(SEP)?;
+        let (vid, rest) = rest.split_once(SEP)?;
+        match verb {
             EFFET => {
-                let (pid, effet) = reste.split_once(SEP)?;
-                Some(Self::Effet {
-                    device: appareil(vid, pid)?,
+                let (pid, effet) = rest.split_once(SEP)?;
+                Some(Self::Start {
+                    device: device(vid, pid)?,
                     effet: effet.to_owned(),
                 })
             }
-            SORTIE => Some(Self::Sortie {
-                device: appareil(vid, reste)?,
+            SORTIE => Some(Self::ToggleOutput {
+                device: device(vid, rest)?,
             }),
-            ETEINDRE => Some(Self::Eteindre {
-                device: appareil(vid, reste)?,
+            ETEINDRE => Some(Self::TurnOff {
+                device: device(vid, rest)?,
             }),
             _ => None,
         }
@@ -219,7 +225,7 @@ impl Action {
 // ---------------------------------------------------------------- the menu
 
 /// A controlled device, as the menu must present it.
-struct Pilote {
+struct ControlledDevice {
     layout: &'static Layout,
     device: DeviceRef,
     availability: Availability,
@@ -249,17 +255,17 @@ enum Availability {
 /// that is no reason to empty the menu: it then falls back to "no known serial",
 /// which [`storage::DeviceRecord::matches`] tolerates precisely for this
 /// situation.
-fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
+fn controlled_devices(settings: &storage::Settings, state: &AppState) -> Vec<ControlledDevice> {
     let api = crate::hid().ok();
     crate::LAYOUTS
         .iter()
         .copied()
         .filter_map(|layout| {
-            let branche = api.as_ref().and_then(|api| crate::plugged(api, layout));
+            let plugged = api.as_ref().and_then(|api| crate::plugged(api, layout));
             let inspection = state.inspection(DeviceRef::of(layout));
-            let device = controlled_device(layout, settings, branche, inspection.as_ref());
+            let device = controlled_device(layout, settings, plugged, inspection.as_ref());
             if let Some(d) = &device {
-                tracing::debug!(appareil = %d.device, availability = ?d.availability, "tray menu device state");
+                tracing::debug!(device = %d.device, availability = ?d.availability, "tray menu device state");
             }
             device
         })
@@ -271,7 +277,7 @@ fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
 /// **The serial comes from the open handle first.** The USB descriptor of this
 /// keyboard carries none, so looking the adoption up with it alone matched any
 /// unit of the model, and "plugged in" was taken for "ready". The window never
-/// had that problem because it reads [`crate::serie_connue`] and reports `open`
+/// had that problem because it reads [`crate::known_serial`] and reports `open`
 /// separately; the tray now asks the same questions.
 ///
 /// Pure, so the #72 scenario is testable without a second keyboard.
@@ -280,9 +286,9 @@ fn controlled_device(
     settings: &storage::Settings,
     plugged: Option<Option<String>>,
     inspection: Option<&Inspection>,
-) -> Option<Pilote> {
+) -> Option<ControlledDevice> {
     let present = plugged.is_some();
-    let serial = crate::serie_connue(inspection, plugged.flatten());
+    let serial = crate::known_serial(inspection, plugged.flatten());
     if settings.device_state(layout.vid, layout.pid, serial.as_deref()) != DeviceState::Adopted {
         return None;
     }
@@ -293,7 +299,7 @@ fn controlled_device(
         (true, true) => Availability::Open,
         (true, false) => Availability::NotOpen,
     };
-    Some(Pilote {
+    Some(ControlledDevice {
         layout,
         device: DeviceRef::of(layout),
         availability,
@@ -315,7 +321,7 @@ struct Presentation {
 ///
 /// The actions still re-read the state when clicked (see the module header):
 /// greying items is honesty in the menu, not the protection.
-fn presentation(device: &Pilote, loop_running: bool) -> Presentation {
+fn presentation(device: &ControlledDevice, loop_running: bool) -> Presentation {
     let name = device.layout.name;
     match device.availability {
         Availability::Open => Presentation {
@@ -348,10 +354,10 @@ fn presentation(device: &Pilote, loop_running: bool) -> Presentation {
 /// Kept apart from the rest of the menu because it is the only part that
 /// depends on the disk and on USB: see [`menu`], which treats its failure as a
 /// degradation and not as a refusal.
-fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
+fn device_submenus(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
     let store = storage::store(app)?;
     let settings = store.read_settings()?;
-    let bibliotheque = store.list_effects()?;
+    let library = store.list_effects()?;
     // The real engine state, not a memory: it is the same source as the
     // `engine_status` command the window reads.
     //
@@ -359,11 +365,11 @@ fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
     // keyboards are doing; ticking here an effect that is only being looked at
     // in the window would be the lie that issue #63 rejects. Nothing to filter —
     // `device_status` cannot return the preview.
-    let moteur = app.state::<AppState>().engine.device_status();
+    let engine_status = app.state::<AppState>().engine.device_status();
 
-    pilotes(&settings, &app.state::<AppState>())
+    controlled_devices(&settings, &app.state::<AppState>())
         .iter()
-        .map(|pilote| sous_menu(app, pilote, &bibliotheque, &moteur))
+        .map(|controlled| device_submenu(app, controlled, &library, &engine_status))
         .collect()
 }
 
@@ -381,134 +387,138 @@ fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
 /// built without a console, and the icon is precisely the place where a failure
 /// can be seen without opening one.
 fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
-    let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
+    let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
-    let degrade = match appareils(app) {
-        Ok(sous_menus) => {
-            if sous_menus.is_empty() {
+    let degraded = match device_submenus(app) {
+        Ok(submenus) => {
+            if submenus.is_empty() {
                 // An empty section would read as a broken icon. Naming the
                 // absence costs one line; "Ouvrir la fenêtre" sits just below.
-                articles.push(Box::new(muet(app, "Aucun appareil piloté")?));
+                items.push(Box::new(inert_item(app, "Aucun appareil piloté")?));
             }
-            for appareil in sous_menus {
-                articles.push(Box::new(appareil));
+            for device in submenus {
+                items.push(Box::new(device));
             }
             None
         }
         Err(e) => {
             // Never the raw error in the menu: it can hold a local file path,
-            // and [`consigner`] already logs it.
-            articles.push(Box::new(muet(app, "Appareils indisponibles")?));
+            // and [`log_menu_failure`] already logs it.
+            items.push(Box::new(inert_item(app, "Appareils indisponibles")?));
             Some(e)
         }
     };
 
-    articles.push(Box::new(separateur(app)?));
-    articles.push(Box::new(article(
+    items.push(Box::new(separator_item(app)?));
+    items.push(Box::new(item(
         app,
-        &Action::Ouvrir,
+        &Action::OpenWindow,
         "Ouvrir la fenêtre",
         true,
     )?));
     // Its own separator, and it is not decorative: closing the window no
     // longer quits, so this item is the application's only exit. Burying it in
     // the list above would amount to hiding it.
-    articles.push(Box::new(separateur(app)?));
-    articles.push(Box::new(article(
+    items.push(Box::new(separator_item(app)?));
+    items.push(Box::new(item(
         app,
-        &Action::Quitter,
+        &Action::QuitApp,
         "Quitter candeo",
         true,
     )?));
 
-    let refs: Vec<&dyn IsMenuItem<Wry>> = articles.iter().map(AsRef::as_ref).collect();
-    let assemble = Menu::with_items(app, &refs).map_err(|e| format!("menu non assemblé : {e}"))?;
-    Ok((assemble, degrade))
+    let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(AsRef::as_ref).collect();
+    let assembled = Menu::with_items(app, &refs).map_err(|e| format!("menu non assemblé : {e}"))?;
+    Ok((assembled, degraded))
 }
 
 /// A device's submenu: its effect, its output, turning it off.
-fn sous_menu(
+fn device_submenu(
     app: &AppHandle,
-    pilote: &Pilote,
-    bibliotheque: &[EffectEntry],
-    moteur: &[DeviceEngineStatus],
+    controlled: &ControlledDevice,
+    library: &[EffectEntry],
+    engine_status: &[DeviceEngineStatus],
 ) -> CmdResult<Submenu<Wry>> {
-    let etat = moteur
+    let current = engine_status
         .iter()
-        .find(|s| s.device == pilote.device)
+        .find(|s| s.device == controlled.device)
         .map(|s| &s.status);
 
     // `effect_id` survives the stop of a loop that shut itself down after
     // thirty failures: without the filter, the menu would tick an effect that
     // nothing runs any more.
-    let en_cours = etat
+    let running_effect = current
         .filter(|s| s.running)
         .and_then(|s| s.effect_id.as_deref());
 
-    let view = presentation(pilote, en_cours.is_some());
+    let view = presentation(controlled, running_effect.is_some());
 
-    let mut articles: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
+    let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
     if let Some(reason) = view.reason {
-        articles.push(Box::new(muet(app, reason)?));
-        articles.push(Box::new(separateur(app)?));
+        items.push(Box::new(inert_item(app, reason)?));
+        items.push(Box::new(separator_item(app)?));
     }
-    for entree in bibliotheque {
-        articles.push(Box::new(coche(
+    for entry in library {
+        items.push(Box::new(check_item(
             app,
-            &Action::Effet {
-                device: pilote.device,
-                effet: entree.id.clone(),
+            &Action::Start {
+                device: controlled.device,
+                effet: entry.id.clone(),
             },
-            &entree.manifest.name,
+            &entry.manifest.name,
             view.effects,
-            en_cours == Some(entree.id.as_str()),
+            running_effect == Some(entry.id.as_str()),
         )?));
     }
 
-    articles.push(Box::new(separateur(app)?));
-    articles.push(Box::new(coche(
+    items.push(Box::new(separator_item(app)?));
+    items.push(Box::new(check_item(
         app,
-        &Action::Sortie {
-            device: pilote.device,
+        &Action::ToggleOutput {
+            device: controlled.device,
         },
         "Envoyer au clavier",
         view.output,
-        etat.is_some_and(|s| s.to_keyboard),
+        current.is_some_and(|s| s.to_keyboard),
     )?));
-    articles.push(Box::new(article(
+    items.push(Box::new(item(
         app,
-        &Action::Eteindre {
-            device: pilote.device,
+        &Action::TurnOff {
+            device: controlled.device,
         },
         "Éteindre",
         // Greyed out is display comfort only: what really protects is that
-        // [`eteindre`] re-reads the state when clicked. See the module header.
+        // [`turn_off_device`] re-reads the state when clicked. See the module
+        // header.
         view.turn_off,
     )?));
 
-    let refs: Vec<&dyn IsMenuItem<Wry>> = articles.iter().map(AsRef::as_ref).collect();
+    let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(AsRef::as_ref).collect();
     Submenu::with_items(app, view.title, true, &refs)
-        .map_err(|e| format!("sous-menu de {} non assemblé : {e}", pilote.device))
+        .map_err(|e| format!("sous-menu de {} non assemblé : {e}", controlled.device))
 }
 
-fn article(app: &AppHandle, action: &Action, texte: &str, actif: bool) -> CmdResult<MenuItem<Wry>> {
-    MenuItem::with_id(app, action.identifiant(), texte, actif, None::<&str>)
+// `texte` keeps its name in the three builders below: it is interpolated by
+// name into their error messages.
+
+fn item(app: &AppHandle, action: &Action, texte: &str, enabled: bool) -> CmdResult<MenuItem<Wry>> {
+    MenuItem::with_id(app, action.to_id(), texte, enabled, None::<&str>)
         .map_err(|e| format!("article « {texte} » non créé : {e}"))
 }
 
-fn coche(
+fn check_item(
     app: &AppHandle,
     action: &Action,
     texte: &str,
-    actif: bool,
-    cochee: bool,
+    enabled: bool,
+    is_checked: bool,
 ) -> CmdResult<CheckMenuItem<Wry>> {
     CheckMenuItem::with_id(
         app,
-        action.identifiant(),
+        action.to_id(),
         texte,
-        actif,
-        cochee,
+        enabled,
+        is_checked,
         None::<&str>,
     )
     .map_err(|e| format!("bascule « {texte} » non créée : {e}"))
@@ -518,39 +528,39 @@ fn coche(
 ///
 /// No identifier, hence no [`Action`]: clicking it is impossible, and giving it
 /// one would suggest otherwise.
-fn muet(app: &AppHandle, texte: &str) -> CmdResult<MenuItem<Wry>> {
+fn inert_item(app: &AppHandle, texte: &str) -> CmdResult<MenuItem<Wry>> {
     MenuItem::new(app, texte, false, None::<&str>)
         .map_err(|e| format!("article « {texte} » non créé : {e}"))
 }
 
-fn separateur(app: &AppHandle) -> CmdResult<PredefinedMenuItem<Wry>> {
+fn separator_item(app: &AppHandle) -> CmdResult<PredefinedMenuItem<Wry>> {
     PredefinedMenuItem::separator(app).map_err(|e| format!("séparateur non créé : {e}"))
 }
 
 // ---------------------------------------------------------------- the actions
 
 /// Performs what the item asks for, re-reading the state along the way.
-fn agir(app: &AppHandle, action: Action) {
+fn perform(app: &AppHandle, action: Action) {
     match action {
         // These two do not touch the engine, and so do not go through
-        // [`rendre_compte`]: [`reveler`] already notifies the returning window,
-        // and [`quitter`] takes the process down — rebuilding a menu or
+        // [`report_change`]: [`open_window`] already notifies the returning
+        // window, and [`quit`] takes the process down — rebuilding a menu or
         // notifying a window that is being destroyed would only add a failure
         // line on every exit. `app.exit` **returns**: what follows a call to
-        // [`quitter`] does run.
-        Action::Ouvrir => reveler(app),
-        Action::Quitter => quitter(app),
-        Action::Effet { device, effet } => {
-            demarrer(app, device, &effet);
-            rendre_compte(app);
+        // [`quit`] does run.
+        Action::OpenWindow => open_window(app),
+        Action::QuitApp => quit(app),
+        Action::Start { device, effet } => {
+            start(app, device, &effet);
+            report_change(app);
         }
-        Action::Sortie { device } => {
-            basculer(app, device);
-            rendre_compte(app);
+        Action::ToggleOutput { device } => {
+            toggle_output(app, device);
+            report_change(app);
         }
-        Action::Eteindre { device } => {
-            eteindre(app, device);
-            rendre_compte(app);
+        Action::TurnOff { device } => {
+            turn_off_device(app, device);
+            report_change(app);
         }
     }
 }
@@ -559,18 +569,18 @@ fn agir(app: &AppHandle, action: Action) {
 ///
 /// Rebuilding the menu **now** is what keeps "the menu reflects the real state"
 /// true where no hover is reported, that is, on Linux.
-fn rendre_compte(app: &AppHandle) {
-    rafraichir(app);
-    signaler(app);
+fn report_change(app: &AppHandle) {
+    refresh(app);
+    notify_state_changed(app);
 }
 
-fn reveler(app: &AppHandle) {
+fn open_window(app: &AppHandle) {
     // The single-instance path, not a second one: it can show a hidden window
     // as well as reopen one from its declaration, and it searches by label
     // alone — a `create: false` window is therefore still the one to open.
     // Writing another one here would make two to keep in agreement.
     if let Err(e) = single_instance::reveal(app) {
-        tracing::warn!("fenêtre non ramenée depuis la zone de notification : {e}");
+        tracing::warn!("window not brought back from the system tray: {e}");
     }
 }
 
@@ -594,20 +604,20 @@ fn reveler(app: &AppHandle) {
 /// mid-transfer by the end of the process would leave the device on a partial
 /// report. The lighting, for its part, does not change — stopping a loop writes
 /// nothing more.
-fn quitter(app: &AppHandle) {
+fn quit(app: &AppHandle) {
     app.state::<AppState>().engine.stop_all();
-    tracing::info!("candeo s'arrête, demandé depuis la zone de notification");
+    tracing::info!("candeo exiting, requested from the system tray");
     // A code, hence `ExitRequested { code: Some(_) }`: that is what tells this
     // exit apart from the one caused by closing the last window, and therefore
     // what lets it through. See [`crate::run`].
     app.exit(0);
 }
 
-fn demarrer(app: &AppHandle, device: DeviceRef, effet: &str) {
-    let params = match parametres(app, device, effet) {
+fn start(app: &AppHandle, device: DeviceRef, effect: &str) {
+    let params = match current_params(app, device, effect) {
         Ok(params) => params,
         Err(e) => {
-            tracing::error!(appareil = %device, effet, "effet non lancé depuis la zone de notification : {e}");
+            tracing::error!(device = %device, effect, "effect not started from the system tray: {e}");
             return;
         }
     };
@@ -620,7 +630,7 @@ fn demarrer(app: &AppHandle, device: DeviceRef, effet: &str) {
         app.clone(),
         app.state(),
         device,
-        effet.to_owned(),
+        effect.to_owned(),
         serde_json::Value::Object(params),
     ) {
         // The engine may already have named the cause under its own *span*;
@@ -629,18 +639,20 @@ fn demarrer(app: &AppHandle, device: DeviceRef, effet: &str) {
         // the menu was built, is refused before the engine knows anything about
         // it. One line per click floods nobody: the transitions rule targets
         // per-frame logging, not a human gesture.
-        tracing::error!(appareil = %device, effet, "effet non lancé depuis la zone de notification : {e}");
+        tracing::error!(device = %device, effect, "effect not started from the system tray: {e}");
     }
 }
 
 /// The values to start this effect with, re-read now.
-fn parametres(
+///
+/// `effet` keeps its name: it is interpolated by name into the error message.
+fn current_params(
     app: &AppHandle,
     device: DeviceRef,
     effet: &str,
 ) -> CmdResult<serde_json::Map<String, serde_json::Value>> {
     let store = storage::store(app)?;
-    let entree = store
+    let entry = store
         .list_effects()?
         .into_iter()
         .find(|e| e.id == effet)
@@ -648,7 +660,7 @@ fn parametres(
     let settings = store.read_settings()?;
 
     Ok(storage::starting_params(
-        &entree.manifest,
+        &entry.manifest,
         settings.effect_params(device.vid, device.pid, effet),
     ))
 }
@@ -658,19 +670,19 @@ fn parametres(
 /// Not based on the menu checkbox: muda flips it by itself on click, and it
 /// dated from the last build. Trusting it would re-enable an output that had
 /// just been cut from the window.
-fn basculer(app: &AppHandle, device: DeviceRef) {
+fn toggle_output(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
-    let Some(etat) = state
+    let Some(current) = state
         .engine
         .device_status()
         .into_iter()
         .find(|s| s.device == device)
     else {
-        tracing::warn!(appareil = %device, "sortie non basculée : aucune boucle sur cet appareil");
+        tracing::warn!(device = %device, "output not toggled: no loop on this device");
         return;
     };
 
-    crate::runtime::set_output_to_keyboard(app.state(), device, !etat.status.to_keyboard);
+    crate::runtime::set_output_to_keyboard(app.state(), device, !current.status.to_keyboard);
 }
 
 /// The firmware's `Effect::Off`: zero cost, and it survives closing.
@@ -678,14 +690,14 @@ fn basculer(app: &AppHandle, device: DeviceRef) {
 /// The order is that of [`crate::release_devices`], and it matters: the loop
 /// stops **and its stop is awaited**, otherwise the next frame would light up
 /// again what was just turned off.
-fn eteindre(app: &AppHandle, device: DeviceRef) {
+fn turn_off_device(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     state.engine.stop(device);
     // Nothing runs on this device any more, and the file must say so: leaving
     // the identifier in place would make `settings.json` describe an effect
     // nobody asks for any more. It is the same step `stop_effect` takes from
     // the window.
-    crate::runtime::retenir_l_effet_actif(app, device, None);
+    crate::runtime::remember_active_effect(app, device, None);
 
     if let Err(e) = crate::with_keyboard(&state, device, |kb| {
         kb.set_effect(Effect::Off).map_err(|e| e.to_string())
@@ -693,7 +705,7 @@ fn eteindre(app: &AppHandle, device: DeviceRef) {
         // The expected case: the device was unplugged — or ignored from the
         // window — while the menu was open. The item was enabled when the menu
         // was built; the device was gone by the time of the click.
-        tracing::warn!(appareil = %device, "extinction refusée depuis la zone de notification : {e}");
+        tracing::warn!(device = %device, "turn-off refused from the system tray: {e}");
     }
 }
 
@@ -703,74 +715,70 @@ fn eteindre(app: &AppHandle, device: DeviceRef) {
 ///
 /// A failure here must not prevent the application from starting: it brings it
 /// back to what it was before this issue — a window, and the close button to
-/// quit it. [`installee`] carries that switch, and [`crate::run`] reads it.
+/// quit it. [`installed`] carries that switch, and [`crate::run`] reads it.
 ///
 /// That leaves the failures that are not really failures: an unreadable
 /// `settings.json` or a broken USB enumeration still place the icon, with a
 /// menu that says so. See [`menu`].
-pub(crate) fn installer(app: &AppHandle) {
-    match poser(app) {
+pub(crate) fn install(app: &AppHandle) {
+    match place_icon(app) {
         Ok(()) => {
-            INSTALLEE.store(true, Ordering::Relaxed);
-            tracing::info!(
-                "icône de zone de notification posée, la fenêtre n'est plus la seule commande"
-            );
+            INSTALLED.store(true, Ordering::Relaxed);
+            tracing::info!("tray icon placed, the window is no longer the only control");
         }
         // `error`: without an icon, closing the window stops the effects — that
         // is exactly the failure this issue closes, and it becomes silent again
         // if nobody reports it.
-        Err(e) => tracing::error!(
-            "aucune icône de zone de notification, fermer la fenêtre arrêtera les effets : {e}"
-        ),
+        Err(e) => tracing::error!("no tray icon, closing the window will stop the effects: {e}"),
     }
 }
 
-fn poser(app: &AppHandle) -> CmdResult<()> {
+fn place_icon(app: &AppHandle) -> CmdResult<()> {
     // The application icon, not a second image to keep up to date: it is the
     // one the bundle already ships, and the one the user recognizes.
-    let icone = app
+    let icon = app
         .default_window_icon()
         .cloned()
         .ok_or_else(|| "aucune icône d'application dans le paquet".to_string())?;
 
     // The initial menu, degradation included; what was missing is recorded
     // through the same path as later rebuilds, so that only the onset is kept.
-    let (depart, degrade) = menu(app)?;
-    consigner(degrade.as_deref());
+    let (initial_menu, degraded) = menu(app)?;
+    log_menu_failure(degraded.as_deref());
 
-    TrayIconBuilder::with_id(ICONE)
-        .icon(icone)
+    TrayIconBuilder::with_id(ICON_ID)
+        .icon(icon)
         .tooltip("candeo")
-        .menu(&depart)
+        .menu(&initial_menu)
         // Left click opens the window, right click opens the menu: that is the
         // system tray convention, and it puts "Ouvrir la fenêtre" one click
         // away. On Linux no click is reported, only the right-click menu
         // responds — hence the item, which remains the safe path.
         .show_menu_on_left_click(false)
-        .on_tray_icon_event(|icone, evenement| match evenement {
+        .on_tray_icon_event(|icon, event| match event {
             // Hover precedes the right click: it is the last moment the menu
             // can be rebuilt before it is shown.
             TrayIconEvent::Enter { .. } => {
                 tracing::debug!("tray icon hovered, rebuilding the menu");
-                rafraichir(icone.app_handle());
+                refresh(icon.app_handle());
             }
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
-            } => reveler(icone.app_handle()),
+            } => open_window(icon.app_handle()),
             _ => {}
         })
-        .on_menu_event(|app, evenement: MenuEvent| {
+        .on_menu_event(|app, event: MenuEvent| {
             // The handler is global: it sees the items of every menu go by.
             // What does not concern us is ignored, not refused.
-            if let Some(action) = Action::depuis(evenement.id.as_ref()) {
-                agir(app, action);
+            if let Some(action) = Action::from_id(event.id.as_ref()) {
+                perform(app, action);
             }
         })
         .build(app)
         // The handle is dropped: the application's manager keeps one, that is
-        // what keeps the icon alive, and [`rafraichir`] finds it again by its
+        // what keeps the icon alive, and [`refresh`] finds it again by its
         // id.
         .map(|_| ())
         .map_err(|e| format!("icône non posée : {e}"))
@@ -783,40 +791,40 @@ fn poser(app: &AppHandle) -> CmdResult<()> {
 /// `list_devices` costs each time the devices screen opens, and it is paid here
 /// on the same terms — on a user gesture, never on a timer. A menu rebuilt in
 /// the background would enumerate USB forever for a menu nobody is looking at.
-pub(crate) fn rafraichir(app: &AppHandle) {
-    let Some(icone) = app.tray_by_id(ICONE) else {
+pub(crate) fn refresh(app: &AppHandle) {
+    let Some(icon) = app.tray_by_id(ICON_ID) else {
         return;
     };
 
-    let echec = match menu(app) {
+    let failure = match menu(app) {
         // A degraded menu is indeed set: it carries a way to open the window
         // and a way to quit, and it **says** what was missing. What the log
         // keeps of it is the start of the failure, not a line per hover.
-        Ok((menu, degrade)) => icone
+        Ok((menu, degraded)) => icon
             .set_menu(Some(menu))
             .map_err(|e| format!("menu non remplacé, l'ancien reste affiché : {e}"))
             .err()
-            .or(degrade),
+            .or(degraded),
         Err(e) => Some(e),
     };
-    consigner(echec.as_deref());
+    log_menu_failure(failure.as_deref());
 }
 
 /// Logs the **start** of a menu failure, and its recovery. Nothing
-/// else — see [`DERNIER_ECHEC`].
-fn consigner(echec: Option<&str>) {
-    let mut dernier = DERNIER_ECHEC.lock().unwrap();
-    let bascule = journal::bascule(dernier.as_deref(), echec);
-    *dernier = echec.map(str::to_owned);
-    drop(dernier);
+/// else — see [`LAST_FAILURE`].
+fn log_menu_failure(failure: Option<&str>) {
+    let mut last = LAST_FAILURE.lock().unwrap();
+    let transition = journal::transition(last.as_deref(), failure);
+    *last = failure.map(str::to_owned);
+    drop(last);
 
-    match bascule {
-        journal::Bascule::Commence => tracing::error!(
-            "menu de la zone de notification incomplet : {}",
-            echec.unwrap_or_default()
+    match transition {
+        journal::Transition::Started => tracing::error!(
+            "tray menu could not be built or replaced: {}",
+            failure.unwrap_or_default()
         ),
-        journal::Bascule::Retabli => tracing::info!("menu de la zone de notification rétabli"),
-        journal::Bascule::Rien => {}
+        journal::Transition::Recovered => tracing::info!("tray menu recovered"),
+        journal::Transition::Unchanged => {}
     }
 }
 
@@ -826,32 +834,32 @@ fn consigner(echec: Option<&str>) {
 mod tests {
     use super::*;
 
-    const APPAREIL: DeviceRef = DeviceRef {
+    const DEVICE: DeviceRef = DeviceRef {
         vid: 0x1532,
         pid: 0x0292,
     };
     /// Two devices, because anything "per device" only makes sense from two
     /// on — and mixing up two identifiers would make the menu act on the wrong
     /// keyboard.
-    const AUTRE: DeviceRef = DeviceRef {
+    const OTHER: DeviceRef = DeviceRef {
         vid: 0x1532,
         pid: 0x0001,
     };
 
-    fn toutes() -> Vec<Action> {
+    fn all_actions() -> Vec<Action> {
         vec![
-            Action::Ouvrir,
-            Action::Quitter,
-            Action::Effet {
-                device: APPAREIL,
+            Action::OpenWindow,
+            Action::QuitApp,
+            Action::Start {
+                device: DEVICE,
                 effet: "onde-circulaire".into(),
             },
-            Action::Effet {
-                device: AUTRE,
+            Action::Start {
+                device: OTHER,
                 effet: "a".into(),
             },
-            Action::Sortie { device: APPAREIL },
-            Action::Eteindre { device: AUTRE },
+            Action::ToggleOutput { device: DEVICE },
+            Action::TurnOff { device: OTHER },
         ]
     }
 
@@ -860,12 +868,12 @@ mod tests {
     /// item that does nothing, with no error at compile time or at run time.
     #[test]
     fn every_action_reads_back_as_written() {
-        for action in toutes() {
-            let id = action.identifiant();
+        for action in all_actions() {
+            let id = action.to_id();
             assert_eq!(
-                Action::depuis(&id).as_ref(),
+                Action::from_id(&id).as_ref(),
                 Some(&action),
-                "identifiant « {id} »"
+                "identifier \"{id}\""
             );
         }
     }
@@ -875,10 +883,10 @@ mod tests {
     #[test]
     fn two_devices_give_two_identifiers() {
         assert_ne!(
-            Action::Eteindre { device: APPAREIL }.identifiant(),
-            Action::Eteindre { device: AUTRE }.identifiant()
+            Action::TurnOff { device: DEVICE }.to_id(),
+            Action::TurnOff { device: OTHER }.to_id()
         );
-        assert_ne!(cle(APPAREIL), cle(AUTRE));
+        assert_ne!(hex_id(DEVICE), hex_id(OTHER));
     }
 
     /// The handler is global: it receives the items of every menu in the
@@ -898,7 +906,7 @@ mod tests {
             "eteindre:1532:029x",
             "3", // an identifier muda numbered itself
         ] {
-            assert_eq!(Action::depuis(id), None, "« {id} » a été interprété");
+            assert_eq!(Action::from_id(id), None, "\"{id}\" was interpreted");
         }
     }
 
@@ -910,12 +918,12 @@ mod tests {
         assert!(storage::validate_id(&format!("a{SEP}b")).is_err());
 
         let effet = "a".repeat(64);
-        let action = Action::Effet {
-            device: APPAREIL,
+        let action = Action::Start {
+            device: DEVICE,
             effet: effet.clone(),
         };
-        storage::validate_id(&effet).expect("identifiant refusé");
-        assert_eq!(Action::depuis(&action.identifiant()), Some(action));
+        storage::validate_id(&effet).expect("identifier refused");
+        assert_eq!(Action::from_id(&action.to_id()), Some(action));
     }
 
     fn inspection_with_serial(serial: &str) -> Inspection {
@@ -1006,8 +1014,8 @@ mod tests {
     fn the_event_has_the_same_name_on_both_sides() {
         let ts = include_str!("../../src/api/candeo.ts");
         assert!(
-            ts.contains(ETAT_CHANGE),
-            "« {ETAT_CHANGE} » est introuvable dans src/api/candeo.ts"
+            ts.contains(STATE_CHANGED),
+            "\"{STATE_CHANGED}\" not found in src/api/candeo.ts"
         );
     }
 }

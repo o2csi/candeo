@@ -1,24 +1,24 @@
-//! Sondes matérielles — la forme exécutable du §9 « Reproduire le relevé ».
+//! Hardware probes — the executable form of §9 "Reproducing the survey".
 //!
-//! Chaque test ici répond à une question de
-//! `docs/protocol/deathstalker-v2-pro.md` en interrogeant un vrai
-//! DeathStalker V2 Pro. Tous sont `#[ignore]` : ils exigent l'appareil, donc
-//! la CI ne les lance jamais.
+//! Each test here answers a question from
+//! `docs/protocol/deathstalker-v2-pro.md` by querying a real
+//! DeathStalker V2 Pro. All of them are `#[ignore]`: they require the device, so
+//! CI never runs them.
 //!
 //! ```text
 //! cargo test -p candeo-desktop sonde -- --ignored --nocapture
 //! ```
 //!
-//! **Le résultat de ces sondes est déjà consigné dans le relevé.** On les garde
-//! parce qu'elles sont la manière de le refaire — sur un autre micrologiciel,
-//! sur un autre exemplaire, ou pour lever une des questions encore ouvertes.
+//! **The results of these probes are already recorded in the survey.** We keep
+//! them because they are the way to redo it — on another firmware, on another
+//! unit, or to settle one of the questions still open.
 //!
-//! ⚠️ Leçon coûteuse, gravée ici : la sonde des identifiants d'effet a d'abord
-//! filtré les réponses tout-à-zéro pour écarter le bruit, **masquant exactement
-//! le cas intéressant** (le mode « normal » se lit `00 00`) ; et elle posait
-//! `Statique` et `Respiration` sans couleur, donc en **noir** —
-//! indistinguables à l'œil d'un effet inexistant. Vérifier par relecture
-//! (`0x0f`/`0x82`), jamais par l'œil seul.
+//! ⚠️ A costly lesson, set down here: the effect identifier probe first filtered
+//! out all-zero replies to discard noise, **hiding exactly the interesting
+//! case** (the "normal" mode reads `00 00`); and it set `Statique` and
+//! `Respiration` without a color, hence in **black** — indistinguishable by eye
+//! from a nonexistent effect. Verify by reading back (`0x0f`/`0x82`), never by
+//! eye alone.
 
 #![cfg(test)]
 
@@ -28,14 +28,15 @@ use candeo_protocol::{checksum, REPORT_LEN};
 
 const VID: u16 = 0x1532;
 const PID: u16 = 0x0292;
-/// L'éclairage passe par cette interface du composite. Ouvrir la mauvaise donne
-/// un handle valide sur lequel toute écriture échoue sans erreur explicite.
+/// Lighting goes through this interface of the composite device. Opening the
+/// wrong one gives a valid handle on which every write fails without an
+/// explicit error.
 const INTERFACE: i32 = 3;
 
 const CLASS_LIGHTING: u8 = 0x0f;
 const TRANSACTION: u8 = 0x9f;
 
-/// Construit un rapport de 90 octets, somme de contrôle comprise.
+/// Builds a 90-byte report, checksum included.
 fn report(command: u8, args: &[u8]) -> [u8; REPORT_LEN + 1] {
     let mut r = [0u8; REPORT_LEN];
     r[1] = TRANSACTION;
@@ -45,33 +46,33 @@ fn report(command: u8, args: &[u8]) -> [u8; REPORT_LEN + 1] {
     r[8..8 + args.len()].copy_from_slice(args);
     r[88] = checksum(&r);
 
-    // Le tampon de `HidD_SetFeature` fait 91 octets : identifiant de rapport,
-    // puis les 90 du rapport.
+    // The `HidD_SetFeature` buffer is 91 bytes: report identifier, then the 90
+    // bytes of the report.
     let mut buf = [0u8; REPORT_LEN + 1];
     buf[1..].copy_from_slice(&r);
     buf
 }
 
-fn ouvrir() -> hidapi::HidDevice {
+fn open_keyboard() -> hidapi::HidDevice {
     let api = hidapi::HidApi::new().expect("HID");
     let info = api
         .device_list()
         .find(|d| {
             d.vendor_id() == VID && d.product_id() == PID && d.interface_number() == INTERFACE
         })
-        .expect("DeathStalker V2 Pro introuvable — branché ?");
-    info.open_device(&api).expect("ouverture")
+        .expect("DeathStalker V2 Pro not found — plugged in?");
+    info.open_device(&api).expect("open")
 }
 
-/// Balaie les identifiants d'effet, sans argument de couleur.
+/// Sweeps the effect identifiers, without a color argument.
 ///
-/// Connus avant ce relevé : `0x00` Off, `0x03` Spectrum Cycle, `0x04` Wave,
-/// `0x08` Direct/custom. Les autres n'ont jamais été essayés.
+/// Known before this survey: `0x00` Off, `0x03` Spectrum Cycle, `0x04` Wave,
+/// `0x08` Direct/custom. The others had never been tried.
 #[test]
 #[ignore]
-fn sonde_identifiants_d_effet() {
-    let dev = ouvrir();
-    let connus = |id: u8| match id {
+fn probe_effect_ids() {
+    let dev = open_keyboard();
+    let known = |id: u8| match id {
         0x00 => " (connu : Éteint)",
         0x03 => " (connu : Spectrum Cycle)",
         0x04 => " (connu : Wave)",
@@ -79,33 +80,33 @@ fn sonde_identifiants_d_effet() {
         _ => "",
     };
 
-    // Pleine luminosité d'abord : un effet invisible parce que le clavier est
-    // éteint se lirait comme un identifiant sans effet.
+    // Full brightness first: an effect invisible because the keyboard is dark
+    // would read as an identifier with no effect.
     let _ = dev.send_feature_report(&report(0x04, &[0, 0, 0xff]));
     std::thread::sleep(Duration::from_millis(400));
 
-    println!("\n>>> Balayage des identifiants d'effet, 3 s chacun.");
-    println!(">>> Regarde le clavier et note ce que fait chaque numéro.\n");
+    println!("\n>>> Sweeping effect identifiers, 3 s each.");
+    println!(">>> Watch the keyboard and note what each number does.\n");
 
     for id in 0x00u8..=0x0f {
-        println!(">>> identifiant 0x{id:02x}{}", connus(id));
+        println!(">>> identifier 0x{id:02x}{}", known(id));
         match dev.send_feature_report(&report(0x02, &[0, 0, id, 0, 0, 0])) {
             Ok(()) => {}
-            Err(e) => println!("    écriture refusée : {e}"),
+            Err(e) => println!("    write refused: {e}"),
         }
         std::thread::sleep(Duration::from_secs(3));
     }
 
-    // On rend le clavier à un état visible plutôt qu'au dernier essai.
+    // Leave the keyboard in a visible state rather than on the last attempt.
     let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
-    println!("\n>>> terminé — remis sur Spectrum Cycle.");
+    println!("\n>>> done — back on Spectrum Cycle.");
 }
 
-/// Lit la réponse du périphérique après une commande.
+/// Reads the device's reply after a command.
 ///
-/// `[0]` porte l'état : `0x02` = compris, et c'est exactement ce que
-/// `reachingKeyboard` ne sait pas distinguer aujourd'hui.
-fn lire(dev: &hidapi::HidDevice) -> Option<[u8; REPORT_LEN]> {
+/// `[0]` holds the status: `0x02` = understood, and that is exactly what
+/// `reachingKeyboard` cannot tell apart today.
+fn read_reply(dev: &hidapi::HidDevice) -> Option<[u8; REPORT_LEN]> {
     let mut buf = [0u8; REPORT_LEN + 1];
     match dev.get_feature_report(&mut buf) {
         Ok(n) if n >= REPORT_LEN => {
@@ -114,17 +115,17 @@ fn lire(dev: &hidapi::HidDevice) -> Option<[u8; REPORT_LEN]> {
             Some(r)
         }
         Ok(n) => {
-            println!("    réponse tronquée : {n} octets");
+            println!("    truncated reply: {n} bytes");
             None
         }
         Err(e) => {
-            println!("    lecture refusée : {e}");
+            println!("    read refused: {e}");
             None
         }
     }
 }
 
-fn etat(code: u8) -> &'static str {
+fn status_name(code: u8) -> &'static str {
     match code {
         0x00 => "aucune",
         0x01 => "occupé",
@@ -136,11 +137,11 @@ fn etat(code: u8) -> &'static str {
     }
 }
 
-/// Construit un rapport pour une classe arbitraire, pas seulement l'éclairage.
-fn report_classe(class: u8, command: u8, taille: u8) -> [u8; REPORT_LEN + 1] {
+/// Builds a report for an arbitrary class, not only lighting.
+fn class_report(class: u8, command: u8, size: u8) -> [u8; REPORT_LEN + 1] {
     let mut r = [0u8; REPORT_LEN];
     r[1] = TRANSACTION;
-    r[5] = taille;
+    r[5] = size;
     r[6] = class;
     r[7] = command;
     r[88] = checksum(&r);
@@ -149,77 +150,76 @@ fn report_classe(class: u8, command: u8, taille: u8) -> [u8; REPORT_LEN + 1] {
     buf
 }
 
-/// **Le périphérique répond-il, et que dit-il ?**
+/// **Does the device reply, and what does it say?**
 ///
-/// Répond à la case `GET_REPORT` du §9 du relevé, et conditionne #35 : sans
-/// lecture, aucune version de micrologiciel n'est accessible — `release_number`
-/// ne donne que le `bcdDevice`, figé à 0x0200 alors que le micrologiciel se
-/// déclare v1.5.
+/// Answers the `GET_REPORT` entry of §9 of the survey, and gates #35: without
+/// reading, no firmware version is reachable — `release_number` only gives
+/// `bcdDevice`, fixed at 0x0200 while the firmware reports itself as v1.5.
 #[test]
 #[ignore]
-fn sonde_lecture_reponse() {
-    let dev = ouvrir();
+fn probe_read_reply() {
+    let dev = open_keyboard();
 
-    // D'abord une commande dont on SAIT qu'elle agit : si celle-là ne se relit
-    // pas, c'est le chemin de lecture qui manque, pas la commande sondée.
-    println!("\n>>> Témoin : luminosité (commande validée en écriture).");
+    // First a command we KNOW has an effect: if that one does not read back,
+    // it is the read path that is missing, not the probed command.
+    println!("\n>>> Control: brightness (command validated on write).");
     dev.send_feature_report(&report(0x04, &[0, 0, 0xff]))
-        .expect("écriture témoin");
+        .expect("control write");
     std::thread::sleep(Duration::from_millis(60));
-    match lire(&dev) {
+    match read_reply(&dev) {
         Some(r) => println!(
-            "    état 0x{:02x} ({}) · classe 0x{:02x} · commande 0x{:02x} · args {:02x?}",
+            "    status 0x{:02x} ({}) · class 0x{:02x} · command 0x{:02x} · args {:02x?}",
             r[0],
-            etat(r[0]),
+            status_name(r[0]),
             r[6],
             r[7],
             &r[8..16]
         ),
-        None => println!("    aucune réponse — le reste de cette sonde ne vaudra rien."),
+        None => println!("    no reply — the rest of this probe will be worthless."),
     }
 
-    // Puis on cherche ce qui rend des octets NON nuls : une version, un nom, un
-    // numéro de série — le clavier n'en déclare aucun par USB.
-    println!("\n>>> Balayage des commandes de la classe 0x00 (informations).");
+    // Then look for what returns NON-zero bytes: a version, a name, a serial
+    // number — the keyboard declares none of them over USB.
+    println!("\n>>> Sweeping the commands of class 0x00 (information).");
     for command in 0x80u8..=0x8f {
-        for taille in [0x02u8, 0x04, 0x10, 0x16] {
-            dev.send_feature_report(&report_classe(0x00, command, taille))
+        for size in [0x02u8, 0x04, 0x10, 0x16] {
+            dev.send_feature_report(&class_report(0x00, command, size))
                 .ok();
             std::thread::sleep(Duration::from_millis(40));
-            let Some(r) = lire(&dev) else { continue };
-            let utile = &r[8..8 + taille as usize];
-            if r[0] == 0x02 && utile.iter().any(|&b| b != 0) {
+            let Some(r) = read_reply(&dev) else { continue };
+            let payload = &r[8..8 + size as usize];
+            if r[0] == 0x02 && payload.iter().any(|&b| b != 0) {
                 println!(
-                    "    classe 0x00 · commande 0x{command:02x} · taille 0x{taille:02x} → {utile:02x?}  {:?}",
-                    String::from_utf8_lossy(utile)
+                    "    class 0x00 · command 0x{command:02x} · size 0x{size:02x} → {payload:02x?}  {:?}",
+                    String::from_utf8_lossy(payload)
                 );
             }
         }
     }
 
-    println!("\n>>> terminé.");
+    println!("\n>>> done.");
 }
 
-/// Relit la classe `0x00` **sans filtrer les octets nuls** — le filtre du
-/// premier passage avait masqué `0x84`, dont la réponse attendue est `00 00`.
+/// Reads class `0x00` again **without filtering out zero bytes** — the filter of
+/// the first pass had hidden `0x84`, whose expected reply is `00 00`.
 ///
-/// Les hypothèses à confirmer sur NOTRE matériel :
-/// `0x85` = fréquence d'interrogation (`01` → 1000 Hz),
-/// `0x86` = disposition du clavier (`04` → fr_FR).
+/// The hypotheses to confirm on OUR hardware:
+/// `0x85` = polling rate (`01` → 1000 Hz),
+/// `0x86` = keyboard locale layout (`04` → fr_FR).
 #[test]
 #[ignore]
-fn sonde_classe_information() {
-    let dev = ouvrir();
+fn probe_information_class() {
+    let dev = open_keyboard();
 
     for command in 0x80u8..=0x8f {
-        dev.send_feature_report(&report_classe(0x00, command, 0x16))
+        dev.send_feature_report(&class_report(0x00, command, 0x16))
             .ok();
         std::thread::sleep(Duration::from_millis(40));
-        let Some(r) = lire(&dev) else { continue };
+        let Some(r) = read_reply(&dev) else { continue };
         println!(
-            "0x{command:02x} → état 0x{:02x} ({:<18}) · écho classe 0x{:02x}/cmd 0x{:02x} · {:02x?}",
+            "0x{command:02x} → status 0x{:02x} ({:<18}) · echo class 0x{:02x}/cmd 0x{:02x} · {:02x?}",
             r[0],
-            etat(r[0]),
+            status_name(r[0]),
             r[6],
             r[7],
             &r[8..24]
@@ -227,44 +227,44 @@ fn sonde_classe_information() {
     }
 }
 
-/// **L'octet d'état veut-il dire quelque chose ?**
+/// **Does the status byte mean anything?**
 ///
-/// Une réponse toujours à `0x02` ne prouverait rien. Il faut voir l'appareil
-/// *refuser* : c'est ce refus qui ferait de la vérification de protocole autre
-/// chose qu'un vœu pieux pour #35.
+/// A reply always at `0x02` would prove nothing. We need to see the device
+/// *refuse*: that refusal is what would make protocol verification something
+/// other than wishful thinking for #35.
 #[test]
 #[ignore]
-fn sonde_etat_sur_commande_invalide() {
-    let dev = ouvrir();
+fn probe_status_on_invalid_command() {
+    let dev = open_keyboard();
 
-    let cas: [(&str, [u8; REPORT_LEN + 1]); 4] = [
+    let cases: [(&str, [u8; REPORT_LEN + 1]); 4] = [
         ("témoin — luminosité, valide", report(0x04, &[0, 0, 0x80])),
-        ("classe inexistante 0xee", report_classe(0xee, 0x01, 0x02)),
+        ("classe inexistante 0xee", class_report(0xee, 0x01, 0x02)),
         (
             "classe éclairage, commande 0xee",
-            report_classe(0x0f, 0xee, 0x02),
+            class_report(0x0f, 0xee, 0x02),
         ),
         (
             "taille aberrante sur commande valide",
-            report_classe(0x0f, 0x04, 0x50),
+            class_report(0x0f, 0x04, 0x50),
         ),
     ];
 
-    for (nom, mut trame) in cas {
-        // La somme de contrôle doit rester juste : on teste le refus d'une
-        // commande, pas celui d'une trame corrompue.
+    for (nom, mut packet) in cases {
+        // The checksum must stay correct: we are testing the refusal of a
+        // command, not that of a corrupted packet.
         let mut r = [0u8; REPORT_LEN];
-        r.copy_from_slice(&trame[1..]);
+        r.copy_from_slice(&packet[1..]);
         r[88] = checksum(&r);
-        trame[1..].copy_from_slice(&r);
+        packet[1..].copy_from_slice(&r);
 
         print!(">>> {nom:<40} ");
-        match dev.send_feature_report(&trame) {
-            Ok(()) => match lire(&dev) {
-                Some(rep) => println!("→ 0x{:02x} ({})", rep[0], etat(rep[0])),
-                None => println!("→ pas de réponse"),
+        match dev.send_feature_report(&packet) {
+            Ok(()) => match read_reply(&dev) {
+                Some(reply) => println!("→ 0x{:02x} ({})", reply[0], status_name(reply[0])),
+                None => println!("→ no reply"),
             },
-            Err(e) => println!("→ écriture refusée : {e}"),
+            Err(e) => println!("→ write refused: {e}"),
         }
         std::thread::sleep(Duration::from_millis(120));
     }
@@ -272,25 +272,25 @@ fn sonde_etat_sur_commande_invalide() {
     let _ = dev.send_feature_report(&report(0x04, &[0, 0, 0xff]));
 }
 
-/// Cherche une **relecture** dans la classe éclairage.
+/// Looks for a **readback** in the lighting class.
 ///
-/// Si l'appareil sait redire l'effet courant, on confirme les identifiants
-/// d'effet **sans dépendre de l'œil** — ce qui avait justement manqué au premier
-/// balayage, jugé « trop rapide pour dire ce que j'ai vu ».
+/// If the device can report the current effect, the effect identifiers are
+/// confirmed **without relying on the eye** — which is precisely what the first
+/// sweep lacked, judged "too fast to tell what I saw".
 #[test]
 #[ignore]
-fn sonde_relecture_eclairage() {
-    let dev = ouvrir();
+fn probe_lighting_readback() {
+    let dev = open_keyboard();
 
-    println!("\n>>> Commandes lisibles de la classe 0x0f.");
+    println!("\n>>> Readable commands of class 0x0f.");
     for command in 0x80u8..=0x8f {
-        dev.send_feature_report(&report_classe(0x0f, command, 0x03))
+        dev.send_feature_report(&class_report(0x0f, command, 0x03))
             .ok();
         std::thread::sleep(Duration::from_millis(40));
-        let Some(r) = lire(&dev) else { continue };
+        let Some(r) = read_reply(&dev) else { continue };
         if r[0] == 0x02 {
             println!(
-                "0x{command:02x} → état compris · écho 0x{:02x}/0x{:02x} · {:02x?}",
+                "0x{command:02x} → status understood · echo 0x{:02x}/0x{:02x} · {:02x?}",
                 r[6],
                 r[7],
                 &r[8..14]
@@ -298,9 +298,9 @@ fn sonde_relecture_eclairage() {
         }
     }
 
-    // Puis : pose un effet, relis-le. Si la relecture suit, les identifiants
-    // sont établis objectivement.
-    println!("\n>>> Pose d'un effet, puis relecture.");
+    // Then: set an effect, read it back. If the readback follows, the
+    // identifiers are established objectively.
+    println!("\n>>> Setting an effect, then reading it back.");
     for (nom, id) in [
         ("Éteint", 0x00u8),
         ("Statique", 0x01),
@@ -311,8 +311,8 @@ fn sonde_relecture_eclairage() {
         ("Étoilé", 0x07),
         ("Direct/custom", 0x08),
     ] {
-        // Statique et Respiration veulent une couleur : sans elle, le premier
-        // balayage les posait en NOIR — donc « rien ne se passe » à l'œil.
+        // Static and Breathing want a color: without it, the first sweep set
+        // them in BLACK — hence "nothing happens" to the eye.
         let args: Vec<u8> = match id {
             0x01 | 0x02 => vec![0, 0, id, 0, 0, 0x01, 0xff, 0x00, 0x00],
             0x04 => vec![0, 0, id, 0x01, 0x28, 0],
@@ -321,39 +321,38 @@ fn sonde_relecture_eclairage() {
         dev.send_feature_report(&report(0x02, &args)).ok();
         std::thread::sleep(Duration::from_millis(150));
 
-        dev.send_feature_report(&report_classe(0x0f, 0x82, 0x03))
+        dev.send_feature_report(&class_report(0x0f, 0x82, 0x03))
             .ok();
         std::thread::sleep(Duration::from_millis(60));
-        match lire(&dev) {
+        match read_reply(&dev) {
             Some(r) => println!(
-                "{nom:<14} posé 0x{id:02x} → relu état 0x{:02x} · {:02x?}",
+                "{nom:<14} set 0x{id:02x} → read back status 0x{:02x} · {:02x?}",
                 r[0],
                 &r[8..14]
             ),
-            None => println!("{nom:<14} posé 0x{id:02x} → pas de relecture"),
+            None => println!("{nom:<14} set 0x{id:02x} → no readback"),
         }
     }
 
     let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
-    println!("\n>>> remis sur Spectre.");
+    println!("\n>>> back on Spectrum Cycle.");
 }
 
-/// Détaille les réponses de `0x0f`/`0x80` et `0x81`, qui ressemblent à des
-/// descripteurs : l'une porte `06 16` — soit exactement nos 6 rangées × 22
-/// colonnes — l'autre une suite `00 01 02 03 04` qui pourrait énumérer les
-/// effets réellement pris en charge.
+/// Details the replies of `0x0f`/`0x80` and `0x81`, which look like
+/// descriptors: one holds `06 16` — exactly our 6 rows × 22 columns — the other
+/// a run `00 01 02 03 04` that could enumerate the effects actually supported.
 #[test]
 #[ignore]
-fn sonde_descripteurs_eclairage() {
-    let dev = ouvrir();
+fn probe_lighting_descriptors() {
+    let dev = open_keyboard();
     for command in [0x80u8, 0x81, 0x86] {
-        for taille in [0x03u8, 0x16] {
-            dev.send_feature_report(&report_classe(0x0f, command, taille))
+        for size in [0x03u8, 0x16] {
+            dev.send_feature_report(&class_report(0x0f, command, size))
                 .ok();
             std::thread::sleep(Duration::from_millis(50));
-            let Some(r) = lire(&dev) else { continue };
+            let Some(r) = read_reply(&dev) else { continue };
             println!(
-                "0x{command:02x} taille 0x{taille:02x} → état 0x{:02x} · {:02x?}",
+                "0x{command:02x} size 0x{size:02x} → status 0x{:02x} · {:02x?}",
                 r[0],
                 &r[8..40]
             );
@@ -361,104 +360,103 @@ fn sonde_descripteurs_eclairage() {
     }
 }
 
-/// **Quelle cadence l'appareil soutient-il réellement ?**
+/// **What frame rate does the device actually sustain?**
 ///
-/// Répond au « débit maximal accepté avant décrochage » du §9, et a tranché une
-/// question de conception : la boucle visait alors 60 images par seconde, or une
-/// mise à jour complète coûte **7 transferts de contrôle** — 6 rangées puis le
-/// passage en mode custom. À 60 Hz cela faisait 420 transferts par seconde sur
-/// une seule interface.
+/// Answers the "maximum rate accepted before dropping out" of §9, and settled a
+/// design question: the loop then aimed at 60 frames per second, yet a full
+/// update costs **7 control transfers** — 6 rows then the switch to custom
+/// mode. At 60 Hz that made 420 transfers per second on a single interface.
 ///
-/// C'est cette sonde qui a répondu non, et `runtime::FPS` vaut 30 depuis. Le
-/// temps de verbe est au passé pour cette raison, et non par négligence : garder
-/// l'énoncé d'origine est ce qui permet de rejouer la mesure et de la comparer.
+/// This probe is what answered no, and `runtime::FPS` has been 30 since. The
+/// tense is past for that reason, not out of carelessness: keeping the original
+/// wording is what lets you replay the measurement and compare it.
 ///
-/// L'enjeu n'est pas le confort : si l'appareil ne suit pas, la moitié de nos
-/// images est jetée par lui, et **le simulateur est alors plus fluide que le
-/// clavier** — ce qui contredit « l'aperçu EST la production ».
+/// What is at stake is not comfort: if the device cannot keep up, half of our
+/// frames are dropped by it, and **the simulator is then smoother than the
+/// keyboard** — which contradicts "the preview IS production".
 #[test]
 #[ignore]
-fn sonde_cadence_soutenable() {
-    let dev = ouvrir();
+fn probe_sustainable_frame_rate() {
+    let dev = open_keyboard();
 
-    // Une image complète : 6 rangées de 22 couleurs, puis le mode custom.
-    let image = |teinte: u8| -> Vec<[u8; REPORT_LEN + 1]> {
-        let mut trames = Vec::with_capacity(7);
-        for rangee in 0u8..6 {
-            let mut args = vec![0u8, 0, rangee, 0, 21];
+    // A full frame: 6 rows of 22 colors, then custom mode.
+    let frame = |hue: u8| -> Vec<[u8; REPORT_LEN + 1]> {
+        let mut packets = Vec::with_capacity(7);
+        for row in 0u8..6 {
+            let mut args = vec![0u8, 0, row, 0, 21];
             for _ in 0..22 {
-                args.extend_from_slice(&[teinte, 0, 255 - teinte]);
+                args.extend_from_slice(&[hue, 0, 255 - hue]);
             }
-            trames.push(report(0x03, &args));
+            packets.push(report(0x03, &args));
         }
-        trames.push(report(0x02, &[0, 0, 0x08, 0, 0, 0]));
-        trames
+        packets.push(report(0x02, &[0, 0, 0x08, 0, 0, 0]));
+        packets
     };
 
-    // Chauffe : la première écriture après ouverture paie des frais qu'on ne
-    // veut pas compter comme du débit.
-    for t in image(0) {
+    // Warm-up: the first write after opening pays costs we do not want to
+    // count as throughput.
+    for t in frame(0) {
         let _ = dev.send_feature_report(&t);
     }
     std::thread::sleep(Duration::from_millis(100));
 
-    println!("\n>>> Coût d'une mise à jour complète (7 trames), au plus vite.");
+    println!("\n>>> Cost of a full update (7 packets), as fast as possible.");
     const N: u32 = 120;
-    let mut echecs = 0u32;
-    let mut pire = Duration::ZERO;
-    let debut = Instant::now();
+    let mut failures = 0u32;
+    let mut worst = Duration::ZERO;
+    let start = Instant::now();
 
     for i in 0..N {
         let t0 = Instant::now();
-        for t in image((i * 2) as u8) {
+        for t in frame((i * 2) as u8) {
             if dev.send_feature_report(&t).is_err() {
-                echecs += 1;
+                failures += 1;
             }
         }
         let d = t0.elapsed();
-        if d > pire {
-            pire = d;
+        if d > worst {
+            worst = d;
         }
     }
 
-    let total = debut.elapsed();
-    let moyenne = total / N;
-    println!("    {N} mises à jour en {total:?}");
-    println!("    moyenne {moyenne:?} · pire {pire:?} · écritures refusées : {echecs}");
+    let total = start.elapsed();
+    let mean = total / N;
+    println!("    {N} updates in {total:?}");
+    println!("    mean {mean:?} · worst {worst:?} · writes refused: {failures}");
     println!(
-        "    soit {:.1} img/s au maximum, {:.1} img/s dans le pire cas",
-        1.0 / moyenne.as_secs_f64(),
-        1.0 / pire.as_secs_f64()
+        "    i.e. {:.1} fps at most, {:.1} fps in the worst case",
+        1.0 / mean.as_secs_f64(),
+        1.0 / worst.as_secs_f64()
     );
-    println!("    (période visée à 60 img/s : 16,7 ms · à 30 img/s : 33,3 ms)");
+    println!("    (target period at 60 fps: 16.7 ms · at 30 fps: 33.3 ms)");
 
-    // L'appareil répond-il encore ? Une cadence « tenue » qui laisse le
-    // périphérique sourd ne vaudrait rien.
-    dev.send_feature_report(&report_classe(0x0f, 0x82, 0x03))
+    // Does the device still reply? A rate "sustained" that leaves the device
+    // deaf would be worthless.
+    dev.send_feature_report(&class_report(0x0f, 0x82, 0x03))
         .ok();
     std::thread::sleep(Duration::from_millis(60));
-    match lire(&dev) {
+    match read_reply(&dev) {
         Some(r) => println!(
-            "    après la rafale : état 0x{:02x} ({}), effet relu 0x{:02x}",
+            "    after the burst: status 0x{:02x} ({}), effect read back 0x{:02x}",
             r[0],
-            etat(r[0]),
+            status_name(r[0]),
             r[10]
         ),
-        None => println!("    après la rafale : PLUS DE RÉPONSE — décrochage"),
+        None => println!("    after the burst: NO MORE REPLIES — dropped out"),
     }
 
     let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
-    println!(">>> remis sur Spectre.");
+    println!(">>> back on Spectrum Cycle.");
 }
 
-/// Ce que l'énumération HID donne **sans protocole**, sur chaque interface.
+/// What HID enumeration gives **without any protocol**, on each interface.
 ///
-/// N'ouvre rien : c'est une lecture de la liste que tient le système. Le chemin
-/// est imprimé pour l'entrée `interface -1` du §10 — c'est lui qui dit par quel
-/// bus, donc par quel pilote, elle arrive.
+/// Opens nothing: this is a read of the list the system keeps. The path is
+/// printed for the `interface -1` entry of §10 — it is what tells through which
+/// bus, and so through which driver, that entry arrives.
 #[test]
 #[ignore]
-fn sonde_descripteur_usb() {
+fn probe_usb_descriptor() {
     let api = hidapi::HidApi::new().expect("HID");
     for d in api
         .device_list()
@@ -466,7 +464,7 @@ fn sonde_descripteur_usb() {
     {
         let r = d.release_number();
         println!(
-            "interface {:>2} | release_number = 0x{r:04x} (soit {}.{:02}) | série {:?} | produit {:?} | page 0x{:04x}/0x{:04x}\n             chemin {}",
+            "interface {:>2} | release_number = 0x{r:04x} (i.e. {}.{:02}) | serial {:?} | product {:?} | page 0x{:04x}/0x{:04x}\n             path {}",
             d.interface_number(),
             r >> 8,
             r & 0xff,
@@ -479,41 +477,41 @@ fn sonde_descripteur_usb() {
     }
 }
 
-/// **L'inspection de production**, telle que l'application la fait à chaque
-/// ouverture — et non une réécriture à la main de ce qu'elle est censée faire.
+/// **The production inspection**, as the application runs it on every open —
+/// and not a hand-written rewrite of what it is supposed to do.
 ///
-/// C'est la sonde à rejouer avant de croire l'inspection sur un autre
-/// micrologiciel : elle émet exactement ce que `Keyboard::open` émet, luminosité
-/// et effet **réécrits à l'identique**. Si le clavier change d'aspect pendant
-/// qu'elle tourne, l'hypothèse qui autorise l'inspection à émettre est fausse —
-/// et c'est ici qu'on veut l'apprendre, pas chez un utilisateur.
+/// This is the probe to replay before trusting the inspection on another
+/// firmware: it sends exactly what `Keyboard::open` sends, brightness and
+/// effect **rewritten identically**. If the keyboard changes appearance while
+/// it runs, the hypothesis that allows the inspection to write is wrong — and
+/// this is where we want to learn it, not on a user's machine.
 ///
-/// ⚠️ **Application fermée.** Une boucle de rendu qui écrit sur la même interface
-/// entrelacerait ses commandes aux nôtres : l'écho les écarte, mais les
-/// verdicts deviendraient « non vérifiée ».
+/// ⚠️ **Application closed.** A render loop writing to the same interface would
+/// interleave its commands with ours: the echo filters them out, but the
+/// verdicts would become "non vérifiée" (unverified).
 #[test]
 #[ignore]
-fn sonde_inspection_a_l_ouverture() {
+fn probe_inspection_on_open() {
     let api = hidapi::HidApi::new().expect("HID");
     let layout = &candeo_device::DEATHSTALKER_V2_PRO;
-    let kb = candeo_device::Keyboard::open(&api, layout).expect("ouverture");
+    let kb = candeo_device::Keyboard::open(&api, layout).expect("open");
     let i = kb.inspection();
 
     println!(
-        "\nmicrologiciel : {:?} (relevé sur {})",
+        "\nfirmware: {:?} (surveyed on {})",
         i.firmware.as_ref().map(ToString::to_string),
         layout.surveyed_firmware
     );
-    // L'empreinte, pas la série : la sortie de cette sonde finit collée dans une
-    // issue aussi souvent qu'un journal.
+    // The fingerprint, not the serial: the output of this probe ends up pasted
+    // into an issue as often as a log does.
     println!(
-        "série : {}",
-        crate::journal::empreinte_de(i.serial.as_deref().ok())
+        "serial: {}",
+        crate::journal::fingerprint_of(i.serial.as_deref().ok())
     );
     for c in &i.checks {
         println!("{:<10} {} → {:?}", c.name, c.command, c.verdict);
     }
     for a in i.warnings(layout) {
-        println!("AVERTISSEMENT : {a}");
+        println!("WARNING: {a}");
     }
 }

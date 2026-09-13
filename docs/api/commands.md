@@ -1154,6 +1154,6 @@ changed, because the recipient rereads everything anyway.
 No additional permission: `core:event:default`, which `core:default`
 includes, already grants `listen`.
 
-The name is written on both sides — `tray::ETAT_CHANGE` and `src/api/candeo.ts` — and
+The name is written on both sides — `tray::STATE_CHANGED` and `src/api/candeo.ts` — and
 a Rust test checks the two against each other: nothing else ties them together, and letting them
 drift apart would produce a window that no longer resynchronizes, without a single error anywhere.

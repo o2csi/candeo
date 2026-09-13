@@ -1,46 +1,44 @@
-//! Le journal : où partent les enregistrements, et comment les atteindre.
+//! The log: where records go, and how to reach them.
 //!
-//! Avant ce module, rien n'était lisible en `release` : huit `eprintln!` dans le
-//! Rust, trois `console.` dans la fenêtre, et un binaire compilé
-//! `windows_subsystem = "windows"` — donc sans console pour les recevoir. Trois
-//! pannes déjà identifiées tombaient dans ce vide : l'échec d'ouverture d'un
-//! appareil au démarrage, la dégradation silencieuse de l'instance unique sous
-//! Linux (#45), et l'avertissement « sans bloquer » sur une version de
-//! micrologiciel inattendue (#35).
+//! Before this module, nothing was readable in `release`: eight `eprintln!` in the
+//! Rust, three `console.` in the window, and a binary compiled with
+//! `windows_subsystem = "windows"`, hence with no console to receive them. Three
+//! failures already identified fell into that void: a device failing to open at
+//! startup, the silent degradation of the single instance under Linux (#45), and
+//! the "non-blocking" warning about an unexpected firmware version (#35).
 //!
-//! # Quatre couches, dont une qu'on oublie toujours
+//! # Four layers, one of which is always forgotten
 //!
-//! 1. une **façade** — les macros de `tracing`, appelées partout, qui ignorent où
-//!    partent les enregistrements ;
-//! 2. un **collecteur** qui filtre par niveau et met en forme ;
-//! 3. des **destinations** : un fichier tournant, et la sortie standard en
-//!    développement ;
-//! 4. **de quoi atteindre le fichier depuis l'application** — [`open_log_dir`] et
-//!    [`diagnostic`]. Un journal que personne ne sait trouver ne sert à rien.
+//! 1. a **facade**: the `tracing` macros, called everywhere, which do not know
+//!    where records go;
+//! 2. a **subscriber** that filters by level and formats;
+//! 3. **destinations**: a rolling file, and standard output in development;
+//! 4. **a way to reach the file from the app**: [`open_log_dir`] and
+//!    [`diagnostic`]. A log nobody knows how to find is useless.
 //!
-//! # `tracing` plutôt que `tauri-plugin-log`
+//! # `tracing` rather than `tauri-plugin-log`
 //!
-//! Le plugin est première partie et réglerait l'essentiel en quelques lignes. Ce
-//! qu'il ne donne pas, c'est le contexte : **il y a une boucle de rendu par
-//! appareil**, et « écriture refusée » ne sert à rien sans savoir laquelle. Un
-//! *span* ouvert par boucle — voir [`crate::runtime`] — attache l'appareil et
-//! l'effet à tout ce qui s'y journalise, **sans trimballer un identifiant
-//! d'appareil dans chaque appel**. C'est exactement la forme de nos pannes, et
-//! c'est ce qui garde un journal lisible quand deux appareils tournent ensemble.
+//! The plugin is first-party and would cover the essentials in a few lines. What
+//! it does not give is context: **there is one render loop per device**, and
+//! "write refused" is useless without knowing which one. A *span* opened per loop
+//! (see [`crate::runtime`]) attaches the device and the effect to everything
+//! logged inside it, **without carrying a device identifier through every call**.
+//! That is exactly the shape of our failures, and it is what keeps a log readable
+//! when two devices run together.
 //!
-//! Le prix est une crate de plus et un filtre à configurer.
+//! The price is one more crate and a filter to configure.
 //!
-//! # Deux règles qui ne se négocient pas
+//! # Two non-negotiable rules
 //!
-//! **Journaliser les transitions, jamais les occurrences.** À 30 images par
-//! seconde, une écriture qui échoue produirait trente lignes par seconde et
-//! enterrerait la seule qui compte. Le moteur a déjà le bon modèle — l'erreur est
-//! posée puis effacée au rétablissement, et l'arrêt vient après un nombre fixe
-//! d'échecs consécutifs ; [`bascule`] est ce qui le transpose au journal.
+//! **Log transitions, never occurrences.** At 30 frames per second, a failing
+//! write would produce thirty lines per second and bury the only one that matters.
+//! The engine already has the right model: the error is set, then cleared on
+//! recovery, and the stop comes after a fixed number of consecutive failures;
+//! [`transition`] is what carries that over to the log.
 //!
-//! **Le numéro de série ne fuit pas.** Le protocole en donne un et il identifie
-//! un exemplaire précis ; un journal collé dans un rapport de bogue ne doit pas
-//! le divulguer. Voir [`empreinte`].
+//! **The serial number does not leak.** The protocol returns one and it identifies
+//! a specific unit; a log pasted into a bug report must not disclose it. See
+//! [`fingerprint`].
 
 use std::fmt;
 use std::path::PathBuf;
@@ -55,65 +53,64 @@ use tracing_subscriber::{fmt as fmt_layer, reload, EnvFilter, Registry};
 
 use crate::{AppState, CmdResult, DeviceRef};
 
-/// La variable d'environnement qui l'emporte sur tout le reste.
+/// The environment variable that overrides everything else.
 ///
-/// `CANDEO_LOG` et non `RUST_LOG` : cette dernière est partagée par tout
-/// l'outillage Rust, et quelqu'un qui l'a posée pour lire ce que raconte `cargo`
-/// changerait au passage, et sans le vouloir, le journal de l'application.
+/// `CANDEO_LOG` and not `RUST_LOG`: the latter is shared by all Rust tooling, and
+/// someone who set it to read what `cargo` is saying would change the app's log
+/// along the way, without meaning to.
 pub const VARIABLE: &str = "CANDEO_LOG";
 
-/// Le niveau quand rien ne le dit : le cycle de vie, et rien de plus.
-const DEFAUT: LogLevel = LogLevel::Info;
+/// The level when nothing says otherwise: the lifecycle, and nothing more.
+const DEFAULT_LEVEL: LogLevel = LogLevel::Info;
 
-/// `candeo.2026-09-12.log`, dans le dossier des journaux.
-const PREFIXE: &str = "candeo";
-const SUFFIXE: &str = "log";
+/// `candeo.2026-09-12.log`, in the log directory.
+const FILE_PREFIX: &str = "candeo";
+const FILE_SUFFIX: &str = "log";
 
-/// Nombre de fichiers gardés, rotation quotidienne comprise : une semaine.
+/// Number of files kept, daily rotation included: one week.
 ///
-/// Une application d'éclairage tourne des jours, et sans plafond le dossier ne
-/// ferait que grossir. Une semaine couvre « ça a commencé lundi » — la distance
-/// utile d'un rapport de bogue — sans conserver un historique que personne ne
-/// relira.
+/// A lighting app runs for days, and without a cap the directory would only
+/// grow. A week covers "it started on Monday", the useful reach of a bug report,
+/// without keeping a history nobody will read again.
 ///
-/// ⚠️ **Le plafond porte sur le nombre de fichiers, pas sur leur taille.** Un
-/// niveau élevé porte du par-image : la journée en cours peut grossir beaucoup
-/// avant que la rotation ne tranche. Ce qui borne la taille, c'est le niveau —
-/// d'où [`JournalStatus::verbose`], et la mention que l'interface en fait.
-const MAX_FICHIERS: usize = 7;
+/// ⚠️ **The cap is on the number of files, not their size.** A high level carries
+/// per-frame records: the current day can grow a lot before rotation cuts it.
+/// What bounds the size is the level, hence [`JournalStatus::verbose`], and the
+/// notice the interface shows about it.
+const MAX_FILES: usize = 7;
 
-/// Cible des enregistrements venus de la fenêtre.
+/// Target of records coming from the window.
 ///
-/// Une cible fixe, et l'origine en champ : `tracing` exige une cible constante à
-/// la compilation, et de toute façon « tout ce qui vient du WebView » est ce
-/// qu'on veut pouvoir filtrer d'un seul mot.
-const CIBLE_WEBVIEW: &str = "candeo_webview";
+/// A fixed target, with the origin as a field: `tracing` requires a target that is
+/// constant at compile time, and in any case "everything from the WebView" is what
+/// we want to be able to filter with a single word.
+const WEBVIEW_TARGET: &str = "candeo_webview";
 
-/// Les crates dont le niveau suit celui qu'on règle.
+/// The crates whose level follows the one that is set.
 ///
-/// Les autres — Tauri, `hidapi`, WebView — restent à `warn` : monter le journal à
-/// `debug` pour suivre une boucle de rendu ne doit pas noyer le fichier sous la
-/// trace d'une bibliothèque tierce, qui est précisément ce qu'on ne cherche pas.
-const NOTRES: &[&str] = &[
+/// The others (Tauri, `hidapi`, WebView) stay at `warn`: raising the log to
+/// `debug` to follow a render loop must not drown the file in a third-party
+/// library's trace, which is precisely what we are not looking for.
+const OUR_CRATES: &[&str] = &[
     "candeo_desktop_lib",
     "candeo_device",
     "candeo_protocol",
-    CIBLE_WEBVIEW,
+    WEBVIEW_TARGET,
 ];
 
-// ---------------------------------------------------------------- niveaux
+// ---------------------------------------------------------------- levels
 
-/// Les niveaux, tels qu'ils veulent dire quelque chose **ici**.
+/// The levels, as they mean something **here**.
 ///
-/// | Niveau | Ce que ça veut dire |
+/// | Level | What it means |
 /// |---|---|
-/// | `error` | l'éclairage de l'utilisateur est cassé |
-/// | `warn` | dégradé mais fonctionnel — micrologiciel inattendu (#35), exclusion d'instance inopérante (#45) |
-/// | `info` | cycle de vie : appareil adopté, effet démarré, effet arrêté |
-/// | `debug` / `trace` | par image, **éteint par défaut** |
+/// | `error` | the user's lighting is broken |
+/// | `warn` | degraded but working: unexpected firmware (#35), single-instance exclusion not working (#45) |
+/// | `info` | lifecycle: device adopted, effect started, effect stopped |
+/// | `debug` / `trace` | per frame, **off by default** |
 ///
-/// L'ordre de déclaration est celui de la verbosité croissante, et il est
-/// utilisé : [`directives`] en tire le niveau accordé aux crates tierces.
+/// The declaration order is increasing verbosity, and it is relied on:
+/// [`directives`] derives from it the level granted to third-party crates.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum LogLevel {
@@ -125,8 +122,8 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    /// Le nom que comprend `EnvFilter`, et celui qu'on lit dans le fichier.
-    fn nom(self) -> &'static str {
+    /// The name `EnvFilter` understands, and the one read in the file.
+    fn name(self) -> &'static str {
         match self {
             Self::Error => "error",
             Self::Warn => "warn",
@@ -136,12 +133,12 @@ impl LogLevel {
         }
     }
 
-    /// Le niveau nommé par cette chaîne, s'il y en a un.
+    /// The level named by this string, if there is one.
     ///
-    /// Insensible à la casse et aux espaces : c'est saisi à la main dans un
-    /// terminal, souvent en majuscules par habitude des autres outils.
-    fn depuis(nom: &str) -> Option<Self> {
-        match nom.trim().to_ascii_lowercase().as_str() {
+    /// Case- and whitespace-insensitive: it is typed by hand in a terminal, often
+    /// in upper case out of habit from other tools.
+    fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
             "error" => Some(Self::Error),
             "warn" => Some(Self::Warn),
             "info" => Some(Self::Info),
@@ -151,456 +148,448 @@ impl LogLevel {
         }
     }
 
-    /// Vrai si ce niveau porte du par-image.
-    fn verbeux(self) -> bool {
+    /// True if this level carries per-frame records.
+    fn is_verbose(self) -> bool {
         self >= Self::Debug
     }
 }
 
 impl fmt::Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.nom())
+        f.write_str(self.name())
     }
 }
 
-/// Les directives données au filtre pour ce niveau.
+/// The directives given to the filter for this level.
 ///
-/// Deux parts, et la seconde est la raison d'écrire cette fonction : nos crates
-/// au niveau demandé, **tout le reste au moins aussi silencieux**. Un `trace`
-/// global rendrait le fichier illisible sans rien apprendre sur candeo.
+/// Two parts, and the second is the reason this function exists: our crates at
+/// the requested level, **everything else at least as quiet**. A global `trace`
+/// would make the file unreadable without teaching anything about candeo.
 ///
-/// Le `min` couvre le seul cas où la règle s'inverse : demander `error`, c'est
-/// demander le silence, et laisser les tiers à `warn` serait alors plus bavard
-/// que ce qu'on a demandé pour soi.
-fn directives(niveau: LogLevel) -> String {
-    let tiers = niveau.min(LogLevel::Warn);
-    let mut out = String::from(tiers.nom());
-    for cible in NOTRES {
+/// The `min` covers the only case where the rule flips: asking for `error` is
+/// asking for silence, and leaving third parties at `warn` would then be chattier
+/// than what was asked for ourselves.
+fn directives(level: LogLevel) -> String {
+    let third_party = level.min(LogLevel::Warn);
+    let mut out = String::from(third_party.name());
+    for target in OUR_CRATES {
         out.push(',');
-        out.push_str(cible);
+        out.push_str(target);
         out.push('=');
-        out.push_str(niveau.nom());
+        out.push_str(level.name());
     }
     out
 }
 
-/// Ce que la règle de priorité a décidé.
+/// What the priority rule decided.
 #[derive(Debug, PartialEq, Eq)]
 struct Resolution {
-    /// Ce qu'on donne au filtre.
+    /// What is given to the filter.
     directives: String,
-    /// Le niveau, quand un seul mot le résume. `None` quand la variable
-    /// d'environnement porte une directive plus fine, qu'aucun niveau ne nomme.
-    niveau: Option<LogLevel>,
-    /// Vrai si la variable d'environnement a tranché.
-    impose: bool,
+    /// The level, when a single word sums it up. `None` when the environment
+    /// variable holds a finer directive that no level names.
+    level: Option<LogLevel>,
+    /// True if the environment variable decided.
+    forced: bool,
 }
 
-/// **La règle de priorité : environnement > réglage retenu > défaut.**
+/// **The priority rule: environment > saved setting > default.**
 ///
-/// L'environnement l'emporte toujours, et ce n'est pas une préférence de goût :
-/// c'est ce qui permet de diagnostiquer une application qui ne va pas assez loin
-/// pour lire ses réglages — un dossier de configuration introuvable, un
-/// `settings.json` illisible.
+/// The environment always wins, and it is not a matter of taste: it is what
+/// makes it possible to diagnose an app that does not get far enough to read its
+/// settings, such as a configuration directory that cannot be found or an
+/// unreadable `settings.json`.
 ///
-/// `CANDEO_LOG` accepte les deux formes : un niveau seul (`debug`), qui est le
-/// geste courant, ou une directive complète
-/// (`candeo_desktop_lib::runtime=trace,warn`) pour viser un module précis. Dans
-/// le second cas aucun niveau ne résume ce qui est demandé, et l'interface le
-/// dit plutôt que d'en inventer un.
+/// `CANDEO_LOG` accepts both forms: a bare level (`debug`), which is the usual
+/// gesture, or a full directive
+/// (`candeo_desktop_lib::runtime=trace,warn`) to target a specific module. In the
+/// second case no level sums up what is requested, and the interface says so
+/// rather than inventing one.
 ///
-/// Une variable **vide** vaut une variable absente : `CANDEO_LOG=` est ce
-/// qu'écrit un shell qui l'a « effacée », et l'entendre comme une directive vide
-/// couperait tout le journal sans que personne ne l'ait demandé.
+/// An **empty** variable counts as an unset one: `CANDEO_LOG=` is what a shell
+/// writes once it has "cleared" it, and reading it as an empty directive would
+/// cut off the whole log without anyone asking for it.
 ///
-/// Fonction pure, et c'est délibéré : la règle se vérifie sans collecteur, sans
-/// disque et sans application.
-fn resoudre(env: Option<&str>, reglage: Option<LogLevel>) -> Resolution {
+/// A pure function, deliberately: the rule is checked without a subscriber,
+/// without a disk and without an app.
+fn resolve(env: Option<&str>, setting: Option<LogLevel>) -> Resolution {
     match env.map(str::trim).filter(|v| !v.is_empty()) {
-        Some(brut) => match LogLevel::depuis(brut) {
-            Some(niveau) => Resolution {
-                directives: directives(niveau),
-                niveau: Some(niveau),
-                impose: true,
+        Some(raw) => match LogLevel::from_name(raw) {
+            Some(level) => Resolution {
+                directives: directives(level),
+                level: Some(level),
+                forced: true,
             },
             None => Resolution {
-                directives: brut.to_string(),
-                niveau: None,
-                impose: true,
+                directives: raw.to_string(),
+                level: None,
+                forced: true,
             },
         },
         None => {
-            let niveau = reglage.unwrap_or(DEFAUT);
+            let level = setting.unwrap_or(DEFAULT_LEVEL);
             Resolution {
-                directives: directives(niveau),
-                niveau: Some(niveau),
-                impose: false,
+                directives: directives(level),
+                level: Some(level),
+                forced: false,
             }
         }
     }
 }
 
-// ---------------------------------------------------------------- collecteur
+// ---------------------------------------------------------------- subscriber
 
-/// Ce que l'initialisation laisse derrière elle, et que les commandes relisent.
-struct Collecteur {
-    /// La poignée de rechargement du filtre.
+/// What initialization leaves behind, and what the commands read back.
+struct Collector {
+    /// The filter's reload handle.
     ///
-    /// **C'est l'exigence qui structure tout le reste** : le défaut qu'on cherche
-    /// peut ne pas survivre au redémarrage. Un clavier qui décroche après deux
-    /// heures, un effet qui dérive lentement — dire « relancez en mode détaillé »
-    /// revient à demander de reproduire ce qu'on vient d'observer, et souvent on
-    /// ne peut pas. Elle est posée **dès l'initialisation** : la rajouter ensuite
-    /// supposerait de reprendre celle-ci de bout en bout.
-    filtre: reload::Handle<EnvFilter, Registry>,
-    /// Vrai si [`VARIABLE`] a tranché pour cette exécution.
-    impose: bool,
-    /// Le dossier des journaux. `None` quand il n'a pas pu être résolu — le
-    /// journal tourne alors sans fichier, ce qui vaut mieux que pas de journal.
-    dossier: Option<PathBuf>,
+    /// **This is the requirement that shapes everything else**: the defect we are
+    /// chasing may not survive a restart. A keyboard that drops out after two
+    /// hours, an effect that drifts slowly: saying "restart in verbose mode"
+    /// amounts to asking to reproduce what was just observed, and often that is
+    /// not possible. It is set up **from initialization**: adding it later would
+    /// mean reworking initialization from end to end.
+    filter: reload::Handle<EnvFilter, Registry>,
+    /// True if [`VARIABLE`] decided for this run.
+    forced: bool,
+    /// The log directory. `None` when it could not be resolved: the log then runs
+    /// without a file, which beats having no log.
+    dir: Option<PathBuf>,
 }
 
-/// Une seule fois par processus, et ensuite en lecture seule.
-static COLLECTEUR: OnceLock<Collecteur> = OnceLock::new();
+/// Once per process, and read-only afterwards.
+static COLLECTOR: OnceLock<Collector> = OnceLock::new();
 
-/// Démarre le journal. **Ne peut pas échouer.**
+/// Starts the log. **Cannot fail.**
 ///
-/// Appelée en tête du `setup` de l'application, c'est-à-dire au premier instant
-/// où `app_log_dir()` existe — et surtout **avant que le magasin ne soit
-/// résolu**. L'ordre n'est pas cosmétique : un échec de résolution du dossier de
-/// configuration est exactement le genre de chose qu'on veut voir, et il
-/// arriverait avant qu'il n'y ait de quoi l'écrire.
+/// Called at the top of the app's `setup`, that is, at the first moment
+/// `app_log_dir()` exists, and above all **before the store is resolved**. The
+/// order is not cosmetic: a failure to resolve the configuration directory is
+/// exactly the kind of thing we want to see, and it would happen before there was
+/// anything to write it to.
 ///
-/// Le réglage retenu, lui, n'est pas encore lu : on démarre au défaut, puis
-/// [`relire_le_reglage`] ajuste. Jamais l'inverse.
+/// The saved setting, however, is not read yet: we start at the default, then
+/// [`reload_level_setting`] adjusts. Never the other way round.
 ///
-/// Rien ne remonte, et deux pannes sont absorbées ici : un dossier de journaux
-/// introuvable — le journal tourne alors sans fichier — et un collecteur déjà
-/// installé, ce qui n'arrive qu'à un second appel. Ni l'une ni l'autre ne doit
-/// empêcher la fenêtre de s'ouvrir : c'est elle qui permettrait de corriger la
-/// situation.
+/// Nothing propagates, and two failures are absorbed here: a log directory that
+/// cannot be found (the log then runs without a file) and a subscriber already
+/// installed, which only happens on a second call. Neither must prevent the
+/// window from opening: it is what would allow fixing the situation.
 pub fn init(app: &AppHandle) {
-    let resolution = resoudre(std::env::var(VARIABLE).ok().as_deref(), None);
+    let resolution = resolve(std::env::var(VARIABLE).ok().as_deref(), None);
 
-    // Une directive illisible ne doit pas priver du journal celui qui la
-    // corrigera : on retombe sur le défaut, et on le dit — une fois le
-    // collecteur en place, puisqu'avant il n'y a personne pour l'entendre.
-    let (filtre, directive_refusee) = match EnvFilter::try_new(&resolution.directives) {
+    // An unreadable directive must not deprive the person who will fix it of a
+    // log: we fall back to the default, and say so, once the subscriber is in
+    // place, since before that there is nobody to hear it.
+    let (filter, rejected_directive) = match EnvFilter::try_new(&resolution.directives) {
         Ok(f) => (f, None),
         Err(e) => (
-            EnvFilter::new(directives(DEFAUT)),
+            EnvFilter::new(directives(DEFAULT_LEVEL)),
             Some(format!("{} : {e}", resolution.directives)),
         ),
     };
-    let (couche_filtre, poignee) = reload::Layer::new(filtre);
+    let (filter_layer, handle) = reload::Layer::new(filter);
 
-    let (dossier, fichier, echec_fichier) = match ouvrir_le_fichier(app) {
-        Ok((dossier, appender)) => (Some(dossier), Some(appender), None),
+    let (dir, file, file_error) = match open_log_file(app) {
+        Ok((dir, appender)) => (Some(dir), Some(appender), None),
         Err(e) => (None, None, Some(e)),
     };
 
-    // `with_ansi(false)` sur le fichier : les séquences de couleur ne veulent
-    // rien dire dans un fichier, et elles rendent illisible ce qu'on colle dans
-    // un rapport de bogue.
+    // `with_ansi(false)` on the file: color sequences mean nothing in a file, and
+    // they make what gets pasted into a bug report unreadable.
     //
-    // Écriture directe, sans fil d'écriture intercalé : on ne journalise que des
-    // transitions, le volume est donc négligeable — et un journal dont les
-    // dernières lignes sont perdues dans la panne qu'on traque ne vaut rien.
-    let couche_fichier = fichier.map(|appender| {
+    // Direct writes, with no writer thread in between: we only log transitions,
+    // so the volume is negligible, and a log whose last lines are lost in the very
+    // failure being chased is worthless.
+    let file_layer = file.map(|appender| {
         fmt_layer::layer()
             .with_ansi(false)
             .with_target(true)
             .with_writer(appender)
     });
 
-    // En développement seulement : en `release` le binaire est compilé
-    // `windows_subsystem = "windows"`, il n'y a aucune console pour recevoir
-    // quoi que ce soit.
-    let couche_console = cfg!(debug_assertions).then(fmt_layer::layer);
+    // In development only: in `release` the binary is compiled
+    // `windows_subsystem = "windows"`, and there is no console to receive anything.
+    let console_layer = cfg!(debug_assertions).then(fmt_layer::layer);
 
-    // `try_init` plutôt que `init` : installer un collecteur alors qu'il y en a
-    // déjà un est une erreur de programmation, pas une raison de refuser de
-    // démarrer l'application.
-    let installe = tracing_subscriber::registry()
-        .with(couche_filtre)
-        .with(couche_fichier)
-        .with(couche_console)
+    // `try_init` rather than `init`: installing a subscriber when there already is
+    // one is a programming error, not a reason to refuse to start the app.
+    let registered = tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(file_layer)
+        .with(console_layer)
         .try_init()
         .is_ok();
-    if !installe {
+    if !registered {
         return;
     }
 
-    let _ = COLLECTEUR.set(Collecteur {
-        filtre: poignee,
-        impose: resolution.impose,
-        dossier: dossier.clone(),
+    let _ = COLLECTOR.set(Collector {
+        filter: handle,
+        forced: resolution.forced,
+        dir: dir.clone(),
     });
 
     tracing::info!(
         version = app.package_info().version.to_string(),
-        systeme = std::env::consts::OS,
+        os = std::env::consts::OS,
         architecture = std::env::consts::ARCH,
-        journal = dossier.as_ref().map(|d| d.display().to_string()),
-        "candeo démarre"
+        log = dir.as_ref().map(|d| d.display().to_string()),
+        "candeo starting"
     );
-    if let Some(e) = echec_fichier {
-        tracing::error!("aucun journal sur disque, la sortie standard seule reste : {e}");
+    if let Some(e) = file_error {
+        tracing::error!("no log on disk, only standard output remains: {e}");
     }
-    if let Some(e) = directive_refusee {
-        tracing::warn!("{VARIABLE} illisible, niveau par défaut appliqué — {e}");
+    if let Some(e) = rejected_directive {
+        tracing::warn!("{VARIABLE} unreadable, default level applied: {e}");
     }
-    if let Some(niveau) = resolution.niveau {
-        prevenir_si_verbeux(niveau);
+    if let Some(level) = resolution.level {
+        warn_if_verbose(level);
     }
 }
 
-/// Le fichier tournant, et le dossier qui le porte.
+/// The rolling file, and the directory that holds it.
 ///
-/// **Par `app_log_dir()`, jamais un chemin en dur** : sous Windows données et
-/// configuration se confondent, sous Linux non — et les journaux ne sont ni
-/// l'une ni l'autre.
-fn ouvrir_le_fichier(
+/// **Through `app_log_dir()`, never a hard-coded path**: on Windows data and
+/// configuration share a location, on Linux they do not, and logs are neither
+/// one nor the other.
+fn open_log_file(
     app: &AppHandle,
 ) -> Result<(PathBuf, tracing_appender::rolling::RollingFileAppender), String> {
-    let dossier = app
+    let dir = app
         .path()
         .app_log_dir()
         .map_err(|e| format!("dossier des journaux introuvable : {e}"))?;
-    let appender = tourner_dans(&dossier)?;
-    Ok((dossier, appender))
+    let appender = rolling_appender_in(&dir)?;
+    Ok((dir, appender))
 }
 
-/// Le fichier tournant d'un dossier donné.
+/// The rolling file of a given directory.
 ///
-/// Séparé de [`ouvrir_le_fichier`] pour la seule raison qui vaille : c'est la
-/// part qu'un test peut exercer. Une configuration de rotation refusée ne se
-/// verrait sinon qu'au lancement de l'application, sous la forme d'un journal qui
-/// n'écrit nulle part.
-fn tourner_dans(
-    dossier: &std::path::Path,
+/// Split from [`open_log_file`] for the only reason that counts: it is the part a
+/// test can exercise. A rejected rotation configuration would otherwise only show
+/// when the app launches, as a log that writes nowhere.
+fn rolling_appender_in(
+    dir: &std::path::Path,
 ) -> Result<tracing_appender::rolling::RollingFileAppender, String> {
-    // Créé ici plutôt qu'à la première écriture : un dossier qu'on ne peut pas
-    // créer se dit maintenant, pas à la première panne qu'on voulait consigner.
-    std::fs::create_dir_all(dossier)
-        .map_err(|e| format!("création de {} impossible : {e}", dossier.display()))?;
+    // Created here rather than on the first write: a directory that cannot be
+    // created is reported now, not at the first failure we wanted to record.
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("création de {} impossible : {e}", dir.display()))?;
 
     tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix(PREFIXE)
-        .filename_suffix(SUFFIXE)
-        .max_log_files(MAX_FICHIERS)
-        .build(dossier)
-        .map_err(|e| format!("journal non ouvert dans {} : {e}", dossier.display()))
+        .filename_prefix(FILE_PREFIX)
+        .filename_suffix(FILE_SUFFIX)
+        .max_log_files(MAX_FILES)
+        .build(dir)
+        .map_err(|e| format!("journal non ouvert dans {} : {e}", dir.display()))
 }
 
-/// Relit le niveau retenu dans `settings.json` et l'applique.
+/// Reads the level saved in `settings.json` back and applies it.
 ///
-/// Appelée juste après [`init`], et c'est tout l'ordre d'amorçage : on démarre au
-/// défaut, **puis** on ajuste. Le magasin est donc résolu ici pour la seconde
-/// fois du démarrage — l'adoption le résout aussi — et c'est le prix assumé de
-/// ne pas faire dépendre le journal de ce qui l'utilise.
+/// Called right after [`init`], and that is the whole startup order: start at
+/// the default, **then** adjust. The store is therefore resolved here for the
+/// second time during startup (adoption resolves it too), and that is the
+/// accepted price of not making the log depend on what uses it.
 ///
-/// Ne fait rien quand [`VARIABLE`] a tranché : la règle de priorité vaut aussi au
-/// démarrage, sans quoi le réglage retenu écraserait ce qu'on vient de demander
-/// en ligne de commande.
-pub fn relire_le_reglage(app: &AppHandle) {
-    if COLLECTEUR.get().is_some_and(|c| c.impose) {
+/// Does nothing when [`VARIABLE`] decided: the priority rule also holds at
+/// startup, otherwise the saved setting would override what was just requested on
+/// the command line.
+pub fn reload_level_setting(app: &AppHandle) {
+    if COLLECTOR.get().is_some_and(|c| c.forced) {
         return;
     }
     match crate::storage::store(app).and_then(|s| s.read_settings()) {
-        // Le journal est déjà en place : c'est précisément pour ce message-là
-        // qu'il devait démarrer avant le magasin.
-        Err(e) => tracing::error!("niveau de journal non relu, le défaut s'applique : {e}"),
+        // The log is already in place: it is precisely for this message that it
+        // had to start before the store.
+        Err(e) => tracing::error!("log level not read back, the default applies: {e}"),
         Ok(settings) => {
-            if let Some(niveau) = settings.preferences.log_level {
-                appliquer(niveau);
+            if let Some(level) = settings.preferences.log_level {
+                apply_level(level);
             }
         }
     }
 }
 
-/// Ramène le niveau au défaut, sans redémarrer.
+/// Brings the level back to the default, without restarting.
 ///
-/// Appelée par la remise à zéro de la configuration : le réglage vient d'être
-/// effacé du fichier, et un écran qui afficherait encore « détaillé » mentirait.
-/// Sans effet quand [`VARIABLE`] a tranché — la priorité ne se suspend pas pour
-/// une remise à zéro.
-pub(crate) fn revenir_au_defaut() {
-    if COLLECTEUR.get().is_some_and(|c| c.impose) {
+/// Called by the configuration reset: the setting has just been erased from the
+/// file, and a screen still showing "détaillé" (verbose) would be lying. No effect
+/// when [`VARIABLE`] decided: priority is not suspended for a reset.
+pub(crate) fn reset_level_to_default() {
+    if COLLECTOR.get().is_some_and(|c| c.forced) {
         return;
     }
-    appliquer(DEFAUT);
+    apply_level(DEFAULT_LEVEL);
 }
 
-/// Remplace le filtre du collecteur **déjà en place**.
+/// Replaces the filter of the subscriber **already in place**.
 ///
-/// C'est le changement à chaud : aucun redémarrage, aucun fichier rouvert, et les
-/// spans ouverts — donc les boucles de rendu en cours — gardent leur contexte.
-fn appliquer(niveau: LogLevel) {
-    let Some(collecteur) = COLLECTEUR.get() else {
+/// This is the live change: no restart, no file reopened, and open spans, hence
+/// the running render loops, keep their context.
+fn apply_level(level: LogLevel) {
+    let Some(collector) = COLLECTOR.get() else {
         return;
     };
-    match EnvFilter::try_new(directives(niveau)) {
-        Ok(filtre) => match collecteur.filtre.reload(filtre) {
+    match EnvFilter::try_new(directives(level)) {
+        Ok(filter) => match collector.filter.reload(filter) {
             Ok(()) => {
-                tracing::info!(niveau = %niveau, "niveau de journal changé");
-                prevenir_si_verbeux(niveau);
+                tracing::info!(level = %level, "log level changed");
+                warn_if_verbose(level);
             }
-            Err(e) => tracing::error!("niveau de journal inchangé : {e}"),
+            Err(e) => tracing::error!("log level unchanged: {e}"),
         },
-        // Les directives sont construites à partir d'un niveau connu : ce
-        // chemin n'est atteignable qu'en se trompant dans [`directives`].
-        Err(e) => tracing::error!("directives de journal refusées : {e}"),
+        // The directives are built from a known level: this path is only
+        // reachable through a mistake in [`directives`].
+        Err(e) => tracing::error!("log directives rejected: {e}"),
     }
 }
 
-/// Écrit dans le fichier lui-même qu'un niveau élevé est actif.
+/// Writes into the file itself that a high level is active.
 ///
-/// L'interface le dit déjà — c'est [`JournalStatus::verbose`] — mais le journal
-/// se lit ailleurs et plus tard, souvent par quelqu'un d'autre : un fichier de
-/// plusieurs gigaoctets doit porter sa propre explication, plutôt que de laisser
-/// chercher ce qui s'est emballé.
-fn prevenir_si_verbeux(niveau: LogLevel) {
-    if niveau.verbeux() {
+/// The interface already says so ([`JournalStatus::verbose`]), but the log is
+/// read elsewhere and later, often by someone else: a file of several gigabytes
+/// must carry its own explanation, rather than leaving the reader to find out
+/// what ran away.
+fn warn_if_verbose(level: LogLevel) {
+    if level.is_verbose() {
         tracing::warn!(
-            "niveau « {niveau} » : le journal porte du par-image et grossit vite. \
-             La rotation plafonne le nombre de fichiers, pas la taille de celui du jour — \
-             revenir à « info » une fois le relevé fini."
+            "level \"{level}\": the log carries per-frame records and grows fast. \
+             Rotation caps the number of files, not the size of today's file; \
+             go back to \"info\" once the capture is done."
         );
     }
 }
 
 // ---------------------------------------------------------------- transitions
 
-/// Ce qu'un changement d'état d'erreur donne à journaliser.
+/// What a change of error state gives to log.
 ///
-/// **Le cas qui compte est [`Rien`](Bascule::Rien)**, et il couvre deux
-/// situations que rien ne rapproche à part leur conclusion :
+/// **The case that matters is [`Unchanged`](Transition::Unchanged)**, and it
+/// covers two situations that have nothing in common but their conclusion:
 ///
-/// - tout va bien et allait déjà bien — c'est l'immense majorité des images ;
-/// - **la panne dure, et la raison a changé.** Ce n'est pas un nouvel incident :
-///   un message qui porte un compteur, une position ou un horodatage varierait à
-///   chaque image, et journaliser ce changement rouvrirait exactement la
-///   inondation qu'on cherche à éviter — trente lignes par seconde, dont aucune
-///   n'apprend rien de plus que la première.
+/// - everything is fine and already was: the vast majority of frames;
+/// - **the failure persists, and the reason changed.** This is not a new
+///   incident: a message carrying a counter, a position or a timestamp would vary
+///   on every frame, and logging that change would reopen exactly the flood we are
+///   trying to avoid: thirty lines per second, none of which teaches anything more
+///   than the first.
 ///
-/// La première raison, elle, est consignée : c'est celle qui nomme la panne.
+/// The first reason, however, is recorded: it is the one that names the failure.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Bascule {
-    /// La panne commence. Une ligne, avec sa raison.
-    Commence,
-    /// Elle est finie. Une ligne, sans quoi l'interface et le journal
-    /// afficheraient une erreur périmée indéfiniment.
-    Retabli,
-    /// Rien à dire.
-    Rien,
+pub(crate) enum Transition {
+    /// The failure begins. One line, with its reason.
+    Started,
+    /// It is over. One line, otherwise the interface and the log would show a
+    /// stale error indefinitely.
+    Recovered,
+    /// Nothing to say.
+    Unchanged,
 }
 
-/// La bascule entre deux états d'erreur successifs.
-pub(crate) fn bascule(avant: Option<&str>, apres: Option<&str>) -> Bascule {
-    match (avant, apres) {
-        (None, Some(_)) => Bascule::Commence,
-        (Some(_), None) => Bascule::Retabli,
-        _ => Bascule::Rien,
+/// The transition between two successive error states.
+pub(crate) fn transition(before: Option<&str>, after: Option<&str>) -> Transition {
+    match (before, after) {
+        (None, Some(_)) => Transition::Started,
+        (Some(_), None) => Transition::Recovered,
+        _ => Transition::Unchanged,
     }
 }
 
-// ---------------------------------------------------------------- série
+// ---------------------------------------------------------------- serial
 
-const FNV_DEPART: u64 = 0xcbf2_9ce4_8422_2325;
-const FNV_PREMIER: u64 = 0x0000_0100_0000_01b3;
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// Une empreinte stable du numéro de série, **qui ne le divulgue pas**.
+/// A stable fingerprint of the serial number, **that does not disclose it**.
 ///
-/// Le protocole donne un numéro de série (`0x00`/`0x82`) et il identifie un
-/// exemplaire précis — le descripteur USB, lui, n'en porte aucun. Un journal
-/// qu'on colle dans un rapport de bogue ne doit pas le révéler ; mais l'effacer
-/// purement et simplement rendrait indiscernables deux claviers du même modèle,
-/// ce qui est justement la situation où le journal sert le plus.
+/// The protocol returns a serial number (`0x00`/`0x82`) and it identifies a
+/// specific unit; the USB descriptor carries none. A log pasted into a bug report
+/// must not reveal it; but erasing it outright would make two keyboards of the
+/// same model indistinguishable, which is precisely when the log helps most.
 ///
-/// FNV-1a écrit ici plutôt qu'un hacheur de la bibliothèque standard :
-/// `DefaultHasher` ne promet pas de rendre la même valeur d'une version de Rust à
-/// l'autre, et une empreinte qui change à la recompilation ne permettrait plus de
-/// rapprocher deux journaux du même appareil.
+/// FNV-1a written here rather than a standard library hasher: `DefaultHasher`
+/// does not promise to return the same value from one Rust version to the next,
+/// and a fingerprint that changes on recompilation would no longer allow matching
+/// two logs of the same device.
 ///
-/// Ce n'est pas une protection cryptographique et ça n'a pas à l'être : on
-/// empêche une divulgation accidentelle, pas une attaque.
-pub(crate) fn empreinte(serial: &str) -> String {
-    let mut h = FNV_DEPART;
+/// This is not cryptographic protection and it does not need to be: it prevents
+/// an accidental disclosure, not an attack.
+pub(crate) fn fingerprint(serial: &str) -> String {
+    let mut h = FNV_OFFSET_BASIS;
     for b in serial.as_bytes() {
         h ^= u64::from(*b);
-        h = h.wrapping_mul(FNV_PREMIER);
+        h = h.wrapping_mul(FNV_PRIME);
     }
     format!("{h:016x}")
 }
 
-/// L'empreinte d'une série qui n'existe peut-être pas.
+/// The fingerprint of a serial that may not exist.
 ///
-/// « Aucune » n'est pas un cas dégénéré : c'est ce que rend hidraw sous Linux
-/// quand la règle udev n'accorde pas la lecture des attributs, et le distinguer
-/// d'une série présente est ce qui évite de chercher une panne d'appareil là où
-/// il n'y a qu'une permission manquante.
-pub(crate) fn empreinte_de(serial: Option<&str>) -> String {
-    serial.map_or_else(|| "aucune".to_string(), empreinte)
+/// "aucune" (none) is not a degenerate case: it is what hidraw returns under
+/// Linux when the udev rule does not grant read access to attributes, and telling
+/// it apart from a present serial is what avoids hunting for a device failure
+/// where there is only a missing permission.
+pub(crate) fn fingerprint_of(serial: Option<&str>) -> String {
+    serial.map_or_else(|| "aucune".to_string(), fingerprint)
 }
 
-// ---------------------------------------------------------------- commandes
+// ---------------------------------------------------------------- commands
 
-/// L'état du journal, tel que l'interface le montre.
+/// The log status, as the interface shows it.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JournalStatus {
-    /// Le niveau appliqué. `None` quand [`VARIABLE`] porte une directive qu'aucun
-    /// niveau ne résume — on ne prétend pas la nommer.
+    /// The applied level. `None` when [`VARIABLE`] holds a directive that no level
+    /// sums up: we do not pretend to name it.
     pub level: Option<LogLevel>,
-    /// Le niveau retenu dans `settings.json`.
+    /// The level saved in `settings.json`.
     ///
-    /// Distinct de `level` : c'est celui que l'interface propose de changer, et
-    /// il reste modifiable même quand la variable d'environnement l'emporte pour
-    /// cette exécution-ci.
+    /// Distinct from `level`: it is the one the interface offers to change, and it
+    /// stays editable even when the environment variable wins for this run.
     pub setting: Option<LogLevel>,
-    /// Vrai si [`VARIABLE`] impose le niveau. L'interface le dit plutôt que de
-    /// laisser croire qu'un réglage sans effet a été pris en compte.
+    /// True if [`VARIABLE`] forces the level. The interface says so rather than
+    /// letting the user believe that a setting with no effect was taken into account.
     pub forced_by_env: bool,
-    /// Le dossier des journaux, `None` s'il n'a pas pu être résolu.
+    /// The log directory, `None` if it could not be resolved.
     pub dir: Option<String>,
-    /// Vrai si le niveau actif porte du **par-image**.
+    /// True if the active level carries **per-frame** records.
     ///
-    /// ⚠️ C'est ce qui rend visible qu'un niveau élevé est actif. Laissé en place
-    /// et oublié, `trace` remplit le disque en silence — et la rotation plafonne
-    /// le nombre de fichiers, pas la taille de celui du jour.
+    /// ⚠️ This is what makes it visible that a high level is active. Left on and
+    /// forgotten, `trace` fills the disk silently, and rotation caps the number of
+    /// files, not the size of today's file.
     ///
-    /// Relevé sur le filtre réellement installé, et non déduit de `level` : c'est
-    /// la seule façon de répondre juste quand la directive vient de
-    /// l'environnement et ne se résume à aucun niveau.
+    /// Read from the filter actually installed, not derived from `level`: it is
+    /// the only way to answer correctly when the directive comes from the
+    /// environment and sums up to no level.
     pub verbose: bool,
 }
 
-fn etat(setting: Option<LogLevel>) -> JournalStatus {
-    let collecteur = COLLECTEUR.get();
+fn journal_status(setting: Option<LogLevel>) -> JournalStatus {
+    let collector = COLLECTOR.get();
     JournalStatus {
-        level: niveau_actif(),
+        level: active_level(),
         setting,
-        forced_by_env: collecteur.is_some_and(|c| c.impose),
-        dir: collecteur
-            .and_then(|c| c.dossier.as_ref())
+        forced_by_env: collector.is_some_and(|c| c.forced),
+        dir: collector
+            .and_then(|c| c.dir.as_ref())
             .map(|d| d.display().to_string()),
         verbose: tracing::level_filters::LevelFilter::current() >= tracing::Level::DEBUG,
     }
 }
 
-/// Le niveau le plus verbeux que le filtre laisse passer, s'il en nomme un.
-fn niveau_actif() -> Option<LogLevel> {
+/// The most verbose level the filter lets through, if it names one.
+fn active_level() -> Option<LogLevel> {
     tracing::level_filters::LevelFilter::current()
         .into_level()
-        .and_then(|l| LogLevel::depuis(l.as_str()))
+        .and_then(|l| LogLevel::from_name(l.as_str()))
 }
 
-/// L'état du journal : niveau appliqué, niveau retenu, dossier.
+/// The log status: applied level, saved level, directory.
 #[tauri::command]
 pub fn get_journal(app: AppHandle) -> CmdResult<JournalStatus> {
-    Ok(etat(
+    Ok(journal_status(
         crate::storage::store(&app)?
             .read_settings()?
             .preferences
@@ -608,22 +597,21 @@ pub fn get_journal(app: AppHandle) -> CmdResult<JournalStatus> {
     ))
 }
 
-/// Change le niveau **sans redémarrer**, et le retient.
+/// Changes the level **without restarting**, and saves it.
 ///
-/// # Il survit au redémarrage, et c'est un choix
+/// # It survives a restart, and that is a choice
 ///
-/// Le retour automatique au défaut protégerait du disque plein ; la persistance
-/// sert celui qui traque un défaut **au démarrage**. Un défaut qui ne se produit
-/// qu'au lancement existe — l'adoption des appareils en est un — et lui demander
-/// de remonter le niveau après coup revient à lui demander l'impossible. Donc on
-/// persiste, et on le dit : [`JournalStatus::verbose`] est là pour ça.
+/// Automatically going back to the default would protect against a full disk;
+/// persistence serves whoever is chasing a defect **at startup**. A defect that
+/// only happens at launch exists (device adoption is one), and asking that person
+/// to raise the level after the fact is asking the impossible. So we persist, and
+/// we say so: [`JournalStatus::verbose`] is there for that.
 ///
-/// # Quand la variable d'environnement l'emporte
+/// # When the environment variable wins
 ///
-/// Le réglage est écrit, mais **le filtre n'est pas touché** : la priorité vaut
-/// pendant toute l'exécution, pas seulement au démarrage. Le réglage vaudra au
-/// prochain lancement sans la variable, et `forcedByEnv` dit à l'interface de
-/// l'annoncer.
+/// The setting is written, but **the filter is not touched**: priority holds for
+/// the whole run, not only at startup. The setting will apply on the next launch
+/// without the variable, and `forcedByEnv` tells the interface to announce it.
 #[tauri::command]
 pub fn set_log_level(app: AppHandle, level: LogLevel) -> CmdResult<JournalStatus> {
     let store = crate::storage::store(&app)?;
@@ -633,74 +621,69 @@ pub fn set_log_level(app: AppHandle, level: LogLevel) -> CmdResult<JournalStatus
         store.write_settings(&settings)?;
     }
 
-    if !COLLECTEUR.get().is_some_and(|c| c.impose) {
-        appliquer(level);
+    if !COLLECTOR.get().is_some_and(|c| c.forced) {
+        apply_level(level);
     }
-    Ok(etat(settings.preferences.log_level))
+    Ok(journal_status(settings.preferences.log_level))
 }
 
-/// Ouvre le dossier des journaux dans le gestionnaire de fichiers du système.
+/// Opens the log directory in the system file manager.
 ///
-/// **Un journal que personne ne sait trouver ne sert à rien**, et le chemin
-/// dépend du système : le donner à lire ne suffit pas, il faut y emmener.
+/// **A log nobody knows how to find is useless**, and the path depends on the
+/// system: giving it to read is not enough, the user has to be taken there.
 #[tauri::command]
 pub fn open_log_dir(app: AppHandle) -> CmdResult<()> {
-    let dossier = COLLECTEUR
-        .get()
-        .and_then(|c| c.dossier.clone())
-        .ok_or_else(|| {
-            "aucun dossier de journaux : le journal n'écrit pas sur disque".to_string()
-        })?;
+    let dir = COLLECTOR.get().and_then(|c| c.dir.clone()).ok_or_else(|| {
+        "aucun dossier de journaux : le journal n'écrit pas sur disque".to_string()
+    })?;
 
     app.opener()
-        .open_path(dossier.display().to_string(), None::<&str>)
-        .map_err(|e| format!("ouverture de {} impossible : {e}", dossier.display()))
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| format!("ouverture de {} impossible : {e}", dir.display()))
 }
 
-/// Le diagnostic, prêt à être collé dans un rapport de bogue.
+/// The diagnostic, ready to be pasted into a bug report.
 ///
-/// **Ça vaut mieux que n'importe quel fouillage de journal** : tout ce qu'on
-/// redemande systématiquement — version, système, appareils, état du moteur —
-/// tient en vingt lignes, sans qu'il faille expliquer où chercher.
+/// **It beats any digging through logs**: everything we ask for every time
+/// (version, system, devices, engine state) fits in twenty lines, with no need
+/// to explain where to look.
 ///
-/// Le numéro de série n'y figure pas : son [`empreinte`] suffit à distinguer deux
-/// exemplaires, et c'est tout ce qu'on demande à un rapport de bogue.
+/// The serial number is not included: its [`fingerprint`] is enough to tell two
+/// units apart, and that is all a bug report needs.
 #[tauri::command]
 pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
     let mut out = String::new();
-    let ligne = |out: &mut String, cle: &str, valeur: &str| {
-        out.push_str(cle);
+    let line = |out: &mut String, key: &str, value: &str| {
+        out.push_str(key);
         out.push_str(" : ");
-        out.push_str(valeur);
+        out.push_str(value);
         out.push('\n');
     };
 
-    ligne(&mut out, "candeo", &app.package_info().version.to_string());
-    ligne(
+    line(&mut out, "candeo", &app.package_info().version.to_string());
+    line(
         &mut out,
         "système",
         &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
     );
-    // Les réglages et HID sont relevés séparément, et aucun des deux n'est
-    // déballé : ne pas pouvoir énumérer l'USB ou relire `settings.json` est
-    // exactement ce qu'un diagnostic doit **dire**, pas ce qui doit
-    // l'interrompre.
+    // Settings and HID are gathered separately, and neither is unwrapped: being
+    // unable to enumerate USB or read `settings.json` back is exactly what a
+    // diagnostic must **say**, not what must interrupt it.
     let settings = crate::storage::store(&app).and_then(|s| s.read_settings());
     let api = crate::hid();
 
-    let journal = etat(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
-    ligne(
+    let log = journal_status(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
+    line(
         &mut out,
         "journal",
         &format!(
             "niveau {} ({}){}",
-            // Le niveau appliqué, pas celui retenu : c'est lui qui explique ce
-            // que le fichier contient — ou ne contient pas.
-            journal
-                .level
+            // The applied level, not the saved one: it is what explains what the
+            // file contains, or does not.
+            log.level
                 .map_or_else(|| "directive".to_string(), |l| l.to_string()),
-            journal.dir.as_deref().unwrap_or("aucun fichier"),
-            if journal.forced_by_env {
+            log.dir.as_deref().unwrap_or("aucun fichier"),
+            if log.forced_by_env {
                 format!(", imposé par {VARIABLE}")
             } else {
                 String::new()
@@ -708,14 +691,14 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         ),
     );
 
-    // Ce qui décide si fermer la fenêtre arrête les effets. Sans cette ligne, un
-    // rapport disant « mon effet s'arrête quand je ferme » et un autre disant le
-    // contraire seraient indiscernables — la pose de l'icône peut échouer, et
-    // c'est alors la croix qui redevient une sortie. Voir [`crate::tray`].
-    ligne(
+    // What decides whether closing the window stops effects. Without this line, a
+    // report saying "my effect stops when I close" and another saying the
+    // opposite would be indistinguishable: placing the icon can fail, and the close
+    // button then becomes an exit again. See [`crate::tray`].
+    line(
         &mut out,
         "zone de notification",
-        if crate::tray::installee() {
+        if crate::tray::installed() {
             "posée — fermer la fenêtre replie, « Quitter candeo » quitte"
         } else {
             "absente — fermer la fenêtre arrête les effets"
@@ -725,30 +708,30 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     out.push_str("\nAppareils\n");
     for layout in crate::LAYOUTS {
         let device = DeviceRef::of(layout);
-        let branche = api
+        let plugged_in = api
             .as_ref()
             .ok()
             .and_then(|api| crate::plugged(api, layout));
-        // Relue sur la poignée : le diagnostic ne refait aucun échange avec
-        // l'appareil, il dit ce que l'ouverture a obtenu.
+        // Read from the handle: the diagnostic makes no new exchange with the
+        // device, it reports what opening obtained.
         let inspection = state.inspection(device);
-        let serial = crate::serie_connue(inspection.as_ref(), branche.clone().flatten());
-        let etat_retenu = settings
+        let serial = crate::known_serial(inspection.as_ref(), plugged_in.clone().flatten());
+        let saved_state = settings
             .as_ref()
             .ok()
             .map(|s| decision(s.device_state(layout.vid, layout.pid, serial.as_deref())));
 
-        ligne(
+        line(
             &mut out,
             &format!("  {} {}", layout.name, device),
             &format!(
                 "{} · {} · série {} · gabarit {}×{} ({} cases, {} touches)",
-                match branche {
+                match plugged_in {
                     Some(_) => "branché",
                     None => "débranché",
                 },
-                etat_retenu.unwrap_or("état inconnu"),
-                empreinte_de(serial.as_deref()),
+                saved_state.unwrap_or("état inconnu"),
+                fingerprint_of(serial.as_deref()),
                 layout.rows,
                 layout.cols,
                 layout.led_count(),
@@ -756,31 +739,31 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             ),
         );
 
-        // Ce que le **fichier** retient pour cet appareil, en face de ce que le
-        // moteur en fait plus bas. Les deux doivent concorder ; quand ils
-        // divergent — un effet appliqué qui ne tourne pas, une luminosité retenue
-        // qu'aucune adoption n'a réappliquée — c'est précisément la ligne qui le
-        // montre, et elle ne coûte rien à celui qui lit.
+        // What the **file** saves for this device, next to what the engine does
+        // with it below. The two must agree; when they diverge (an applied effect
+        // that is not running, a saved brightness that no adoption reapplied),
+        // this is precisely the line that shows it, and it costs the reader
+        // nothing.
         if let Ok(s) = &settings {
-            ligne(
+            line(
                 &mut out,
                 "    retenu",
                 &format!(
                     "effet {} · luminosité {}",
                     s.active_effect(layout.vid, layout.pid).unwrap_or("aucun"),
                     match s.brightness(layout.vid, layout.pid, serial.as_deref()) {
-                        crate::storage::BRIGHTNESS_DEFAUT => "pleine (défaut)".to_string(),
+                        crate::storage::DEFAULT_BRIGHTNESS => "pleine (défaut)".to_string(),
                         n => n.to_string(),
                     }
                 ),
             );
         }
 
-        // **Le premier champ qu'on demandera** devant un comportement
-        // inexpliqué : la version lue, en face de celle du relevé. Fermé, on dit
-        // qu'elle n'a pas été lue plutôt que de répéter celle d'une ouverture
-        // passée — l'exemplaire branché depuis n'est peut-être plus le même.
-        ligne(
+        // **The first field anyone will ask for** in front of unexplained
+        // behavior: the version read, next to the one of the survey. When closed,
+        // we say it was not read rather than repeat the one from a past opening:
+        // the unit plugged in since may no longer be the same.
+        line(
             &mut out,
             "    micrologiciel",
             &format!(
@@ -796,7 +779,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             ),
         );
         if let Some(i) = &inspection {
-            ligne(
+            line(
                 &mut out,
                 "    commandes",
                 &i.checks
@@ -806,32 +789,32 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                     .join(" · "),
             );
             if let Err(e) = &i.serial {
-                ligne(
+                line(
                     &mut out,
                     "    série par le protocole",
                     &format!("non lue ({e})"),
                 );
             }
-            for avertissement in i.warnings(layout) {
-                ligne(&mut out, "    avertissement", &avertissement);
+            for warning in i.warnings(layout) {
+                line(&mut out, "    avertissement", &warning);
             }
         }
     }
     if let Err(e) = &api {
-        ligne(&mut out, "  énumération USB", e);
+        line(&mut out, "  énumération USB", e);
     }
     if let Err(e) = &settings {
-        ligne(&mut out, "  réglages", e);
+        line(&mut out, "  réglages", e);
     }
 
     out.push_str("\nMoteur\n");
-    let rapport = state.engine.report();
-    let moteur = rapport.devices;
-    if moteur.is_empty() {
+    let report = state.engine.report();
+    let engine = report.devices;
+    if engine.is_empty() {
         out.push_str("  aucun appareil visé depuis le démarrage\n");
     }
-    for s in moteur {
-        ligne(
+    for s in engine {
+        line(
             &mut out,
             &format!("  {}", s.device),
             &format!(
@@ -858,14 +841,14 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         );
     }
 
-    // **Sur sa propre ligne, et dite pour ce qu'elle est.** Un aperçu n'écrit sur
-    // aucun clavier : le confondre avec ce qui précède ferait chercher côté
-    // matériel une panne qui n'y est pas — et son absence de la liste ci-dessus
-    // se lirait comme un oubli si rien ne la nommait ici.
-    ligne(
+    // **On its own line, and named for what it is.** A preview writes to no
+    // keyboard: confusing it with what precedes would send someone hunting on the
+    // hardware side for a failure that is not there, and its absence from the list
+    // above would read as an omission if nothing named it here.
+    line(
         &mut out,
         "  aperçu",
-        &match rapport.preview {
+        &match report.preview {
             None => "aucun — rien n'est prévisualisé".to_string(),
             Some(p) => format!(
                 "{} · effet {} · gabarit emprunté {} · aucune sortie clavier{}",
@@ -881,11 +864,11 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     Ok(out)
 }
 
-/// La décision d'adoption, dans la langue du rapport de bogue.
+/// The adoption decision, in the language of the bug report.
 ///
-/// Une table plutôt qu'un `{:?}` mis en minuscules : le diagnostic est lu par un
-/// humain, et les noms de variantes Rust n'ont aucune raison d'y apparaître. Le
-/// compilateur réclamera cette ligne le jour où un quatrième état existera.
+/// A table rather than a lowercased `{:?}`: the diagnostic is read by a human, and
+/// Rust variant names have no reason to appear in it. The compiler will demand
+/// this line the day a fourth state exists.
 fn decision(state: crate::storage::DeviceState) -> &'static str {
     match state {
         crate::storage::DeviceState::Detected => "détecté",
@@ -894,11 +877,12 @@ fn decision(state: crate::storage::DeviceState) -> &'static str {
     }
 }
 
-/// Le verdict d'une commande, dans la langue du rapport de bogue.
+/// The verdict of a command, in the language of the bug report.
 ///
-/// « connue » et non « comprise » : l'octet d'état confirme que le couple
-/// classe / commande existe, jamais que ses arguments sont bons. Un diagnostic
-/// qui dirait « compatible » enverrait chercher ailleurs une panne d'argument.
+/// "connue" (known) and not "comprise" (understood): the status byte confirms
+/// that the class / command pair exists, never that its arguments are right. A
+/// diagnostic saying "compatible" would send people looking elsewhere for an
+/// argument failure.
 fn verdict(v: &candeo_device::Verdict) -> String {
     use candeo_device::Verdict;
     match v {
@@ -911,11 +895,11 @@ fn verdict(v: &candeo_device::Verdict) -> String {
     }
 }
 
-/// Le niveau d'un enregistrement venu de la fenêtre.
+/// The level of a record coming from the window.
 ///
-/// Un type dédié plutôt que [`LogLevel`] : la fenêtre n'a rien à dire au-delà de
-/// `debug` — le par-image du moteur ne passe pas par elle — et un niveau qu'on ne
-/// sait pas produire n'a pas à être acceptable en argument.
+/// A dedicated type rather than [`LogLevel`]: the window has nothing to say beyond
+/// `debug` (the engine's per-frame records do not go through it), and a level it
+/// cannot produce has no reason to be accepted as an argument.
 #[derive(Deserialize, Clone, Copy, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum WebviewLevel {
@@ -925,27 +909,26 @@ pub enum WebviewLevel {
     Debug,
 }
 
-/// Consigne un enregistrement venu de la fenêtre.
+/// Records an entry coming from the window.
 ///
-/// Sans elle, `app.config.errorHandler` et les erreurs de compilation d'effet
-/// partaient dans une console que personne n'ouvre en `release`. Elles arrivent
-/// désormais dans le **même fichier** que le reste : une panne se lit d'un bout à
-/// l'autre, et l'ordre entre ce qu'a vu la fenêtre et ce qu'a vu le moteur est
-/// celui du fichier.
+/// Without it, `app.config.errorHandler` and effect compilation errors went to a
+/// console nobody opens in `release`. They now arrive in the **same file** as
+/// everything else: a failure reads from end to end, and the order between what
+/// the window saw and what the engine saw is the order in the file.
 ///
-/// `source` nomme d'où ça vient — un composant, un module — en champ plutôt qu'en
-/// cible : `tracing` exige une cible constante à la compilation, et de toute
-/// façon « ce qui vient du WebView » est ce qu'on veut pouvoir filtrer d'un mot.
+/// `source` names where it comes from (a component, a module) as a field rather
+/// than as a target: `tracing` requires a target constant at compile time, and in
+/// any case "what comes from the WebView" is what we want to filter with one word.
 ///
-/// Ne rend rien et ne peut pas échouer : journaliser ne doit jamais devenir une
-/// seconde panne à traiter dans le gestionnaire d'erreurs.
+/// Returns nothing and cannot fail: logging must never become a second failure to
+/// handle in the error handler.
 #[tauri::command]
 pub fn log_from_webview(level: WebviewLevel, source: String, message: String) {
     match level {
-        WebviewLevel::Error => tracing::error!(target: CIBLE_WEBVIEW, source, "{message}"),
-        WebviewLevel::Warn => tracing::warn!(target: CIBLE_WEBVIEW, source, "{message}"),
-        WebviewLevel::Info => tracing::info!(target: CIBLE_WEBVIEW, source, "{message}"),
-        WebviewLevel::Debug => tracing::debug!(target: CIBLE_WEBVIEW, source, "{message}"),
+        WebviewLevel::Error => tracing::error!(target: WEBVIEW_TARGET, source, "{message}"),
+        WebviewLevel::Warn => tracing::warn!(target: WEBVIEW_TARGET, source, "{message}"),
+        WebviewLevel::Info => tracing::info!(target: WEBVIEW_TARGET, source, "{message}"),
+        WebviewLevel::Debug => tracing::debug!(target: WEBVIEW_TARGET, source, "{message}"),
     }
 }
 
@@ -955,160 +938,154 @@ pub fn log_from_webview(level: WebviewLevel, source: String, message: String) {
 mod tests {
     use super::*;
 
-    // -------------------------------------------------------- priorité
+    // -------------------------------------------------------- priority
 
-    /// **La règle, dans l'ordre.** Rien : le défaut. Un réglage : le réglage.
-    /// L'environnement : l'environnement, quoi qu'il y ait d'autre.
+    /// **The rule, in order.** Nothing: the default. A setting: the setting. The
+    /// environment: the environment, whatever else there is.
     #[test]
-    fn l_environnement_l_emporte_puis_le_reglage_puis_le_defaut() {
-        assert_eq!(resoudre(None, None).niveau, Some(DEFAUT));
-        assert!(!resoudre(None, None).impose);
+    fn env_wins_then_setting_then_default() {
+        assert_eq!(resolve(None, None).level, Some(DEFAULT_LEVEL));
+        assert!(!resolve(None, None).forced);
 
         assert_eq!(
-            resoudre(None, Some(LogLevel::Debug)).niveau,
+            resolve(None, Some(LogLevel::Debug)).level,
             Some(LogLevel::Debug)
         );
-        assert!(!resoudre(None, Some(LogLevel::Debug)).impose);
+        assert!(!resolve(None, Some(LogLevel::Debug)).forced);
 
-        let impose = resoudre(Some("trace"), Some(LogLevel::Debug));
-        assert_eq!(impose.niveau, Some(LogLevel::Trace));
-        assert!(impose.impose, "le réglage a eu le dernier mot");
+        let forced = resolve(Some("trace"), Some(LogLevel::Debug));
+        assert_eq!(forced.level, Some(LogLevel::Trace));
+        assert!(forced.forced, "the setting had the last word");
     }
 
-    /// Saisi à la main dans un terminal : majuscules et espaces se pardonnent.
+    /// Typed by hand in a terminal: upper case and spaces are forgiven.
     #[test]
-    fn le_niveau_de_l_environnement_se_lit_quelle_que_soit_sa_casse() {
-        assert_eq!(resoudre(Some("  WARN "), None).niveau, Some(LogLevel::Warn));
+    fn env_level_is_read_whatever_its_case() {
+        assert_eq!(resolve(Some("  WARN "), None).level, Some(LogLevel::Warn));
     }
 
-    /// `CANDEO_LOG=` est ce qu'écrit un shell qui l'a « effacée ». L'entendre
-    /// comme une directive vide couperait tout le journal sans qu'on l'ait
-    /// demandé.
+    /// `CANDEO_LOG=` is what a shell writes once it has "cleared" it. Reading it
+    /// as an empty directive would cut off the whole log without anyone asking
+    /// for it.
     #[test]
-    fn une_variable_vide_vaut_une_variable_absente() {
-        let r = resoudre(Some("   "), Some(LogLevel::Warn));
-        assert_eq!(r.niveau, Some(LogLevel::Warn));
-        assert!(!r.impose);
+    fn empty_variable_counts_as_unset() {
+        let r = resolve(Some("   "), Some(LogLevel::Warn));
+        assert_eq!(r.level, Some(LogLevel::Warn));
+        assert!(!r.forced);
     }
 
-    /// Une directive fine passe telle quelle, et **aucun niveau ne la résume** :
-    /// l'interface doit pouvoir le dire plutôt qu'en inventer un.
+    /// A fine-grained directive passes as is, and **no level sums it up**: the
+    /// interface must be able to say so rather than invent one.
     #[test]
-    fn une_directive_complete_passe_sans_etre_nommee() {
-        let r = resoudre(Some("candeo_desktop_lib::runtime=trace,warn"), None);
+    fn full_directive_passes_without_being_named() {
+        let r = resolve(Some("candeo_desktop_lib::runtime=trace,warn"), None);
         assert_eq!(r.directives, "candeo_desktop_lib::runtime=trace,warn");
-        assert_eq!(r.niveau, None);
-        assert!(r.impose);
+        assert_eq!(r.level, None);
+        assert!(r.forced);
     }
 
     // -------------------------------------------------------- directives
 
-    /// Monter notre niveau ne doit pas monter celui des bibliothèques tierces :
-    /// c'est ce qui garde le fichier lisible quand on cherche une boucle de
-    /// rendu.
+    /// Raising our level must not raise that of third-party libraries: it is what
+    /// keeps the file readable when chasing a render loop.
     #[test]
-    fn seules_nos_crates_suivent_le_niveau_demande() {
+    fn only_our_crates_follow_requested_level() {
         let d = directives(LogLevel::Trace);
-        assert!(d.starts_with("warn,"), "les tiers ne sont pas bridés : {d}");
-        for cible in NOTRES {
+        assert!(d.starts_with("warn,"), "third parties are not capped: {d}");
+        for target in OUR_CRATES {
             assert!(
-                d.contains(&format!("{cible}=trace")),
-                "{cible} absente de {d}"
+                d.contains(&format!("{target}=trace")),
+                "{target} missing from {d}"
             );
         }
-        // Et ce qu'on écrit doit être acceptable par le filtre, sans quoi la
-        // panne n'apparaîtrait qu'au lancement de l'application.
-        EnvFilter::try_new(&d).expect("directives refusées par le filtre");
+        // And what we write must be accepted by the filter, otherwise the
+        // failure would only show when the app launches.
+        EnvFilter::try_new(&d).expect("directives rejected by the filter");
     }
 
-    /// Demander `error`, c'est demander le silence : laisser les tiers à `warn`
-    /// rendrait le journal plus bavard que ce qu'on a demandé pour soi.
+    /// Asking for `error` is asking for silence: leaving third parties at `warn`
+    /// would make the log chattier than what we asked for ourselves.
     #[test]
-    fn demander_le_silence_fait_taire_les_tiers_aussi() {
+    fn asking_for_silence_quiets_third_parties_too() {
         let d = directives(LogLevel::Error);
         assert!(d.starts_with("error,"), "{d}");
     }
 
     #[test]
-    fn chaque_niveau_produit_des_directives_valides() {
-        for niveau in [
+    fn every_level_produces_valid_directives() {
+        for level in [
             LogLevel::Error,
             LogLevel::Warn,
             LogLevel::Info,
             LogLevel::Debug,
             LogLevel::Trace,
         ] {
-            EnvFilter::try_new(directives(niveau)).unwrap_or_else(|e| panic!("« {niveau} » : {e}"));
-            assert_eq!(LogLevel::depuis(niveau.nom()), Some(niveau));
+            EnvFilter::try_new(directives(level)).unwrap_or_else(|e| panic!("\"{level}\": {e}"));
+            assert_eq!(LogLevel::from_name(level.name()), Some(level));
         }
     }
 
-    /// Le défaut n'est pas verbeux, et `debug` l'est : c'est cette frontière que
-    /// l'interface annonce.
+    /// The default is not verbose, and `debug` is: that is the boundary the
+    /// interface announces.
     #[test]
-    fn le_par_image_commence_a_debug() {
-        assert!(!DEFAUT.verbeux());
-        assert!(!LogLevel::Warn.verbeux());
-        assert!(LogLevel::Debug.verbeux());
-        assert!(LogLevel::Trace.verbeux());
+    fn per_frame_starts_at_debug() {
+        assert!(!DEFAULT_LEVEL.is_verbose());
+        assert!(!LogLevel::Warn.is_verbose());
+        assert!(LogLevel::Debug.is_verbose());
+        assert!(LogLevel::Trace.is_verbose());
     }
 
-    // -------------------------------------------------------- fichier
+    // -------------------------------------------------------- file
 
-    /// Le fichier tournant s'ouvre, s'écrit, et porte le nom qu'on attend.
+    /// The rolling file opens, gets written, and has the expected name.
     ///
-    /// La configuration de rotation est refusée à la construction quand elle est
-    /// incohérente — un préfixe vide, un plafond nul — et ce refus ne se verrait
-    /// autrement qu'au lancement de l'application, sous la forme d'un journal
-    /// silencieux. Le dossier n'existe pas encore au départ : c'est le cas du
-    /// premier lancement, et il ne doit pas être une panne.
+    /// The rotation configuration is rejected at build time when it is
+    /// inconsistent (an empty prefix, a zero cap), and that rejection would
+    /// otherwise only show when the app launches, as a silent log. The directory
+    /// does not exist yet at the start: that is the first-launch case, and it
+    /// must not be a failure.
     #[test]
-    fn le_fichier_tournant_s_ouvre_et_porte_le_nom_attendu() {
+    fn rolling_file_opens_with_expected_name() {
         use std::io::Write;
 
-        let tmp = tempfile::tempdir().expect("dossier temporaire");
-        let dossier = tmp.path().join("logs");
-        assert!(!dossier.exists(), "le test ne vérifierait plus la création");
+        let tmp = tempfile::tempdir().expect("temporary directory");
+        let dir = tmp.path().join("logs");
+        assert!(!dir.exists(), "the test would no longer check creation");
 
-        let mut appender = tourner_dans(&dossier).expect("journal non ouvert");
-        appender.write_all(b"une ligne\n").expect("écriture");
-        appender.flush().expect("vidange");
+        let mut appender = rolling_appender_in(&dir).expect("log not opened");
+        appender.write_all(b"une ligne\n").expect("write");
+        appender.flush().expect("flush");
 
-        let fichiers: Vec<String> = std::fs::read_dir(&dossier)
-            .expect("dossier des journaux")
-            .map(|e| {
-                e.expect("entrée")
-                    .file_name()
-                    .to_string_lossy()
-                    .into_owned()
-            })
+        let files: Vec<String> = std::fs::read_dir(&dir)
+            .expect("log directory")
+            .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
             .collect();
 
-        assert_eq!(fichiers.len(), 1, "fichiers : {fichiers:?}");
-        // `candeo.AAAA-MM-JJ.log` : le préfixe rend le fichier reconnaissable
-        // dans un dossier qu'on ouvre depuis l'application, la date le rend
-        // triable, et le suffixe le rend ouvrable d'un double-clic.
-        let nom = &fichiers[0];
-        assert!(nom.starts_with(&format!("{PREFIXE}.")), "nom : {nom}");
-        assert!(nom.ends_with(&format!(".{SUFFIXE}")), "nom : {nom}");
-        assert!(std::fs::read_to_string(dossier.join(nom))
-            .expect("lecture")
+        assert_eq!(files.len(), 1, "files: {files:?}");
+        // `candeo.YYYY-MM-DD.log`: the prefix makes the file recognizable in a
+        // directory opened from the app, the date makes it sortable, and the
+        // suffix makes it open on a double-click.
+        let name = &files[0];
+        assert!(name.starts_with(&format!("{FILE_PREFIX}.")), "name: {name}");
+        assert!(name.ends_with(&format!(".{FILE_SUFFIX}")), "name: {name}");
+        assert!(std::fs::read_to_string(dir.join(name))
+            .expect("read")
             .contains("une ligne"));
     }
 
-    // -------------------------------------------------------- recharge
+    // -------------------------------------------------------- reload
 
-    /// Un cahier qui garde ce que le collecteur écrit, pour pouvoir l'y relire.
+    /// A buffer that keeps what the subscriber writes, so it can be read back.
     #[derive(Clone, Default)]
-    struct Cahier(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    struct CaptureBuffer(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
 
-    impl Cahier {
-        fn texte(&self) -> String {
+    impl CaptureBuffer {
+        fn text(&self) -> String {
             String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
         }
     }
 
-    impl std::io::Write for Cahier {
+    impl std::io::Write for CaptureBuffer {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(buf);
             Ok(buf.len())
@@ -1118,150 +1095,154 @@ mod tests {
         }
     }
 
-    impl fmt_layer::MakeWriter<'_> for Cahier {
+    impl fmt_layer::MakeWriter<'_> for CaptureBuffer {
         type Writer = Self;
         fn make_writer(&self) -> Self {
             self.clone()
         }
     }
 
-    /// **Le niveau se change à chaud, sans redémarrer.**
+    /// **The level changes live, without restarting.**
     ///
-    /// C'est l'exigence qui structure tout le module, et elle ne se vérifie pas
-    /// en lisant le code : la recharge dépend de la place du filtre dans la pile
-    /// de couches et de la reconstruction du cache d'intérêt de `tracing`. Une
-    /// pile mal montée compilerait, et le réglage n'aurait simplement aucun
-    /// effet — la panne la plus difficile à remarquer, puisqu'elle ne se voit
-    /// que le jour où l'on en a besoin.
+    /// This is the requirement that shapes the whole module, and it cannot be
+    /// checked by reading the code: reloading depends on where the filter sits in
+    /// the layer stack and on `tracing` rebuilding its interest cache. A badly
+    /// assembled stack would compile, and the setting would simply have no
+    /// effect: the hardest failure to notice, since it only shows the day it is
+    /// needed.
     ///
-    /// Le collecteur est monté ici comme [`init`] le monte, mais posé sur le fil
-    /// du test — `set_default` plutôt que `try_init` : un collecteur global ne
-    /// s'installe qu'une fois par processus, et les autres tests n'ont pas à
-    /// dépendre de celui-là.
+    /// The subscriber is assembled here as [`init`] assembles it, but set on the
+    /// test thread (`set_default` rather than `try_init`): a global subscriber can
+    /// only be installed once per process, and the other tests do not have to
+    /// depend on this one.
     #[test]
-    fn le_niveau_se_change_a_chaud_sans_redemarrer() {
-        let cahier = Cahier::default();
-        let (couche, poignee) = reload::Layer::new(EnvFilter::new(directives(LogLevel::Info)));
-        let abonne = tracing_subscriber::registry().with(couche).with(
+    fn level_changes_live_without_restart() {
+        let buffer = CaptureBuffer::default();
+        let (reload_layer, handle) = reload::Layer::new(EnvFilter::new(directives(LogLevel::Info)));
+        let subscriber = tracing_subscriber::registry().with(reload_layer).with(
             fmt_layer::layer()
                 .with_ansi(false)
-                .with_writer(cahier.clone()),
+                .with_writer(buffer.clone()),
         );
-        let _garde = tracing::subscriber::set_default(abonne);
+        let _guard = tracing::subscriber::set_default(subscriber);
 
-        tracing::debug!("clé-avant");
-        tracing::info!("clé-pendant");
+        tracing::debug!("marker-before");
+        tracing::info!("marker-during");
         assert!(
-            !cahier.texte().contains("clé-avant"),
-            "le par-image passe alors que le niveau est « info » : {}",
-            cahier.texte()
+            !buffer.text().contains("marker-before"),
+            "per-frame records pass while the level is \"info\": {}",
+            buffer.text()
         );
-        assert!(cahier.texte().contains("clé-pendant"));
+        assert!(buffer.text().contains("marker-during"));
 
-        poignee
+        handle
             .reload(EnvFilter::new(directives(LogLevel::Debug)))
-            .expect("recharge refusée");
+            .expect("reload rejected");
 
-        tracing::debug!("clé-après");
+        tracing::debug!("marker-after");
         assert!(
-            cahier.texte().contains("clé-après"),
-            "le niveau n'a pas changé sans redémarrage : {}",
-            cahier.texte()
+            buffer.text().contains("marker-after"),
+            "the level did not change without a restart: {}",
+            buffer.text()
         );
 
-        // Et dans l'autre sens : on doit pouvoir refermer le robinet sans
-        // relancer non plus, sinon un relevé oublié remplirait le disque jusqu'à
-        // la prochaine fermeture de l'application.
-        poignee
+        // And the other way round: we must be able to turn the tap off without
+        // relaunching either, otherwise a forgotten capture would fill the disk
+        // until the app is next closed.
+        handle
             .reload(EnvFilter::new(directives(LogLevel::Info)))
-            .expect("recharge refusée");
-        tracing::debug!("clé-refermé");
+            .expect("reload rejected");
+        tracing::debug!("marker-closed");
         assert!(
-            !cahier.texte().contains("clé-refermé"),
-            "le niveau ne redescend pas : {}",
-            cahier.texte()
+            !buffer.text().contains("marker-closed"),
+            "the level does not go back down: {}",
+            buffer.text()
         );
     }
 
     // -------------------------------------------------------- transitions
 
-    /// **Les transitions, jamais les occurrences.** À 30 images par seconde, une
-    /// écriture qui échoue produirait trente lignes par seconde.
+    /// **Transitions, never occurrences.** At 30 frames per second, a failing
+    /// write would produce thirty lines per second.
     #[test]
-    fn seul_un_changement_d_etat_se_journalise() {
-        assert_eq!(bascule(None, Some("refusée")), Bascule::Commence);
-        assert_eq!(bascule(Some("refusée"), None), Bascule::Retabli);
-        assert_eq!(bascule(None, None), Bascule::Rien);
-        assert_eq!(bascule(Some("refusée"), Some("refusée")), Bascule::Rien);
-    }
-
-    /// La panne dure et la raison change : ce n'est pas un nouvel incident. Un
-    /// message qui porte un compteur varierait à chaque image, et le journaliser
-    /// rouvrirait l'inondation qu'on vient de fermer.
-    #[test]
-    fn une_raison_qui_change_pendant_la_panne_ne_dit_rien_de_neuf() {
+    fn only_a_state_change_is_logged() {
+        assert_eq!(transition(None, Some("refused")), Transition::Started);
+        assert_eq!(transition(Some("refused"), None), Transition::Recovered);
+        assert_eq!(transition(None, None), Transition::Unchanged);
         assert_eq!(
-            bascule(Some("image 1 refusée"), Some("image 2 refusée")),
-            Bascule::Rien
+            transition(Some("refused"), Some("refused")),
+            Transition::Unchanged
         );
     }
 
-    // -------------------------------------------------------- série
-
-    /// Ce qu'un journal collé dans un rapport de bogue ne doit **jamais**
-    /// contenir. La série choisie ne s'écrit pas en hexadécimal, faute de quoi le
-    /// test pourrait passer par accident.
+    /// The failure persists and the reason changes: this is not a new incident. A
+    /// message carrying a counter would vary on every frame, and logging it would
+    /// reopen the flood we just closed.
     #[test]
-    fn l_empreinte_ne_divulgue_pas_le_numero_de_serie() {
-        let serie = "XYZW-KLM-9921";
-        let e = empreinte(serie);
-        assert!(!e.contains(serie), "la série est dans l'empreinte : {e}");
-        for morceau in ["XYZW", "KLM", "9921"] {
-            assert!(!e.contains(morceau), "« {morceau} » a fuité dans {e}");
+    fn reason_changing_during_failure_says_nothing_new() {
+        assert_eq!(
+            transition(Some("frame 1 refused"), Some("frame 2 refused")),
+            Transition::Unchanged
+        );
+    }
+
+    // -------------------------------------------------------- serial
+
+    /// What a log pasted into a bug report must **never** contain. The chosen
+    /// serial cannot be written in hexadecimal, otherwise the test could pass by
+    /// accident.
+    #[test]
+    fn fingerprint_does_not_disclose_serial_number() {
+        let serial = "XYZW-KLM-9921";
+        let e = fingerprint(serial);
+        assert!(!e.contains(serial), "the serial is in the fingerprint: {e}");
+        for piece in ["XYZW", "KLM", "9921"] {
+            assert!(!e.contains(piece), "\"{piece}\" leaked into {e}");
         }
     }
 
-    /// Stable d'un appel à l'autre — sinon deux journaux du même appareil ne se
-    /// rapprocheraient pas — et distincte d'un exemplaire à l'autre, sinon elle
-    /// ne servirait à rien.
+    /// Stable from one call to the next (otherwise two logs of the same device
+    /// would not match) and distinct from one unit to another, otherwise it would
+    /// be useless.
     #[test]
-    fn l_empreinte_est_stable_et_distingue_deux_exemplaires() {
-        assert_eq!(empreinte("XY01"), empreinte("XY01"));
-        assert_ne!(empreinte("XY01"), empreinte("XY02"));
-        assert_eq!(empreinte("XY01").len(), 16);
+    fn fingerprint_is_stable_and_tells_two_units_apart() {
+        assert_eq!(fingerprint("XY01"), fingerprint("XY01"));
+        assert_ne!(fingerprint("XY01"), fingerprint("XY02"));
+        assert_eq!(fingerprint("XY01").len(), 16);
     }
 
-    /// « Branché sans série déclarée » n'est pas un cas dégénéré : c'est hidraw
-    /// sans règle udev, et le confondre avec une série ferait chercher une panne
-    /// d'appareil là où il n'y a qu'une permission manquante.
+    /// "Plugged in without a declared serial" is not a degenerate case: it is
+    /// hidraw without a udev rule, and confusing it with a serial would send
+    /// someone hunting for a device failure where there is only a missing
+    /// permission.
     #[test]
-    fn une_enumeration_muette_se_dit_autrement_qu_une_empreinte() {
-        assert_eq!(empreinte_de(None), "aucune");
-        assert_eq!(empreinte_de(Some("XY01")), empreinte("XY01"));
+    fn silent_enumeration_reads_differently_from_a_fingerprint() {
+        assert_eq!(fingerprint_of(None), "aucune");
+        assert_eq!(fingerprint_of(Some("XY01")), fingerprint("XY01"));
     }
 
-    // -------------------------------------------------------- micrologiciel
+    // -------------------------------------------------------- firmware
 
-    /// L'octet d'état ne valide aucun argument : le diagnostic ne doit jamais
-    /// laisser lire « compatible » ni « compris » là où l'appareil a seulement
-    /// dit qu'il connaissait la commande.
+    /// The status byte validates no argument: the diagnostic must never let
+    /// "compatible" or "compris" (understood) be read where the device only said
+    /// that it knew the command.
     #[test]
-    fn le_diagnostic_ne_survend_pas_une_commande_connue() {
+    fn diagnostic_does_not_oversell_a_known_command() {
         use candeo_device::Verdict;
-        let texte = verdict(&Verdict::Understood);
-        assert!(texte.contains("connue"), "{texte}");
-        for mot in ["compatible", "compris"] {
-            assert!(!texte.contains(mot), "« {mot} » dans « {texte} »");
+        let text = verdict(&Verdict::Understood);
+        assert!(text.contains("connue"), "{text}");
+        for word in ["compatible", "compris"] {
+            assert!(!text.contains(word), "\"{word}\" in \"{text}\"");
         }
         assert!(verdict(&Verdict::Unsupported).contains("plus envoyée"));
     }
 
-    // -------------------------------------------------------- sérialisation
+    // -------------------------------------------------------- serialization
 
-    /// Les niveaux traversent l'IPC : leur écriture est celle de l'interface et
-    /// celle de `settings.json`, et elle ne doit pas bouger.
+    /// Levels cross the IPC: their spelling is the interface's and the one in
+    /// `settings.json`, and it must not change.
     #[test]
-    fn les_niveaux_se_serialisent_comme_ils_s_ecrivent() {
+    fn levels_serialize_as_they_are_written() {
         assert_eq!(serde_json::to_string(&LogLevel::Warn).unwrap(), r#""warn""#);
         assert_eq!(
             serde_json::from_str::<LogLevel>(r#""trace""#).unwrap(),

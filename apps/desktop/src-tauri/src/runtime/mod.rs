@@ -1,71 +1,70 @@
-//! Moteur d'effets : **un fil de rendu par appareil**, indépendants de la fenêtre.
+//! Effects engine: **one render thread per device**, independent of the window.
 //!
-//! C'est le seul endroit où du code d'effet s'exécute. Le front n'en exécute
-//! jamais : il envoie la source et reçoit les images. L'aperçu du simulateur
-//! est donc la production, par construction — et non une ressemblance obtenue
-//! en faisant tourner le même code dans un second moteur JavaScript.
+//! This is the only place where effect code runs. The front end never runs any:
+//! it sends the source and receives the frames. The simulator preview is
+//! therefore the production output, by construction — not a likeness obtained
+//! by running the same code in a second JavaScript engine.
 //!
-//! # Un appareil, un effet
+//! # One device, one effect
 //!
-//! Chaque appareil porte sa boucle, donc sa cadence, ses paramètres, son état
-//! d'erreur et sa sortie. Rien n'est partagé entre deux appareils : c'est ce qui
-//! fait qu'un appareil en panne n'en affecte aucun autre — l'invariant de
-//! l'adoption (issue #25), tenu cette fois au niveau du moteur.
+//! Each device carries its own loop, hence its own frame rate, parameters, error
+//! state and output. Nothing is shared between two devices: that is what keeps a
+//! failing device from affecting any other — the adoption invariant (issue #25),
+//! held this time at the engine level.
 //!
-//! Une boucle reçoit **un gabarit** et **une sortie**, jamais « un clavier ».
-//! Le jour où un gabarit couvrira plusieurs appareils, c'est [`DeviceOut`] qui
-//! répartira l'image, et le code des effets ne changera pas d'une ligne.
+//! A loop receives **a layout** and **an output**, never "a keyboard". The day a
+//! layout spans several devices, [`DeviceOut`] will split the frame, and the
+//! effect code will not change by a single line.
 //!
-//! # Et une boucle d'aperçu, qui n'est celle d'aucun appareil
+//! # And one preview loop, which belongs to no device
 //!
-//! **Prévisualiser ne doit jamais interrompre l'effet en cours sur le clavier.**
-//! Le moteur étant à un effet par appareil, prévisualiser Y sur un clavier qui
-//! exécute X arrêterait X : parcourir la galerie éteindrait l'éclairage en cours
-//! (issue #63). La sortie est une boucle **séparée**, une seule, dont la sortie
-//! matérielle est [`SansSortie`] — `DeviceOut::present` rendant `None` veut déjà
-//! dire « aucun appareil ouvert, ce n'est pas un échec ».
+//! **Previewing must never interrupt the effect running on the keyboard.**
+//! With the engine at one effect per device, previewing Y on a keyboard running
+//! X would stop X: browsing the gallery would turn off the current lighting
+//! (issue #63). The preview is a **separate** loop, a single one, whose hardware
+//! output is [`NoOutput`] — `DeviceOut::present` returning `None` already means
+//! "no device open, this is not a failure".
 //!
-//! Elle **emprunte le gabarit** de l'appareil sélectionné, pour ressembler à ce
-//! qu'on obtiendra, sans rien lui prendre d'autre : ni sa boucle, ni sa poignée,
-//! ni sa ligne d'état.
+//! It **borrows the layout** of the selected device, to look like what will be
+//! obtained, without taking anything else from it: not its loop, not its handle,
+//! not its status line.
 //!
-//! C'est pourquoi [`EngineReport`] range les deux dans **deux champs distincts**
-//! plutôt que dans une liste à filtrer. Voir [`PreviewStatus`].
+//! That is why [`EngineReport`] keeps the two in **two separate fields** rather
+//! than in a list to filter. See [`PreviewStatus`].
 //!
-//! # Ce qu'un effet ne peut pas faire durer
+//! # What an effect cannot drag on
 //!
-//! Un `while (true)` dans `render` gèlerait son fil définitivement : le drapeau
-//! `stop` est lu *entre* deux images, il ne serait donc jamais relu — et comme
-//! un effet tourne fenêtre fermée, la fermer ne sauverait pas. Une allocation
-//! sans fin, elle, emporterait le processus entier plutôt que le seul effet.
+//! A `while (true)` in `render` would freeze its thread for good: the `stop`
+//! flag is read *between* two frames, so it would never be read again — and
+//! since an effect runs with the window closed, closing it would not help. An
+//! endless allocation, for its part, would take down the whole process rather
+//! than the effect alone.
 //!
-//! Ni l'une ni l'autre n'est une question de malveillance : ce sont deux erreurs
-//! de programmation ordinaires, et deux bornes suffisent à les traiter comme
-//! telles — un temps de calcul par image ([`BUDGET_IMAGE`], et
-//! [`BUDGET_CHARGEMENT`] pour le corps du module) et une mémoire par effet
-//! ([`BUDGET_MEMOIRE`]). Le dépassement n'ouvre **aucun chemin nouveau** : il
-//! emprunte celui des exceptions, que [`MAX_CONSECUTIVE_ERRORS`] transforme en
-//! arrêt propre. Ce que le moteur ajoute, c'est le nom de la cause : voir
-//! [`nommer_la_cause`].
+//! Neither is a matter of malice: they are two ordinary programming errors, and
+//! two limits are enough to treat them as such — a compute time per frame
+//! ([`FRAME_BUDGET`], and [`LOAD_BUDGET`] for the module body) and a memory per
+//! effect ([`MEMORY_BUDGET`]). Exceeding one opens **no new path**: it takes the
+//! exception path, which [`MAX_CONSECUTIVE_ERRORS`] turns into a clean stop.
+//! What the engine adds is the name of the cause: see [`name_the_cause`].
 //!
-//! # Ordre de prise des verrous
+//! # Lock order
 //!
-//! Trois, et l'ordre est celui de la déclaration : **table des boucles → fil d'un
-//! appareil → état partagé d'une boucle**.
+//! Three locks, and the order is the declaration order: **loop table → a
+//! device's thread → a loop's shared state**.
 //!
-//! La table n'est verrouillée que le temps d'y lire ou d'y poser un `Arc`, jamais
-//! pendant un démarrage ni une attente de fin. Les deux suivants sont pris
-//! ensemble, dans cet ordre, par [`DeviceLoop::start`] et [`DeviceLoop::stop`] —
-//! c'est ce qui sérialise démarrage et arrêt d'un appareil, et le verrou attendu
-//! est **le sien** : attendre la fin de l'un ne retient aucune commande visant
-//! les autres.
+//! The table is locked only long enough to read or put an `Arc` in it, never
+//! during a start or while waiting for a thread to end. The next two are taken
+//! together, in this order, by [`DeviceLoop::start`] and [`DeviceLoop::stop`] —
+//! that is what serializes starting and stopping a device, and the lock waited
+//! on is **its own**: waiting for one to end holds back no command aimed at the
+//! others.
 //!
-//! Le fil de rendu, lui, ne prend que le dernier : il ne connaît que son
-//! [`Shared`] et sa sortie, jamais le moteur. Il n'a donc aucun moyen de retenir
-//! une commande, et il ne tient jamais la poignée d'un appareil et un verrou du
-//! moteur en même temps. Voir `crate::AppState`.
+//! The render thread takes only the last one: it knows only its [`Shared`] and
+//! its output, never the engine. It therefore has no way to hold back a command,
+//! and it never holds a device handle and an engine lock at the same time. See
+//! `crate::AppState`.
 //!
-//! Voir `docs/design/effects-runtime.md`.
+//! See `docs/design/effects-runtime.md`.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -87,38 +86,38 @@ use crate::journal;
 
 pub mod swatch;
 
-/// Le module que l'hôte fournit, et que l'éditeur décrit par son `.d.ts`.
+/// The module the host provides, and that the editor describes through its
+/// `.d.ts`.
 const API_JS: &str = include_str!("api.js");
 
-/// La colle qui importe l'effet et installe la fonction de rendu.
+/// The glue that imports the effect and installs the render function.
 const BOOTSTRAP_JS: &str = include_str!("bootstrap.js");
 
-/// 30 images par seconde — **mesuré, pas supposé**.
+/// 30 frames per second — **measured, not assumed**.
 ///
-/// La cadence était à 60 par analogie avec un écran. Le chronométrage sur le
-/// matériel dit autre chose : une mise à jour complète coûte **7 transferts de
-/// contrôle** — 6 rangées puis le passage en mode custom, voir
-/// `Keyboard::present` — et les 120 mesurées donnent **13,1 ms en moyenne,
-/// 14,4 ms au pire**, sans une seule écriture refusée. L'appareil accepte donc
-/// jusqu'à ~76 img/s.
+/// The frame rate was 60, by analogy with a screen. Timing on the hardware says
+/// otherwise: a full update costs **7 control transfers** — 6 rows then the
+/// switch to custom mode, see `Keyboard::present` — and the 120 measured give
+/// **13.1 ms on average, 14.4 ms at worst**, without a single refused write. The
+/// device therefore accepts up to ~76 fps.
 ///
-/// 60 img/s tenait donc *à peine* : l'écriture seule mangeait **78 % de la
-/// période** de 16,7 ms, laissant ~3,6 ms à l'effet — moins que le budget de
-/// calcul qu'on lui accorde. Autrement dit un effet **parfaitement dans les
-/// clous** faisait déjà rater l'échéance, et la boucle retombait en silence à
-/// une cadence qu'elle n'annonçait nulle part.
+/// 60 fps therefore *barely* held: the write alone ate **78 % of the 16.7 ms
+/// period**, leaving ~3.6 ms to the effect — less than the compute budget it is
+/// granted. In other words an effect **well within its limits** already made the
+/// deadline slip, and the loop silently fell back to a frame rate it announced
+/// nowhere.
 ///
-/// À 33,3 ms, l'écriture retombe à 39 % et il reste ~20 ms pour l'effet. Ce que
-/// 60 promettait sans le tenir, 30 le tient.
+/// At 33.3 ms, the write drops to 39 % and ~20 ms remain for the effect. What 60
+/// promised without keeping, 30 keeps.
 ///
-/// ⚠️ **Le goulot est le bus, pas le JavaScript.** Deux pistes si la cadence
-/// devait remonter : ne réécrire que les rangées qui changent — l'écriture
-/// partielle est vérifiée sur le matériel — et cesser de réémettre la trame de
-/// mode custom quand on y est déjà, qui vaut à elle seule ~1,9 ms sur les 13.
+/// ⚠️ **The bottleneck is the bus, not the JavaScript.** Two leads if the frame
+/// rate ever had to go back up: rewrite only the rows that change — partial
+/// writes are verified on hardware — and stop re-sending the custom mode report
+/// when already in it, which alone accounts for ~1.9 ms of the 13.
 const FPS: u32 = 30;
 
-/// Au-delà, on arrête. Un effet qui lève à chaque image ne se rétablira pas
-/// tout seul, et continuer reviendrait à remplir le journal en silence.
+/// Beyond this, stop. An effect that throws on every frame will not recover on
+/// its own, and carrying on would only fill the log silently.
 const MAX_CONSECUTIVE_ERRORS: u32 = 30;
 
 /// Consecutive failed writes after which the loop **closes** its device.
@@ -133,135 +132,135 @@ const MAX_CONSECUTIVE_ERRORS: u32 = 30;
 /// device that is gone is not presented as open for long.
 const MAX_DEVICE_WRITE_ERRORS: u32 = FPS;
 
-/// Temps accordé au calcul d'**une** image.
+/// Time granted to compute **one** frame.
 ///
-/// ## Ce que ce chiffre mesure vraiment
+/// ## What this figure really measures
 ///
-/// Pas une allocation de performance : **un détecteur de gel**, avec de la marge
-/// pour l'à-coup machine. Un effet ordinaire coûte **0,23 ms** et un champ de
-/// cinq mille particules avec une seconde de traînée **1,1 ms** — mesurés en
-/// `release` sur ce moteur, pour un clavier de 132 LED. Aucun effet réaliste ne
-/// vit entre 1 et 10 ms.
+/// Not a performance allowance: **a freeze detector**, with headroom for machine
+/// hiccups. An ordinary effect costs **0.23 ms** and a field of five thousand
+/// particles with a one-second trail **1.1 ms** — measured in `release` on this
+/// engine, for a 132-LED keyboard. No realistic effect lives between 1 and
+/// 10 ms.
 ///
-/// Ce que ces millisecondes achètent, c'est donc de la **préemption tolérée** :
-/// l'échéance se mesure en temps réel, pas en temps de calcul, et un fil que
-/// l'ordonnanceur suspend au milieu d'une image consomme son budget sans rien
-/// exécuter. À 10 ms, un effet ordinaire peut se faire suspendre près de 10 ms
-/// sans être accusé de geler.
+/// What these milliseconds buy is therefore **tolerated preemption**: the
+/// deadline is measured in wall-clock time, not compute time, and a thread the
+/// scheduler suspends in the middle of a frame consumes its budget without
+/// executing anything. At 10 ms, an ordinary effect can be suspended for nearly
+/// 10 ms without being accused of freezing.
 ///
-/// ## Où est le plafond
+/// ## Where the ceiling is
 ///
-/// L'écriture HID d'une image complète coûte **13,1 ms en moyenne, 14,4 ms au
-/// pire** (§5 du relevé), et elle vit dans la même période de 33,3 ms :
+/// The HID write of a full frame costs **13.1 ms on average, 14.4 ms at worst**
+/// (§5 of the survey), and it lives in the same 33.3 ms period:
 ///
 /// ```text
-///   budget 10 ms + écriture 14,4 ms = 24,4 ms   →  9 ms de marge
+///   budget 10 ms + write 14.4 ms = 24.4 ms   →  9 ms of headroom
 /// ```
 ///
-/// Le seuil où l'on commencerait à **rater l'échéance en silence** est vers
-/// **19 ms** de budget. On en est loin, et c'est ce qui rend 10 ms sans risque
-/// là où le chiffre d'origine — la moitié d'une période de 16,7 ms — n'était
-/// qu'une proportion, plus une mesure.
+/// The threshold where the deadline would start to **slip silently** is around
+/// **19 ms** of budget. We are far from it, and that is what makes 10 ms safe
+/// where the original figure — half of a 16.7 ms period — was just a proportion,
+/// and no longer a measurement.
 ///
-/// ## Et très en-dessous d'un gel
+/// ## And far below a freeze
 ///
-/// Un effet qui ne sort pas s'arrête au bout de [`MAX_CONSECUTIVE_ERRORS`]
-/// images, soit **0,3 s** — alors qu'un budget d'une seconde par image aurait
-/// fait attendre une demi-minute avant de dire ce qui ne va pas.
+/// An effect that does not return is stopped after [`MAX_CONSECUTIVE_ERRORS`]
+/// frames, that is **0.3 s** — whereas a budget of one second per frame would
+/// have waited half a minute before saying what is wrong.
 ///
-/// Dépasser une fois n'arrête rien : le compteur d'erreurs consécutives repart
-/// à zéro dès la première image rendue. Il en faut trente d'affilée.
+/// Exceeding it once stops nothing: the consecutive error counter goes back to
+/// zero at the first rendered frame. It takes thirty in a row.
 #[cfg(not(debug_assertions))]
-const BUDGET_IMAGE: Duration = Duration::from_millis(10);
+const FRAME_BUDGET: Duration = Duration::from_millis(10);
 
-/// Le même budget, à la vitesse du moteur qu'on a réellement compilé.
+/// The same budget, at the speed of the engine actually compiled.
 ///
-/// QuickJS est du C, compilé au niveau d'optimisation du profil. Non optimisé,
-/// la **même** image du **même** effet simple passait de 0,23 ms à 6,3 ms de
-/// JavaScript : vingt-cinq fois plus lent, mesuré. Ce n'est pas l'effet qui
-/// changeait, c'est l'interpréteur.
+/// QuickJS is C, compiled at the profile's optimization level. Unoptimized, the
+/// **same** frame of the **same** simple effect went from 0.23 ms to 6.3 ms of
+/// JavaScript: twenty-five times slower, measured. It was not the effect that
+/// changed, it was the interpreter.
 ///
-/// Un budget unique aurait donc dû choisir son camp : à 10 ms il couperait des
-/// effets irréprochables dès qu'on lance l'application en développement ; à
-/// 200 ms il laisserait un gel de six secondes en production.
+/// A single budget would therefore have had to pick a side: at 10 ms it would
+/// cut flawless effects as soon as the app runs in development; at 200 ms it
+/// would allow a six-second freeze in production.
 ///
-/// ⚠️ **Ce facteur 25 a été mesuré avant que `[profile.dev.package."*"]` ne
-/// passe les dépendances en `opt-level = 2`.** QuickJS arrive par une
-/// dépendance : il est donc optimisé en débogage lui aussi, désormais, et
-/// l'écart devrait avoir fondu. Cette valeur reste **un plafond, pas une
-/// cible** — la garder large ne coûte rien tant que personne ne la prend pour
-/// une mesure à jour. À refaire si quelqu'un veut unifier les deux budgets.
+/// ⚠️ **This factor of 25 was measured before `[profile.dev.package."*"]` moved
+/// dependencies to `opt-level = 2`.** QuickJS comes in through a dependency: it
+/// is therefore optimized in debug builds too now, and the gap should have
+/// melted. This value remains **a ceiling, not a target** — keeping it wide
+/// costs nothing as long as nobody takes it for an up-to-date measurement. To be
+/// redone if someone wants to unify the two budgets.
 #[cfg(debug_assertions)]
-const BUDGET_IMAGE: Duration = Duration::from_millis(200);
+const FRAME_BUDGET: Duration = Duration::from_millis(200);
 
-/// Temps accordé au **chargement** d'un effet, corps du module compris.
+/// Time granted to **load** an effect, module body included.
 ///
-/// Le corps du module s'exécute une fois, avant la première image : il échappe
-/// donc au budget d'image. Sans borne ici, une boucle écrite hors de `render`
-/// bloquerait [`DeviceLoop::start`] pour toujours — la commande attend le
-/// verdict du chargement, le verrou de l'appareil à la main, et ce clavier ne
-/// démarrerait ni n'arrêterait plus rien.
+/// The module body runs once, before the first frame: it therefore escapes the
+/// frame budget. Without a limit here, a loop written outside `render` would
+/// block [`DeviceLoop::start`] forever — the command waits for the load verdict
+/// while holding the device lock, and that keyboard would never start or stop
+/// anything again.
 ///
-/// Analyser et évaluer un module se compte en millisecondes ; deux secondes
-/// sont trois ordres de grandeur au-dessus, et ce prix n'est payé qu'une fois.
-const BUDGET_CHARGEMENT: Duration = Duration::from_secs(2);
+/// Parsing and evaluating a module takes milliseconds; two seconds is three
+/// orders of magnitude above, and that price is paid only once.
+const LOAD_BUDGET: Duration = Duration::from_secs(2);
 
-/// Mémoire accordée au moteur JavaScript d'un effet — **un par appareil**.
+/// Memory granted to an effect's JavaScript engine — **one per device**.
 ///
-/// Le tampon d'image ne pèse rien : `bootstrap.js` le réutilise d'une image à
-/// l'autre. Mais un effet a le droit de garder un état, et c'est lui qu'il faut
-/// loger. Mesuré, contexte QuickJS et modules chargés compris : 0,17 Mo pour un
-/// effet sans état, 2,7 Mo pour deux mille particules gardant une seconde
-/// d'images, 6 Mo pour cinq mille. Trente-deux mégaoctets laissent donc cinq
-/// fois l'effet le plus démesuré qu'on sache écrire pour 132 LED, et près de
-/// deux cents fois l'effet ordinaire — tout en restant négligeables devant
-/// l'application, même avec un effet par clavier.
+/// The frame buffer weighs nothing: `bootstrap.js` reuses it from one frame to
+/// the next. But an effect is allowed to keep state, and that is what has to
+/// fit. Measured, QuickJS context and loaded modules included: 0.17 MB for a
+/// stateless effect, 2.7 MB for two thousand particles keeping one second of
+/// frames, 6 MB for five thousand. Thirty-two megabytes therefore leave five
+/// times the most outlandish effect we know how to write for 132 LEDs, and
+/// nearly two hundred times the ordinary effect — while staying negligible next
+/// to the application, even with one effect per keyboard.
 ///
-/// Contrairement au temps, la mémoire ne dépend pas du profil de compilation :
-/// les mêmes objets occupent les mêmes octets.
+/// Unlike time, memory does not depend on the build profile: the same objects
+/// take the same bytes.
 ///
-/// Ce qu'on borne, ce n'est pas l'appétit d'un effet : c'est qu'un tableau qui
-/// grandit à chaque image emporte tout le processus au lieu de lui-même.
-const BUDGET_MEMOIRE: usize = 32 * 1024 * 1024;
+/// What is bounded is not an effect's appetite: it is an array that grows on
+/// every frame taking down the whole process instead of itself.
+const MEMORY_BUDGET: usize = 32 * 1024 * 1024;
 
-/// Ce que la boucle partage avec le reste de l'application.
+/// What the loop shares with the rest of the application.
 ///
-/// Tout est derrière `Arc` : le fil de rendu survit à la fenêtre, il ne peut
-/// donc rien emprunter à l'état d'une commande.
+/// Everything is behind `Arc`: the render thread outlives the window, so it
+/// cannot borrow anything from a command's state.
 struct Shared {
     stop: AtomicBool,
-    /// Paramètres de l'effet, en JSON. Relus à chaque image : les régler ne
-    /// redémarre pas la boucle.
+    /// Effect parameters, as JSON. Re-read on every frame: setting them does
+    /// not restart the loop.
     params: Mutex<String>,
-    /// Sortie clavier. Séparée de la sortie simulateur — on doit pouvoir
-    /// écrire un effet sans posséder le clavier, et le laisser tourner sans
-    /// regarder l'écran.
+    /// Keyboard output. Separate from the simulator output — one must be able
+    /// to write an effect without owning the keyboard, and to leave it running
+    /// without watching the screen.
     to_keyboard: AtomicBool,
-    /// Sortie simulateur. `None` tant que personne n'écoute : rien n'est alors
-    /// sérialisé.
+    /// Simulator output. `None` while nobody listens: nothing is serialized
+    /// then.
     frames: Mutex<Option<Channel<InvokeResponseBody>>>,
-    /// Dernière erreur de l'effet. Lisible même fenêtre fermée puis rouverte,
-    /// ce qu'un événement ponctuel ne permettrait pas.
+    /// The effect's last error. Readable even after the window is closed and
+    /// reopened, which a one-off event would not allow.
     error: Mutex<Option<String>>,
-    /// Dernier échec d'écriture vers le clavier.
+    /// Last failed write to the keyboard.
     ///
-    /// Distinct de l'erreur d'effet ci-dessus : ces deux pannes n'ont ni la
-    /// même cause ni le même remède, et les confondre enverrait chercher au
-    /// mauvais endroit. Un effet impeccable peut très bien n'atteindre aucune
+    /// Distinct from the effect error above: these two failures have neither
+    /// the same cause nor the same remedy, and mixing them up would send
+    /// someone looking in the wrong place. A flawless effect may well reach no
     /// LED.
     device_error: Mutex<Option<String>>,
-    /// Vrai si la dernière image a réellement été écrite sur un périphérique.
+    /// True if the last frame was actually written to a device.
     ///
-    /// Sans cela, lancer un effet sans clavier connecté ne produisait **aucun
-    /// signe** : le simulateur s'animait, la case « envoyer » restait cochée,
-    /// et le clavier gardait son image précédente. Un silence qui se lit comme
-    /// une panne du moteur.
+    /// Without it, starting an effect with no keyboard connected produced **no
+    /// sign at all**: the simulator animated, the "envoyer" (send) box stayed
+    /// checked, and the keyboard kept its previous frame. A silence that reads
+    /// as an engine failure.
     reaching: AtomicBool,
     /// Consecutive failed writes, reset by any successful write. See
     /// [`MAX_DEVICE_WRITE_ERRORS`].
     device_failures: AtomicU32,
-    /// Nom de l'effet en cours, pour que l'interface sache quoi mettre en
-    /// avant après un redémarrage de la fenêtre.
+    /// Name of the running effect, so that the interface knows what to
+    /// highlight after the window restarts.
     effect_id: Mutex<Option<String>>,
 }
 
@@ -281,26 +280,26 @@ impl Default for Shared {
     }
 }
 
-/// État du moteur pour **un** appareil, tel que l'interface le lit.
+/// Engine state for **one** device, as the interface reads it.
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineStatus {
     pub running: bool,
     pub effect_id: Option<String>,
-    /// Erreur venant du code de l'effet, déjà lisible : affichée telle quelle.
+    /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
-    /// Échec d'écriture vers le clavier — rien à voir avec le code de l'effet.
+    /// Failed write to the keyboard — nothing to do with the effect code.
     pub device_error: Option<String>,
-    /// Vrai si les images parviennent effectivement à un clavier.
+    /// True if the frames actually reach a keyboard.
     pub reaching_keyboard: bool,
     pub to_keyboard: bool,
 }
 
-/// L'état d'un appareil, et à qui il appartient.
+/// A device's state, and which device it belongs to.
 ///
-/// `engine_status()` en rend une par appareil visé : un message global
-/// obligerait à choisir lequel afficher, et le suivant effacerait le précédent —
-/// exactement ce que la table des échecs d'ouverture évite déjà côté adoption.
+/// `engine_status()` returns one per targeted device: a global message would
+/// force a choice of which one to show, and the next would erase the previous —
+/// exactly what the table of open failures already avoids on the adoption side.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceEngineStatus {
@@ -309,73 +308,72 @@ pub struct DeviceEngineStatus {
     pub status: EngineStatus,
 }
 
-/// Ce que la fenêtre **regarde**, et qui n'atteint aucun clavier.
+/// What the window **watches**, and which reaches no keyboard.
 ///
-/// # Un type à part, et non une ligne de plus dans la liste des appareils
+/// # A type of its own, not one more line in the device list
 ///
-/// C'est la quatrième fois dans ce projet qu'un état qui ment coûte une session
-/// de diagnostic — le clavier non adopté, l'écriture « acceptée », l'image figée
-/// après arrêt automatique, et maintenant l'aperçu. Un drapeau à filtrer se
-/// filtre mal : il suffit d'un appelant qui l'oublie — l'icône de zone de
-/// notification, le journal, la galerie — pour annoncer comme tournant sur le
-/// clavier un effet qu'on ne fait que regarder. Ici il n'y a **rien à filtrer** :
-/// l'aperçu n'est pas dans la liste, et un appelant ne peut pas l'y trouver par
-/// mégarde.
+/// This is the fourth time in this project that a lying state has cost a round
+/// of debugging — the unadopted keyboard, the "accepted" write, the frame frozen
+/// after an automatic stop, and now the preview. A flag to filter gets filtered
+/// badly: a single caller that forgets it — the tray icon, the log, the gallery
+/// — is enough to announce as running on the keyboard an effect that is only
+/// being watched. Here there is **nothing to filter**: the preview is not in the
+/// list, and a caller cannot find it there by mistake.
 ///
-/// # Ce qu'il ne porte pas est aussi délibéré
+/// # What it does not carry is deliberate too
 ///
-/// Ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError`. Une boucle d'aperçu
-/// n'a **aucune** sortie matérielle ; ces trois champs à faux ne décriraient pas
-/// un aperçu, ils décriraient un effet qui n'arrive pas à écrire — c'est-à-dire
-/// une panne, là où il n'y a qu'un choix.
+/// No `toKeyboard`, no `reachingKeyboard`, no `deviceError`. A preview loop has
+/// **no** hardware output; those three fields set to false would not describe a
+/// preview, they would describe an effect failing to write — that is, a
+/// failure, where there is only a choice.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewStatus {
-    /// L'appareil dont l'aperçu **emprunte** le gabarit.
+    /// The device whose layout the preview **borrows**.
     ///
-    /// Il n'est pas piloté, il n'est même pas forcément branché : c'est une
-    /// géométrie, pas une destination. Le nommer permet à l'interface de dire « à
-    /// quoi ça ressemblera sur ce clavier-là ».
+    /// It is not controlled, it is not even necessarily plugged in: it is a
+    /// geometry, not a destination. Naming it lets the interface say "what it
+    /// will look like on that keyboard".
     pub layout_of: DeviceRef,
     pub running: bool,
     pub effect_id: Option<String>,
-    /// Erreur venant du code de l'effet, déjà lisible : affichée telle quelle.
+    /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
 }
 
-/// Tout ce que le moteur sait, **rangé de façon à ne pas se confondre**.
+/// Everything the engine knows, **arranged so that nothing gets confused**.
 ///
-/// Deux champs, pas une liste : `devices` décrit ce qui tourne sur le matériel,
-/// `preview` ce que la fenêtre regarde. La zone de notification, le journal et la
-/// galerie ne lisent que le premier — voir [`PreviewStatus`] pour le pourquoi.
+/// Two fields, not a list: `devices` describes what runs on the hardware,
+/// `preview` what the window watches. The tray, the log and the gallery read
+/// only the first — see [`PreviewStatus`] for why.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineReport {
     pub devices: Vec<DeviceEngineStatus>,
-    /// `None` quand rien n'est prévisualisé — ce qui est le cas dès que la
-    /// fenêtre est fermée, voir [`Engine::stop_preview`].
+    /// `None` when nothing is being previewed — which is the case as soon as
+    /// the window is closed, see [`Engine::stop_preview`].
     pub preview: Option<PreviewStatus>,
 }
 
-// ---------------------------------------------------------------- sortie
+// ---------------------------------------------------------------- output
 
-/// La sortie matérielle d'une boucle.
+/// A loop's hardware output.
 ///
-/// Un trait plutôt que le [`Keyboard`] lui-même, pour deux raisons qui comptent
-/// autant l'une que l'autre :
+/// A trait rather than the [`Keyboard`] itself, for two reasons that matter
+/// equally:
 ///
-/// 1. **c'est le seul endroit où une boucle touche du matériel.** Le jour où un
-///    gabarit couvrira plusieurs appareils, c'est ici que l'image se répartira ;
-///    ni la boucle ni le code des effets n'auront à changer ;
-/// 2. **un test peut faire échouer un appareil.** Sans ce joint, « un appareil
-///    en panne n'en affecte aucun autre » ne serait vérifiable qu'avec deux
-///    claviers branchés, donc jamais.
+/// 1. **it is the only place where a loop touches hardware.** The day a layout
+///    spans several devices, this is where the frame will be split; neither
+///    the loop nor the effect code will have to change;
+/// 2. **a test can make a device fail.** Without this seam, "a failing device
+///    affects no other" could only be checked with two keyboards plugged in,
+///    so never.
 pub(crate) trait DeviceOut: Send {
-    /// Écrit une image.
+    /// Writes a frame.
     ///
-    /// `None` quand aucun appareil n'est ouvert. Ce n'est pas un échec : on
-    /// écrit un effet sans posséder le clavier, et l'interface doit pouvoir le
-    /// dire autrement qu'en erreur.
+    /// `None` when no device is open. That is not a failure: one writes an
+    /// effect without owning the keyboard, and the interface must be able to
+    /// say so other than as an error.
     ///
     /// `abandon`: if this write fails too, **drop the device** in the same
     /// critical section as the write. Deciding outside it would race with a
@@ -383,19 +381,18 @@ pub(crate) trait DeviceOut: Send {
     fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>>;
 }
 
-/// La poignée d'un appareil, partagée entre les commandes et sa boucle.
+/// A device handle, shared between the commands and its loop.
 ///
-/// `Arc` parce que la boucle survit à la fenêtre : elle ne peut rien emprunter
-/// à l'état d'une commande. `Option` parce que refermer un appareil — ignoré,
-/// débranché — ne doit pas arrêter la boucle qui l'alimentait : elle s'en
-/// aperçoit à l'image suivante et le signale par `reachingKeyboard`.
+/// `Arc` because the loop outlives the window: it cannot borrow anything from a
+/// command's state. `Option` because closing a device — ignored, unplugged —
+/// must not stop the loop that fed it: the loop notices on the next frame and
+/// reports it through `reachingKeyboard`.
 pub(crate) type Handle = Arc<Mutex<Option<Keyboard>>>;
 
 impl DeviceOut for Handle {
     fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
-        // Le verrou de la poignée est rendu **avant** que le résultat ne soit
-        // consigné : une boucle ne tient jamais la poignée et un verrou du
-        // moteur en même temps.
+        // The handle lock is released **before** the result is recorded: a
+        // loop never holds the handle and an engine lock at the same time.
         let mut guard = self.lock().unwrap();
         let result = guard.as_ref()?.present(colors).map_err(|e| e.to_string());
         if result.is_err() && abandon {
@@ -407,71 +404,68 @@ impl DeviceOut for Handle {
     }
 }
 
-/// La sortie de l'aperçu : **aucune**.
+/// The preview's output: **none**.
 ///
-/// Rien à inventer ici — `None` veut déjà dire « aucun appareil ouvert, ce n'est
-/// pas un échec », et c'est exactement ce qu'est un aperçu. La boucle alimente
-/// donc son canal d'images et rien d'autre, `reachingKeyboard` reste faux, et
-/// aucun octet ne part vers un clavier.
-struct SansSortie;
+/// Nothing to invent here — `None` already means "no device open, this is not
+/// a failure", and that is exactly what a preview is. The loop therefore feeds
+/// its frame channel and nothing else, `reachingKeyboard` stays false, and not
+/// a single byte goes to a keyboard.
+struct NoOutput;
 
-impl DeviceOut for SansSortie {
+impl DeviceOut for NoOutput {
     fn present(&self, _colors: &[Rgb], _abandon: bool) -> Option<Result<(), String>> {
         None
     }
 }
 
-/// À qui appartient une boucle de rendu.
+/// Who a render loop belongs to.
 ///
-/// Un type, et non un `bool` en plus du [`DeviceRef`] : les deux cas ne se
-/// journalisent ni au même niveau ni sous le même mot, et « l'appareil de
-/// l'aperçu » n'existe pas — il n'y a qu'un gabarit emprunté. Le compilateur
-/// tient ici une distinction que deux arguments côte à côte laisseraient
-/// confondre.
+/// A type, rather than a `bool` next to the [`DeviceRef`]: the two cases are
+/// logged neither at the same level nor under the same word, and "the preview's
+/// device" does not exist — there is only a borrowed layout. The compiler holds
+/// here a distinction that two arguments side by side would let slip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cible {
-    /// La boucle d'un appareil : elle écrit sur le matériel.
-    Appareil(DeviceRef),
-    /// La boucle d'aperçu, qui emprunte le gabarit de cet appareil sans le
-    /// piloter.
-    Apercu(DeviceRef),
+enum Target {
+    /// A device's loop: it writes to the hardware.
+    Device(DeviceRef),
+    /// The preview loop, which borrows this device's layout without
+    /// controlling it.
+    Preview(DeviceRef),
 }
 
-// ---------------------------------------------------------------- moteur
+// ---------------------------------------------------------------- engine
 
-/// Les boucles en cours, une par appareil.
+/// The running loops, one per device.
 ///
-/// La table ne porte que des `Arc` : on la verrouille le temps d'une recherche,
-/// jamais le temps d'un démarrage ou d'une attente. Arrêter la boucle d'un
-/// appareil ne retient donc aucune commande visant les autres — sans quoi une
-/// écriture HID bloquée sur l'un gèlerait l'autre, et l'invariant de l'adoption
-/// ne survivrait pas au moteur.
+/// The table holds only `Arc`s: it is locked for the length of a lookup, never
+/// for a start or a wait. Stopping one device's loop therefore holds back no
+/// command aimed at the others — otherwise a HID write stuck on one would
+/// freeze the other, and the adoption invariant would not survive the engine.
 #[derive(Default)]
 pub struct Engine {
     loops: Mutex<HashMap<DeviceRef, Arc<DeviceLoop>>>,
-    /// La boucle d'aperçu : **une seule**, sans sortie matérielle.
+    /// The preview loop: **a single one**, with no hardware output.
     ///
-    /// Une par fenêtre, et il n'y en a qu'une — la promesse « un effet tourne
-    /// fenêtre fermée » ne vaut que pour les appareils, et un aperçu que
-    /// personne ne regarde est un contexte QuickJS entretenu pour rien.
+    /// One per window, and there is only one — the promise "an effect runs with
+    /// the window closed" holds only for devices, and a preview that nobody
+    /// watches is a QuickJS context kept alive for nothing.
     ///
-    /// Elle vit **à côté** de la table, jamais dedans : une entrée de la table
-    /// serait trouvée par `all()`, donc arrêtée par `stop_everywhere`, comptée par
-    /// `status()`, et il aurait fallu l'exclure à chaque fois. La sortir de la
-    /// table, c'est faire tenir par le type ce qu'on aurait sinon tenu par
+    /// It lives **next to** the table, never inside: a table entry would be
+    /// found by `all()`, hence stopped by `stop_everywhere`, counted by
+    /// `status()`, and it would have had to be excluded every time. Keeping it
+    /// out of the table makes the type hold what would otherwise be held by
     /// vigilance.
     preview: Arc<DeviceLoop>,
-    /// Le gabarit que l'aperçu emprunte, écrit et effacé avec la boucle.
+    /// The layout the preview borrows, written and cleared with the loop.
     preview_layout: Mutex<Option<DeviceRef>>,
 }
 
-/// La boucle d'**un** appareil.
+/// The loop of **one** device.
 ///
-/// Deux verrous, et l'ordre entre eux est fixe : `thread` puis `shared`.
-/// `thread` sérialise démarrage et arrêt ; `shared` n'est pris que le temps de
-/// cloner ou de remplacer un `Arc`, jamais pendant une attente. C'est ce qui
-/// permet de lire l'état d'un appareil pendant qu'un autre démarre — et même
-/// pendant que celui-ci démarre.
+/// Two locks, and the order between them is fixed: `thread` then `shared`.
+/// `thread` serializes start and stop; `shared` is taken only long enough to
+/// clone or replace an `Arc`, never during a wait. That is what allows reading
+/// a device's state while another one starts — and even while this one starts.
 #[derive(Default)]
 struct DeviceLoop {
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -483,12 +477,12 @@ impl DeviceLoop {
         self.shared.lock().unwrap().clone()
     }
 
-    /// Vrai si c'est **cet** effet que la boucle fait tourner.
+    /// True if **this** effect is the one the loop is running.
     ///
-    /// L'identifiant est celui qu'on a demandé à `start`, pas une propriété du
-    /// code chargé : le JavaScript est lu une fois au démarrage et vit ensuite en
-    /// mémoire, il n'y a donc rien à relire pour le savoir — et c'est précisément
-    /// pourquoi supprimer un effet ne se remarque pas tout seul.
+    /// The id is the one requested from `start`, not a property of the loaded
+    /// code: the JavaScript is read once at start and then lives in memory, so
+    /// there is nothing to re-read to know it — and that is precisely why
+    /// deleting an effect does not get noticed on its own.
     fn runs(&self, effect: &str) -> bool {
         self.current()
             .is_some_and(|s| s.effect_id.lock().unwrap().as_deref() == Some(effect))
@@ -508,51 +502,51 @@ impl DeviceLoop {
         }
     }
 
-    /// Arrête la boucle et **attend** sa fin.
+    /// Stops the loop and **waits** for it to end.
     ///
-    /// L'attente n'est pas un détail : sans elle, démarrer un effet juste après
-    /// en avoir arrêté un laisserait deux boucles écrire sur le même appareil le
-    /// temps que la première s'aperçoive qu'elle doit s'arrêter. Le raisonnement
-    /// vaut par appareil, et le verrou attendu l'est aussi.
+    /// The wait is not a detail: without it, starting an effect right after
+    /// stopping one would let two loops write to the same device until the
+    /// first one notices it must stop. The reasoning holds per device, and so
+    /// does the lock waited on.
     ///
-    /// `cible` ne sert qu'au journal : une boucle ne connaît pas son appareil —
-    /// elle reçoit un gabarit et une sortie — et « effet arrêté » sans dire lequel
-    /// ne vaudrait rien avec deux claviers branchés.
-    fn stop(&self, cible: Cible) {
+    /// `target` is only for the log: a loop does not know its device — it
+    /// receives a layout and an output — and "effect stopped" without saying
+    /// which one would be worthless with two keyboards plugged in.
+    fn stop(&self, target: Target) {
         let mut thread = self.thread.lock().unwrap();
-        let tournait = self.shared.lock().unwrap().take().inspect(|s| {
+        let was_running = self.shared.lock().unwrap().take().inspect(|s| {
             s.stop.store(true, Ordering::Relaxed);
         });
         if let Some(h) = thread.take() {
             let _ = h.join();
         }
-        // Seulement si quelque chose tournait : arrêter un appareil au repos est
-        // le geste le plus courant de tous — chaque suppression d'effet y passe —
-        // et n'apprend rien à personne.
-        if let Some(s) = tournait {
-            let effet = s.effect_id.lock().unwrap().clone();
-            match cible {
-                Cible::Appareil(d) => tracing::info!(appareil = %d, effet, "effet arrêté"),
-                // `debug` : voir [`DeviceLoop::start`]. Le niveau « cycle de vie »
-                // décrit ce que fait le clavier, et un aperçu ne le touche pas.
-                Cible::Apercu(d) => tracing::debug!(gabarit = %d, effet, "aperçu arrêté"),
+        // Only if something was running: stopping an idle device is the most
+        // common action of all — every effect deletion goes through it — and
+        // tells nobody anything.
+        if let Some(s) = was_running {
+            let effect = s.effect_id.lock().unwrap().clone();
+            match target {
+                Target::Device(d) => tracing::info!(device = %d, effect, "effect stopped"),
+                // `debug`: see [`DeviceLoop::start`]. The "lifecycle" level
+                // describes what the keyboard does, and a preview does not touch it.
+                Target::Preview(d) => tracing::debug!(layout = %d, effect, "preview stopped"),
             }
         }
     }
 
-    /// Démarre un effet sur cette cible. Remplace celui qui tournait.
+    /// Starts an effect on this target. Replaces the one that was running.
     fn start(
         &self,
-        cible: Cible,
+        target: Target,
         effect_id: String,
         js: String,
         params: String,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
-        // Gardé du début à la fin : c'est ce verrou qui interdit à deux boucles
-        // de se chevaucher sur cet appareil. Il n'est pris qu'ici et dans
-        // [`Self::stop`], et le fil de rendu ne le connaît pas.
+        // Held from start to finish: this lock is what forbids two loops from
+        // overlapping on this device. It is taken only here and in
+        // [`Self::stop`], and the render thread does not know it.
         let mut thread = self.thread.lock().unwrap();
         if let Some(s) = self.shared.lock().unwrap().take() {
             s.stop.store(true, Ordering::Relaxed);
@@ -565,33 +559,33 @@ impl DeviceLoop {
         *shared.params.lock().unwrap() = params;
         *shared.effect_id.lock().unwrap() = Some(effect_id.clone());
 
-        // Le contexte JavaScript est bâti **dans** le fil et n'en sort jamais :
-        // les types de QuickJS ne traversent pas les fils, et les enfermer ici
-        // est plus sûr que de les rendre partageables.
+        // The JavaScript context is built **inside** the thread and never
+        // leaves it: QuickJS types do not cross threads, and confining them
+        // here is safer than making them shareable.
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let s = Arc::clone(&shared);
 
-        let pour_le_fil = effect_id.clone();
+        let thread_effect_id = effect_id.clone();
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
-            .spawn(move || render_loop(cible, pour_le_fil, s, js, layout, out, ready_tx))
+            .spawn(move || render_loop(target, thread_effect_id, s, js, layout, out, ready_tx))
             .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
 
-        // On attend le verdict du chargement : une erreur de syntaxe doit
-        // remonter à l'appel, pas se découvrir dans un état plus tard.
+        // Wait for the load verdict: a syntax error must surface to the call,
+        // not be discovered in a status later.
         match ready_rx.recv() {
             Ok(Ok(())) => {
-                match cible {
-                    Cible::Appareil(d) => {
-                        tracing::info!(appareil = %d, effet = %effect_id, "effet démarré")
+                match target {
+                    Target::Device(d) => {
+                        tracing::info!(device = %d, effect = %effect_id, "effect started")
                     }
-                    // `debug` et non `info`, et ce n'est pas une timidité :
-                    // « cycle de vie » est le niveau qui décrit **ce que fait le
-                    // clavier**, et un aperçu ne le touche pas. Parcourir la
-                    // galerie remplirait sinon le journal de lignes qui ne
-                    // correspondent à rien d'allumé.
-                    Cible::Apercu(d) => {
-                        tracing::debug!(gabarit = %d, effet = %effect_id, "aperçu démarré")
+                    // `debug` and not `info`, and this is not shyness:
+                    // "lifecycle" is the level that describes **what the
+                    // keyboard does**, and a preview does not touch it. Browsing
+                    // the gallery would otherwise fill the log with lines that
+                    // match nothing lit.
+                    Target::Preview(d) => {
+                        tracing::debug!(layout = %d, effect = %effect_id, "preview started")
                     }
                 }
                 *self.shared.lock().unwrap() = Some(shared);
@@ -600,19 +594,19 @@ impl DeviceLoop {
             }
             Ok(Err(e)) => {
                 let _ = handle.join();
-                match cible {
-                    // `error` : l'effet demandé ne tournera pas, donc l'éclairage
-                    // n'est pas celui qu'on a demandé. L'appelant reçoit le même
-                    // message — le journal sert à qui lit après coup, et à qui n'a
-                    // pas la fenêtre sous les yeux.
-                    Cible::Appareil(d) => {
-                        tracing::error!(appareil = %d, effet = %effect_id, "effet non démarré : {e}")
+                match target {
+                    // `error`: the requested effect will not run, so the
+                    // lighting is not the one requested. The caller gets the
+                    // same message — the log is for whoever reads it afterwards,
+                    // and for whoever does not have the window in front of them.
+                    Target::Device(d) => {
+                        tracing::error!(device = %d, effect = %effect_id, "effect not started: {e}")
                     }
-                    // `warn` : rien n'est cassé sur le matériel, mais l'écran ne
-                    // montrera pas ce qu'on a demandé — et c'est justement le
-                    // premier endroit où un effet fraîchement écrit se casse.
-                    Cible::Apercu(d) => {
-                        tracing::warn!(gabarit = %d, effet = %effect_id, "aperçu non démarré : {e}")
+                    // `warn`: nothing is broken on the hardware, but the screen
+                    // will not show what was requested — and that is precisely
+                    // the first place where a freshly written effect breaks.
+                    Target::Preview(d) => {
+                        tracing::warn!(layout = %d, effect = %effect_id, "preview not started: {e}")
                     }
                 }
                 Err(e)
@@ -620,7 +614,7 @@ impl DeviceLoop {
             Err(_) => {
                 let _ = handle.join();
                 let e = "le fil de rendu s'est arrêté avant d'avoir chargé l'effet".to_string();
-                tracing::error!(cible = ?cible, effet = %effect_id, "{e}");
+                tracing::error!(target = ?target, effect = %effect_id, "{e}");
                 Err(e)
             }
         }
@@ -628,28 +622,28 @@ impl DeviceLoop {
 }
 
 impl Engine {
-    /// La boucle de cet appareil, créée à l'arrêt si elle n'existait pas.
+    /// This device's loop, created stopped if it did not exist.
     ///
-    /// Seul un démarrage en crée une. L'entrée n'est ensuite jamais retirée : un
-    /// appareil qui a porté un effet garde sa ligne dans `engine_status()`,
-    /// arrêté plutôt qu'absent. « Cet appareil ne fait rien » et « je ne sais
-    /// rien de cet appareil » ne se disent pas pareil.
+    /// Only a start creates one. The entry is then never removed: a device that
+    /// has carried an effect keeps its line in `engine_status()`, stopped rather
+    /// than absent. "This device is doing nothing" and "I know nothing about
+    /// this device" are not the same statement.
     fn device_loop(&self, device: DeviceRef) -> Arc<DeviceLoop> {
         Arc::clone(self.loops.lock().unwrap().entry(device).or_default())
     }
 
-    /// La boucle de cet appareil, **sans en créer une**.
+    /// This device's loop, **without creating one**.
     ///
-    /// Régler ou arrêter un appareil qui n'a jamais rien lancé ne fait rien, et
-    /// ne doit surtout pas lui inventer une ligne d'état.
+    /// Setting or stopping a device that never started anything does nothing,
+    /// and above all must not invent a status line for it.
     fn existing(&self, device: DeviceRef) -> Option<Arc<DeviceLoop>> {
         self.loops.lock().unwrap().get(&device).map(Arc::clone)
     }
 
-    /// Toutes les boucles, table déverrouillée.
+    /// All loops, with the table unlocked.
     ///
-    /// La copie n'est pas un détail : agir sur une boucle demande d'attendre la
-    /// fin d'un fil, ce qu'on refuse de faire le verrou de la table à la main.
+    /// The copy is not a detail: acting on a loop means waiting for a thread to
+    /// end, which we refuse to do while holding the table lock.
     fn all(&self) -> Vec<(DeviceRef, Arc<DeviceLoop>)> {
         let mut all: Vec<_> = self
             .loops
@@ -658,17 +652,17 @@ impl Engine {
             .iter()
             .map(|(d, l)| (*d, Arc::clone(l)))
             .collect();
-        // Une table de hachage n'ordonne rien, et une liste qui se réordonne à
-        // chaque interrogation est illisible dans l'interface.
+        // A hash table orders nothing, and a list that reorders itself on every
+        // query is unreadable in the interface.
         all.sort_by_key(|(d, _)| (d.vid, d.pid));
         all
     }
 
-    /// État de chaque appareil visé depuis le démarrage de l'application.
+    /// State of every device targeted since the application started.
     ///
-    /// **L'aperçu n'y figure pas, et ne peut pas y figurer** : il ne vit pas dans
-    /// la table. C'est ce que lisent l'icône de zone de notification et le
-    /// diagnostic — les deux endroits qui décrivent le matériel.
+    /// **The preview is not in it, and cannot be**: it does not live in the
+    /// table. This is what the tray icon and the diagnostic read — the two
+    /// places that describe the hardware.
     pub fn device_status(&self) -> Vec<DeviceEngineStatus> {
         self.all()
             .into_iter()
@@ -679,26 +673,26 @@ impl Engine {
             .collect()
     }
 
-    /// L'aperçu en cours, s'il y en a un.
+    /// The current preview, if there is one.
     ///
-    /// `None` dès que la boucle est arrêtée par [`Self::stop_preview`] : un
-    /// aperçu est transitoire, et « le dernier effet que vous avez regardé » n'est
-    /// une information pour personne. Un aperçu qui s'est coupé **tout seul** —
-    /// trente images en échec — reste en revanche visible, `running` à faux et
-    /// l'erreur avec : c'est la seule façon de savoir pourquoi l'écran s'est figé.
+    /// `None` as soon as the loop is stopped by [`Self::stop_preview`]: a
+    /// preview is transient, and "the last effect you watched" is information
+    /// for nobody. A preview that cut out **on its own** — thirty failed frames
+    /// — does stay visible, with `running` false and the error along with it:
+    /// that is the only way to know why the screen froze.
     pub fn preview_status(&self) -> Option<PreviewStatus> {
         let layout_of = (*self.preview_layout.lock().unwrap())?;
         let s = self.preview.current()?;
-        let etat = PreviewStatus {
+        let status = PreviewStatus {
             layout_of,
             running: !s.stop.load(Ordering::Relaxed),
             effect_id: s.effect_id.lock().unwrap().clone(),
             error: s.error.lock().unwrap().clone(),
         };
-        Some(etat)
+        Some(status)
     }
 
-    /// Tout ce que le moteur sait, appareils et aperçu **séparés**.
+    /// Everything the engine knows, devices and preview **kept apart**.
     pub fn report(&self) -> EngineReport {
         EngineReport {
             devices: self.device_status(),
@@ -706,45 +700,45 @@ impl Engine {
         }
     }
 
-    /// L'état partagé de la boucle en cours sur cet appareil, s'il y en a une.
+    /// The shared state of the loop running on this device, if there is one.
     fn shared(&self, device: DeviceRef) -> Option<Arc<Shared>> {
         self.existing(device).and_then(|l| l.current())
     }
 
     pub fn stop(&self, device: DeviceRef) {
         if let Some(l) = self.existing(device) {
-            l.stop(Cible::Appareil(device));
+            l.stop(Target::Device(device));
         }
     }
 
-    /// Arrête **toutes** les boucles, aperçu compris, et attend leur fin.
+    /// Stops **all** loops, preview included, and waits for them to end.
     ///
-    /// Sert à la fin du processus comme à la remise à zéro de la configuration :
-    /// dans les deux cas on repart d'un état connu, et laisser tourner des
-    /// boucles que plus rien ne désigne serait exactement le contraire. L'aperçu
-    /// en fait partie — il n'écrit sur aucun clavier, mais il entretient un
-    /// contexte QuickJS et un fil.
+    /// Used at process exit as well as when resetting the configuration: in
+    /// both cases we start again from a known state, and leaving running loops
+    /// that nothing refers to any more would be exactly the opposite. The
+    /// preview is part of it — it writes to no keyboard, but it keeps a QuickJS
+    /// context and a thread alive.
     pub fn stop_all(&self) {
         self.stop_preview();
         for (device, l) in self.all() {
-            l.stop(Cible::Appareil(device));
+            l.stop(Target::Device(device));
         }
     }
 
-    // ------------------------------------------------------------ aperçu
+    // ------------------------------------------------------------ preview
 
-    /// Démarre — ou remplace — l'aperçu, **sans toucher à aucun appareil**.
+    /// Starts — or replaces — the preview, **without touching any device**.
     ///
-    /// `layout_of` désigne l'appareil dont on emprunte le gabarit ; il n'est ni
-    /// ouvert, ni piloté, ni même nécessairement branché. La sortie est
-    /// [`SansSortie`] : aucun octet ne part vers un clavier, quoi qu'il arrive.
+    /// `layout_of` names the device whose layout is borrowed; it is neither
+    /// open, nor controlled, nor even necessarily plugged in. The output is
+    /// [`NoOutput`]: not a single byte goes to a keyboard, whatever happens.
     ///
-    /// Remplacer coûte un contexte QuickJS détruit et un autre construit. Ce
-    /// n'est pas gratuit, et c'est pourquoi la cadence est bornée **du côté du
-    /// geste** — la fenêtre attend que la sélection se pose avant d'appeler. La
-    /// borner ici aurait obligé à choisir entre faire attendre la dernière
-    /// sélection et la perdre, et la fenêtre aurait dû réconcilier ce qu'elle
-    /// croyait avoir demandé avec ce qui tourne.
+    /// Replacing costs one QuickJS context destroyed and another one built.
+    /// That is not free, and that is why the rate is bounded **on the gesture
+    /// side** — the window waits for the selection to settle before calling.
+    /// Bounding it here would have forced a choice between making the last
+    /// selection wait and losing it, and the window would have had to reconcile
+    /// what it believed it had requested with what is running.
     pub fn start_preview(
         &self,
         layout_of: DeviceRef,
@@ -753,27 +747,27 @@ impl Engine {
         params: String,
         layout: &'static Layout,
     ) -> Result<(), String> {
-        // Écrit **avant** le démarrage : si celui-ci échoue, la boucle est vide
-        // et `preview_status` rend `None` de toute façon — alors qu'un gabarit
-        // posé après coup manquerait pendant tout le chargement.
+        // Written **before** the start: if the start fails, the loop is empty
+        // and `preview_status` returns `None` anyway — whereas a layout set
+        // afterwards would be missing for the whole load.
         *self.preview_layout.lock().unwrap() = Some(layout_of);
         self.preview.start(
-            Cible::Apercu(layout_of),
+            Target::Preview(layout_of),
             effect_id,
             js,
             params,
             layout,
-            Box::new(SansSortie),
+            Box::new(NoOutput),
         )
     }
 
-    /// Arrête l'aperçu. Aucun effet d'appareil n'est touché.
+    /// Stops the preview. No device effect is touched.
     pub fn stop_preview(&self) {
-        // Le gabarit est relevé avant l'arrêt, pour que la ligne de journal
-        // nomme celui qu'on empruntait plutôt que rien.
-        let emprunte = self.preview_layout.lock().unwrap().take();
-        if let Some(device) = emprunte {
-            self.preview.stop(Cible::Apercu(device));
+        // The layout is taken before the stop, so that the log line names the
+        // one that was borrowed rather than nothing.
+        let borrowed = self.preview_layout.lock().unwrap().take();
+        if let Some(device) = borrowed {
+            self.preview.stop(Target::Preview(device));
         }
     }
 
@@ -789,36 +783,36 @@ impl Engine {
         }
     }
 
-    /// Arrête cet effet **partout où il tourne**, et rend les appareils touchés.
+    /// Stops this effect **wherever it runs**, and returns the devices affected.
     ///
-    /// Appelée avant la suppression d'un effet : la boucle exécute un `effect.js`
-    /// chargé en mémoire au démarrage, elle continuerait donc sans la moindre
-    /// erreur alors que son dossier n'existe plus — un appareil piloté par un
-    /// effet absent de la bibliothèque.
+    /// Called before an effect is deleted: the loop runs an `effect.js` loaded
+    /// into memory at start, so it would carry on without the slightest error
+    /// while its folder no longer exists — a device controlled by an effect
+    /// missing from the library.
     ///
-    /// Tous les appareils, pas seulement celui qu'on regarde : le même effet se
-    /// lance sur autant de claviers qu'on veut, et en oublier un le laisserait
-    /// dans cet état invisible.
+    /// All devices, not just the one being looked at: the same effect can be
+    /// started on as many keyboards as one likes, and missing one would leave it
+    /// in that invisible state.
     ///
-    /// La ligne d'état de l'appareil ne disparaît pas, mais elle cesse de nommer
-    /// l'effet — c'est ce que fait [`DeviceLoop::stop`], et c'est bien ce qu'on
-    /// veut ici : l'identifiant ne désigne plus rien.
+    /// The device's status line does not disappear, but it stops naming the
+    /// effect — that is what [`DeviceLoop::stop`] does, and it is exactly what
+    /// is wanted here: the id no longer refers to anything.
     pub fn stop_everywhere(&self, effect: &str) -> Vec<DeviceRef> {
-        // **L'aperçu aussi**, et pour exactement la même raison : il exécute le
-        // même `effect.js` chargé en mémoire, et le laisser tourner donnerait un
-        // écran qui anime un effet absent de la bibliothèque. Il ne figure pas
-        // dans la liste rendue — aucun appareil n'a été touché.
+        // **The preview too**, and for exactly the same reason: it runs the
+        // same `effect.js` loaded into memory, and leaving it running would give
+        // a screen animating an effect missing from the library. It is not in
+        // the returned list — no device was touched.
         if self.preview.runs(effect) {
             self.stop_preview();
         }
 
         let mut stopped = Vec::new();
         for (device, l) in self.all() {
-            // Le verrou de la table est déjà rendu — `all` a copié les pointeurs.
-            // Un arrêt attend la fin d'un fil, et on ne fait jamais attendre une
-            // commande visant un autre appareil.
+            // The table lock is already released — `all` copied the pointers.
+            // A stop waits for a thread to end, and a command aimed at another
+            // device is never made to wait.
             if l.runs(effect) {
-                l.stop(Cible::Appareil(device));
+                l.stop(Target::Device(device));
                 stopped.push(device);
             }
         }
@@ -843,10 +837,10 @@ impl Engine {
         }
     }
 
-    /// Démarre un effet sur un appareil. Remplace celui qui y tournait.
+    /// Starts an effect on a device. Replaces the one running there.
     ///
-    /// Les autres appareils ne sont pas touchés — ni leur boucle, ni leur
-    /// cadence, ni leur état d'erreur.
+    /// The other devices are not touched — not their loop, not their frame
+    /// rate, not their error state.
     pub fn start(
         &self,
         device: DeviceRef,
@@ -857,7 +851,7 @@ impl Engine {
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
         self.device_loop(device)
-            .start(Cible::Appareil(device), effect_id, js, params, layout, out)
+            .start(Target::Device(device), effect_id, js, params, layout, out)
     }
 }
 
@@ -867,9 +861,9 @@ impl Drop for Engine {
     }
 }
 
-/// Prépare le contexte QuickJS, puis tourne jusqu'à l'arrêt.
+/// Prepares the QuickJS context, then runs until stopped.
 fn render_loop(
-    cible: Cible,
+    target: Target,
     effect_id: String,
     shared: Arc<Shared>,
     js: String,
@@ -877,46 +871,46 @@ fn render_loop(
     out: Box<dyn DeviceOut>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
-    // **Le span, et c'est la raison d'avoir choisi `tracing`.** Il y a une boucle
-    // par appareil : « écriture refusée » ne sert à rien sans savoir laquelle.
-    // Ouvert ici, il porte l'appareil et l'effet jusqu'à la fin du fil, et tout ce
-    // qui se journalise en dessous — y compris dans [`emit`] — les porte aussi,
-    // sans qu'un seul appel n'ait à les passer.
+    // **The span, and it is the reason `tracing` was chosen.** There is one
+    // loop per device: "write refused" is useless without knowing which one.
+    // Opened here, it carries the device and the effect until the thread ends,
+    // and everything logged below — including in [`emit`] — carries them too,
+    // without a single call having to pass them.
     //
-    // Deux noms, et non un champ à lire : dans un journal relu après coup,
-    // « rendu » et « aperçu » doivent se distinguer d'un coup d'œil — une erreur
-    // d'effet dans l'un n'a pas éteint le clavier, dans l'autre si.
-    let span = match cible {
-        Cible::Appareil(d) => tracing::info_span!("rendu", appareil = %d, effet = %effect_id),
-        Cible::Apercu(d) => tracing::info_span!("aperçu", gabarit = %d, effet = %effect_id),
+    // Two names, not a field to read: in a log read afterwards, "rendu"
+    // (render) and "aperçu" (preview) must be told apart at a glance — an
+    // effect error in one did not turn off the keyboard, in the other it did.
+    let span = match target {
+        Target::Device(d) => tracing::info_span!("rendu", device = %d, effect = %effect_id),
+        Target::Preview(d) => tracing::info_span!("aperçu", layout = %d, effect = %effect_id),
     };
-    let _entree = span.enter();
+    let _entered = span.enter();
 
     let frame_len = layout.led_count();
 
-    // Le budget naît ici et ne sort pas du fil : le gestionnaire d'interruption
-    // ne traverse aucune frontière, et l'échéance n'est écrite que par cette
-    // boucle, juste avant chaque exécution de code d'effet.
+    // The budget is born here and never leaves the thread: the interrupt
+    // handler crosses no boundary, and the deadline is written only by this
+    // loop, just before each run of effect code.
     let budget = Rc::new(Budget::default());
 
-    // Le chargement a la sienne : le corps du module tourne une fois, avant la
-    // première image, donc hors de tout budget d'image.
-    budget.accorder(BUDGET_CHARGEMENT);
+    // Loading gets its own: the module body runs once, before the first frame,
+    // hence outside any frame budget.
+    budget.grant(LOAD_BUDGET);
 
-    // `_rt` doit vivre aussi longtemps que le contexte : c'est lui qui porte
-    // le résolveur de modules. Le laisser tomber ici rendrait tout `import`
-    // introuvable à la première image.
+    // `_rt` must live as long as the context: it carries the module resolver.
+    // Dropping it here would make every `import` unresolvable on the first
+    // frame.
     let (_rt, ctx) = match prepare_budgeted(&js, layout, &budget) {
         Ok(c) => {
             let _ = ready.send(Ok(()));
             c
         }
         Err(e) => {
-            let _ = ready.send(Err(nommer_la_cause(
+            let _ = ready.send(Err(name_the_cause(
                 e,
                 &budget,
                 "le chargement de l'effet",
-                &format!("{} s", BUDGET_CHARGEMENT.as_secs()),
+                &format!("{} s", LOAD_BUDGET.as_secs()),
             )));
             return;
         }
@@ -932,45 +926,46 @@ fn render_loop(
         let params = shared.params.lock().unwrap().clone();
         let time = started.elapsed().as_secs_f64();
 
-        // L'échéance est renouvelée avant **chaque** image : c'est tout l'objet
-        // de la cellule partagée. Le gestionnaire, lui, a été posé une fois pour
-        // toutes sur le `Runtime`.
-        budget.accorder(BUDGET_IMAGE);
+        // The deadline is renewed before **every** frame: that is the whole
+        // point of the shared cell. The handler, for its part, was set once and
+        // for all on the `Runtime`.
+        budget.grant(FRAME_BUDGET);
 
         match render_once(&ctx, time, frame_index, &params, frame_len) {
             Ok(bytes) => {
                 consecutive_errors = 0;
-                // L'effet s'est rétabli : on efface, sinon l'interface
-                // afficherait une erreur périmée indéfiniment.
-                let avant = shared.error.lock().unwrap().take();
-                if journal::bascule(avant.as_deref(), None) == journal::Bascule::Retabli {
-                    tracing::info!("l'effet s'est rétabli");
+                // The effect recovered: clear the error, otherwise the
+                // interface would show a stale one indefinitely.
+                let before = shared.error.lock().unwrap().take();
+                if journal::transition(before.as_deref(), None) == journal::Transition::Recovered {
+                    tracing::info!("effect recovered");
                 }
                 emit(&shared, out.as_ref(), &bytes);
             }
             Err(e) => {
-                // Un dépassement n'ouvre aucun chemin nouveau : c'est une erreur
-                // d'image comme une autre, que le compteur ci-dessous finit par
-                // transformer en arrêt propre.
-                let e = nommer_la_cause(
+                // Exceeding a limit opens no new path: it is a frame error like
+                // any other, which the counter below eventually turns into a
+                // clean stop.
+                let e = name_the_cause(
                     e,
                     &budget,
                     "l'effet",
-                    &format!("{} ms par image", BUDGET_IMAGE.as_millis()),
+                    &format!("{} ms par image", FRAME_BUDGET.as_millis()),
                 );
                 consecutive_errors += 1;
-                // **Une ligne au début de la panne, pas une par image.** À 30
-                // images par seconde, journaliser chaque échec produirait trente
-                // lignes par seconde et enterrerait celle qui nomme la cause.
-                // C'est [`journal::bascule`] qui tient la règle.
-                let avant = shared.error.lock().unwrap().replace(e.clone());
-                if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
-                    tracing::warn!("l'effet a commencé à échouer : {e}");
+                // **One line when the failure starts, not one per frame.** At 30
+                // frames per second, logging every failure would produce thirty
+                // lines per second and bury the one that names the cause.
+                // [`journal::transition`] holds the rule.
+                let before = shared.error.lock().unwrap().replace(e.clone());
+                if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
+                {
+                    tracing::warn!("effect started failing: {e}");
                 }
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     tracing::error!(
-                        echecs = MAX_CONSECUTIVE_ERRORS,
-                        "effet arrêté après {MAX_CONSECUTIVE_ERRORS} échecs consécutifs : {e}"
+                        failures = MAX_CONSECUTIVE_ERRORS,
+                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures: {e}"
                     );
                     shared.stop.store(true, Ordering::Relaxed);
                     break;
@@ -980,9 +975,9 @@ fn render_loop(
 
         frame_index = frame_index.wrapping_add(1);
 
-        // Échéance absolue plutôt que `sleep(period)` : une image lente ne doit
-        // pas décaler toutes les suivantes. Si on a pris du retard, on repart
-        // de maintenant au lieu d'essayer de le rattraper en accéléré.
+        // Absolute deadline rather than `sleep(period)`: a slow frame must not
+        // shift all the following ones. If we fell behind, start again from now
+        // instead of trying to catch up at high speed.
         deadline += period;
         let now = Instant::now();
         if deadline > now {
@@ -993,39 +988,38 @@ fn render_loop(
     }
 }
 
-/// L'échéance que le gestionnaire d'interruption consulte — et ce qu'il en a
-/// fait.
+/// The deadline the interrupt handler checks — and what it did about it.
 ///
-/// Une cellule partagée, et non une échéance capturée : le gestionnaire se pose
-/// sur le `Runtime` **une fois**, alors que l'échéance change à **chaque image**.
-/// [`prepare_bounded`], qui n'en accorde qu'une pour toute une installation,
-/// peut se contenter de la capturer ; la boucle de rendu, non.
+/// A shared cell, not a captured deadline: the handler is set on the `Runtime`
+/// **once**, whereas the deadline changes on **every frame**.
+/// [`prepare_bounded`], which grants only one for a whole installation, can
+/// make do with capturing it; the render loop cannot.
 ///
-/// Le drapeau sert à **nommer la cause**. QuickJS lève la même
-/// « InternalError: interrupted » quelle que soit la raison d'une interruption,
-/// et c'est le gestionnaire — lui seul — qui sait que c'est l'échéance qui l'a
-/// fait lever.
+/// The flag is there to **name the cause**. QuickJS throws the same
+/// "InternalError: interrupted" whatever the reason for an interruption, and it
+/// is the handler — and only the handler — that knows the deadline made it
+/// throw.
 #[derive(Default)]
 struct Budget {
     deadline: Cell<Option<Instant>>,
-    depasse: Cell<bool>,
+    exceeded: Cell<bool>,
 }
 
 impl Budget {
-    /// Accorde `duree` à l'exécution qui suit, drapeau baissé.
-    fn accorder(&self, duree: Duration) {
-        self.deadline.set(Some(Instant::now() + duree));
-        self.depasse.set(false);
+    /// Grants `duration` to the next run, with the flag lowered.
+    fn grant(&self, duration: Duration) {
+        self.deadline.set(Some(Instant::now() + duration));
+        self.exceeded.set(false);
     }
 
-    /// Le gestionnaire lui-même : `true` coupe l'exécution en cours.
+    /// The handler itself: `true` cuts the current run.
     ///
-    /// QuickJS l'appelle toutes les 10 000 instructions — un `Instant::now()` à
-    /// cette fréquence ne se mesure pas.
+    /// QuickJS calls it every 10,000 instructions — an `Instant::now()` at that
+    /// frequency is not measurable.
     fn expire(&self) -> bool {
         match self.deadline.get() {
-            Some(fin) if Instant::now() >= fin => {
-                self.depasse.set(true);
+            Some(end) if Instant::now() >= end => {
+                self.exceeded.set(true);
                 true
             }
             _ => false,
@@ -1033,43 +1027,43 @@ impl Budget {
     }
 }
 
-/// Contexte JavaScript prêt à rendre, **sans borne de temps**.
+/// JavaScript context ready to render, **with no time limit**.
 ///
-/// Réservé aux tests. Depuis que la boucle de rendu borne chaque image et que
-/// l'échantillonnage borne son installation, plus aucun appelant de production
-/// ne prépare un contexte qu'un `while (true)` pourrait figer — c'est tout
-/// l'objet des deux budgets. Restent les tests qui ne portent pas sur les
-/// bornes, et auxquels une échéance n'ajouterait qu'un aléa de machine.
+/// Reserved for tests. Since the render loop bounds every frame and swatch
+/// sampling bounds its installation, no production caller prepares a context
+/// that a `while (true)` could freeze any more — that is the whole point of the
+/// two budgets. What remains are the tests that are not about the limits, to
+/// which a deadline would only add machine-dependent randomness.
 ///
-/// Le `Runtime` est renvoyé avec le contexte, et non gardé ici : c'est lui qui
-/// porte le résolveur de modules, il doit donc vivre aussi longtemps.
+/// The `Runtime` is returned with the context, not kept here: it carries the
+/// module resolver, so it must live just as long.
 #[cfg(test)]
 fn prepare(js: &str, layout: &'static Layout) -> Result<(Runtime, Context), String> {
     prepare_bounded(js, layout, None)
 }
 
-/// Comme [`prepare_with`], avec une échéance **unique**, capturée par valeur.
+/// Like [`prepare_with`], with a **single** deadline, captured by value.
 ///
-/// Elle couvre tout ce que l'appelant fera du contexte, du chargement à la
-/// dernière image. C'est ce dont a besoin l'échantillonnage du repère —
-/// quelques images, une seule borne, dans le fil d'une commande où un
-/// `while (true)` empêcherait une installation d'aboutir. La boucle de rendu,
-/// elle, en change à chaque image : voir [`Budget`].
+/// It covers everything the caller will do with the context, from loading to
+/// the last frame. That is what swatch sampling needs — a few frames, a single
+/// limit, on a command's thread where a `while (true)` would prevent an
+/// installation from completing. The render loop, for its part, changes it on
+/// every frame: see [`Budget`].
 ///
-/// L'échéance est posée **avant** toute évaluation, pour couvrir aussi le corps
-/// du module.
+/// The deadline is set **before** any evaluation, to cover the module body as
+/// well.
 fn prepare_bounded(
     js: &str,
     layout: &'static Layout,
     deadline: Option<Instant>,
 ) -> Result<(Runtime, Context), String> {
     let interrupt =
-        deadline.map(|fin| -> InterruptHandler { Box::new(move || Instant::now() >= fin) });
+        deadline.map(|end| -> InterruptHandler { Box::new(move || Instant::now() >= end) });
     prepare_with(js, layout, interrupt)
 }
 
-/// Comme [`prepare_with`], mais borné **appel par appel** : le gestionnaire lit
-/// un budget que l'appelant renouvelle avant chaque exécution.
+/// Like [`prepare_with`], but bounded **call by call**: the handler reads a
+/// budget that the caller renews before each run.
 fn prepare_budgeted(
     js: &str,
     layout: &'static Layout,
@@ -1079,7 +1073,8 @@ fn prepare_budgeted(
     prepare_with(js, layout, Some(Box::new(move || budget.expire())))
 }
 
-/// Le tronc commun, pour un gabarit du dépôt : il sérialise, puis délègue.
+/// The common trunk, for a layout from this repository: it serializes, then
+/// delegates.
 fn prepare_with(
     js: &str,
     layout: &'static Layout,
@@ -1088,18 +1083,18 @@ fn prepare_with(
     prepare_with_layout(js, layout.led_count(), layout_json(layout), interrupt)
 }
 
-/// Le tronc : bornes posées, modules résolus, `__candeo_render` installé, pour
-/// un gabarit **déjà sérialisé**.
+/// The trunk: limits set, modules resolved, `__candeo_render` installed, for an
+/// **already serialized** layout.
 ///
-/// Les deux bornes sont posées **avant** toute évaluation — le corps du module
-/// est du code d'effet comme un autre.
+/// Both limits are set **before** any evaluation — the module body is effect
+/// code like any other.
 ///
-/// Le gabarit arrive en JSON plutôt qu'en [`Layout`] pour une raison qui ne se
-/// voit qu'aux tests : `candeo_device::Key` porte un rectangle **obligatoire**,
-/// donc aucun gabarit de ce dépôt ne peut décrire un appareil sans géométrie
-/// relevée — et c'est pourtant le cas qu'un effet qui mesure des distances
-/// physiques doit refuser en le disant. L'écrire à la main est le seul moyen de
-/// vérifier ce refus tant que #34 n'a pas rendu le rectangle facultatif.
+/// The layout arrives as JSON rather than as a [`Layout`] for a reason that only
+/// shows in the tests: `candeo_device::Key` carries a **mandatory** rectangle,
+/// so no layout in this repository can describe a device without a surveyed
+/// geometry — and yet that is the case an effect measuring physical distances
+/// must refuse, saying so. Writing it by hand is the only way to check that
+/// refusal until #34 makes the rectangle optional.
 fn prepare_with_layout(
     js: &str,
     frame_len: usize,
@@ -1110,13 +1105,13 @@ fn prepare_with_layout(
 
     rt.set_interrupt_handler(interrupt);
 
-    // La borne mémoire, elle, ne se renouvelle pas et vaut pour tous les
-    // appelants : une allocation sans fin emporte le processus entier, qu'elle
-    // survienne dans une boucle de rendu ou pendant l'installation d'un effet.
-    rt.set_memory_limit(BUDGET_MEMOIRE);
+    // The memory limit, for its part, is not renewed and applies to every
+    // caller: an endless allocation takes down the whole process, whether it
+    // happens in a render loop or during an effect installation.
+    rt.set_memory_limit(MEMORY_BUDGET);
 
-    // `@candeo/effects-api` est **interne**. C'est ce qui permet d'écrire un
-    // `import` normal sans bundler, sans résolution de chemins et sans
+    // `@candeo/effects-api` is **built in**. That is what allows writing a
+    // normal `import` without a bundler, without path resolution and without
     // `node_modules`.
     let resolver = BuiltinResolver::default()
         .with_module("@candeo/effects-api")
@@ -1175,83 +1170,81 @@ fn render_once(
     })
 }
 
-/// Le texte que QuickJS lève quand la limite mémoire est atteinte, et le seul
-/// signe qu'il en donne (`JS_ThrowOutOfMemory`).
-const OOM_QUICKJS: &str = "out of memory";
+/// The text QuickJS throws when the memory limit is reached, and the only sign
+/// it gives of it (`JS_ThrowOutOfMemory`).
+const QUICKJS_OOM: &str = "out of memory";
 
-/// Traduit un échec d'exécution bornée en une cause que l'auteur de l'effet
-/// peut relier à **son** code.
+/// Turns a failure of a bounded run into a cause the effect author can relate
+/// to **their** code.
 ///
-/// QuickJS ne nomme aucune des deux bornes : une interruption remonte en
-/// « InternalError: interrupted », qui ne désigne rien, et un dépassement
-/// mémoire en « out of memory », qui ne dit ni de qui ni de combien. Les deux
-/// bornes sont posées ici ; c'est donc ici, et nulle part ailleurs, qu'on sait
-/// les expliquer.
+/// QuickJS names neither limit: an interruption surfaces as
+/// "InternalError: interrupted", which points at nothing, and a memory overrun
+/// as "out of memory", which says neither whose nor by how much. Both limits
+/// are set here; so it is here, and nowhere else, that they can be explained.
 ///
-/// Le temps se lit sur le drapeau du budget, jamais sur le message : c'est le
-/// gestionnaire qui a coupé, il est seul à le savoir de source sûre. La mémoire
-/// n'a que le texte de QuickJS — d'où la comparaison, et le repli sur l'erreur
-/// brute quand elle ne dit rien : mal nommer une cause serait pire que de ne pas
-/// la nommer.
+/// Time is read from the budget flag, never from the message: the handler did
+/// the cutting, and it alone knows so for sure. Memory has only QuickJS's text
+/// — hence the comparison, and the fallback to the raw error when it says
+/// nothing: misnaming a cause would be worse than not naming it.
 ///
-/// `sujet` distingue les deux endroits bornés — une image, un chargement. La
-/// boucle qui ne se termine pas n'est pas au même endroit du fichier, et le
-/// temps accordé n'est pas le même.
-fn nommer_la_cause(erreur: String, budget: &Budget, sujet: &str, accorde: &str) -> String {
-    if budget.depasse.get() {
+/// `sujet` (subject) tells the two bounded places apart — a frame, a load. The
+/// loop that never ends is not at the same place in the file, and the time
+/// granted (`accorde`) is not the same.
+fn name_the_cause(error: String, budget: &Budget, sujet: &str, accorde: &str) -> String {
+    if budget.exceeded.get() {
         return format!(
             "{sujet} a dépassé son temps de calcul ({accorde}) : \
              une boucle qui ne se termine pas, ou un calcul trop lourd."
         );
     }
-    if erreur.contains(OOM_QUICKJS) {
+    if error.contains(QUICKJS_OOM) {
         return format!(
             "{sujet} a dépassé la mémoire qui lui est accordée ({} Mo) : \
              un état qui grandit à chaque image, ou une allocation démesurée.",
-            BUDGET_MEMOIRE / (1024 * 1024)
+            MEMORY_BUDGET / (1024 * 1024)
         );
     }
-    erreur
+    error
 }
 
-/// Les deux sorties, indépendantes : chacune peut être absente.
+/// The two outputs, independent: either one may be absent.
 fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
     if !shared.to_keyboard.load(Ordering::Relaxed) {
-        // Sortie coupée volontairement : ce n'est pas un défaut, mais les
-        // images n'atteignent aucun clavier et l'interface doit pouvoir le dire.
+        // Output deliberately turned off: this is not a fault, but the frames
+        // reach no keyboard and the interface must be able to say so.
         shared.reaching.store(false, Ordering::Relaxed);
     } else {
         let colors: Vec<Rgb> = bytes
             .chunks_exact(3)
             .map(|c| Rgb::new(c[0], c[1], c[2]))
             .collect();
-        // Un clavier débranché en cours de route n'arrête pas l'effet : le
-        // simulateur continue, et la reconnexion passe par les commandes
-        // existantes. Mais l'échec est **consigné**, pas avalé — le taire
-        // donnait une boucle qui se dit saine pendant qu'aucun octet n'atteint
-        // l'appareil. Et l'échec de celui-ci ne dit rien des autres : chaque
-        // boucle écrit dans son propre état.
+        // A keyboard unplugged midway does not stop the effect: the simulator
+        // carries on, and reconnecting goes through the existing commands. But
+        // the failure is **recorded**, not swallowed — hiding it gave a loop
+        // that claims to be healthy while not a single byte reaches the device.
+        // And this device's failure says nothing about the others: each loop
+        // writes into its own state.
         let failures = shared.device_failures.load(Ordering::Relaxed);
         let abandon = failures + 1 >= MAX_DEVICE_WRITE_ERRORS;
         match out.present(&colors, abandon) {
-            // **Aucun périphérique ouvert.** Sans ce signalement, lancer un
-            // effet sans clavier connecté ne produisait aucun signe : le
-            // simulateur s'animait, la case « envoyer » restait cochée, et le
-            // clavier gardait son image précédente. On lisait ça comme « seule
-            // la première image est passée ».
-            // Rien à journaliser : écrire un effet **sans posséder le clavier**
-            // est un usage prévu, pas une panne. Le dire par image le noierait,
-            // et le dire une fois ferait passer pour un incident ce que
-            // `reachingKeyboard` rend déjà visible à l'écran.
+            // **No device open.** Without this report, starting an effect with
+            // no keyboard connected produced no sign at all: the simulator
+            // animated, the "envoyer" (send) box stayed checked, and the
+            // keyboard kept its previous frame. It read as "only the first frame
+            // got through".
+            // Nothing to log: writing an effect **without owning the keyboard**
+            // is an intended use, not a failure. Saying so on every frame would
+            // drown the log, and saying it once would pass off as an incident
+            // what `reachingKeyboard` already makes visible on screen.
             None => {
                 shared.device_failures.store(0, Ordering::Relaxed);
                 shared.reaching.store(false, Ordering::Relaxed);
             }
             Some(Ok(())) => {
                 shared.device_failures.store(0, Ordering::Relaxed);
-                let avant = shared.device_error.lock().unwrap().take();
-                if journal::bascule(avant.as_deref(), None) == journal::Bascule::Retabli {
-                    tracing::info!("l'écriture vers l'appareil est rétablie");
+                let before = shared.device_error.lock().unwrap().take();
+                if journal::transition(before.as_deref(), None) == journal::Transition::Recovered {
+                    tracing::info!("writing to the device recovered");
                 }
                 shared.reaching.store(true, Ordering::Relaxed);
             }
@@ -1269,45 +1262,46 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
                 shared.reaching.store(false, Ordering::Relaxed);
             }
             Some(Err(e)) => {
-                // Même règle que pour l'erreur d'effet : le début de la panne,
-                // et rien d'autre. Un clavier débranché en cours de route
-                // échouerait à chaque image jusqu'à ce qu'on le rebranche.
+                // Same rule as for the effect error: the start of the failure,
+                // and nothing else. A keyboard unplugged midway would fail on
+                // every frame until it is plugged back in.
                 shared
                     .device_failures
                     .store(failures + 1, Ordering::Relaxed);
-                let avant = shared.device_error.lock().unwrap().replace(e.clone());
-                if journal::bascule(avant.as_deref(), Some(&e)) == journal::Bascule::Commence {
-                    tracing::warn!("l'écriture vers l'appareil a commencé à échouer : {e}");
+                let before = shared.device_error.lock().unwrap().replace(e.clone());
+                if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
+                {
+                    tracing::warn!("writing to the device started failing: {e}");
                 }
                 shared.reaching.store(false, Ordering::Relaxed);
             }
         }
     }
 
-    // Binaire brut : sérialiser en tableau JSON d'entiers ferait passer une
-    // image de 396 octets à plus de 1,5 Ko, trente fois par seconde.
+    // Raw binary: serializing as a JSON array of integers would take a 396-byte
+    // frame to more than 1.5 KB, thirty times per second.
     if let Some(ch) = shared.frames.lock().unwrap().as_ref() {
         let _ = ch.send(InvokeResponseBody::Raw(bytes.to_vec()));
     }
 }
 
-/// Le gabarit tel que l'effet le voit.
+/// The layout as the effect sees it.
 ///
-/// Sérialisé à la main : `candeo-device` n'a pas serde, et c'est délibéré —
-/// ses tests tournent sans dépendance système.
+/// Serialized by hand: `candeo-device` has no serde, and that is deliberate —
+/// its tests run without any system dependency.
 ///
-/// # Deux espaces, et les deux voyagent
+/// # Two spaces, and both travel
 ///
-/// `row`/`col` situent la LED dans la matrice ; `x`/`y`/`w`/`h` donnent le
-/// rectangle du capuchon, en unités de pas de clavier — la même unité que
-/// [`candeo_device::Key`], sans conversion en chemin. Un effet qui parle de
-/// distance ne peut pas être juste sans le second : une case de matrice vaut une
-/// case, que la touche fasse 1 u ou 6,25 u.
+/// `row`/`col` place the LED in the matrix; `x`/`y`/`w`/`h` give the keycap
+/// rectangle, in keyboard pitch units — the same unit as
+/// [`candeo_device::Key`], with no conversion on the way. An effect that talks
+/// about distance cannot be right without the second: a matrix cell is one
+/// cell, whether the key is 1 u or 6.25 u wide.
 ///
-/// La géométrie est **toujours** émise ici, parce que `candeo_device::Key` la
-/// porte toujours. Le jour où le rectangle deviendra facultatif (#34), ces
-/// quatre champs disparaîtront pour les gabarits non dessinés, et les effets qui
-/// les lisent échoueront en le disant — voir `bounds` et `center` dans `api.js`.
+/// The geometry is **always** emitted here, because `candeo_device::Key` always
+/// carries it. The day the rectangle becomes optional (#34), these four fields
+/// will disappear for layouts that have not been drawn, and the effects reading
+/// them will fail saying so — see `bounds` and `center` in `api.js`.
 fn layout_json(l: &'static Layout) -> String {
     let mut keys = String::new();
     for row in 0..l.rows {
@@ -1357,30 +1351,29 @@ fn js_error(e: rquickjs::Error) -> String {
     format!("QuickJS : {e}")
 }
 
-// ---------------------------------------------------------------- commandes
+// ---------------------------------------------------------------- commands
 
 use crate::{AppState, CmdResult, DeviceRef};
 use tauri::{AppHandle, State};
 
-/// Démarre un effet, intégré ou installé, **sur un appareil**.
+/// Starts an effect, built-in or installed, **on a device**.
 ///
-/// La résolution `identifiant → JavaScript` est celle de la bibliothèque, donc
-/// les intégrés d'abord : voir [`crate::storage`]. Le moteur, lui, ne fait
-/// aucune différence — un effet livré est un module chargé exactement comme
-/// celui qu'on vient d'écrire.
+/// The `id → JavaScript` resolution is the library's, so built-ins come first:
+/// see [`crate::storage`]. The engine itself makes no difference — a shipped
+/// effect is a module loaded exactly like the one just written.
 ///
-/// Le gabarit vient de **l'appareil visé**, ouvert ou non. C'est délibéré : on
-/// doit pouvoir écrire et prévisualiser un effet **sans posséder le clavier**,
-/// et le gabarit d'un appareil ne dépend pas de sa présence. Viser un appareil
-/// débranché lance donc l'effet, alimente le simulateur, et `reachingKeyboard`
-/// reste faux jusqu'à l'ouverture.
+/// The layout comes from **the targeted device**, open or not. That is
+/// deliberate: one must be able to write and preview an effect **without owning
+/// the keyboard**, and a device's layout does not depend on its presence.
+/// Targeting an unplugged device therefore starts the effect, feeds the
+/// simulator, and `reachingKeyboard` stays false until the device is opened.
 ///
-/// # C'est le geste qui **engage** le clavier
+/// # This is the gesture that **commits** the keyboard
 ///
-/// Prévisualiser est l'autre chemin, et il ne passe pas par ici :
-/// [`start_preview`] n'ouvre aucune sortie matérielle et n'écrit rien sur disque.
-/// « Appliquer » fait les deux — il envoie au clavier, et il **retient** l'effet
-/// pour cet appareil.
+/// Previewing is the other path, and it does not go through here:
+/// [`start_preview`] opens no hardware output and writes nothing to disk.
+/// "Appliquer" (Apply) does both — it sends to the keyboard, and it
+/// **remembers** the effect for this device.
 #[tauri::command]
 pub fn start_effect(
     app: AppHandle,
@@ -1395,63 +1388,63 @@ pub fn start_effect(
     let params = serde_json::to_string(&params)
         .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
 
-    // La poignée est partagée avec la boucle, pas copiée : refermer l'appareil
-    // plus tard — ignoré, débranché — se voit à l'image suivante.
+    // The handle is shared with the loop, not copied: closing the device later
+    // — ignored, unplugged — shows on the next frame.
     let out = Box::new(state.handle(device));
     state
         .engine
         .start(device, id.clone(), js, params, layout, out)?;
 
-    // **Après** le démarrage, jamais avant : on ne retient que ce qui tourne
-    // vraiment. Un effet dont le chargement échoue ne doit pas laisser derrière
-    // lui un identifiant que le fichier présente comme appliqué.
-    retenir_l_effet_actif(&app, device, Some(&id));
+    // **After** the start, never before: only what actually runs is
+    // remembered. An effect whose load fails must not leave behind an id that
+    // the file presents as applied.
+    remember_active_effect(&app, device, Some(&id));
     Ok(())
 }
 
 #[tauri::command]
 pub fn stop_effect(app: AppHandle, state: State<'_, AppState>, device: DeviceRef) {
     state.engine.stop(device);
-    retenir_l_effet_actif(&app, device, None);
+    remember_active_effect(&app, device, None);
 }
 
-/// Retient — ou oublie, avec `None` — l'effet appliqué sur cet appareil.
+/// Remembers — or forgets, with `None` — the effect applied on this device.
 ///
-/// # Un échec est journalisé, pas remonté
+/// # A failure is logged, not propagated
 ///
-/// L'effet tourne, le clavier est éclairé : faire échouer « Appliquer » parce que
-/// le disque n'a pas pris note ferait payer à l'éclairage un incident qui ne le
-/// concerne pas. Ce qu'on perd est borné et se dit en une ligne — le fichier ne
-/// reprendra pas cet effet plus tard.
-pub(crate) fn retenir_l_effet_actif(app: &AppHandle, device: DeviceRef, effect: Option<&str>) {
-    let ecrire = || -> CmdResult<()> {
+/// The effect runs, the keyboard is lit: making "Appliquer" (Apply) fail because
+/// the disk did not take note would make the lighting pay for an incident that
+/// does not concern it. What is lost is bounded and fits in one line — the file
+/// will not resume this effect later.
+pub(crate) fn remember_active_effect(app: &AppHandle, device: DeviceRef, effect: Option<&str>) {
+    let write = || -> CmdResult<()> {
         let store = crate::storage::store(app)?;
         let mut settings = store.read_settings()?;
-        // Rien de neuf : on ne repasse pas par le fichier temporaire et son
-        // renommage. Relancer deux fois le même effet est un double-clic.
+        // Nothing new: do not go through the temporary file and its rename
+        // again. Starting the same effect twice is a double click.
         if settings.set_active_effect(device.vid, device.pid, effect) {
             store.write_settings(&settings)?;
         }
         Ok(())
     };
-    if let Err(e) = ecrire() {
-        tracing::warn!(appareil = %device, "effet appliqué non retenu : {e}");
+    if let Err(e) = write() {
+        tracing::warn!(device = %device, "applied effect not remembered: {e}");
     }
 }
 
-// ---------------------------------------------------------------- aperçu
+// ---------------------------------------------------------------- preview
 
-/// Démarre l'aperçu d'un effet, **sans toucher au clavier ni au disque**.
+/// Starts the preview of an effect, **without touching the keyboard or the
+/// disk**.
 ///
-/// C'est le pendant exact de [`start_effect`], moins tout ce qui engage :
-/// aucune sortie matérielle, aucune écriture dans `settings.json`, et surtout
-/// **aucune boucle d'appareil arrêtée**. Sélectionner un effet dans la galerie
-/// passe par ici ; l'effet qui tourne sur le clavier continue de tourner.
+/// It is the exact counterpart of [`start_effect`], minus everything that
+/// commits: no hardware output, no write to `settings.json`, and above all **no
+/// device loop stopped**. Selecting an effect in the gallery goes through here;
+/// the effect running on the keyboard keeps running.
 ///
-/// `device` désigne l'appareil dont on **emprunte le gabarit**. `None` retombe
-/// sur le gabarit par défaut : on prévisualise sans posséder le clavier, et sans
-/// en avoir adopté aucun — c'est la même raison qui fait exister
-/// `get_default_layout`.
+/// `device` names the device whose **layout is borrowed**. `None` falls back to
+/// the default layout: one previews without owning the keyboard, and without
+/// having adopted any — the same reason `get_default_layout` exists.
 #[tauri::command]
 pub fn start_preview(
     app: AppHandle,
@@ -1478,8 +1471,8 @@ pub fn stop_preview(state: State<'_, AppState>) {
     state.engine.stop_preview();
 }
 
-/// Ajuste les paramètres de l'aperçu à chaud, comme [`set_effect_params`] le
-/// fait pour un appareil. La boucle relit le JSON à chaque image.
+/// Adjusts the preview parameters live, as [`set_effect_params`] does for a
+/// device. The loop re-reads the JSON on every frame.
 #[tauri::command]
 pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
     let params = serde_json::to_string(&params)
@@ -1488,11 +1481,11 @@ pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value)
     Ok(())
 }
 
-/// Ouvre le flux d'images de l'aperçu vers le simulateur.
+/// Opens the preview frame stream to the simulator.
 ///
-/// Un canal distinct de celui des appareils, et c'est ce qui permet de regarder
-/// un effet pendant qu'un autre tourne sur le clavier : les deux flux existent en
-/// même temps, et la fenêtre choisit lequel elle affiche.
+/// A channel separate from the devices' one, and that is what allows watching
+/// an effect while another one runs on the keyboard: both streams exist at the
+/// same time, and the window picks which one it shows.
 #[tauri::command]
 pub fn subscribe_preview_frames(state: State<'_, AppState>, channel: Channel<InvokeResponseBody>) {
     state.engine.set_preview_channel(Some(channel));
@@ -1503,8 +1496,8 @@ pub fn unsubscribe_preview_frames(state: State<'_, AppState>) {
     state.engine.set_preview_channel(None);
 }
 
-/// Ajuste les paramètres à chaud. La boucle ne redémarre pas : elle relit le
-/// JSON à chaque image.
+/// Adjusts the parameters live. The loop does not restart: it re-reads the
+/// JSON on every frame.
 #[tauri::command]
 pub fn set_effect_params(
     state: State<'_, AppState>,
@@ -1517,21 +1510,22 @@ pub fn set_effect_params(
     Ok(())
 }
 
-/// Active ou coupe la sortie clavier d'un appareil, sans toucher au simulateur.
+/// Turns a device's keyboard output on or off, without touching the simulator.
 #[tauri::command]
 pub fn set_output_to_keyboard(state: State<'_, AppState>, device: DeviceRef, on: bool) {
     state.engine.set_to_keyboard(device, on);
 }
 
-/// Ouvre le flux d'images d'**un appareil** vers le simulateur.
+/// Opens the frame stream of **one device** to the simulator.
 ///
-/// Un canal, et non un événement global : la destination est connue, la portée
-/// est explicite, et le binaire passe brut. Libérer le canal côté front, ou
-/// appeler [`unsubscribe_frames`], arrête le flux **sans arrêter l'effet**, qui
-/// continue d'alimenter le clavier fenêtre fermée.
+/// A channel, not a global event: the destination is known, the scope is
+/// explicit, and the binary goes through raw. Releasing the channel on the
+/// front end, or calling [`unsubscribe_frames`], stops the stream **without
+/// stopping the effect**, which keeps feeding the keyboard with the window
+/// closed.
 ///
-/// Le simulateur suit l'appareil sélectionné : changer de sélection, c'est se
-/// réabonner ailleurs, pas multiplexer un flux unique.
+/// The simulator follows the selected device: changing the selection means
+/// subscribing elsewhere, not multiplexing a single stream.
 #[tauri::command]
 pub fn subscribe_frames(
     state: State<'_, AppState>,
@@ -1546,17 +1540,16 @@ pub fn unsubscribe_frames(state: State<'_, AppState>, device: DeviceRef) {
     state.engine.set_channel(device, None);
 }
 
-/// État du moteur : ce qui tourne **sur les appareils**, et ce qu'on **regarde**.
+/// Engine state: what runs **on the devices**, and what is **being watched**.
 ///
-/// Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit
-/// pouvoir être lue à la réouverture, ce qu'un événement ponctuel ne permet
-/// pas.
+/// Polled rather than pushed: an error raised while the window was closed must
+/// be readable when it reopens, which a one-off event does not allow.
 ///
-/// `devices` porte une entrée par appareil visé depuis le démarrage — pas
-/// seulement par appareil ouvert, ni par boucle en cours : « cet appareil ne fait
-/// rien » et « je ne sais rien de cet appareil » ne se disent pas pareil.
+/// `devices` holds one entry per device targeted since startup — not only per
+/// open device, nor per running loop: "this device is doing nothing" and "I
+/// know nothing about this device" are not the same statement.
 ///
-/// `preview` est **à part**, et l'interface ne peut pas les confondre : voir
+/// `preview` is **separate**, and the interface cannot confuse the two: see
 /// [`PreviewStatus`].
 #[tauri::command]
 pub fn engine_status(state: State<'_, AppState>) -> EngineReport {
@@ -1567,8 +1560,8 @@ pub fn engine_status(state: State<'_, AppState>) -> EngineReport {
 mod tests {
     use super::*;
 
-    /// Un effet minimal, écrit comme l'utilisateur l'écrirait.
-    const EFFET: &str = r#"
+    /// A minimal effect, written the way a user would write it.
+    const EFFECT: &str = r#"
         import { hsv } from '@candeo/effects-api'
         export default {
           name: 'Test',
@@ -1584,22 +1577,22 @@ mod tests {
         &candeo_device::DEATHSTALKER_V2_PRO
     }
 
-    /// `unwrap_err` exigerait que `(Runtime, Context)` soit `Debug`, ce que
-    /// rquickjs ne fournit pas.
-    fn erreur_de_chargement(js: &str) -> String {
+    /// `unwrap_err` would require `(Runtime, Context)` to be `Debug`, which
+    /// rquickjs does not provide.
+    fn load_error(js: &str) -> String {
         match prepare(js, layout()) {
-            Ok(_) => panic!("le chargement aurait dû échouer"),
+            Ok(_) => panic!("loading should have failed"),
             Err(e) => e,
         }
     }
 
-    // ------------------------------------------------------------ un appareil
+    // ------------------------------------------------------------ one device
 
-    /// Deux appareils inventés : le seul gabarit réel est unique, et tout ce qui
-    /// est « par appareil » n'a de sens qu'à partir de deux. Ils ne servent qu'à
-    /// être distingués — la géométrie, elle, reste celle du vrai gabarit, pour
-    /// que les effets rendent de vraies images.
-    const PREMIER: DeviceRef = DeviceRef {
+    /// Two made-up devices: the only real layout is unique, and everything that
+    /// is "per device" only makes sense from two onwards. They only exist to be
+    /// told apart — the geometry stays that of the real layout, so that the
+    /// effects render real frames.
+    const FIRST: DeviceRef = DeviceRef {
         vid: 0x1532,
         pid: 0x1111,
     };
@@ -1608,31 +1601,31 @@ mod tests {
         pid: 0x2222,
     };
 
-    /// Au-delà, on considère que la condition attendue ne viendra pas.
+    /// Beyond this, the expected condition is considered not to be coming.
     ///
-    /// Généreux, et à dessein : à 30 images par seconde quelques images tiennent
-    /// dans quelques dizaines de millisecondes, mais la cadence d'un coureur
-    /// d'intégration continue n'est pas celle d'une machine de développement.
-    /// Un test qui dort une durée choisie serait soit lent, soit capricieux.
+    /// Generous, and on purpose: at 30 frames per second a few frames fit in a
+    /// few tens of milliseconds, but the pace of a CI runner is not that of a
+    /// development machine. A test that sleeps for a chosen duration would be
+    /// either slow or flaky.
     const PATIENCE: Duration = Duration::from_secs(5);
 
-    /// Une sortie d'appareil pilotée depuis le test.
+    /// A device output driven from the test.
     ///
-    /// C'est tout l'intérêt de [`DeviceOut`] : faire échouer **un** appareil sans
-    /// en brancher aucun. Avec le `Keyboard` en dur, l'invariant « un appareil en
-    /// panne n'en affecte aucun autre » n'aurait été vérifiable qu'avec deux
-    /// claviers sur le bureau, donc jamais.
+    /// That is the whole point of [`DeviceOut`]: making **one** device fail
+    /// without plugging any in. With the `Keyboard` hard-wired, the invariant "a
+    /// failing device affects no other" could only have been checked with two
+    /// keyboards on the desk, so never.
     #[derive(Default)]
-    struct Sortie {
-        ecrites: AtomicU32,
-        en_panne: AtomicBool,
+    struct Output {
+        written: AtomicU32,
+        failing: AtomicBool,
         /// Writes still to fail before this output recovers on its own.
         transient_failures: AtomicU32,
         /// Set when the loop dropped the device, as the real handle does.
         closed: AtomicBool,
     }
 
-    impl DeviceOut for Arc<Sortie> {
+    impl DeviceOut for Arc<Output> {
         fn present(&self, _colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
             if self.closed.load(Ordering::Relaxed) {
                 return None;
@@ -1641,13 +1634,13 @@ mod tests {
                 .transient_failures
                 .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
                 .is_ok();
-            if transient || self.en_panne.load(Ordering::Relaxed) {
+            if transient || self.failing.load(Ordering::Relaxed) {
                 if abandon {
                     self.closed.store(true, Ordering::Relaxed);
                 }
                 return Some(Err("écriture refusée par l'appareil".into()));
             }
-            self.ecrites.fetch_add(1, Ordering::Relaxed);
+            self.written.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
         }
     }
@@ -1660,21 +1653,21 @@ mod tests {
     #[test]
     fn a_device_that_keeps_failing_is_closed_but_the_loop_goes_on() {
         let engine = Engine::default();
-        let broken = Arc::new(Sortie::default());
-        broken.en_panne.store(true, Ordering::Relaxed);
+        let broken = Arc::new(Output::default());
+        broken.failing.store(true, Ordering::Relaxed);
 
-        demarrer(&engine, PREMIER, "broken", Arc::clone(&broken));
-        attendre("the failing device was never closed", || {
+        start(&engine, FIRST, "broken", Arc::clone(&broken));
+        wait_for("the failing device was never closed", || {
             broken.closed.load(Ordering::Relaxed)
         });
 
-        let status = etat(&engine, PREMIER);
+        let status = status(&engine, FIRST);
         assert!(status.running, "closing the device stopped the loop");
         assert!(!status.reaching_keyboard);
         let message = status.device_error.unwrap_or_default();
         assert!(message.contains("refermé"), "{message}");
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
     }
 
     /// A few failures below the threshold close nothing: a transient error
@@ -1682,412 +1675,406 @@ mod tests {
     #[test]
     fn a_transient_write_failure_does_not_close_the_device() {
         let engine = Engine::default();
-        let output = Arc::new(Sortie::default());
+        let output = Arc::new(Output::default());
         output.transient_failures.store(3, Ordering::Relaxed);
 
-        demarrer(&engine, PREMIER, "hiccup", Arc::clone(&output));
-        attendre("writing never recovered", || {
-            output.ecrites.load(Ordering::Relaxed) >= 3
+        start(&engine, FIRST, "hiccup", Arc::clone(&output));
+        wait_for("writing never recovered", || {
+            output.written.load(Ordering::Relaxed) >= 3
         });
 
         assert!(
             !output.closed.load(Ordering::Relaxed),
             "closed on a transient failure"
         );
-        let status = etat(&engine, PREMIER);
+        let status = status(&engine, FIRST);
         assert!(status.reaching_keyboard);
         assert_eq!(status.device_error, None);
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
     }
 
-    fn demarrer(engine: &Engine, device: DeviceRef, effect_id: &str, out: Arc<Sortie>) {
+    fn start(engine: &Engine, device: DeviceRef, effect_id: &str, out: Arc<Output>) {
         engine
             .start(
                 device,
                 effect_id.into(),
-                EFFET.into(),
+                EFFECT.into(),
                 "{}".into(),
                 layout(),
                 Box::new(out),
             )
-            .expect("démarrage");
+            .expect("start");
     }
 
-    /// L'état d'un appareil, extrait de la liste que rend le moteur.
-    fn etat(engine: &Engine, device: DeviceRef) -> EngineStatus {
+    /// A device's status, taken from the list the engine returns.
+    fn status(engine: &Engine, device: DeviceRef) -> EngineStatus {
         engine
             .device_status()
             .into_iter()
             .find(|s| s.device == device)
-            .unwrap_or_else(|| panic!("aucun état pour {device}"))
+            .unwrap_or_else(|| panic!("no status for {device}"))
             .status
     }
 
-    /// Attend qu'une condition se réalise, ou échoue. Voir [`PATIENCE`].
-    fn attendre(quoi: &str, pret: impl FnMut() -> bool) {
-        attendre_au_plus(PATIENCE, quoi, pret);
+    /// Waits for a condition to come true, or fails. See [`PATIENCE`].
+    fn wait_for(what: &str, ready: impl FnMut() -> bool) {
+        wait_at_most(PATIENCE, what, ready);
     }
 
-    /// Comme [`attendre`], mais avec une patience calculée sur la borne qu'on
-    /// éprouve.
+    /// Like [`wait_for`], but with a patience computed from the limit under
+    /// test.
     ///
-    /// [`PATIENCE`] est une durée fixe, choisie pour des conditions qui se
-    /// réalisent en quelques images. Une borne, elle, promet une durée : l'arrêt
-    /// d'un effet qui boucle demande [`MAX_CONSECUTIVE_ERRORS`] images coupées,
-    /// et une image coupée dure tout le [`BUDGET_IMAGE`] — lequel n'est pas le
-    /// même selon le profil de compilation. Attendre un multiple de ce qu'on
-    /// éprouve garde le test juste dans les deux cas.
-    fn attendre_au_plus(patience: Duration, quoi: &str, mut pret: impl FnMut() -> bool) {
-        let limite = Instant::now() + patience;
-        while Instant::now() < limite {
-            if pret() {
+    /// [`PATIENCE`] is a fixed duration, chosen for conditions that come true
+    /// within a few frames. A limit, on the other hand, promises a duration:
+    /// stopping a looping effect takes [`MAX_CONSECUTIVE_ERRORS`] cut frames,
+    /// and a cut frame lasts the whole [`FRAME_BUDGET`] — which is not the same
+    /// from one build profile to the other. Waiting for a multiple of what is
+    /// under test keeps the test right in both cases.
+    fn wait_at_most(patience: Duration, what: &str, mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + patience;
+        while Instant::now() < deadline {
+            if ready() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
-        panic!("{quoi} : rien en {patience:?}");
+        panic!("{what}: nothing in {patience:?}");
     }
 
-    /// **L'invariant de l'adoption, au niveau du moteur.**
+    /// **The adoption invariant, at the engine level.**
     ///
-    /// `un_appareil_en_echec_n_en_bloque_aucun_autre` le vérifie à l'ouverture ;
-    /// celui-ci le vérifie une fois les boucles lancées, là où l'appareil tombe
-    /// en marche. Un appareil dont toute écriture échoue ne doit rien retirer aux
-    /// autres : ni leur boucle, ni leurs images, ni leur état — et l'arrêter ne
-    /// doit pas les arrêter.
+    /// `a_failing_device_blocks_no_other` checks it at open time;
+    /// this one checks it once the loops are running, where the device fails
+    /// while in use. A device whose every write fails must take nothing away
+    /// from the others: not their loop, not their frames, not their state — and
+    /// stopping it must not stop them.
     #[test]
-    fn un_appareil_en_panne_n_en_affecte_aucun_autre() {
+    fn a_broken_device_affects_no_other() {
         let engine = Engine::default();
-        let panne = Arc::new(Sortie::default());
-        panne.en_panne.store(true, Ordering::Relaxed);
-        let sain = Arc::new(Sortie::default());
+        let broken = Arc::new(Output::default());
+        broken.failing.store(true, Ordering::Relaxed);
+        let healthy = Arc::new(Output::default());
 
-        demarrer(&engine, PREMIER, "casse", Arc::clone(&panne));
-        demarrer(&engine, SECOND, "sain", Arc::clone(&sain));
+        start(&engine, FIRST, "casse", Arc::clone(&broken));
+        start(&engine, SECOND, "sain", Arc::clone(&healthy));
 
-        attendre("le voisin sain n'écrit rien", || {
-            sain.ecrites.load(Ordering::Relaxed) >= 3
+        wait_for("le voisin sain n'écrit rien", || {
+            healthy.written.load(Ordering::Relaxed) >= 3
         });
 
-        let casse = etat(&engine, PREMIER);
+        let failed = status(&engine, FIRST);
+        assert!(failed.running, "the broken device's loop stopped");
         assert!(
-            casse.running,
-            "la boucle de l'appareil en panne s'est arrêtée"
+            failed.device_error.is_some(),
+            "the write failure was not recorded"
         );
-        assert!(
-            casse.device_error.is_some(),
-            "l'échec d'écriture n'a pas été consigné"
-        );
-        assert!(!casse.reaching_keyboard);
-        assert_eq!(panne.ecrites.load(Ordering::Relaxed), 0);
+        assert!(!failed.reaching_keyboard);
+        assert_eq!(broken.written.load(Ordering::Relaxed), 0);
 
-        let ok = etat(&engine, SECOND);
-        assert!(ok.running, "la boucle du voisin s'est arrêtée");
-        assert_eq!(ok.device_error, None, "l'échec du voisin a débordé");
-        assert!(ok.reaching_keyboard, "le voisin n'est plus atteint");
+        let ok = status(&engine, SECOND);
+        assert!(ok.running, "the neighbor's loop stopped");
+        assert_eq!(ok.device_error, None, "the neighbor's failure spilled over");
+        assert!(ok.reaching_keyboard, "the neighbor is no longer reached");
         assert_eq!(
             ok.error, None,
-            "erreur d'effet sur le voisin : {:?}",
+            "effect error on the neighbor: {:?}",
             ok.error
         );
 
-        // Arrêter l'appareil en panne laisse l'autre tourner : les boucles ne
-        // partagent ni fil, ni verrou, ni état.
-        let avant = sain.ecrites.load(Ordering::Relaxed);
-        engine.stop(PREMIER);
-        attendre("le voisin s'est arrêté avec son camarade", || {
-            sain.ecrites.load(Ordering::Relaxed) > avant
+        // Stopping the broken device leaves the other one running: the loops
+        // share no thread, no lock and no state.
+        let before = healthy.written.load(Ordering::Relaxed);
+        engine.stop(FIRST);
+        wait_for("le voisin s'est arrêté avec son camarade", || {
+            healthy.written.load(Ordering::Relaxed) > before
         });
-        assert!(!etat(&engine, PREMIER).running);
-        assert!(etat(&engine, SECOND).running);
+        assert!(!status(&engine, FIRST).running);
+        assert!(status(&engine, SECOND).running);
 
         engine.stop(SECOND);
     }
 
-    /// Chaque appareil porte son effet et sa sortie. Couper l'un ne coupe pas
-    /// l'autre — sans quoi « envoyer au clavier » serait une bascule globale
-    /// déguisée en réglage d'appareil.
+    /// Each device carries its own effect and output. Turning one off does not
+    /// turn off the other — otherwise "envoyer au clavier" (send to keyboard)
+    /// would be a global switch disguised as a device setting.
     #[test]
-    fn chaque_appareil_porte_son_effet_et_sa_sortie() {
+    fn each_device_carries_its_own_effect_and_output() {
         let engine = Engine::default();
-        let a = Arc::new(Sortie::default());
-        let b = Arc::new(Sortie::default());
+        let a = Arc::new(Output::default());
+        let b = Arc::new(Output::default());
 
-        demarrer(&engine, PREMIER, "premier", Arc::clone(&a));
-        demarrer(&engine, SECOND, "second", Arc::clone(&b));
+        start(&engine, FIRST, "premier", Arc::clone(&a));
+        start(&engine, SECOND, "second", Arc::clone(&b));
 
-        assert_eq!(etat(&engine, PREMIER).effect_id.as_deref(), Some("premier"));
-        assert_eq!(etat(&engine, SECOND).effect_id.as_deref(), Some("second"));
+        assert_eq!(status(&engine, FIRST).effect_id.as_deref(), Some("premier"));
+        assert_eq!(status(&engine, SECOND).effect_id.as_deref(), Some("second"));
 
         engine.set_to_keyboard(SECOND, false);
-        attendre("la sortie du second reste ouverte", || {
-            !etat(&engine, SECOND).reaching_keyboard
+        wait_for("la sortie du second reste ouverte", || {
+            !status(&engine, SECOND).reaching_keyboard
         });
 
-        let fige = b.ecrites.load(Ordering::Relaxed);
-        let avant = a.ecrites.load(Ordering::Relaxed);
-        attendre("le premier n'écrit plus", || {
-            a.ecrites.load(Ordering::Relaxed) > avant + 2
+        let frozen = b.written.load(Ordering::Relaxed);
+        let before = a.written.load(Ordering::Relaxed);
+        wait_for("le premier n'écrit plus", || {
+            a.written.load(Ordering::Relaxed) > before + 2
         });
 
-        assert!(etat(&engine, PREMIER).to_keyboard, "la coupure a débordé");
-        assert!(etat(&engine, PREMIER).reaching_keyboard);
+        assert!(status(&engine, FIRST).to_keyboard, "the cut spilled over");
+        assert!(status(&engine, FIRST).reaching_keyboard);
         assert_eq!(
-            b.ecrites.load(Ordering::Relaxed),
-            fige,
-            "la sortie coupée écrit encore"
+            b.written.load(Ordering::Relaxed),
+            frozen,
+            "the output turned off still writes"
         );
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
         engine.stop(SECOND);
     }
 
-    /// Un appareil arrêté garde sa ligne : « cet appareil ne fait rien » et « je
-    /// ne sais rien de cet appareil » ne se disent pas pareil, et l'interface
-    /// doit pouvoir les distinguer.
+    /// A stopped device keeps its line: "this device is doing nothing" and "I
+    /// know nothing about this device" are not the same statement, and the
+    /// interface must be able to tell them apart.
     #[test]
-    fn un_appareil_arrete_garde_sa_ligne_d_etat() {
+    fn a_stopped_device_keeps_its_status_line() {
         let engine = Engine::default();
-        demarrer(&engine, PREMIER, "premier", Arc::new(Sortie::default()));
-        engine.stop(PREMIER);
+        start(&engine, FIRST, "premier", Arc::new(Output::default()));
+        engine.stop(FIRST);
 
-        let s = etat(&engine, PREMIER);
+        let s = status(&engine, FIRST);
         assert!(!s.running);
         assert_eq!(s.effect_id, None);
         assert_eq!(engine.device_status().len(), 1);
     }
 
-    /// **Ce que la suppression d'un effet doit obtenir du moteur.**
+    /// **What deleting an effect must get from the engine.**
     ///
-    /// Un effet supprimé peut tourner sur plusieurs appareils, et il doit
-    /// s'arrêter sur tous — une boucle oubliée continuerait d'exécuter un
-    /// `effect.js` chargé en mémoire, sans erreur visible, alors que son dossier
-    /// n'existe plus. Les boucles qui font tourner **autre chose** ne sont pas
-    /// concernées : supprimer un effet n'éteint pas les claviers des autres.
+    /// A deleted effect may be running on several devices, and it must stop on
+    /// all of them — a forgotten loop would keep running an `effect.js` loaded
+    /// into memory, with no visible error, while its folder no longer exists.
+    /// The loops running **something else** are not concerned: deleting an
+    /// effect does not turn off the other keyboards.
     #[test]
-    fn arreter_un_effet_l_arrete_partout_et_nulle_part_ailleurs() {
+    fn stopping_an_effect_stops_it_everywhere_and_nowhere_else() {
         let engine = Engine::default();
-        let voisin = Arc::new(Sortie::default());
+        let neighbor = Arc::new(Output::default());
 
-        demarrer(&engine, PREMIER, "a-supprimer", Arc::new(Sortie::default()));
-        demarrer(&engine, SECOND, "autre", Arc::clone(&voisin));
+        start(&engine, FIRST, "a-supprimer", Arc::new(Output::default()));
+        start(&engine, SECOND, "autre", Arc::clone(&neighbor));
 
-        let arretes = engine.stop_everywhere("a-supprimer");
-        assert_eq!(arretes, vec![PREMIER]);
+        let stopped = engine.stop_everywhere("a-supprimer");
+        assert_eq!(stopped, vec![FIRST]);
 
-        let supprime = etat(&engine, PREMIER);
-        assert!(!supprime.running);
+        let deleted = status(&engine, FIRST);
+        assert!(!deleted.running);
         assert_eq!(
-            supprime.effect_id, None,
-            "la ligne d'état nomme encore un effet qui n'existe plus"
+            deleted.effect_id, None,
+            "the status line still names an effect that no longer exists"
         );
 
-        // Le voisin, lui, n'a rien vu passer : il tourne toujours, et ses images
-        // continuent de partir.
-        let avant = voisin.ecrites.load(Ordering::Relaxed);
-        assert!(etat(&engine, SECOND).running);
-        attendre("le voisin s'est arrêté avec son camarade", || {
-            voisin.ecrites.load(Ordering::Relaxed) > avant
+        // The neighbor, for its part, noticed nothing: it is still running, and
+        // its frames keep going out.
+        let before = neighbor.written.load(Ordering::Relaxed);
+        assert!(status(&engine, SECOND).running);
+        wait_for("le voisin s'est arrêté avec son camarade", || {
+            neighbor.written.load(Ordering::Relaxed) > before
         });
 
         engine.stop(SECOND);
     }
 
-    /// Le même effet sur deux appareils : les deux boucles partent.
+    /// The same effect on two devices: both loops go.
     #[test]
-    fn arreter_un_effet_couvre_tous_les_appareils_qui_le_font_tourner() {
+    fn stopping_an_effect_covers_every_device_running_it() {
         let engine = Engine::default();
-        demarrer(&engine, PREMIER, "partout", Arc::new(Sortie::default()));
-        demarrer(&engine, SECOND, "partout", Arc::new(Sortie::default()));
+        start(&engine, FIRST, "partout", Arc::new(Output::default()));
+        start(&engine, SECOND, "partout", Arc::new(Output::default()));
 
-        assert_eq!(engine.stop_everywhere("partout"), vec![PREMIER, SECOND]);
-        assert!(!etat(&engine, PREMIER).running);
-        assert!(!etat(&engine, SECOND).running);
+        assert_eq!(engine.stop_everywhere("partout"), vec![FIRST, SECOND]);
+        assert!(!status(&engine, FIRST).running);
+        assert!(!status(&engine, SECOND).running);
     }
 
-    /// Un identifiant que personne ne fait tourner n'arrête rien. C'est le cas
-    /// courant : on supprime un effet qu'on n'a pas appliqué.
+    /// An id that nothing is running stops nothing. That is the common case:
+    /// deleting an effect that was never applied.
     #[test]
-    fn arreter_un_effet_qui_ne_tourne_nulle_part_ne_touche_a_rien() {
+    fn stopping_an_effect_running_nowhere_touches_nothing() {
         let engine = Engine::default();
-        demarrer(&engine, PREMIER, "en-cours", Arc::new(Sortie::default()));
+        start(&engine, FIRST, "en-cours", Arc::new(Output::default()));
 
         assert!(engine.stop_everywhere("jamais-lance").is_empty());
-        assert!(etat(&engine, PREMIER).running);
+        assert!(status(&engine, FIRST).running);
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
     }
 
-    /// Ce que la remise à zéro de la configuration attend du moteur : plus une
-    /// seule boucle, quel que soit l'effet et quel que soit l'appareil — aperçu
-    /// compris, qui n'écrit sur rien mais entretient un contexte QuickJS.
+    /// What resetting the configuration expects from the engine: not a single
+    /// loop left, whatever the effect and whatever the device — preview
+    /// included, which writes to nothing but keeps a QuickJS context alive.
     #[test]
-    fn tout_arreter_ne_laisse_aucune_boucle() {
+    fn stopping_everything_leaves_no_loop() {
         let engine = Engine::default();
-        demarrer(&engine, PREMIER, "premier", Arc::new(Sortie::default()));
-        demarrer(&engine, SECOND, "second", Arc::new(Sortie::default()));
-        apercevoir(&engine, PREMIER, "regarde");
+        start(&engine, FIRST, "premier", Arc::new(Output::default()));
+        start(&engine, SECOND, "second", Arc::new(Output::default()));
+        preview_effect(&engine, FIRST, "regarde");
 
         engine.stop_all();
 
         assert!(engine.device_status().iter().all(|s| !s.status.running));
-        // Les lignes restent : « cet appareil ne fait rien » et « je ne sais rien
-        // de cet appareil » ne se disent pas pareil, remise à zéro ou non.
+        // The lines stay: "this device is doing nothing" and "I know nothing
+        // about this device" are not the same statement, reset or not.
         assert_eq!(engine.device_status().len(), 2);
         assert!(engine.preview_status().is_none());
     }
 
-    // ------------------------------------------------------------ aperçu
+    // ------------------------------------------------------------ preview
 
-    fn apercevoir(engine: &Engine, layout_of: DeviceRef, effect_id: &str) {
+    fn preview_effect(engine: &Engine, layout_of: DeviceRef, effect_id: &str) {
         engine
             .start_preview(
                 layout_of,
                 effect_id.into(),
-                EFFET.into(),
+                EFFECT.into(),
                 "{}".into(),
                 layout(),
             )
-            .expect("démarrage de l'aperçu");
+            .expect("preview start");
     }
 
-    /// **Le cœur de l'issue #63.** Prévisualiser Y pendant que X tourne sur le
-    /// clavier ne doit rien arrêter : parcourir la galerie éteindrait sinon
-    /// l'éclairage en cours, et ça ne se verrait qu'une fois livré.
+    /// **The heart of issue #63.** Previewing Y while X runs on the keyboard
+    /// must stop nothing: otherwise browsing the gallery would turn off the
+    /// current lighting, and it would only show once shipped.
     #[test]
-    fn l_apercu_n_interrompt_pas_l_effet_de_l_appareil() {
+    fn the_preview_does_not_interrupt_the_device_effect() {
         let engine = Engine::default();
-        let sortie = Arc::new(Sortie::default());
-        demarrer(&engine, PREMIER, "applique", Arc::clone(&sortie));
+        let output = Arc::new(Output::default());
+        start(&engine, FIRST, "applique", Arc::clone(&output));
 
-        // Trois aperçus à la suite, comme un parcours de galerie.
-        for effet in ["regarde-1", "regarde-2", "regarde-3"] {
-            apercevoir(&engine, PREMIER, effet);
+        // Three previews in a row, like browsing the gallery.
+        for effect in ["regarde-1", "regarde-2", "regarde-3"] {
+            preview_effect(&engine, FIRST, effect);
         }
 
-        let appareil = etat(&engine, PREMIER);
-        assert!(
-            appareil.running,
-            "l'aperçu a arrêté la boucle de l'appareil"
-        );
-        assert_eq!(appareil.effect_id.as_deref(), Some("applique"));
+        let device = status(&engine, FIRST);
+        assert!(device.running, "the preview stopped the device's loop");
+        assert_eq!(device.effect_id.as_deref(), Some("applique"));
 
-        // Et les images continuent de partir vers le clavier pendant l'aperçu.
-        let avant = sortie.ecrites.load(Ordering::Relaxed);
-        attendre("le clavier n'est plus alimenté", || {
-            sortie.ecrites.load(Ordering::Relaxed) > avant + 2
+        // And frames keep going out to the keyboard during the preview.
+        let before = output.written.load(Ordering::Relaxed);
+        wait_for("le clavier n'est plus alimenté", || {
+            output.written.load(Ordering::Relaxed) > before + 2
         });
 
         engine.stop_all();
     }
 
-    /// **Aucun octet ne part vers un clavier depuis un aperçu.** C'est ce que
-    /// [`SansSortie`] garantit, et c'est la seule garantie qui compte : une
-    /// sortie ouverte par inadvertance ferait de l'aperçu une application.
+    /// **Not a single byte goes to a keyboard from a preview.** That is what
+    /// [`NoOutput`] guarantees, and it is the only guarantee that matters: an
+    /// output opened by accident would turn the preview into an application.
     #[test]
-    fn l_apercu_n_ecrit_sur_aucun_appareil() {
+    fn the_preview_writes_to_no_device() {
         let engine = Engine::default();
-        let sortie = Arc::new(Sortie::default());
-        demarrer(&engine, PREMIER, "applique", Arc::clone(&sortie));
-        engine.stop(PREMIER);
+        let output = Arc::new(Output::default());
+        start(&engine, FIRST, "applique", Arc::clone(&output));
+        engine.stop(FIRST);
 
-        let fige = sortie.ecrites.load(Ordering::Relaxed);
-        apercevoir(&engine, PREMIER, "regarde");
-        attendre("l'aperçu n'a rendu aucune image", || {
+        let frozen = output.written.load(Ordering::Relaxed);
+        preview_effect(&engine, FIRST, "regarde");
+        wait_for("l'aperçu n'a rendu aucune image", || {
             engine
                 .preview_status()
                 .is_some_and(|p| p.running && p.error.is_none())
         });
-        // Quelques images passent pendant que le test dort.
+        // A few frames go by while the test sleeps.
         std::thread::sleep(Duration::from_millis(120));
 
         assert_eq!(
-            sortie.ecrites.load(Ordering::Relaxed),
-            fige,
-            "l'aperçu a écrit sur la sortie de l'appareil"
+            output.written.load(Ordering::Relaxed),
+            frozen,
+            "the preview wrote to the device's output"
         );
         engine.stop_all();
     }
 
-    /// L'aperçu ne se confond avec aucun appareil : il n'ajoute aucune ligne à la
-    /// liste que lisent l'icône de zone de notification et le diagnostic.
+    /// The preview is not mistaken for any device: it adds no line to the list
+    /// that the tray icon and the diagnostic read.
     #[test]
-    fn l_apercu_n_apparait_pas_dans_la_liste_des_appareils() {
+    fn the_preview_is_not_in_the_device_list() {
         let engine = Engine::default();
-        apercevoir(&engine, PREMIER, "regarde");
+        preview_effect(&engine, FIRST, "regarde");
 
         assert!(
             engine.device_status().is_empty(),
-            "l'aperçu s'est glissé dans la liste des appareils"
+            "the preview slipped into the device list"
         );
 
-        let rapport = engine.report();
-        assert!(rapport.devices.is_empty());
-        let apercu = rapport.preview.expect("aucun aperçu");
-        assert_eq!(apercu.effect_id.as_deref(), Some("regarde"));
+        let report = engine.report();
+        assert!(report.devices.is_empty());
+        let preview = report.preview.expect("no preview");
+        assert_eq!(preview.effect_id.as_deref(), Some("regarde"));
         assert_eq!(
-            apercu.layout_of, PREMIER,
-            "le gabarit emprunté n'est pas celui qu'on a demandé"
+            preview.layout_of, FIRST,
+            "the borrowed layout is not the one requested"
         );
 
         engine.stop_preview();
         assert!(
             engine.preview_status().is_none(),
-            "un aperçu arrêté reste annoncé"
+            "a stopped preview is still announced"
         );
     }
 
-    /// Supprimer un effet arrête aussi l'**aperçu** qui le fait tourner : le
-    /// JavaScript est chargé en mémoire, l'écran continuerait d'animer un effet
-    /// absent de la bibliothèque. Et il n'apparaît pas dans la liste des
-    /// appareils arrêtés — aucun appareil n'a été touché.
+    /// Deleting an effect also stops the **preview** running it: the
+    /// JavaScript is loaded into memory, and the screen would keep animating an
+    /// effect missing from the library. And it does not appear in the list of
+    /// stopped devices — no device was touched.
     #[test]
-    fn supprimer_un_effet_arrete_aussi_son_apercu() {
+    fn deleting_an_effect_also_stops_its_preview() {
         let engine = Engine::default();
-        demarrer(&engine, PREMIER, "autre", Arc::new(Sortie::default()));
-        apercevoir(&engine, PREMIER, "a-supprimer");
+        start(&engine, FIRST, "autre", Arc::new(Output::default()));
+        preview_effect(&engine, FIRST, "a-supprimer");
 
         assert!(engine.stop_everywhere("a-supprimer").is_empty());
         assert!(engine.preview_status().is_none());
         assert!(
-            etat(&engine, PREMIER).running,
-            "la boucle de l'appareil a été arrêtée au passage"
+            status(&engine, FIRST).running,
+            "the device's loop was stopped along the way"
         );
 
         engine.stop_all();
     }
 
-    /// Deux sélections à la suite : la seconde **remplace** la première, elle ne
-    /// s'y ajoute pas. Il n'y a qu'une boucle d'aperçu, donc qu'un contexte
-    /// QuickJS à la fois.
+    /// Two selections in a row: the second **replaces** the first, it does not
+    /// add to it. There is only one preview loop, hence only one QuickJS context
+    /// at a time.
     #[test]
-    fn changer_de_selection_remplace_l_apercu() {
+    fn changing_the_selection_replaces_the_preview() {
         let engine = Engine::default();
-        apercevoir(&engine, PREMIER, "premier-regarde");
-        apercevoir(&engine, SECOND, "second-regarde");
+        preview_effect(&engine, FIRST, "premier-regarde");
+        preview_effect(&engine, SECOND, "second-regarde");
 
-        let apercu = engine.preview_status().expect("aucun aperçu");
-        assert_eq!(apercu.effect_id.as_deref(), Some("second-regarde"));
-        assert_eq!(apercu.layout_of, SECOND);
+        let preview = engine.preview_status().expect("no preview");
+        assert_eq!(preview.effect_id.as_deref(), Some("second-regarde"));
+        assert_eq!(preview.layout_of, SECOND);
         assert!(engine.device_status().is_empty());
 
         engine.stop_preview();
     }
 
-    /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.
+    /// END TO END — writes to the REAL keyboard. `#[ignore]` by default.
     ///
-    /// `cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture`
+    /// `cargo test -p candeo-desktop end_to_end -- --ignored --nocapture`
     #[test]
     #[ignore]
-    fn bout_en_bout_sur_le_vrai_clavier() {
+    fn end_to_end_on_the_real_keyboard() {
         let api = hidapi::HidApi::new().expect("HID");
         let l = layout();
         let kb = match Keyboard::open(&api, l) {
             Ok(kb) => kb,
-            Err(e) => panic!("ouverture impossible : {e}"),
+            Err(e) => panic!("cannot open: {e}"),
         };
-        println!("clavier ouvert : {}", l.name);
+        println!("keyboard open: {}", l.name);
 
         let device = DeviceRef {
             vid: l.vid,
@@ -2095,7 +2082,7 @@ mod tests {
         };
         let handle: Handle = Arc::new(Mutex::new(Some(kb)));
         let engine = Engine::default();
-        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
+        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
 
         engine
             .start(
@@ -2106,79 +2093,79 @@ mod tests {
                 l,
                 Box::new(Arc::clone(&handle)),
             )
-            .expect("démarrage");
-        println!("moteur démarré — 3 s d'onde radiale sur le clavier");
+            .expect("start");
+        println!("engine started — 3 s of radial wave on the keyboard");
         std::thread::sleep(Duration::from_secs(3));
 
-        let s = etat(&engine, device);
-        println!("état : running={} erreur={:?}", s.running, s.error);
-        assert!(s.running, "la boucle s'est arrêtée");
-        assert!(s.error.is_none(), "erreur pendant le rendu : {:?}", s.error);
+        let s = status(&engine, device);
+        println!("status: running={} error={:?}", s.running, s.error);
+        assert!(s.running, "the loop stopped");
+        assert!(s.error.is_none(), "error while rendering: {:?}", s.error);
         assert!(
             s.reaching_keyboard,
-            "aucune image n'atteint le clavier : {:?}",
+            "no frame reaches the keyboard: {:?}",
             s.device_error
         );
 
         engine.stop(device);
-        println!("arrêté proprement");
+        println!("stopped cleanly");
     }
 
     #[test]
-    fn un_effet_rend_une_image_complete() {
-        let (_rt, ctx) = prepare(EFFET, layout()).expect("chargement");
-        let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+    fn an_effect_renders_a_full_frame() {
+        let (_rt, ctx) = prepare(EFFECT, layout()).expect("load");
+        let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
 
-        // 132 positions, pas 106 : une image couvre toute la matrice.
+        // 132 positions, not 106: a frame covers the whole matrix.
         assert_eq!(bytes.len(), 132 * 3);
     }
 
     #[test]
-    fn les_positions_sans_led_restent_noires() {
-        let (_rt, ctx) = prepare(EFFET, layout()).expect("chargement");
-        let bytes = render_once(&ctx, 1.0, 0, "{}", layout().led_count()).expect("rendu");
+    fn positions_without_an_led_stay_black() {
+        let (_rt, ctx) = prepare(EFFECT, layout()).expect("load");
+        let bytes = render_once(&ctx, 1.0, 0, "{}", layout().led_count()).expect("render");
 
-        // (0, 1) est un trou de la matrice — l'effet itère `layout.keys`, il ne
-        // peut donc pas l'atteindre.
+        // (0, 1) is a hole in the matrix — the effect iterates over
+        // `layout.keys`, so it cannot reach it.
         let trou = 1usize;
         assert_eq!(&bytes[trou * 3..trou * 3 + 3], &[0, 0, 0]);
 
-        // Échap, elle, est allumée.
+        // Escape, on the other hand, is lit.
         assert_ne!(&bytes[0..3], &[0, 0, 0]);
     }
 
     #[test]
-    fn une_erreur_de_syntaxe_remonte_au_chargement() {
-        let err = erreur_de_chargement("ceci n'est pas du JavaScript {{{");
+    fn a_syntax_error_surfaces_at_load() {
+        let err = load_error("ceci n'est pas du JavaScript {{{");
         assert!(
             err.contains("chargement de l'effet"),
-            "message inattendu : {err}"
+            "unexpected message: {err}"
         );
     }
 
     #[test]
-    fn un_module_sans_export_par_defaut_est_refuse() {
-        let err = erreur_de_chargement("export const x = 1");
+    fn a_module_without_a_default_export_is_refused() {
+        let err = load_error("export const x = 1");
         assert!(
             err.contains("export par défaut"),
-            "message inattendu : {err}"
+            "unexpected message: {err}"
         );
     }
 
-    /// Une exception à l'exécution ne doit pas faire tomber le moteur : elle
-    /// remonte en `Err`, la boucle la compte et continue.
+    /// An exception at run time must not bring the engine down: it surfaces as
+    /// `Err`, and the loop counts it and carries on.
     #[test]
-    fn une_exception_a_l_execution_est_rattrapee() {
+    fn a_runtime_exception_is_caught() {
         let js = "export default { name: 'X', render() { throw new Error('boum') } }";
-        let (_rt, ctx) = prepare(js, layout()).expect("chargement");
+        let (_rt, ctx) = prepare(js, layout()).expect("load");
         let err = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).unwrap_err();
-        assert!(err.contains("boum"), "message inattendu : {err}");
+        assert!(err.contains("boum"), "unexpected message: {err}");
     }
 
-    /// Une couleur aberrante doit devenir un octet valide, pas faire échouer la
-    /// conversion loin de sa cause.
+    /// An out-of-range color must become a valid byte, not make the conversion
+    /// fail far from its cause.
     #[test]
-    fn les_couleurs_hors_bornes_sont_bornees() {
+    fn out_of_range_colors_are_clamped() {
         let js = r#"
             export default {
               name: 'X',
@@ -2187,13 +2174,14 @@ mod tests {
               },
             }
         "#;
-        let (_rt, ctx) = prepare(js, layout()).expect("chargement");
-        let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+        let (_rt, ctx) = prepare(js, layout()).expect("load");
+        let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
         assert_eq!(&bytes[0..3], &[255, 0, 0]);
     }
 
-    /// `api.js` et `packages/effects-api/src/index.ts` décrivent la même API.
-    /// Si un nom disparaît d'ici, l'éditeur promettrait une fonction absente.
+    /// `api.js` and `packages/effects-api/src/index.ts` describe the same API.
+    /// If a name disappears from here, the editor would promise a missing
+    /// function.
     #[test]
     fn api_js_exports_match_the_typescript_surface() {
         let js = r#"
@@ -2207,87 +2195,86 @@ mod tests {
               },
             }
         "#;
-        let (_rt, ctx) = prepare(js, layout()).expect("chargement");
-        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+        let (_rt, ctx) = prepare(js, layout()).expect("load");
+        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
     }
 
-    // ---------------------------------------------------------------- géométrie
+    // ---------------------------------------------------------------- geometry
 
-    /// Le rectangle des touches arrive jusqu'à l'effet, dans l'unité du Rust.
+    /// The key rectangle makes it all the way to the effect, in the Rust unit.
     ///
-    /// La barre d'espace est le cas qui résume le sujet : **une** case de
-    /// matrice, **6,25 u** de capuchon. Sans le rectangle, un effet ne peut pas
-    /// faire la différence entre elle et une touche alphabétique.
+    /// The space bar is the case that sums up the subject: **one** matrix cell,
+    /// **6.25 u** of keycap. Without the rectangle, an effect cannot tell it
+    /// apart from a letter key.
     #[test]
-    fn le_gabarit_remis_a_l_effet_porte_la_geometrie() {
+    fn the_layout_given_to_the_effect_carries_the_geometry() {
         let json: serde_json::Value =
-            serde_json::from_str(&layout_json(layout())).expect("gabarit JSON");
-        let keys = json["keys"].as_array().expect("touches");
+            serde_json::from_str(&layout_json(layout())).expect("layout JSON");
+        let keys = json["keys"].as_array().expect("keys");
 
-        let espace = keys
+        let space = keys
             .iter()
             .find(|k| k["label"] == "Espace")
-            .expect("la barre d'espace");
-        assert_eq!(espace["col"], 6, "une seule case de matrice");
-        assert_eq!(espace["w"], 6.25, "et 6,25 u de capuchon");
-        assert_eq!(espace["x"], 3.75);
-        assert_eq!(espace["y"], 5.5);
-        assert_eq!(espace["h"], 1.0);
+            .expect("the space bar");
+        assert_eq!(space["col"], 6, "a single matrix cell");
+        assert_eq!(space["w"], 6.25, "and 6.25 u of keycap");
+        assert_eq!(space["x"], 3.75);
+        assert_eq!(space["y"], 5.5);
+        assert_eq!(space["h"], 1.0);
 
         assert!(
             keys.iter().all(|k| k["w"].as_f64().unwrap_or(0.0) > 0.0),
-            "une touche sans largeur ne se distingue pas d'une touche sans géométrie"
+            "a key without a width cannot be told apart from a key without geometry"
         );
     }
 
-    /// Un gabarit dont personne n'a dessiné la disposition.
+    /// A layout whose arrangement nobody has drawn.
     ///
-    /// Il n'en existe pas dans ce dépôt — `candeo_device::Key` porte un
-    /// rectangle obligatoire — mais c'est ce que sera un appareil contribué sans
-    /// la capacité `geometry` de `docs/design/device-sdk.md` §3.2. Deux
-    /// positions suffisent : ce qui est testé est l'absence des champs.
-    const SANS_GEOMETRIE: &str = r#"{"name":"Gabarit non dessiné","rows":1,"cols":2,"keys":[{"index":0,"row":0,"col":0,"label":"A"},{"index":1,"row":0,"col":1,"label":"B"}]}"#;
+    /// There is none in this repository — `candeo_device::Key` carries a
+    /// mandatory rectangle — but that is what a device contributed without the
+    /// `geometry` capability of `docs/design/device-sdk.md` §3.2 will be. Two
+    /// positions are enough: what is tested is the absence of the fields.
+    const NO_GEOMETRY: &str = r#"{"name":"Gabarit non dessiné","rows":1,"cols":2,"keys":[{"index":0,"row":0,"col":0,"label":"A"},{"index":1,"row":0,"col":1,"label":"B"}]}"#;
 
-    /// **Le motif qu'on combat.** Sans géométrie, `key.x` vaut `undefined`, la
-    /// distance `NaN`, et la couleur serait bornée à zéro : un clavier noir,
-    /// sans une erreur, et une session de diagnostic pour comprendre pourquoi.
-    /// L'effet doit échouer en nommant ce qui manque.
+    /// **The pattern we are fighting.** Without geometry, `key.x` is
+    /// `undefined`, the distance `NaN`, and the color would be clamped to zero:
+    /// a black keyboard, without a single error, and a round of debugging to
+    /// understand why. The effect must fail by naming what is missing.
     #[test]
-    fn l_onde_radiale_refuse_un_gabarit_sans_geometrie() {
-        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
-        let (_rt, ctx) =
-            prepare_with_layout(js, 2, SANS_GEOMETRIE.to_string(), None).expect("chargement");
+    fn the_radial_wave_refuses_a_layout_without_geometry() {
+        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
         let err = render_once(&ctx, 0.0, 0, "{}", 2).unwrap_err();
-        assert!(err.contains("géométrie"), "message inattendu : {err}");
+        assert!(err.contains("géométrie"), "unexpected message: {err}");
         assert!(
             err.contains('A') || err.contains('B'),
-            "le message doit nommer la touche fautive : {err}"
+            "the message must name the offending key: {err}"
         );
     }
 
-    /// Et l'onde de matrice, elle, y tourne : c'est tout l'intérêt de l'avoir
-    /// gardée plutôt que corrigée. Un gabarit non dessiné garde un effet.
+    /// And the matrix wave, for its part, does run there: that is the whole
+    /// point of having kept it rather than fixed it. A layout that has not been
+    /// drawn keeps an effect.
     #[test]
-    fn l_onde_matricielle_tourne_sans_geometrie() {
+    fn the_matrix_wave_runs_without_geometry() {
         let js = crate::builtins::find("onde-matricielle")
-            .expect("intégré")
+            .expect("built-in")
             .js;
-        let (_rt, ctx) =
-            prepare_with_layout(js, 2, SANS_GEOMETRIE.to_string(), None).expect("chargement");
+        let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
-        let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("rendu");
+        let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("render");
         assert!(
             bytes.iter().any(|&c| c != 0),
-            "l'onde matricielle n'a besoin que de `row` et `col`"
+            "the matrix wave only needs `row` and `col`"
         );
     }
 
-    // ------------------------------------------------------- bornes d'exécution
+    // ------------------------------------------------------- execution limits
 
-    /// Une boucle qui ne rend jamais la main, écrite comme on l'écrit par
-    /// accident : une condition de sortie qui n'arrive pas.
-    const RENDU_SANS_FIN: &str = r#"
+    /// A loop that never gives control back, written the way it gets written by
+    /// accident: an exit condition that never comes.
+    const ENDLESS_RENDER: &str = r#"
         export default {
           name: 'Sans fin',
           render() {
@@ -2297,8 +2284,8 @@ mod tests {
         }
     "#;
 
-    /// Un état qui grandit à chaque image, et que rien ne libère.
-    const ALLOCATION_SANS_FIN: &str = r#"
+    /// A state that grows on every frame, and that nothing frees.
+    const ENDLESS_ALLOCATION: &str = r#"
         const garde = []
         export default {
           name: 'Fuite',
@@ -2308,12 +2295,13 @@ mod tests {
         }
     "#;
 
-    /// Comme [`demarrer`], mais avec un effet donné, et sans exiger qu'il parte.
-    fn demarrer_js(
+    /// Like [`start`], but with a given effect, and without requiring it to
+    /// start.
+    fn start_js(
         engine: &Engine,
         device: DeviceRef,
         js: &str,
-        out: Arc<Sortie>,
+        out: Arc<Output>,
     ) -> Result<(), String> {
         engine.start(
             device,
@@ -2325,17 +2313,17 @@ mod tests {
         )
     }
 
-    /// Lance `f` à côté, et rend son résultat — ou échoue si elle ne revient pas.
+    /// Runs `f` on the side, and returns its result — or fails if it does not
+    /// come back.
     ///
-    /// Appeler directement une fonction qu'on soupçonne de ne jamais revenir
-    /// donne un test qui ne peut pas échouer : il gèle, et c'est l'intégration
-    /// continue qui finit par le tuer, des heures plus tard. Ici, c'est le test
-    /// qui tranche. Le fil laissé derrière tournerait dans le vide, mais il
-    /// n'empêche rien de se terminer — et un test déjà échoué n'a plus rien à
-    /// protéger.
-    fn sans_geler<T: Send + 'static>(
+    /// Calling a function suspected of never returning directly gives a test
+    /// that cannot fail: it hangs, and it is CI that ends up killing it, hours
+    /// later. Here, the test decides. The thread left behind would spin in the
+    /// void, but it prevents nothing from finishing — and a test that has
+    /// already failed has nothing left to protect.
+    fn without_hanging<T: Send + 'static>(
         patience: Duration,
-        quoi: &str,
+        what: &str,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -2343,136 +2331,124 @@ mod tests {
             let _ = tx.send(f());
         });
         rx.recv_timeout(patience)
-            .unwrap_or_else(|_| panic!("{quoi} : rien en {patience:?}"))
+            .unwrap_or_else(|_| panic!("{what}: nothing in {patience:?}"))
     }
 
-    /// **Un effet qui ne rend jamais la main ne gèle plus son fil.**
+    /// **An effect that never gives control back no longer freezes its
+    /// thread.**
     ///
-    /// C'est la panne que les bornes existent pour traiter : sans elles, le
-    /// drapeau `stop` ne serait jamais relu, et fermer la fenêtre ne sauverait
-    /// pas — un effet tourne fenêtre fermée. L'arrêt doit donc venir du moteur,
-    /// par le chemin d'erreur ordinaire.
+    /// This is the failure the limits exist to handle: without them, the `stop`
+    /// flag would never be read again, and closing the window would not help —
+    /// an effect runs with the window closed. The stop must therefore come from
+    /// the engine, through the ordinary error path.
     #[test]
-    fn un_effet_qui_boucle_a_chaque_image_est_arrete_proprement() {
+    fn an_effect_looping_on_every_frame_is_stopped_cleanly() {
         let engine = Engine::default();
-        let out = Arc::new(Sortie::default());
-        demarrer_js(&engine, PREMIER, RENDU_SANS_FIN, Arc::clone(&out)).expect("démarrage");
+        let out = Arc::new(Output::default());
+        start_js(&engine, FIRST, ENDLESS_RENDER, Arc::clone(&out)).expect("start");
 
-        // Le garde-fou du test : si rien n'arrêtait la boucle, c'est lui qui
-        // échouerait, et non l'intégration continue qui expirerait des heures
-        // plus tard. Trois fois ce que la borne promet — trente images coupées,
-        // chacune de tout son budget.
-        attendre_au_plus(
-            BUDGET_IMAGE * MAX_CONSECUTIVE_ERRORS * 3,
+        // The test's safeguard: if nothing stopped the loop, this is what would
+        // fail, rather than CI timing out hours later. Three times what the
+        // limit promises — thirty cut frames, each taking its whole budget.
+        wait_at_most(
+            FRAME_BUDGET * MAX_CONSECUTIVE_ERRORS * 3,
             "la boucle ne s'est pas arrêtée",
-            || !etat(&engine, PREMIER).running,
+            || !status(&engine, FIRST).running,
         );
 
-        let erreur = etat(&engine, PREMIER)
-            .error
-            .expect("aucune erreur consignée");
+        let error = status(&engine, FIRST).error.expect("no error recorded");
         assert!(
-            erreur.contains("temps de calcul"),
-            "la cause n'est pas nommée : {erreur}"
+            error.contains("temps de calcul"),
+            "the cause is not named: {error}"
         );
         assert_eq!(
-            out.ecrites.load(Ordering::Relaxed),
+            out.written.load(Ordering::Relaxed),
             0,
-            "une image est sortie d'un effet qui n'en a jamais terminé une"
+            "a frame came out of an effect that never finished one"
         );
 
-        // La boucle a bien rendu son fil : sans quoi c'est ici que le test
-        // s'arrêterait pour toujours, sur l'attente de la fin.
-        engine.stop(PREMIER);
+        // The loop did give its thread back: otherwise this is where the test
+        // would stop forever, waiting for it to end.
+        engine.stop(FIRST);
     }
 
-    /// **Un effet qui alloue sans fin n'emporte plus que lui-même.**
+    /// **An effect that allocates endlessly now takes down only itself.**
     ///
-    /// Les premières images passent — l'effet a le droit de garder un état —,
-    /// puis la borne tombe et le dépassement devient une erreur d'image comme
-    /// une autre.
+    /// The first frames go through — the effect is allowed to keep state —,
+    /// then the limit hits and exceeding it becomes a frame error like any
+    /// other.
     #[test]
-    fn un_effet_qui_alloue_sans_fin_est_arrete_proprement() {
+    fn an_effect_allocating_endlessly_is_stopped_cleanly() {
         let engine = Engine::default();
-        let out = Arc::new(Sortie::default());
-        demarrer_js(&engine, PREMIER, ALLOCATION_SANS_FIN, Arc::clone(&out)).expect("démarrage");
+        let out = Arc::new(Output::default());
+        start_js(&engine, FIRST, ENDLESS_ALLOCATION, Arc::clone(&out)).expect("start");
 
-        attendre("la boucle ne s'est pas arrêtée", || {
-            !etat(&engine, PREMIER).running
+        wait_for("la boucle ne s'est pas arrêtée", || {
+            !status(&engine, FIRST).running
         });
 
-        let erreur = etat(&engine, PREMIER)
-            .error
-            .expect("aucune erreur consignée");
-        assert!(
-            erreur.contains("mémoire"),
-            "la cause n'est pas nommée : {erreur}"
-        );
+        let error = status(&engine, FIRST).error.expect("no error recorded");
+        assert!(error.contains("mémoire"), "the cause is not named: {error}");
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
     }
 
-    /// **Une boucle hors de `render` ne bloque plus le démarrage.**
+    /// **A loop outside `render` no longer blocks the start.**
     ///
-    /// Le corps du module s'exécute au chargement, hors de toute image, et
-    /// `start` en attend le verdict, le verrou de l'appareil à la main : sans
-    /// borne, ce clavier ne démarrerait ni n'arrêterait plus jamais rien.
+    /// The module body runs at load time, outside any frame, and `start` waits
+    /// for its verdict while holding the device lock: without a limit, that
+    /// keyboard would never start or stop anything again.
     #[test]
-    fn un_effet_qui_boucle_au_chargement_rend_la_main() {
-        let erreur = sans_geler(
-            BUDGET_CHARGEMENT * 3,
-            "le démarrage n'est jamais revenu",
-            || {
-                let engine = Engine::default();
-                demarrer_js(
-                    &engine,
-                    PREMIER,
-                    "while (true) {}\nexport default { name: 'X', render() {} }",
-                    Arc::new(Sortie::default()),
-                )
-                .expect_err("le chargement aurait dû être interrompu")
-            },
-        );
+    fn an_effect_looping_at_load_gives_control_back() {
+        let error = without_hanging(LOAD_BUDGET * 3, "le démarrage n'est jamais revenu", || {
+            let engine = Engine::default();
+            start_js(
+                &engine,
+                FIRST,
+                "while (true) {}\nexport default { name: 'X', render() {} }",
+                Arc::new(Output::default()),
+            )
+            .expect_err("le chargement aurait dû être interrompu")
+        });
 
         assert!(
-            erreur.contains("temps de calcul"),
-            "la cause n'est pas nommée : {erreur}"
+            error.contains("temps de calcul"),
+            "the cause is not named: {error}"
         );
     }
 
-    /// Une exception ordinaire garde son message : les bornes n'expliquent que
-    /// ce qu'elles ont coupé, et un `throw` de l'effet se lit déjà tout seul.
+    /// An ordinary exception keeps its message: the limits only explain what
+    /// they cut, and a `throw` from the effect already speaks for itself.
     #[test]
-    fn une_exception_ordinaire_garde_son_message() {
+    fn an_ordinary_exception_keeps_its_message() {
         let engine = Engine::default();
         let js = "export default { name: 'X', render() { throw new Error('boum') } }";
-        demarrer_js(&engine, PREMIER, js, Arc::new(Sortie::default())).expect("démarrage");
+        start_js(&engine, FIRST, js, Arc::new(Output::default())).expect("start");
 
-        attendre("aucune erreur consignée", || {
-            etat(&engine, PREMIER).error.is_some()
+        wait_for("aucune erreur consignée", || {
+            status(&engine, FIRST).error.is_some()
         });
-        let erreur = etat(&engine, PREMIER).error.unwrap();
-        assert!(erreur.contains("boum"), "message réécrit : {erreur}");
+        let error = status(&engine, FIRST).error.unwrap();
+        assert!(error.contains("boum"), "message rewritten: {error}");
 
-        engine.stop(PREMIER);
+        engine.stop(FIRST);
     }
 
-    /// **Les bornes ne doivent étrangler aucun effet honnête.**
+    /// **The limits must strangle no honest effect.**
     ///
-    /// Le tampon d'image ne coûte rien — `bootstrap.js` le réutilise — mais un
-    /// effet a le droit de garder un état et de le faire vivre. Deux mille
-    /// particules et une traînée d'une seconde d'images, pour un clavier qui
-    /// compte 132 LED, c'est démesuré à dessein : si les bornes laissent passer
-    /// celui-là, elles laissent passer tout ce qu'on écrira.
+    /// The frame buffer costs nothing — `bootstrap.js` reuses it — but an effect
+    /// is allowed to keep state and to keep it alive. Two thousand particles and
+    /// a trail of one second of frames, for a keyboard with 132 LEDs, is
+    /// outlandish on purpose: if the limits let that one through, they let
+    /// through anything anyone will write.
     ///
-    /// Le rendu va au-delà de la profondeur de la traînée, jusqu'à son régime
-    /// permanent : un état qui ne se libère qu'à la soixantième image ne se voit
-    /// pas sur trente.
+    /// Rendering goes beyond the depth of the trail, to its steady state: a
+    /// state that is only freed at the sixtieth frame does not show over thirty.
     ///
-    /// La marge est vérifiée, et pas seulement le succès : un effet qui
-    /// passerait de justesse ne passerait plus sur la machine du voisin.
+    /// The margin is checked, not only the success: an effect that passed by a
+    /// hair would no longer pass on the machine next door.
     #[test]
-    fn les_bornes_laissent_passer_un_effet_qui_garde_un_etat() {
+    fn the_limits_let_a_stateful_effect_through() {
         let js = r#"
             const particules = Array.from({ length: 2000 }, (_, i) => ({
               x: (i * 7) % 20,
@@ -2501,200 +2477,198 @@ mod tests {
         "#;
 
         let budget = Rc::new(Budget::default());
-        budget.accorder(BUDGET_CHARGEMENT);
-        let (rt, ctx) = prepare_budgeted(js, layout(), &budget).expect("chargement");
+        budget.grant(LOAD_BUDGET);
+        let (rt, ctx) = prepare_budgeted(js, layout(), &budget).expect("load");
 
-        for image in 0..90u32 {
-            budget.accorder(BUDGET_IMAGE);
+        for frame in 0..90u32 {
+            budget.grant(FRAME_BUDGET);
             render_once(
                 &ctx,
-                f64::from(image) / f64::from(FPS),
-                image,
+                f64::from(frame) / f64::from(FPS),
+                frame,
                 "{}",
                 layout().led_count(),
             )
-            .unwrap_or_else(|e| panic!("image {image} : {e}"));
+            .unwrap_or_else(|e| panic!("frame {frame}: {e}"));
         }
 
-        let utilise = rt.memory_usage().malloc_size as usize;
+        let used = rt.memory_usage().malloc_size as usize;
         assert!(
-            utilise * 4 < BUDGET_MEMOIRE,
-            "un effet à état frôle la borne mémoire : {utilise} octets sur {BUDGET_MEMOIRE}"
+            used * 4 < MEMORY_BUDGET,
+            "a stateful effect is close to the memory limit: {used} bytes of {MEMORY_BUDGET}"
         );
     }
 
-    // ------------------------------------------------------------ intégrés
+    // ------------------------------------------------------------ built-ins
     //
-    // Les effets livrés passent par le même moteur que ceux de l'utilisateur,
-    // donc par les mêmes tests. Un effet intégré cassé ne doit pas se découvrir
-    // à l'exécution, chez celui qui l'ouvre en premier.
+    // Shipped effects go through the same engine as the user's, hence through
+    // the same tests. A broken built-in effect must not be discovered at run
+    // time, by whoever opens it first.
 
-    /// Instants d'échantillonnage. Plusieurs, et pas seulement zéro : une
-    /// division par la durée d'un cycle ou un dépassement de la dernière rangée
-    /// ne se voit qu'une fois l'animation commencée.
-    const INSTANTS: [f64; 4] = [0.0, 0.4, 1.3, 2.7];
+    /// Sampling times. Several, and not only zero: a division by a cycle's
+    /// duration or an overrun past the last row only shows once the animation
+    /// has started.
+    const SAMPLE_TIMES: [f64; 4] = [0.0, 0.4, 1.3, 2.7];
 
     #[test]
-    fn chaque_effet_integre_rend_une_image_complete() {
+    fn every_built_in_effect_renders_a_full_frame() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) =
-                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
 
-            for (i, time) in INSTANTS.iter().enumerate() {
+            for (i, time) in SAMPLE_TIMES.iter().enumerate() {
                 let bytes = render_once(&ctx, *time, i as u32, "{}", layout().led_count())
-                    .unwrap_or_else(|e| panic!("« {} » à t={time} : {e}", b.id));
+                    .unwrap_or_else(|e| panic!("{} at t={time}: {e}", b.id));
 
-                assert_eq!(bytes.len(), 132 * 3, "« {} » à t={time}", b.id);
-                // (0, 1) est un trou de la matrice. Un effet qui l'atteint
-                // n'itère pas `layout.keys` : il travaille sur les 132 cases au
-                // lieu des 106 positions éclairées.
+                assert_eq!(bytes.len(), 132 * 3, "{} at t={time}", b.id);
+                // (0, 1) is a hole in the matrix. An effect that reaches it
+                // does not iterate over `layout.keys`: it works on the 132
+                // cells instead of the 106 lit positions.
                 assert_eq!(
                     &bytes[3..6],
                     &[0, 0, 0],
-                    "« {} » écrit sur une position sans LED",
+                    "{} writes to a position without an LED",
                     b.id
                 );
             }
         }
     }
 
-    /// Un effet livré doit être visible dès sa première image : une image noire
-    /// au démarrage ressemble à un effet qui n'a pas démarré.
+    /// A shipped effect must be visible from its first frame: a black frame at
+    /// start looks like an effect that did not start.
     #[test]
-    fn chaque_effet_integre_allume_quelque_chose_des_la_premiere_image() {
+    fn every_built_in_effect_lights_something_from_the_first_frame() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) =
-                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
-            let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+            let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
 
             assert!(
                 bytes.iter().any(|&c| c != 0),
-                "« {} » rend une image entièrement noire",
+                "{} renders an entirely black frame",
                 b.id
             );
         }
     }
 
-    /// Le manifeste annoncé en Rust et celui que le module déclare décrivent le
-    /// même effet. Sans ce test, la galerie pourrait promettre un paramètre que
-    /// le code ne lit pas — un réglage sans effet, que rien ne signale.
+    /// The manifest announced in Rust and the one the module declares describe
+    /// the same effect. Without this test, the gallery could promise a
+    /// parameter that the code does not read — a setting with no effect, that
+    /// nothing reports.
     #[test]
-    fn les_manifestes_integres_correspondent_aux_modules() {
+    fn built_in_manifests_match_their_modules() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) =
-                prepare(b.js, layout()).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
 
             let raw: String = ctx.with(|ctx| {
                 ctx.globals()
                     .get("__candeo_manifest")
-                    .expect("manifeste déclaré")
+                    .expect("declared manifest")
             });
-            let declare: serde_json::Value = serde_json::from_str(&raw).expect("manifeste JSON");
+            let declared: serde_json::Value = serde_json::from_str(&raw).expect("manifest JSON");
 
-            let annonce = serde_json::json!({
+            let announced = serde_json::json!({
                 "name": b.name,
                 "description": b.description,
                 "params": serde_json::from_str::<serde_json::Value>(b.params).expect("params JSON"),
             });
-            assert_eq!(declare, annonce, "« {} »", b.id);
+            assert_eq!(declared, announced, "{}", b.id);
         }
     }
 
-    // ------------------------------------------------- les deux ondes, côte à côte
+    // ------------------------------------------------- the two waves, side by side
     //
-    // Deux couples de touches du **vrai** gabarit, choisis pour que chacun
-    // départage les deux espaces. Rien n'est simulé ici : la géométrie vient de
-    // `layout.rs`, et c'est elle qui rend la vérification possible sans clavier.
+    // Two pairs of keys from the **real** layout, chosen so that each one tells
+    // the two spaces apart. Nothing is simulated here: the geometry comes from
+    // `layout.rs`, and that is what makes the check possible without a keyboard.
 
-    /// La couleur d'une LED dans une image rendue.
-    fn couleur(image: &[u8], index: usize) -> &[u8] {
-        &image[index * 3..index * 3 + 3]
+    /// The color of an LED in a rendered frame.
+    fn color_at(frame: &[u8], index: usize) -> &[u8] {
+        &frame[index * 3..index * 3 + 3]
     }
 
-    /// La première image d'un effet livré, sur le gabarit par défaut.
-    fn premiere_image(id: &str) -> Vec<u8> {
+    /// The first frame of a shipped effect, on the default layout.
+    fn first_frame(id: &str) -> Vec<u8> {
         let js = crate::builtins::find(id)
-            .unwrap_or_else(|| panic!("« {id} » n'est pas livré"))
+            .unwrap_or_else(|| panic!("{id} is not shipped"))
             .js;
-        let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("« {id} » : {e}"));
-        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu")
+        let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("{id}: {e}"));
+        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render")
     }
 
-    /// « L » (index 75) et « ù » (index 77) sont à la **même distance physique**
-    /// du centre du dessin — 1 u de part et d'autre, 0,75 u plus bas — et à deux
-    /// distances de matrice différentes : 1,5 case contre 0,5.
+    /// "L" (index 75) and "ù" (index 77) are at the **same physical distance**
+    /// from the center of the drawing — 1 u on either side, 0.75 u lower — and at
+    /// two different matrix distances: 1.5 cells against 0.5.
     ///
-    /// L'onde radiale doit donc les peindre de la même couleur, et l'onde
-    /// matricielle non. C'est la définition de « radiale », vérifiée plutôt
-    /// qu'annoncée.
+    /// The radial wave must therefore paint them the same color, and the matrix
+    /// wave must not. That is the definition of "radial", checked rather than
+    /// announced.
     #[test]
-    fn l_onde_radiale_mesure_en_distance_physique() {
-        let radiale = premiere_image("onde-radiale");
+    fn the_radial_wave_measures_physical_distance() {
+        let radial = first_frame("onde-radiale");
         assert_eq!(
-            couleur(&radiale, 75),
-            couleur(&radiale, 77),
-            "deux touches à égale distance physique doivent avoir la même couleur"
+            color_at(&radial, 75),
+            color_at(&radial, 77),
+            "two keys at equal physical distance must have the same color"
         );
 
-        let matricielle = premiere_image("onde-matricielle");
+        let matrix = first_frame("onde-matricielle");
         assert_ne!(
-            couleur(&matricielle, 75),
-            couleur(&matricielle, 77),
-            "en distance de matrice, elles ne sont pas à égale distance"
+            color_at(&matrix, 75),
+            color_at(&matrix, 77),
+            "in matrix distance, they are not at equal distance"
         );
     }
 
-    /// Le couple symétrique : « L » (index 75) et « * » (index 78) sont à la
-    /// **même distance de matrice** — 1,5 case de part et d'autre — mais à
-    /// 1,25 u et 2,14 u du centre du dessin, parce que la rangée est décalée et
-    /// que l'Entrée en L ne tombe pas sur la grille.
+    /// The symmetric pair: "L" (index 75) and "*" (index 78) are at the **same
+    /// matrix distance** — 1.5 cells on either side — but at 1.25 u and 2.14 u
+    /// from the center of the drawing, because the row is staggered and the
+    /// L-shaped Enter key does not fall on the grid.
     ///
-    /// C'est ce qui fait de l'onde matricielle un effet à part entière, et non
-    /// une version fausse de l'autre : elle rend exactement ce qu'elle annonce.
+    /// That is what makes the matrix wave an effect in its own right, and not a
+    /// wrong version of the other one: it renders exactly what it announces.
     #[test]
-    fn l_onde_matricielle_mesure_en_distance_de_matrice() {
-        let matricielle = premiere_image("onde-matricielle");
+    fn the_matrix_wave_measures_matrix_distance() {
+        let matrix = first_frame("onde-matricielle");
         assert_eq!(
-            couleur(&matricielle, 75),
-            couleur(&matricielle, 78),
-            "deux touches à égale distance de matrice doivent avoir la même couleur"
+            color_at(&matrix, 75),
+            color_at(&matrix, 78),
+            "two keys at equal matrix distance must have the same color"
         );
 
-        let radiale = premiere_image("onde-radiale");
+        let radial = first_frame("onde-radiale");
         assert_ne!(
-            couleur(&radiale, 75),
-            couleur(&radiale, 78),
-            "physiquement, elles ne sont pas à égale distance"
+            color_at(&radial, 75),
+            color_at(&radial, 78),
+            "physically, they are not at equal distance"
         );
     }
 
-    /// La barre d'espace est peinte d'après le **milieu de son capuchon**.
+    /// The space bar is painted according to **the middle of its keycap**.
     ///
-    /// Une case de matrice, 6,25 u de large : son centre est à 6,875 u, pas au
-    /// bord gauche (3,75 u) ni à la colonne 6. La touche de la rangée du dessus
-    /// dont le capuchon est centré au même endroit — « B », à 6,75 u — doit donc
-    /// être presque à la même distance du centre, alors que rien dans la matrice
-    /// ne le dit.
+    /// One matrix cell, 6.25 u wide: its center is at 6.875 u, not at the left
+    /// edge (3.75 u) nor at column 6. The key of the row above whose keycap is
+    /// centered at the same place — "B", at 6.75 u — must therefore be at almost
+    /// the same distance from the center, although nothing in the matrix says
+    /// so.
     #[test]
-    fn l_onde_radiale_place_la_barre_d_espace_au_milieu_de_son_capuchon() {
-        let radiale = premiere_image("onde-radiale");
+    fn the_radial_wave_places_the_space_bar_at_the_middle_of_its_keycap() {
+        let radial = first_frame("onde-radiale");
 
-        // Distances au centre du dessin (11,25 ; 3,25) : « Espace » à 5,17 u,
-        // « B » à 4,83 u — 0,34 u d'écart, donc des teintes voisines. Mesurer
-        // depuis le bord gauche du capuchon (3,75 u) porterait l'écart à 2,7 u,
-        // et les deux couleurs n'auraient plus rien à voir.
-        let espace = couleur(&radiale, 116);
-        let touche_b = couleur(&radiale, 94);
-        let ecart = espace
+        // Distances to the center of the drawing (11.25; 3.25): "Espace" (Space)
+        // at 5.17 u, "B" at 4.83 u — a 0.34 u gap, hence neighboring hues.
+        // Measuring from the left edge of the keycap (3.75 u) would widen the
+        // gap to 2.7 u, and the two colors would have nothing in common.
+        let space = color_at(&radial, 116);
+        let key_b = color_at(&radial, 94);
+        let gap = space
             .iter()
-            .zip(touche_b)
+            .zip(key_b)
             .map(|(e, t)| e.abs_diff(*t) as u32)
             .max()
-            .expect("trois composantes");
+            .expect("three components");
 
         assert!(
-            ecart < 60,
-            "« Espace » et « B » sont physiquement voisins, leurs couleurs devraient l'être : {espace:?} contre {touche_b:?}"
+            gap < 60,
+            "Space and B are physically close, their colors should be too: {space:?} vs {key_b:?}"
         );
     }
 }
