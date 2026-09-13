@@ -2082,7 +2082,9 @@ mod tests {
         };
         let handle: Handle = Arc::new(Mutex::new(Some(kb)));
         let engine = Engine::default();
-        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let js = crate::builtins::by_slug("onde-radiale")
+            .expect("built-in")
+            .js;
 
         engine
             .start(
@@ -2242,7 +2244,9 @@ mod tests {
     /// understand why. The effect must fail by naming what is missing.
     #[test]
     fn the_radial_wave_refuses_a_layout_without_geometry() {
-        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let js = crate::builtins::by_slug("onde-radiale")
+            .expect("built-in")
+            .js;
         let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
         let err = render_once(&ctx, 0.0, 0, "{}", 2).unwrap_err();
@@ -2258,7 +2262,7 @@ mod tests {
     /// drawn keeps an effect.
     #[test]
     fn the_diagonal_wave_runs_without_geometry() {
-        let js = crate::builtins::find("onde-matricielle")
+        let js = crate::builtins::by_slug("onde-matricielle")
             .expect("built-in")
             .js;
         let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
@@ -2511,13 +2515,13 @@ mod tests {
     #[test]
     fn every_built_in_effect_renders_a_full_frame() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.slug));
 
             for (i, time) in SAMPLE_TIMES.iter().enumerate() {
                 let bytes = render_once(&ctx, *time, i as u32, "{}", layout().led_count())
-                    .unwrap_or_else(|e| panic!("{} at t={time}: {e}", b.id));
+                    .unwrap_or_else(|e| panic!("{} at t={time}: {e}", b.slug));
 
-                assert_eq!(bytes.len(), 132 * 3, "{} at t={time}", b.id);
+                assert_eq!(bytes.len(), 132 * 3, "{} at t={time}", b.slug);
                 // (0, 1) is a hole in the matrix. An effect that reaches it
                 // does not iterate over `layout.keys`: it works on the 132
                 // cells instead of the 106 lit positions.
@@ -2525,7 +2529,7 @@ mod tests {
                     &bytes[3..6],
                     &[0, 0, 0],
                     "{} writes to a position without an LED",
-                    b.id
+                    b.slug
                 );
             }
         }
@@ -2536,13 +2540,13 @@ mod tests {
     #[test]
     fn every_built_in_effect_lights_something_from_the_first_frame() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.slug));
             let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
 
             assert!(
                 bytes.iter().any(|&c| c != 0),
                 "{} renders an entirely black frame",
-                b.id
+                b.slug
             );
         }
     }
@@ -2554,7 +2558,7 @@ mod tests {
     #[test]
     fn built_in_manifests_match_their_modules() {
         for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.slug));
 
             let raw: String = ctx.with(|ctx| {
                 ctx.globals()
@@ -2564,11 +2568,12 @@ mod tests {
             let declared: serde_json::Value = serde_json::from_str(&raw).expect("manifest JSON");
 
             let announced = serde_json::json!({
+                "uid": b.uid,
                 "name": b.name,
                 "description": b.description,
                 "params": serde_json::from_str::<serde_json::Value>(b.params).expect("params JSON"),
             });
-            assert_eq!(declared, announced, "{}", b.id);
+            assert_eq!(declared, announced, "{}", b.slug);
         }
     }
 
@@ -2585,7 +2590,7 @@ mod tests {
 
     /// The first frame of a shipped effect, on the default layout.
     fn first_frame(id: &str) -> Vec<u8> {
-        let js = crate::builtins::find(id)
+        let js = crate::builtins::by_slug(id)
             .unwrap_or_else(|| panic!("{id} is not shipped"))
             .js;
         let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("{id}: {e}"));
@@ -2663,7 +2668,7 @@ mod tests {
     /// the color "K" (row 3, column 8) had a second earlier.
     #[test]
     fn the_diagonal_wave_moves_away_from_the_corner() {
-        let js = crate::builtins::find("onde-matricielle")
+        let js = crate::builtins::by_slug("onde-matricielle")
             .expect("built-in")
             .js;
         let (_rt, ctx) = prepare(js, layout()).expect("load");

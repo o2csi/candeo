@@ -60,3 +60,28 @@ export function clearDraft(id: string | null): void {
     // Voir `writeDraft`.
   }
 }
+
+let migration: Promise<void> | null = null
+
+/**
+ * Moves drafts saved under an effect id from before uids to the uid that id now
+ * designates. Once per window load, and again after a failure.
+ *
+ * A draft already saved under the uid is newer than the one under the old id:
+ * it stays, and the old one is left where it is rather than lost.
+ */
+export function migrateDrafts(renames: () => Promise<Record<string, string>>): Promise<void> {
+  migration ??= renames()
+    .then((table) => {
+      for (const [old, uid] of Object.entries(table)) {
+        const source = readDraft(old)
+        if (source === null || readDraft(uid) !== null) continue
+        writeDraft(uid, source)
+        if (readDraft(uid) === source) clearDraft(old)
+      }
+    })
+    .catch(() => {
+      migration = null
+    })
+  return migration
+}

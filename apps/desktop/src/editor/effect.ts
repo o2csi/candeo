@@ -69,6 +69,16 @@ export interface Compiled {
  * connu plutôt que de vider son champ à chaque frappe.
  */
 export async function nameInSource(source: string): Promise<string | null> {
+  return stringInSource(source, 'name')
+}
+
+/** The uid the source declares, or `null` when it has none (yet). */
+export async function uidInSource(source: string): Promise<string | null> {
+  return stringInSource(source, 'uid')
+}
+
+/** A string literal property of the effect object, without running anything. */
+async function stringInSource(source: string, key: string): Promise<string | null> {
   const ts = await compiler()
   const file = ts.createSourceFile(FILE, source, ts.ScriptTarget.ES2020, true)
 
@@ -80,9 +90,51 @@ export async function nameInSource(source: string): Promise<string | null> {
   }
   if (!ts.isObjectLiteralExpression(exported)) return null
 
-  const literal = member(ts, exported, 'name')
+  const literal = member(ts, exported, key)
   if (!literal || literal === 'méthode' || !ts.isStringLiteralLike(literal)) return null
   return literal.text
+}
+
+/**
+ * The source with its `uid` set to this value.
+ *
+ * The literal is replaced when there is one; otherwise `uid` is inserted as the
+ * first property of the effect object, on its own line when the properties are.
+ * The author sees it in the code, and keeps it when sharing the file.
+ *
+ * Located by the parser, like {@link renameInSource}. A source without a
+ * recognizable effect object comes back unchanged: saving then fails on the
+ * manifest, with the message that says why.
+ */
+export async function withUid(source: string, uid: string): Promise<string> {
+  const ts = await compiler()
+  const file = ts.createSourceFile(FILE, source, ts.ScriptTarget.ES2020, true)
+
+  let exported: TS.Expression
+  try {
+    exported = unwrap(ts, defaultExport(ts, file))
+  } catch {
+    return source
+  }
+  if (!ts.isObjectLiteralExpression(exported)) return source
+
+  const literal = member(ts, exported, 'uid')
+  if (literal !== undefined) {
+    if (literal === 'méthode' || !ts.isStringLiteralLike(literal)) return source
+    const start = literal.getStart(file)
+    const quote = source[start] ?? "'"
+    return source.slice(0, start) + quote + uid + quote + source.slice(literal.getEnd())
+  }
+
+  const first = exported.properties[0]
+  if (first === undefined) {
+    const brace = exported.getStart(file) + 1
+    return `${source.slice(0, brace)} uid: '${uid}' ${source.slice(brace)}`
+  }
+  const at = first.getStart(file)
+  const indent = source.slice(source.lastIndexOf('\n', at - 1) + 1, at)
+  const separator = indent.trim() === '' ? `,\n${indent}` : ', '
+  return `${source.slice(0, at)}uid: '${uid}'${separator}${source.slice(at)}`
 }
 
 /**
@@ -171,10 +223,18 @@ function readManifest(ts: typeof TS, source: string): EffectManifest {
     throw new Error("l'effet doit avoir un `name`, sous forme de chaîne littérale")
   }
 
+  // The editor writes it before compiling: absent here means the source has
+  // no effect object it could write it into.
+  const uid = text(ts, file, exported, 'uid')
+  if (uid === null) {
+    throw new Error("l'effet doit avoir un `uid`, sous forme de chaîne littérale")
+  }
+
   const description = text(ts, file, exported, 'description')
   const declared = member(ts, exported, 'params')
 
   return {
+    uid,
     name,
     ...(description === null ? {} : { description }),
     ...(declared === undefined ? {} : { params: params(ts, file, declared) }),

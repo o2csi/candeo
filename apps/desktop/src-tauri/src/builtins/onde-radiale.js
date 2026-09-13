@@ -13,6 +13,7 @@
 import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
+  uid: '33d117dc-57f2-48dd-a717-d160ad0f0cfc',
   name: 'Onde radiale',
   description: 'Une onde de teinte se propage en cercles, à la distance physique des touches',
   params: {

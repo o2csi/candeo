@@ -472,6 +472,23 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
     )
 }
 
+/// Moves effects saved before uids to their uid, at application startup. See
+/// [`storage::Store::migrate_effect_ids`].
+///
+/// A failure is logged and the startup goes on: the effects it did not reach
+/// are only missing from the library, and the window is what lets someone look.
+fn migrate_effect_ids(app: &AppHandle) {
+    match storage::store(app).and_then(|store| store.migrate_effect_ids()) {
+        Ok(migration) if migration != storage::Migration::default() => tracing::info!(
+            effects = migration.effects,
+            settings = migration.settings,
+            "effects moved to uids"
+        ),
+        Ok(_) => {}
+        Err(e) => tracing::warn!("effects not moved to uids: {e}"),
+    }
+}
+
 /// Applies the stored decisions, at application startup.
 ///
 /// Returns nothing and cannot fail: unreadable settings or a missing HID must
@@ -1014,6 +1031,10 @@ pub fn run() {
             journal::init(app.handle());
             journal::reload_level_setting(app.handle());
 
+            // Before anything reads an effect id from `settings.json`: adoption
+            // resumes the applied effects, and the tray lists them.
+            migrate_effect_ids(app.handle());
+
             let state = AppState::default();
             // Before `manage`: the state is afterwards only reachable through
             // the manager, and adoption needs nothing but the state.
@@ -1089,6 +1110,7 @@ pub fn run() {
             storage::list_effects,
             storage::delete_effect,
             storage::read_effect_source,
+            storage::legacy_effect_ids,
             storage::get_settings,
             storage::set_settings,
             storage::reset_settings,

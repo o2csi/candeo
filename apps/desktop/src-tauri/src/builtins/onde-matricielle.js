@@ -16,6 +16,7 @@
 import { defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
+  uid: 'd82c2077-c90d-4cce-869a-21c6a5d65755',
   name: 'Onde diagonale',
   description: 'Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale',
   params: {

@@ -200,6 +200,12 @@ export type ParamSpec =
   | { kind: 'choice'; label: string; options: readonly string[]; default: string }
 
 export interface EffectModule<P = undefined> {
+  /**
+   * The effect's identity: a lowercase UUID, inserted by candeo at the first
+   * save. Keep it when sharing the file, so an import recognizes the effect;
+   * remove it to make a new effect from this one.
+   */
+  readonly uid?: string
   readonly name: string
   readonly description?: string
   readonly params?: P

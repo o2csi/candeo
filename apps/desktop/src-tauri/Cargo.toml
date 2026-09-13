@@ -55,6 +55,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Rotation quotidienne et nombre de fichiers plafonné : une application
 # d'éclairage tourne des jours.
 tracing-appender = "0.2"
+# Effect identity: a random UUID v4, minted for effects saved before uids
+# existed. Already in the tree through Tauri.
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 # Le stockage se teste dans un dossier temporaire, jamais dans celui de

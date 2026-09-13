@@ -17,6 +17,7 @@ const DEPART = { r: 255, g: 0, b: 128 }
 const ARRIVEE = { r: 0, g: 128, b: 255 }
 
 export default defineEffect({
+  uid: '5797884d-774c-4e3f-9505-aeace0248ec9',
   name: 'Dégradé fixe',
   description: 'Un dégradé entre deux couleurs, immobile',
   params: {

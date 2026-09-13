@@ -47,6 +47,7 @@ import {
   engineStatus,
   getDefaultLayout,
   installEffect,
+  legacyEffectIds,
   listEffects,
   readEffectSource,
   setOutputToKeyboard,
@@ -60,8 +61,8 @@ import CodeEditor from '../components/CodeEditor.vue'
 import DevicePill from '../components/DevicePill.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
-import { clearDraft, readDraft, writeDraft } from '../editor/draft'
-import { compile, nameInSource, renameInSource } from '../editor/effect'
+import { clearDraft, migrateDrafts, readDraft, writeDraft } from '../editor/draft'
+import { compile, nameInSource, renameInSource, uidInSource, withUid } from '../editor/effect'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
 import { useEngineFrames } from '../keyboard/engineFrames'
@@ -183,9 +184,18 @@ function target(): DeviceRef {
  */
 const derivedFrom = ref<string | null>(null)
 
+/**
+ * The uid saving writes into a source that carries none: the opened effect's,
+ * so an effect saved before uids keeps its settings; a fresh one for a copy;
+ * none yet for a new effect, which gets one at its first save.
+ */
+const ownUid = ref<string | null>(null)
+
 async function open(): Promise<void> {
   loading.value = true
   derivedFrom.value = null
+  ownUid.value = id.value
+  await migrateDrafts(legacyEffectIds)
   const draft = readDraft(id.value)
   try {
     let disk = id.value === null ? NEW_EFFECT : await readEffectSource(id.value)
@@ -194,7 +204,9 @@ async function open(): Promise<void> {
       const entry = (await listEffects()).find((e) => e.id === id.value)
       if (entry?.kind === 'builtin') {
         derivedFrom.value = entry.name
-        disk = await renameInSource(disk, `${entry.name} (copie)`)
+        // A copy is a new effect: the shipped uid would be refused at save.
+        ownUid.value = crypto.randomUUID()
+        disk = await withUid(await renameInSource(disk, `${entry.name} (copie)`), ownUid.value)
       }
     }
 
@@ -301,8 +313,15 @@ async function store(run: boolean): Promise<void> {
       )
     }
 
+    // Written into the source before compiling, so the saved text is exactly
+    // the one that carries it.
+    const uid = (await uidInSource(source.value)) ?? ownUid.value ?? crypto.randomUUID()
+    const withItsUid = await withUid(source.value, uid)
+    if (withItsUid !== source.value) source.value = withItsUid
+
     const { js, manifest, params } = await compile(source.value)
     const installedId = await installEffect(source.value, js, manifest)
+    ownUid.value = installedId
     clearDraft(id.value)
     restored.value = false
     saved.value = source.value
@@ -322,8 +341,8 @@ async function store(run: boolean): Promise<void> {
       await listen(device)
     }
 
-    // L'identifiant est dérivé du nom par le Rust. Le porter dans la route,
-    // c'est ce qui fait que rouvrir cet écran relit bien cet effet.
+    // A new effect or a copy only has its id now. Carrying it in the route is
+    // what makes reopening this screen read this effect.
     if (id.value !== installedId) await router.replace(`/editor/${installedId}`)
   } catch (e) {
     problem.value = message(e)
@@ -435,8 +454,9 @@ onBeforeUnmount(() => {
         />
       </label>
 
-      <p class="what">
-        {{ derivedFrom ? `copie de ${derivedFrom}` : (id ?? 'nouvel effet') }}
+      <!-- The id is a uid now: it tells the reader nothing, so it is not shown. -->
+      <p v-if="derivedFrom || id === null" class="what">
+        {{ derivedFrom ? `copie de ${derivedFrom}` : 'nouvel effet' }}
       </p>
 
       <span class="spacer" />

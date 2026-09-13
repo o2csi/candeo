@@ -4,13 +4,22 @@
 //! [`docs/design/effects-runtime.md`](../../../../docs/design/effects-runtime.md) §3:
 //!
 //! ```text
-//! app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
+//! app_data_dir()/effects/<name>/   source.ts · effect.js · manifest.json · swatch.json
 //! app_config_dir()/settings.json   preferences · devices · applied effect · effect parameters
 //! ```
 //!
 //! The effect is **content**; the choice of the active effect is
 //! **configuration**. On Windows both directories are the same, on Linux they
 //! are not — hence going through the Tauri API rather than a constant.
+//!
+//! # An effect is its uid, not its directory
+//!
+//! Every effect carries a `uid` (a lowercase UUID) in its manifest, and that is
+//! the id the rest of the application uses: the engine, `settings.json`, the
+//! tray menu. The directory name is derived from the effect's name when it is
+//! first saved, for whoever browses the folder, and nothing decides on it
+//! afterwards: renaming an effect keeps its directory, its uid and its settings.
+//! See [`docs/design/effects-library.md`](../../../../docs/design/effects-library.md) §1.
 //!
 //! # The shape of the file: preferences on one side, devices on the other
 //!
@@ -37,16 +46,16 @@
 //! [`crate::builtins`] — but the caller does not need to know: listing, reading
 //! the JavaScript or the source finds them like the others.
 //!
-//! **On a name clash, the built-in wins**, and the clash is refused at install
+//! **On a uid clash, the built-in wins**, and the clash is refused at install
 //! anyway. The direction of the priority is not arbitrary: an entry marked
 //! `builtin` in the gallery must run the shipped code, and nothing else. The
-//! reverse would let a user effect slip in under a known name, with the
+//! reverse would let a user effect slip in under a known uid, with the
 //! built-in's manifest shown on screen and other code running — exactly what we
-//! refuse. Reserving the id at install makes the situation impossible; the
+//! refuse. Refusing the uid at install makes the situation impossible; the
 //! priority at read time is the second barrier, for a directory that arrived by
-//! another path (manual copy, library inherited from a version where the id was
-//! free).
+//! another path (a manual copy).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -92,6 +101,13 @@ const RESERVED_NAMES: &[&str] = &[
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
+    /// The effect's identity. See the module documentation.
+    ///
+    /// Empty only in a `manifest.json` written before uids, until
+    /// [`Store::migrate_effect_ids`] gives it one. Left out of the library
+    /// listing, where it travels as [`EffectEntry::id`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub uid: String,
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -120,6 +136,8 @@ pub enum EffectKind {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectEntry {
+    /// The effect's uid, moved out of [`Manifest::uid`] so the listing does not
+    /// carry it twice.
     pub id: String,
     pub kind: EffectKind,
     /// Color swatch, **sampled by running the effect**.
@@ -331,9 +349,16 @@ pub struct Preferences {
 /// `#[serde(default)]` on the whole struct: a `settings.json` written by an
 /// earlier version, missing a field added since, reloads without error instead
 /// of leaving the application silent at startup.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    /// Shape of the file, for migrations that cannot be told from the content.
+    ///
+    /// A file without it predates the version field, and so the uids: it reads
+    /// as 0, not as [`SETTINGS_VERSION`], which is what the new settings of a
+    /// first launch get. See [`Store::migrate_effect_ids`].
+    #[serde(default)]
+    pub version: u32,
     /// What depends on no device. See [`Preferences`].
     pub preferences: Preferences,
     /// Decisions made device by device, brightness included.
@@ -369,6 +394,25 @@ pub struct Settings {
     /// than v2.1 is around any more.
     #[serde(default, rename = "logLevel", skip_serializing)]
     legacy_log_level: Option<LogLevel>,
+}
+
+/// Current shape of `settings.json`.
+///
+/// - 0: effects referenced by their directory name;
+/// - 1: effects referenced by their uid.
+pub const SETTINGS_VERSION: u32 = 1;
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            version: SETTINGS_VERSION,
+            preferences: Preferences::default(),
+            devices: Vec::new(),
+            active_effects: Vec::new(),
+            effect_params: Vec::new(),
+            legacy_log_level: None,
+        }
+    }
 }
 
 impl Settings {
@@ -607,6 +651,24 @@ impl Settings {
         self.active_effects.retain(|r| r.effect != effect);
         self.effect_params.len() + self.active_effects.len() != before
     }
+
+    /// Rewrites every effect reference found in `renames`, from old id to uid.
+    ///
+    /// A reference that is not in the table stays as it is: it names an effect
+    /// removed by hand, which the startup fallback already copes with, and
+    /// guessing what it meant would be worse.
+    fn rename_effects(&mut self, renames: &BTreeMap<String, String>) {
+        for record in &mut self.active_effects {
+            if let Some(uid) = renames.get(&record.effect) {
+                record.effect.clone_from(uid);
+            }
+        }
+        for record in &mut self.effect_params {
+            if let Some(uid) = renames.get(&record.effect) {
+                record.effect.clone_from(uid);
+            }
+        }
+    }
 }
 
 /// The values an effect must start with: what it **declares**, overridden by
@@ -727,6 +789,32 @@ pub fn derive_id(name: &str) -> String {
     id.to_string()
 }
 
+/// Checks that `uid` is a lowercase UUID: `8-4-4-4-12` hexadecimal digits.
+///
+/// Stricter than [`validate_id`], which it implies: a uid is also a directory
+/// name, a settings key and part of a tray menu id, and one shape everywhere
+/// keeps it from being mistaken for a readable name.
+pub(crate) fn validate_uid(uid: &str) -> CmdResult<()> {
+    let groups: Vec<&str> = uid.split('-').collect();
+    let shaped = groups.len() == 5
+        && groups.iter().zip([8, 4, 4, 4, 12]).all(|(group, len)| {
+            group.len() == len
+                && group
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+        });
+    if shaped {
+        Ok(())
+    } else {
+        Err(format!("identifiant d'effet invalide : « {uid} »"))
+    }
+}
+
+/// A new uid, for an effect saved before uids existed.
+fn mint_uid() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 // ---------------------------------------------------------------- storage
 
 /// Disk access to effects and settings.
@@ -747,13 +835,20 @@ impl Store {
         }
     }
 
-    /// Writes `effects/<id>/` and returns the id used.
+    /// Writes an effect's directory and returns its uid.
     ///
     /// The three files are written together: `source.ts` to reopen the effect in
     /// the editor, `effect.js` to run it, `manifest.json` to describe it. The
     /// `.js` is not a regenerable cache — the transpiler lives in Monaco, so
     /// rebuilding it would require opening the window, while an effect must be
     /// able to start without an interface.
+    ///
+    /// # Which directory
+    ///
+    /// The one already holding this uid, if there is one: saving again or
+    /// renaming updates the effect in place. Otherwise a new one, named after the
+    /// effect, with a numeric suffix when the name is taken — two effects may
+    /// share a name, never a uid.
     pub fn install_effect(
         &self,
         source_ts: &str,
@@ -772,19 +867,22 @@ impl Store {
                 manifest.api_version
             ));
         }
-
-        let id = derive_id(&manifest.name);
-        // Built-in ids are reserved. Accepting the clash would force a choice
-        // afterwards, on every read, between two effects with the same id — and
-        // the library would show two of them under the same key. The refusal is
-        // immediate and fits in one sentence.
-        if builtins::find(&id).is_some() {
-            return Err(format!(
-                "« {id} » est l'identifiant d'un effet intégré ; donnez un autre nom au vôtre"
-            ));
+        validate_uid(&manifest.uid)?;
+        // Built-in uids are reserved. Accepting the clash would force a choice
+        // afterwards, on every read, between two effects with the same uid — and
+        // the library would show two of them under the same key. The editor
+        // gives a copy its own uid, so this only happens to a uid typed by hand.
+        if builtins::find(&manifest.uid).is_some() {
+            return Err(
+                "cet identifiant est celui d'un effet intégré : retirez la ligne uid pour enregistrer votre version"
+                    .into(),
+            );
         }
 
-        let dir = self.effects_dir.join(&id);
+        let dir = match self.find_dir(&manifest.uid)? {
+            Some(dir) => dir,
+            None => self.effects_dir.join(self.free_dir_name(&manifest.name)),
+        };
         create_dir(&dir)?;
 
         let json = serde_json::to_string_pretty(manifest)
@@ -799,58 +897,42 @@ impl Store {
         // an effect that turned blue does not keep its red thumbnail.
         write_swatch(&dir, js);
 
-        Ok(id)
+        Ok(manifest.uid.clone())
     }
 
-    /// An effect's executable JavaScript, **built-in or installed**.
+    /// A directory name for a new effect: derived from its name, with `-2`,
+    /// `-3`… when taken.
     ///
-    /// This is what the engine loads. Built-ins are looked up first: see the
-    /// priority justified at the top of the module.
-    ///
-    /// For a user effect, it is also why the `.js` is written to disk at install —
-    /// reading it needs neither the editor nor the window.
-    pub fn effect_js(&self, id: &str) -> CmdResult<String> {
-        if let Some(b) = builtins::find(id) {
-            return Ok(b.js.to_string());
+    /// The stem is shortened to make room for the suffix: a name longer than
+    /// [`MAX_ID_LEN`] would otherwise give a directory the library no longer
+    /// reads.
+    fn free_dir_name(&self, name: &str) -> String {
+        let base = derive_id(name);
+        if !self.effects_dir.join(&base).exists() {
+            return base;
         }
-        self.read_file(id, JS_FILE)
+        (2..)
+            .map(|n| {
+                let suffix = format!("-{n}");
+                let stem = base[..base.len().min(MAX_ID_LEN - suffix.len())].trim_end_matches('-');
+                format!("{stem}{suffix}")
+            })
+            .find(|candidate| !self.effects_dir.join(candidate).exists())
+            .expect("an unbounded range always has a free name")
     }
 
-    /// An effect's source, to reopen it in the editor.
+    /// Every readable effect directory, in the order of their names.
     ///
-    /// A built-in effect has no `.ts`: its JavaScript **is** its source. Making it
-    /// readable from the editor is the whole point of shipping it — you start from
-    /// an effect that works, change it, and save it under another name (the
-    /// built-in id is reserved).
-    pub fn effect_source(&self, id: &str) -> CmdResult<String> {
-        if let Some(b) = builtins::find(id) {
-            return Ok(b.js.to_string());
-        }
-        self.read_file(id, SOURCE_FILE)
-    }
-
-    fn read_file(&self, id: &str, file: &str) -> CmdResult<String> {
-        validate_id(id)?;
-        let path = self.effects_dir.join(id).join(file);
-        fs::read_to_string(&path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => format!("aucun effet nommé « {id} »"),
-            _ => format!("lecture de {} impossible : {e}", path.display()),
-        })
-    }
-
-    /// Full library: built-in effects **and** user effects.
-    ///
-    /// Built-ins are compiled into the binary and have no directory; they show up
-    /// anyway, told apart by [`EffectKind`], so the interface has a single list to
-    /// display.
-    pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
-        let mut effects = builtin_effects();
-
+    /// Manifests without a uid are included: the migration needs them. A damaged
+    /// or foreign directory is skipped rather than failing the whole list: a
+    /// library of twenty effects must not disappear because one of them has an
+    /// unreadable manifest.
+    fn installed(&self) -> CmdResult<Vec<Installed>> {
         // Missing directory: first launch, no effect installed. This is not an
         // error.
         let entries = match fs::read_dir(&self.effects_dir) {
             Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(effects),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => {
                 return Err(format!(
                     "lecture de {} impossible : {e}",
@@ -863,21 +945,10 @@ impl Store {
         for entry in entries {
             let entry =
                 entry.map_err(|e| format!("lecture de la bibliothèque interrompue : {e}"))?;
-            let Some(id) = entry.file_name().to_str().map(str::to_owned) else {
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            // A damaged or foreign directory is skipped rather than failing the
-            // whole list: a library of twenty effects must not disappear because
-            // one of them has an unreadable manifest.
-            if validate_id(&id).is_err() {
-                continue;
-            }
-            // A directory that takes over a built-in's id is left out: the list
-            // is indexed by id, it cannot hold two of them, and the built-in
-            // would start anyway. Leaving it in would show an effect that will
-            // never run. It can still be deleted — `delete_effect` only looks at
-            // the disk.
-            if builtins::find(&id).is_some() {
+            if validate_id(&name).is_err() {
                 continue;
             }
             let Ok(raw) = fs::read_to_string(entry.path().join(MANIFEST_FILE)) else {
@@ -886,25 +957,114 @@ impl Store {
             let Ok(manifest) = serde_json::from_str::<Manifest>(&raw) else {
                 continue;
             };
-            installed.push(EffectEntry {
-                id,
-                kind: EffectKind::User,
-                swatch: read_swatch(&entry.path()),
+            installed.push(Installed {
+                dir: entry.path(),
+                name,
                 manifest,
             });
         }
 
         // Stable order: the file system guarantees none, and a gallery that
-        // reorders itself on every opening is unreadable.
-        installed.sort_by(|a, b| a.id.cmp(&b.id));
-        effects.append(&mut installed);
+        // reorders itself on every opening is unreadable. By directory name
+        // rather than uid, which would shuffle it.
+        installed.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(installed)
+    }
+
+    /// The directory of the installed effect with this uid.
+    ///
+    /// A scan of the manifests, on every call: the library holds tens of effects,
+    /// and this runs when an effect starts, is opened or deleted — never per
+    /// frame. An index would be one more thing to keep true when a directory is
+    /// copied or removed by hand.
+    ///
+    /// Two directories with the same uid can only come from a manual copy; the
+    /// first by name wins, the same one [`Self::list_effects`] shows.
+    fn find_dir(&self, uid: &str) -> CmdResult<Option<PathBuf>> {
+        Ok(self
+            .installed()?
+            .into_iter()
+            .find(|i| i.manifest.uid == uid)
+            .map(|i| i.dir))
+    }
+
+    /// An effect's executable JavaScript, **built-in or installed**.
+    ///
+    /// This is what the engine loads. Built-ins are looked up first: see the
+    /// priority justified at the top of the module.
+    ///
+    /// For a user effect, it is also why the `.js` is written to disk at install —
+    /// reading it needs neither the editor nor the window.
+    pub fn effect_js(&self, uid: &str) -> CmdResult<String> {
+        if let Some(b) = builtins::find(uid) {
+            return Ok(b.js.to_string());
+        }
+        self.read_file(uid, JS_FILE)
+    }
+
+    /// An effect's source, to reopen it in the editor.
+    ///
+    /// A built-in effect has no `.ts`: its JavaScript **is** its source. Making it
+    /// readable from the editor is the whole point of shipping it — you start from
+    /// an effect that works, change it, and save it as a copy.
+    pub fn effect_source(&self, uid: &str) -> CmdResult<String> {
+        if let Some(b) = builtins::find(uid) {
+            return Ok(b.js.to_string());
+        }
+        self.read_file(uid, SOURCE_FILE)
+    }
+
+    fn read_file(&self, uid: &str, file: &str) -> CmdResult<String> {
+        validate_uid(uid)?;
+        let Some(dir) = self.find_dir(uid)? else {
+            return Err(format!("aucun effet installé sous l'identifiant « {uid} »"));
+        };
+        let path = dir.join(file);
+        fs::read_to_string(&path)
+            .map_err(|e| format!("lecture de {} impossible : {e}", path.display()))
+    }
+
+    /// Full library: built-in effects **and** user effects.
+    ///
+    /// Built-ins are compiled into the binary and have no directory; they show up
+    /// anyway, told apart by [`EffectKind`], so the interface has a single list to
+    /// display.
+    pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
+        let mut effects = builtin_effects();
+
+        for Installed {
+            dir, mut manifest, ..
+        } in self.installed()?
+        {
+            // Without a valid uid, the effect has no id to be started or
+            // opened by: it predates uids and waits for the migration at the
+            // next launch.
+            if validate_uid(&manifest.uid).is_err() {
+                continue;
+            }
+            // A uid already listed is left out: a directory taking over a
+            // built-in's uid, or a manual copy of another directory. The list is
+            // indexed by id, it cannot hold two of them, and the first one is
+            // what starts anyway. It can still be deleted — see
+            // [`Self::check_deletable`].
+            if effects.iter().any(|e| e.id == manifest.uid) {
+                continue;
+            }
+            effects.push(EffectEntry {
+                id: std::mem::take(&mut manifest.uid),
+                kind: EffectKind::User,
+                swatch: read_swatch(&dir),
+                manifest,
+            });
+        }
+
         Ok(effects)
     }
 
     /// Tells whether this effect can be deleted, **without deleting anything**.
     ///
     /// The directory is checked **before** the built-in case: that is what allows
-    /// removing a directory that takes over a built-in id, invisible in the list
+    /// removing a directory that takes over a built-in uid, invisible in the list
     /// and never run, but present on disk. The order is the reverse of the one
     /// used to resolve at run time ([`Self::effect_js`]), which checks built-ins
     /// first so a shipped effect cannot be taken over. Both asymmetries serve the
@@ -913,28 +1073,91 @@ impl Store {
     /// Separate from [`Self::delete_effect`] because the command stops the loops
     /// **between** the refusal and the erasure: refusing afterwards would make a
     /// running built-in effect pay for a stop it was not owed.
-    pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
-        validate_id(id)?;
-        if self.effects_dir.join(id).is_dir() {
-            return Ok(());
-        }
-        if builtins::find(id).is_some() {
-            return Err(format!(
-                "« {id} » est un effet intégré : il est livré avec l'application et ne peut pas être supprimé"
-            ));
-        }
-        Err(format!("aucun effet installé sous l'identifiant « {id} »"))
+    pub fn check_deletable(&self, uid: &str) -> CmdResult<()> {
+        self.deletable_dir(uid).map(|_| ())
     }
 
-    /// Deletes `effects/<id>/`.
-    pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
+    fn deletable_dir(&self, uid: &str) -> CmdResult<PathBuf> {
+        validate_uid(uid)?;
+        if let Some(dir) = self.find_dir(uid)? {
+            return Ok(dir);
+        }
+        if builtins::find(uid).is_some() {
+            return Err(
+                "cet effet est intégré : il est livré avec l'application et ne peut pas être supprimé"
+                    .into(),
+            );
+        }
+        Err(format!("aucun effet installé sous l'identifiant « {uid} »"))
+    }
+
+    /// Deletes the effect's directory.
+    pub fn delete_effect(&self, uid: &str) -> CmdResult<()> {
         // Checked again rather than assumed: between the command's refusal and
         // this call, the directory may have disappeared — and this is where it is
         // reported.
-        self.check_deletable(id)?;
-        let dir = self.effects_dir.join(id);
+        let dir = self.deletable_dir(uid)?;
         fs::remove_dir_all(&dir)
             .map_err(|e| format!("suppression de {} impossible : {e}", dir.display()))
+    }
+
+    /// Old effect ids, and the uid each one now designates.
+    ///
+    /// The shipped effects' fixed table, then the name of every installed
+    /// directory: before uids, an effect's id was its directory name. Computed
+    /// from the disk rather than recorded, so it needs no state of its own.
+    ///
+    /// A shipped effect wins over a directory of the same name: before uids, the
+    /// built-in was the one that ran under that id.
+    pub fn legacy_effect_ids(&self) -> CmdResult<BTreeMap<String, String>> {
+        let mut renames: BTreeMap<String, String> = builtins::ALL
+            .iter()
+            .map(|b| (b.slug.to_owned(), b.uid.to_owned()))
+            .collect();
+        for Installed { name, manifest, .. } in self.installed()? {
+            if validate_uid(&manifest.uid).is_ok() && name != manifest.uid {
+                renames.entry(name).or_insert(manifest.uid);
+            }
+        }
+        Ok(renames)
+    }
+
+    /// Moves a library from ids to uids. Runs at every startup, and does nothing
+    /// once done.
+    ///
+    /// 1. Every installed effect without a uid gets one, written to its
+    ///    `manifest.json`. Its `source.ts` is left alone: the editor writes the
+    ///    uid into the source at the next save, with the TypeScript parser —
+    ///    editing a source here would mean guessing where the object starts.
+    /// 2. A `settings.json` from before uids has its effect references rewritten,
+    ///    **once**: the version recorded afterwards is what keeps a later
+    ///    directory, whose name happens to be an old id, from being taken for it.
+    pub fn migrate_effect_ids(&self) -> CmdResult<Migration> {
+        let mut migration = Migration::default();
+
+        for Installed { dir, manifest, .. } in self.installed()? {
+            if validate_uid(&manifest.uid).is_ok() {
+                continue;
+            }
+            let manifest = Manifest {
+                uid: mint_uid(),
+                ..manifest
+            };
+            let json = serde_json::to_string_pretty(&manifest)
+                .map_err(|e| format!("manifeste non sérialisable : {e}"))?;
+            write(&dir.join(MANIFEST_FILE), &json)?;
+            migration.effects += 1;
+        }
+
+        let mut settings = self.read_settings()?;
+        if settings.version < 1 {
+            settings.rename_effects(&self.legacy_effect_ids()?);
+            settings.version = 1;
+            self.write_settings(&settings)?;
+            migration.settings = true;
+        }
+
+        Ok(migration)
     }
 
     /// Reads `settings.json`, or returns the default values if it does not exist.
@@ -1019,6 +1242,23 @@ impl Store {
     }
 }
 
+/// An effect directory as [`Store::installed`] read it.
+struct Installed {
+    dir: PathBuf,
+    /// The directory name: the effect's id before uids.
+    name: String,
+    manifest: Manifest,
+}
+
+/// What [`Store::migrate_effect_ids`] changed, for the log.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Migration {
+    /// Installed effects that received a uid.
+    pub effects: usize,
+    /// True if `settings.json` was rewritten.
+    pub settings: bool,
+}
+
 /// Effects compiled into the binary, in the shape the gallery expects.
 ///
 /// The manifest is rebuilt on every call rather than kept: five small JSON
@@ -1031,12 +1271,13 @@ fn builtin_effects() -> Vec<EffectEntry> {
         .iter()
         .zip(builtins::swatches())
         .map(|(b, swatch)| EffectEntry {
-            id: b.id.to_string(),
+            id: b.uid.to_string(),
             kind: EffectKind::Builtin,
             // Built-ins have no directory: their swatch lives in memory,
             // computed once per run. The why is in [`builtins::swatches`].
             swatch: swatch.clone(),
             manifest: Manifest {
+                uid: String::new(),
                 name: b.name.to_string(),
                 description: b.description.to_string(),
                 params: serde_json::from_str(b.params).unwrap_or_default(),
@@ -1114,7 +1355,7 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     Ok(Store::new(&data, &config))
 }
 
-/// Installs an effect and returns its id.
+/// Installs an effect and returns its uid.
 #[tauri::command]
 pub fn install_effect(
     app: AppHandle,
@@ -1180,6 +1421,16 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
     store(&app)?.effect_source(&id)
+}
+
+/// Old effect ids and their uids. See [`Store::legacy_effect_ids`].
+///
+/// For the editor's drafts: they are keyed by effect id in the web view's
+/// storage, which the startup migration cannot reach. To remove once no draft
+/// older than uids is around any more.
+#[tauri::command]
+pub fn legacy_effect_ids(app: AppHandle) -> CmdResult<BTreeMap<String, String>> {
+    store(&app)?.legacy_effect_ids()
 }
 
 #[tauri::command]
@@ -1294,22 +1545,32 @@ mod tests {
     }
 
     /// Writes an effect directory by hand, without going through
-    /// `install_effect`. It is the only way to get a reserved id on disk — and so
-    /// to check what happens then.
-    fn plant_effect_dir(tmp: &tempfile::TempDir, id: &str, js: &str) {
-        let dir = tmp.path().join("data").join("effects").join(id);
+    /// `install_effect`. It is the only way to get a reserved uid on disk — and
+    /// so to check what happens then.
+    fn plant_effect_dir(tmp: &tempfile::TempDir, dir_name: &str, uid: &str, js: &str) {
+        let dir = tmp.path().join("data").join("effects").join(dir_name);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(JS_FILE), js).unwrap();
         fs::write(dir.join(SOURCE_FILE), js).unwrap();
         fs::write(
             dir.join(MANIFEST_FILE),
-            serde_json::to_string(&test_manifest("Usurpateur")).unwrap(),
+            serde_json::to_string(&Manifest {
+                uid: uid.into(),
+                ..test_manifest("Usurpateur")
+            })
+            .unwrap(),
         )
         .unwrap();
     }
 
+    /// The uid most tests install under: saving twice with it is saving the
+    /// same effect again.
+    const UID: &str = "0b5f1a3e-7c2d-4e8f-9a6b-1c2d3e4f5a6b";
+    const OTHER_UID: &str = "7e6d5c4b-3a29-4817-8f6e-5d4c3b2a1908";
+
     fn test_manifest(name: &str) -> Manifest {
         Manifest {
+            uid: UID.into(),
             name: name.into(),
             description: "Une onde de teinte se propage depuis le centre".into(),
             params: serde_json::json!({
@@ -1334,9 +1595,14 @@ mod tests {
                 &manifest,
             )
             .unwrap();
-        assert_eq!(id, "onde-circulaire");
+        assert_eq!(id, UID, "the id of an effect is its uid");
 
-        let dir = tmp.path().join("data").join("effects").join(&id);
+        // The directory is named after the effect, for whoever browses it.
+        let dir = tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join("onde-circulaire");
         assert_eq!(
             fs::read_to_string(dir.join("source.ts")).unwrap(),
             "export const x: number = 1"
@@ -1350,12 +1616,19 @@ mod tests {
         let effects = installed_effects(&store);
         assert_eq!(effects.len(), 1);
         assert_eq!(effects[0].id, id);
-        assert_eq!(effects[0].manifest, manifest);
+        // The uid travels as the entry's id, not twice.
+        assert_eq!(
+            effects[0].manifest,
+            Manifest {
+                uid: String::new(),
+                ..manifest
+            }
+        );
         assert_eq!(store.effect_js(&id).unwrap(), "export const x = 1");
     }
 
     #[test]
-    fn reinstalling_the_same_name_updates_instead_of_duplicating() {
+    fn reinstalling_the_same_uid_updates_instead_of_duplicating() {
         let (_tmp, store) = temp_store();
         store
             .install_effect("v1", "v1", &test_manifest("Onde"))
@@ -1365,6 +1638,86 @@ mod tests {
             .unwrap();
 
         assert_eq!(installed_effects(&store).len(), 1);
+        assert_eq!(store.effect_source(UID).unwrap(), "v2");
+    }
+
+    /// **Renaming no longer makes a new effect**: the uid finds the directory,
+    /// whatever the name says now. The directory keeps its first name — nothing
+    /// decides on it any more.
+    #[test]
+    fn renaming_keeps_the_directory_and_the_uid() {
+        let (tmp, store) = temp_store();
+        store
+            .install_effect("v1", "v1", &test_manifest("Onde"))
+            .unwrap();
+        store
+            .install_effect("v2", "v2", &test_manifest("Vague"))
+            .unwrap();
+
+        let effects = installed_effects(&store);
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].id, UID);
+        assert_eq!(effects[0].manifest.name, "Vague");
+        let effects_dir = tmp.path().join("data").join("effects");
+        assert!(effects_dir.join("onde").is_dir());
+        assert!(!effects_dir.join("vague").exists());
+    }
+
+    /// Two effects may share a name, never a uid: the second one gets a
+    /// directory of its own instead of overwriting the first.
+    #[test]
+    fn two_effects_with_the_same_name_both_stay() {
+        let (tmp, store) = temp_store();
+        store
+            .install_effect("a", "a", &test_manifest("Onde"))
+            .unwrap();
+        let other = Manifest {
+            uid: OTHER_UID.into(),
+            ..test_manifest("Onde")
+        };
+        store.install_effect("b", "b", &other).unwrap();
+
+        assert_eq!(installed_effects(&store).len(), 2);
+        assert_eq!(store.effect_source(UID).unwrap(), "a");
+        assert_eq!(store.effect_source(OTHER_UID).unwrap(), "b");
+        assert!(tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join("onde-2")
+            .is_dir());
+    }
+
+    /// The suffix must not push a long name past what the library reads back.
+    #[test]
+    fn a_suffixed_directory_name_stays_valid() {
+        let (_tmp, store) = temp_store();
+        let long = "a".repeat(200);
+        store.install_effect("", "", &test_manifest(&long)).unwrap();
+        let other = Manifest {
+            uid: OTHER_UID.into(),
+            ..test_manifest(&long)
+        };
+        store.install_effect("", "", &other).unwrap();
+
+        assert_eq!(installed_effects(&store).len(), 2);
+        let next = store.free_dir_name(&long);
+        validate_id(&next).unwrap_or_else(|e| panic!("\"{next}\": {e}"));
+        assert!(next.ends_with("-3"), "name: {next}");
+    }
+
+    #[test]
+    fn an_effect_without_a_valid_uid_is_refused() {
+        let (tmp, store) = temp_store();
+        for uid in ["", "onde", "0B5F1A3E-7C2D-4E8F-9A6B-1C2D3E4F5A6B"] {
+            let manifest = Manifest {
+                uid: uid.into(),
+                ..test_manifest("Onde")
+            };
+            let err = store.install_effect("", "", &manifest).unwrap_err();
+            assert!(err.contains("identifiant"), "\"{uid}\": {err}");
+        }
+        assert!(!tmp.path().join("data").join("effects").exists());
     }
 
     #[test]
@@ -1379,17 +1732,17 @@ mod tests {
         assert!(!effects.is_empty());
 
         for (entry, b) in effects.iter().zip(&builtins::ALL) {
-            assert_eq!(entry.id, b.id);
+            assert_eq!(entry.id, b.uid);
             assert_eq!(entry.manifest.name, b.name);
             assert_eq!(entry.manifest.api_version, EFFECTS_API_VERSION);
             assert!(
                 !entry.manifest.params.is_empty(),
                 "\"{}\": parameters lost while reading the JSON",
-                b.id
+                b.slug
             );
             // Built-ins have no directory, but they do have a swatch: it is
             // computed in memory, the first time the library is read.
-            assert!(!entry.swatch.is_empty(), "\"{}\": no color swatch", b.id);
+            assert!(!entry.swatch.is_empty(), "\"{}\": no color swatch", b.slug);
         }
     }
 
@@ -1406,12 +1759,12 @@ mod tests {
         )
     }
 
-    fn swatch_on_disk(tmp: &tempfile::TempDir, id: &str) -> Option<String> {
+    fn swatch_on_disk(tmp: &tempfile::TempDir, dir_name: &str) -> Option<String> {
         let path = tmp
             .path()
             .join("data")
             .join("effects")
-            .join(id)
+            .join(dir_name)
             .join(SWATCH_FILE);
         fs::read_to_string(path).ok()
     }
@@ -1421,12 +1774,12 @@ mod tests {
     #[test]
     fn install_samples_the_swatch_from_the_effect() {
         let (tmp, store) = temp_store();
-        let id = store
+        store
             .install_effect("", &solid_effect("00ff00"), &test_manifest("Uni"))
             .unwrap();
 
         assert_eq!(
-            swatch_on_disk(&tmp, &id).as_deref(),
+            swatch_on_disk(&tmp, "uni").as_deref(),
             Some(r##"["#00ff00","#00ff00","#00ff00","#00ff00"]"##),
             "the swatch must be stored next to the manifest"
         );
@@ -1466,7 +1819,7 @@ mod tests {
             js,
             "the effect must be written"
         );
-        assert_eq!(swatch_on_disk(&tmp, &id), None);
+        assert_eq!(swatch_on_disk(&tmp, "cass"), None);
         assert!(installed_effects(&store)[0].swatch.is_empty());
     }
 
@@ -1475,10 +1828,10 @@ mod tests {
     #[test]
     fn an_effect_that_breaks_loses_its_swatch() {
         let (tmp, store) = temp_store();
-        let id = store
+        store
             .install_effect("", &solid_effect("00ff00"), &test_manifest("Uni"))
             .unwrap();
-        assert!(swatch_on_disk(&tmp, &id).is_some());
+        assert!(swatch_on_disk(&tmp, "uni").is_some());
 
         store
             .install_effect(
@@ -1488,7 +1841,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(swatch_on_disk(&tmp, &id), None);
+        assert_eq!(swatch_on_disk(&tmp, "uni"), None);
         assert!(installed_effects(&store)[0].swatch.is_empty());
     }
 
@@ -1500,7 +1853,12 @@ mod tests {
             .unwrap();
 
         store.delete_effect(&id).unwrap();
-        assert!(!tmp.path().join("data").join("effects").join(&id).exists());
+        assert!(!tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join("onde")
+            .exists());
         assert!(installed_effects(&store).is_empty());
 
         let err = store.delete_effect(&id).unwrap_err();
@@ -1521,14 +1879,18 @@ mod tests {
 
         store.check_deletable(&id).unwrap();
         assert!(
-            tmp.path().join("data").join("effects").join(&id).is_dir(),
+            tmp.path()
+                .join("data")
+                .join("effects")
+                .join("onde")
+                .is_dir(),
             "the check took the directory away"
         );
 
-        let err = store.check_deletable(builtins::ALL[0].id).unwrap_err();
-        assert!(err.contains("effet intégré"), "message: {err}");
+        let err = store.check_deletable(builtins::ALL[0].uid).unwrap_err();
+        assert!(err.contains("effet est intégré"), "message: {err}");
 
-        let err = store.check_deletable("jamais-installe").unwrap_err();
+        let err = store.check_deletable(OTHER_UID).unwrap_err();
         assert!(err.contains("aucun effet installé"), "message: {err}");
     }
 
@@ -1541,72 +1903,94 @@ mod tests {
         let (_tmp, store) = temp_store();
 
         for b in &builtins::ALL {
-            assert_eq!(store.effect_js(b.id).unwrap(), b.js);
+            assert_eq!(store.effect_js(b.uid).unwrap(), b.js);
             // The source too: a shipped effect is there to be read and modified,
             // and its JavaScript *is* its source.
-            assert_eq!(store.effect_source(b.id).unwrap(), b.js);
+            assert_eq!(store.effect_source(b.uid).unwrap(), b.js);
         }
     }
 
-    /// Taking over an id, both ways: through install, then through a directory
+    /// Taking over a uid, both ways: through install, then through a directory
     /// planted by hand.
     #[test]
-    fn a_user_effect_cannot_take_over_a_builtin_id() {
+    fn a_user_effect_cannot_take_over_a_builtin_uid() {
         let (tmp, store) = temp_store();
 
         for builtin in &builtins::ALL {
-            // A name that derives exactly to the targeted id: what someone who
-            // read the gallery would type.
-            let err = store
-                .install_effect("", "", &test_manifest(builtin.id))
-                .unwrap_err();
+            let manifest = Manifest {
+                uid: builtin.uid.into(),
+                ..test_manifest("Copie")
+            };
+            let err = store.install_effect("", "", &manifest).unwrap_err();
             assert!(err.contains("effet intégré"), "message: {err}");
             assert!(
                 !tmp.path()
                     .join("data")
                     .join("effects")
-                    .join(builtin.id)
+                    .join("copie")
                     .exists(),
                 "\"{}\": the refusal came after the write",
-                builtin.id
+                builtin.slug
             );
 
             // The directory planted by hand does not take over either: the
             // shipped code is still what runs, and the gallery shows only one
-            // entry under that id — the built-in's.
-            plant_effect_dir(&tmp, builtin.id, "export default { render() {} }");
-            assert_eq!(store.effect_js(builtin.id).unwrap(), builtin.js);
-            assert_eq!(store.effect_source(builtin.id).unwrap(), builtin.js);
+            // entry under that uid — the built-in's.
+            plant_effect_dir(
+                &tmp,
+                builtin.slug,
+                builtin.uid,
+                "export default { render() {} }",
+            );
+            assert_eq!(store.effect_js(builtin.uid).unwrap(), builtin.js);
+            assert_eq!(store.effect_source(builtin.uid).unwrap(), builtin.js);
 
             let matching: Vec<_> = store
                 .list_effects()
                 .unwrap()
                 .into_iter()
-                .filter(|e| e.id == builtin.id)
+                .filter(|e| e.id == builtin.uid)
                 .collect();
-            assert_eq!(matching.len(), 1, "\"{}\": listed twice", builtin.id);
+            assert_eq!(matching.len(), 1, "\"{}\": listed twice", builtin.slug);
             assert_eq!(matching[0].kind, EffectKind::Builtin);
             assert_eq!(matching[0].manifest.name, builtin.name);
         }
     }
 
-    /// A built-in cannot be deleted — but a directory taking over its id can:
+    /// A built-in cannot be deleted — but a directory taking over its uid can:
     /// otherwise it would stay on disk, invisible and impossible to remove.
     #[test]
     fn a_builtin_cannot_be_deleted_but_its_impostor_can() {
         let (tmp, store) = temp_store();
-        let id = builtins::ALL[0].id;
+        let uid = builtins::ALL[0].uid;
 
-        let err = store.delete_effect(id).unwrap_err();
-        assert!(err.contains("effet intégré"), "message: {err}");
+        let err = store.delete_effect(uid).unwrap_err();
+        assert!(err.contains("effet est intégré"), "message: {err}");
 
-        plant_effect_dir(&tmp, id, "export default { render() {} }");
+        plant_effect_dir(&tmp, "imposteur", uid, "export default { render() {} }");
         // The disk first, including for the command's prior refusal: if it
         // checked built-ins first, the impostor would be refused before even
         // reaching the deletion.
-        store.check_deletable(id).unwrap();
-        store.delete_effect(id).unwrap();
-        assert!(!tmp.path().join("data").join("effects").join(id).exists());
+        store.check_deletable(uid).unwrap();
+        store.delete_effect(uid).unwrap();
+        assert!(!tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join("imposteur")
+            .exists());
+    }
+
+    /// A manual copy of a directory holds the same uid twice: the list shows one
+    /// entry, and it is the one that runs.
+    #[test]
+    fn a_copied_directory_is_listed_once() {
+        let (tmp, store) = temp_store();
+        plant_effect_dir(&tmp, "onde", UID, "first");
+        plant_effect_dir(&tmp, "onde-copie", UID, "second");
+
+        assert_eq!(installed_effects(&store).len(), 1);
+        assert_eq!(store.effect_js(UID).unwrap(), "first");
     }
 
     #[test]
@@ -1637,6 +2021,9 @@ mod tests {
             "-onde",
             "onde-",
             too_long.as_str(),
+            // Readable ids, valid before uids.
+            "onde",
+            "onde-radiale",
         ] {
             let Err(err) = store.delete_effect(id) else {
                 panic!("\"{id}\" should have been refused");
@@ -1707,6 +2094,7 @@ mod tests {
     fn settings_round_trip() {
         let (tmp, store) = temp_store();
         let settings = Settings {
+            version: SETTINGS_VERSION,
             preferences: Preferences {
                 log_level: Some(LogLevel::Debug),
             },
@@ -2294,11 +2682,214 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------- migration to uids
+
+    /// A data folder as the version before uids left it: one user effect whose
+    /// id is its directory name, and settings pointing at it and at two
+    /// shipped effects by their old ids.
+    fn plant_pre_uid_library(tmp: &tempfile::TempDir) {
+        let dir = tmp.path().join("data").join("effects").join("mon-effet");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(SOURCE_FILE),
+            "export default defineEffect({ name: 'Mon effet' })",
+        )
+        .unwrap();
+        fs::write(dir.join(JS_FILE), "export default { name: 'Mon effet' }").unwrap();
+        fs::write(
+            dir.join(MANIFEST_FILE),
+            "{\n  \"name\": \"Mon effet\",\n  \"description\": \"\",\n  \"params\": {},\n  \"apiVersion\": 1\n}",
+        )
+        .unwrap();
+
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{
+              "preferences": {},
+              "devices": [{ "vid": 5426, "pid": 658, "state": "adopted" }],
+              "activeEffects": [
+                { "vid": 5426, "pid": 658, "effect": "mon-effet" },
+                { "vid": 5426, "pid": 659, "effect": "respiration" }
+              ],
+              "effectParams": [
+                { "vid": 5426, "pid": 658, "effect": "balayage", "values": { "speed": 4 } },
+                { "vid": 5426, "pid": 658, "effect": "disparu", "values": { "speed": 1 } }
+              ]
+            }"#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_pre_uid_library_moves_to_uids() {
+        let (tmp, store) = temp_store();
+        plant_pre_uid_library(&tmp);
+        assert!(
+            installed_effects(&store).is_empty(),
+            "an effect without a uid has no id to be listed under"
+        );
+
+        let migration = store.migrate_effect_ids().unwrap();
+        assert_eq!(
+            migration,
+            Migration {
+                effects: 1,
+                settings: true
+            }
+        );
+
+        let effects = installed_effects(&store);
+        assert_eq!(effects.len(), 1);
+        let uid = effects[0].id.clone();
+        validate_uid(&uid).unwrap();
+        assert_eq!(effects[0].manifest.name, "Mon effet");
+        assert_eq!(
+            store.effect_js(&uid).unwrap(),
+            "export default { name: 'Mon effet' }"
+        );
+        assert_eq!(
+            fs::read_to_string(
+                tmp.path()
+                    .join("data")
+                    .join("effects")
+                    .join("mon-effet")
+                    .join(SOURCE_FILE)
+            )
+            .unwrap(),
+            "export default defineEffect({ name: 'Mon effet' })",
+            "the source is the editor's to change"
+        );
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.version, SETTINGS_VERSION);
+        assert_eq!(settings.active_effect(VID, PID), Some(uid.as_str()));
+        assert_eq!(
+            settings.active_effect(VID, PID + 1),
+            builtins::by_slug("respiration").map(|b| b.uid)
+        );
+        let balayage = builtins::by_slug("balayage").unwrap().uid;
+        assert_eq!(
+            settings.effect_params(VID, PID, balayage),
+            Some(&to_map(&[("speed", serde_json::json!(4))]))
+        );
+        // An id that names nothing is left as it was, not guessed.
+        assert!(settings.effect_params(VID, PID, "disparu").is_some());
+        // And what has nothing to do with effects is untouched.
+        assert_eq!(settings.device_state(VID, PID, None), DeviceState::Adopted);
+    }
+
+    /// At every startup, and nothing happens the second time: not one byte of
+    /// the files changes.
+    #[test]
+    fn migrating_twice_changes_nothing() {
+        let (tmp, store) = temp_store();
+        plant_pre_uid_library(&tmp);
+        store.migrate_effect_ids().unwrap();
+
+        let manifest_path = tmp
+            .path()
+            .join("data")
+            .join("effects")
+            .join("mon-effet")
+            .join(MANIFEST_FILE);
+        let settings_path = tmp.path().join("config").join("settings.json");
+        let manifest = fs::read_to_string(&manifest_path).unwrap();
+        let settings = fs::read_to_string(&settings_path).unwrap();
+
+        assert_eq!(store.migrate_effect_ids().unwrap(), Migration::default());
+        assert_eq!(fs::read_to_string(&manifest_path).unwrap(), manifest);
+        assert_eq!(fs::read_to_string(&settings_path).unwrap(), settings);
+    }
+
+    /// Once recorded, the version keeps a later directory whose name happens to
+    /// be an old id from being taken for it.
+    #[test]
+    fn settings_already_on_uids_are_not_rewritten() {
+        let (tmp, store) = temp_store();
+        let mut settings = Settings::default();
+        settings.set_active_effect(VID, PID, Some("onde"));
+        store.write_settings(&settings).unwrap();
+        store
+            .install_effect("", "", &test_manifest("Onde"))
+            .unwrap();
+
+        assert_eq!(store.migrate_effect_ids().unwrap(), Migration::default());
+        assert_eq!(
+            store.read_settings().unwrap().active_effect(VID, PID),
+            Some("onde")
+        );
+        let _ = tmp;
+    }
+
+    /// First launch: no settings file, and none is created for the migration.
+    #[test]
+    fn a_first_launch_writes_no_settings() {
+        let (tmp, store) = temp_store();
+        assert_eq!(store.migrate_effect_ids().unwrap(), Migration::default());
+        assert!(!tmp.path().join("config").join("settings.json").exists());
+    }
+
+    /// A file written before the version field reads as version 0 — not as the
+    /// current version the defaults carry, which would skip the migration.
+    #[test]
+    fn a_file_without_version_reads_as_version_zero() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join("settings.json"), r#"{"devices":[]}"#).unwrap();
+
+        assert_eq!(store.read_settings().unwrap().version, 0);
+        assert_eq!(Settings::default().version, SETTINGS_VERSION);
+    }
+
+    /// The table the window renames its drafts with: shipped effects by their
+    /// old ids, user effects by their directory names, and a shipped effect
+    /// winning over a directory of the same name, as it did at run time.
+    #[test]
+    fn legacy_ids_cover_shipped_and_installed_effects() {
+        let (tmp, store) = temp_store();
+        plant_pre_uid_library(&tmp);
+        plant_effect_dir(&tmp, "respiration", OTHER_UID, "");
+        store.migrate_effect_ids().unwrap();
+
+        let renames = store.legacy_effect_ids().unwrap();
+        for b in &builtins::ALL {
+            assert_eq!(renames.get(b.slug).map(String::as_str), Some(b.uid));
+        }
+        let mine = &installed_effects(&store)
+            .into_iter()
+            .find(|e| e.manifest.name == "Mon effet")
+            .unwrap()
+            .id;
+        assert_eq!(renames.get("mon-effet"), Some(mine));
+    }
+
+    #[test]
+    fn uids_have_one_shape() {
+        validate_uid(&mint_uid()).unwrap();
+        validate_uid(UID).unwrap();
+        for bad in [
+            "",
+            "onde-radiale",
+            "0B5F1A3E-7C2D-4E8F-9A6B-1C2D3E4F5A6B",
+            "0b5f1a3e7c2d4e8f9a6b1c2d3e4f5a6b",
+            "0b5f1a3e-7c2d-4e8f-9a6b-1c2d3e4f5a6",
+            "0b5f1a3e-7c2d-4e8f-9a6b-1c2d3e4f5a6g",
+            "0b5f1a3e-7c2d-4e8f-9a6b-1c2d3e4f5a6b-",
+            "../5f1a3e-7c2d-4e8f-9a6b-1c2d3e4f5a6b",
+        ] {
+            assert!(validate_uid(bad).is_err(), "\"{bad}\" was accepted");
+        }
+    }
+
     // ------------------------------------------------- starting values
 
     /// A manifest declaring three parameters, one of them without `default`.
     fn declared_manifest() -> Manifest {
         Manifest {
+            uid: UID.into(),
             name: "Balayage".into(),
             description: String::new(),
             params: serde_json::json!({

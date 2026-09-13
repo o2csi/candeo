@@ -23,10 +23,13 @@ use crate::runtime::swatch::{self, Swatch};
 
 /// An effect compiled into the binary.
 pub struct Builtin {
-    /// Stable identifier, written by hand and not derived from the name: it is
-    /// saved in `settings.json` as the active effect, so renaming the effect
-    /// must not change it.
-    pub id: &'static str,
+    /// Identity, fixed once and for all: it is what `settings.json` records,
+    /// and what every installation recognizes. The module declares the same
+    /// value in its `export default`.
+    pub uid: &'static str,
+    /// The id this effect had before uids, still found in settings written by
+    /// earlier versions. See [`crate::storage::Store::migrate_effect_ids`].
+    pub slug: &'static str,
     /// The module, as the engine loads it.
     pub js: &'static str,
     pub name: &'static str,
@@ -45,7 +48,8 @@ pub struct Builtin {
 /// steps through the matrix, crossing it in diagonals from a corner.
 pub static ALL: [Builtin; 5] = [
     Builtin {
-        id: "onde-radiale",
+        uid: "33d117dc-57f2-48dd-a717-d160ad0f0cfc",
+        slug: "onde-radiale",
         js: include_str!("onde-radiale.js"),
         name: "Onde radiale",
         description: "Une onde de teinte se propage en cercles, à la distance physique des touches",
@@ -55,7 +59,8 @@ pub static ALL: [Builtin; 5] = [
         }"#,
     },
     Builtin {
-        id: "onde-matricielle",
+        uid: "d82c2077-c90d-4cce-869a-21c6a5d65755",
+        slug: "onde-matricielle",
         js: include_str!("onde-matricielle.js"),
         name: "Onde diagonale",
         description:
@@ -66,7 +71,8 @@ pub static ALL: [Builtin; 5] = [
         }"#,
     },
     Builtin {
-        id: "respiration",
+        uid: "62fdbb90-6033-461a-83c0-3b186e8d1f51",
+        slug: "respiration",
         js: include_str!("respiration.js"),
         name: "Respiration",
         description: "Tout le clavier respire, d'une seule couleur",
@@ -76,7 +82,8 @@ pub static ALL: [Builtin; 5] = [
         }"#,
     },
     Builtin {
-        id: "balayage",
+        uid: "f2c7bd61-c7fe-4731-964f-7c526b7052ad",
+        slug: "balayage",
         js: include_str!("balayage.js"),
         name: "Balayage",
         description: "Une rangée éclairée descend le clavier en laissant une traînée",
@@ -88,7 +95,8 @@ pub static ALL: [Builtin; 5] = [
         }"#,
     },
     Builtin {
-        id: "degrade-fixe",
+        uid: "5797884d-774c-4e3f-9505-aeace0248ec9",
+        slug: "degrade-fixe",
         js: include_str!("degrade-fixe.js"),
         name: "Dégradé fixe",
         description: "Un dégradé entre deux couleurs, immobile",
@@ -100,13 +108,19 @@ pub static ALL: [Builtin; 5] = [
     },
 ];
 
-/// The built-in effect with this identifier, if there is one.
+/// The built-in effect with this uid, if there is one.
 ///
 /// This is the single entry point of the precedence described in
-/// [`crate::storage`]: a built-in identifier is resolved here **before** any
-/// disk access.
-pub fn find(id: &str) -> Option<&'static Builtin> {
-    ALL.iter().find(|b| b.id == id)
+/// [`crate::storage`]: a built-in uid is resolved here **before** any disk
+/// access.
+pub fn find(uid: &str) -> Option<&'static Builtin> {
+    ALL.iter().find(|b| b.uid == uid)
+}
+
+/// The built-in effect that had this id before uids: a readable name for tests.
+#[cfg(test)]
+pub fn by_slug(slug: &str) -> Option<&'static Builtin> {
+    ALL.iter().find(|b| b.slug == slug)
 }
 
 /// Color swatches of the shipped effects, **in the order of [`ALL`]**.
@@ -148,24 +162,26 @@ pub fn swatches() -> &'static [Swatch] {
 mod tests {
     use super::*;
 
-    /// A built-in identifier lives in the **same** namespace as those of user
-    /// effects: it is saved in the settings and displayed like the others. If
-    /// it did not pass the same validation, the reservation made at install
-    /// time would protect nothing.
+    /// A built-in uid lives in the **same** namespace as those of user effects:
+    /// it is saved in the settings and used in the tray menu like the others. If
+    /// it did not pass the same validation, the refusal made at install time
+    /// would protect nothing.
     #[test]
-    fn builtin_ids_are_valid_ids() {
+    fn builtin_uids_are_valid_uids() {
         for b in &ALL {
-            crate::storage::validate_id(b.id).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
+            crate::storage::validate_uid(b.uid).unwrap_or_else(|e| panic!("\"{}\": {e}", b.slug));
         }
     }
 
     #[test]
-    fn builtin_ids_are_unique() {
+    fn builtin_uids_and_slugs_are_unique() {
         for (i, b) in ALL.iter().enumerate() {
             assert!(
-                ALL[i + 1..].iter().all(|o| o.id != b.id),
+                ALL[i + 1..]
+                    .iter()
+                    .all(|o| o.uid != b.uid && o.slug != b.slug),
                 "\"{}\" is shipped twice",
-                b.id
+                b.slug
             );
         }
     }
@@ -177,7 +193,7 @@ mod tests {
         let swatches = swatches();
         assert_eq!(swatches.len(), ALL.len());
         for (b, swatch) in ALL.iter().zip(swatches) {
-            assert!(!swatch.is_empty(), "\"{}\" has no swatch", b.id);
+            assert!(!swatch.is_empty(), "\"{}\" has no swatch", b.slug);
         }
         // Kept, so returned identically: nothing is recomputed each time the
         // library is opened.
@@ -190,11 +206,11 @@ mod tests {
     fn builtin_params_are_valid_json() {
         for b in &ALL {
             let params: serde_json::Value =
-                serde_json::from_str(b.params).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
+                serde_json::from_str(b.params).unwrap_or_else(|e| panic!("\"{}\": {e}", b.slug));
             assert!(
                 params.as_object().is_some_and(|o| !o.is_empty()),
                 "\"{}\" declares no parameters",
-                b.id
+                b.slug
             );
         }
     }

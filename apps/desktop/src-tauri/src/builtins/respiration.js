@@ -9,6 +9,7 @@ import { defineEffect, rgb } from '@candeo/effects-api'
 const DEFAUT = { r: 255, g: 96, b: 0 }
 
 export default defineEffect({
+  uid: '62fdbb90-6033-461a-83c0-3b186e8d1f51',
   name: 'Respiration',
   description: "Tout le clavier respire, d'une seule couleur",
   params: {

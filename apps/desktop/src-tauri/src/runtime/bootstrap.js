@@ -27,11 +27,11 @@ if (typeof effect?.render !== 'function') {
   )
 }
 
-// Le manifeste tel que le module le déclare, posé une fois au chargement.
-// Les effets intégrés annoncent le leur en Rust, pour que lister la
-// bibliothèque n'instancie aucun moteur ; c'est par ici que le test vérifie que
-// les deux disent la même chose.
+// The manifest as the module declares it, set once at load. Built-in effects
+// also declare theirs in Rust, so that listing the library starts no engine;
+// this is how the test checks that both say the same thing.
 globalThis.__candeo_manifest = JSON.stringify({
+  uid: effect.uid ?? '',
   name: effect.name ?? '',
   description: effect.description ?? '',
   params: effect.params ?? {},

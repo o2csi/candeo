@@ -169,13 +169,18 @@ export function writeRow(
 export const EFFECTS_API_VERSION = 1
 
 /**
- * Ce qui est écrit dans `manifest.json`, à côté de l'effet.
+ * What `manifest.json` holds, next to the effect.
  *
- * `params` garde la forme de `ParamSpec` telle que déclarée en TypeScript : le
- * Rust ne les interprète pas, les retyper là-bas créerait une seconde source de
- * vérité.
+ * `params` keeps the shape of `ParamSpec` as declared in TypeScript: the Rust
+ * side does not interpret them, and typing them there would create a second
+ * source of truth.
  */
 export interface EffectManifest {
+  /**
+   * The effect's identity, a lowercase UUID, written in its source. Saving
+   * again or renaming keeps it; it is what `settings.json` records.
+   */
+  uid: string
   name: string
   description?: string
   params?: Record<string, ParamSpec>
@@ -183,14 +188,14 @@ export interface EffectManifest {
 }
 
 /**
- * Écrit `source.ts`, `effect.js` et `manifest.json`, et rend l'`id` retenu.
+ * Writes `source.ts`, `effect.js` and `manifest.json`, and returns the effect's
+ * id: its uid.
  *
- * Les deux sources partent ensemble : sans le `.ts` l'effet ne serait plus
- * modifiable, sans le `.js` il ne pourrait plus démarrer sans ouvrir la fenêtre
- * — le transpileur vit ici, dans l'éditeur.
+ * Both sources go together: without the `.ts` the effect could no longer be
+ * edited, without the `.js` it could not start without opening the window — the
+ * transpiler lives here, in the editor.
  *
- * L'`id` est **dérivé du nom** par le Rust, jamais repris tel quel. Deux
- * enregistrements sous le même nom mettent donc à jour le même effet.
+ * Saving under a uid already installed updates that effect, whatever its name.
  */
 export function installEffect(
   sourceTs: string,
@@ -203,6 +208,16 @@ export function installEffect(
 /** La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur. */
 export function readEffectSource(id: string): Promise<string> {
   return invoke('read_effect_source', { id })
+}
+
+/**
+ * Effect ids from before uids, mapped to the uid each one now designates.
+ *
+ * Only for renaming drafts saved under an old id: the startup migration cannot
+ * reach the web view's storage.
+ */
+export function legacyEffectIds(): Promise<Record<string, string>> {
+  return invoke('legacy_effect_ids')
 }
 
 /**
@@ -226,12 +241,13 @@ export function deleteEffect(id: string): Promise<void> {
 }
 
 /**
- * Un effet de la bibliothèque : son manifeste, plus ce qui n'en fait pas partie.
+ * A library effect: its manifest, plus what is not part of it.
  *
- * Les intégrés sont compilés dans le binaire et n'ont pas de dossier ; `kind`
- * les distingue, pour que l'interface n'ait qu'une liste à afficher.
+ * Built-ins are compiled into the binary and have no directory; `kind` tells
+ * them apart, so the interface has a single list to show.
  */
-export interface EffectEntry extends EffectManifest {
+export interface EffectEntry extends Omit<EffectManifest, 'uid'> {
+  /** The effect's uid, carried once, under this name. */
   id: string
   kind: 'builtin' | 'user'
   /**
@@ -355,6 +371,8 @@ export interface EffectParamsRecord {
  * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
  */
 export interface Settings {
+  /** Shape of the file: 1 since effects are referenced by uid. */
+  version: number
   preferences: Preferences
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]

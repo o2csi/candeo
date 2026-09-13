@@ -16,6 +16,7 @@ import { defineEffect, rgb } from '@candeo/effects-api'
 const DEFAUT = { r: 0, g: 180, b: 255 }
 
 export default defineEffect({
+  uid: 'f2c7bd61-c7fe-4731-964f-7c526b7052ad',
   name: 'Balayage',
   description: 'Une rangée éclairée descend le clavier en laissant une traînée',
   params: {
