@@ -1031,8 +1031,8 @@ pub fn run() {
             journal::init(app.handle());
             journal::reload_level_setting(app.handle());
 
-            // Before anything reads an effect id from `settings.json`: adoption
-            // resumes the applied effects, and the tray lists them.
+            // Before the tray menu and the window read effect ids from the
+            // library and `settings.json`.
             migrate_effect_ids(app.handle());
 
             let state = AppState::default();
