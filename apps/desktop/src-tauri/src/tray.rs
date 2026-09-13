@@ -257,7 +257,11 @@ fn pilotes(settings: &storage::Settings, state: &AppState) -> Vec<Pilote> {
         .filter_map(|layout| {
             let branche = api.as_ref().and_then(|api| crate::plugged(api, layout));
             let inspection = state.inspection(DeviceRef::of(layout));
-            controlled_device(layout, settings, branche, inspection.as_ref())
+            let device = controlled_device(layout, settings, branche, inspection.as_ref());
+            if let Some(d) = &device {
+                tracing::debug!(appareil = %d.device, availability = ?d.availability, "tray menu device state");
+            }
+            device
         })
         .collect()
 }
@@ -746,7 +750,10 @@ fn poser(app: &AppHandle) -> CmdResult<()> {
         .on_tray_icon_event(|icone, evenement| match evenement {
             // Hover precedes the right click: it is the last moment the menu
             // can be rebuilt before it is shown.
-            TrayIconEvent::Enter { .. } => rafraichir(icone.app_handle()),
+            TrayIconEvent::Enter { .. } => {
+                tracing::debug!("tray icon hovered, rebuilding the menu");
+                rafraichir(icone.app_handle());
+            }
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
