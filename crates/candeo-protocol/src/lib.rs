@@ -1,52 +1,51 @@
-//! Construction des rapports du protocole d'éclairage Razer, et lecture des
-//! réponses.
+//! Builds the reports of the Razer lighting protocol, and reads the
+//! responses.
 //!
-//! Structure établie par capture du bus USB — voir `docs/protocol/`.
-//! Aucun code tiers n'a été consulté : ce module dérive uniquement de trames
-//! observées sur le matériel.
+//! Structure established by capturing the USB bus — see `docs/protocol/`.
+//! No third-party code was consulted: this module derives only from frames
+//! observed on the hardware.
 
-/// Taille du rapport, hors identifiant de rapport HID.
+/// Report length, excluding the HID report id.
 ///
-/// ⚠️ **`pub` pour les sondes, et c'est délibéré.** Le seul consommateur hors de
-/// cette crate est `apps/desktop/src-tauri/src/sonde.rs`, qui est déclaré
-/// `#[cfg(test)] mod sonde;` et dont toutes les sondes sont `#[ignore]` : cette
-/// constante ne part donc jamais dans le binaire livré, et un balayage de code
-/// mort la donnera toujours pour restreignable.
+/// ⚠️ **`pub` for the probes, and on purpose.** The only consumer outside this
+/// crate is `apps/desktop/src-tauri/src/sonde.rs`, which is declared
+/// `#[cfg(test)] mod sonde;` and whose probes are all `#[ignore]`: this constant
+/// therefore never ships in the released binary, and a dead-code sweep will
+/// always report it as restrictable.
 ///
-/// Ne pas la restreindre. Ces sondes sont conservées pour **rejouer le relevé**
-/// sur un autre micrologiciel ou un autre exemplaire — c'est ce qui a établi le
-/// protocole, et c'est la seule façon de le réétablir le jour où un appareil
-/// répondra autrement. Les couper pour gagner deux caractères de visibilité
-/// coûterait cette capacité, et le lien ne se reverrait pas.
+/// Do not restrict it. These probes are kept to **replay the survey** on
+/// another firmware or another unit — that is what established the protocol,
+/// and it is the only way to re-establish it the day a device answers
+/// differently. Cutting them to save a few characters of visibility would cost
+/// that ability, and the connection would not be spotted again.
 pub const REPORT_LEN: usize = 90;
 
-/// Taille du tampon passé à `HidD_SetFeature` : identifiant de rapport + données.
+/// Size of the buffer passed to `HidD_SetFeature`: report id + data.
 pub(crate) const FEATURE_BUF_LEN: usize = REPORT_LEN + 1;
 
-/// Classe de commande « éclairage ».
+/// "Lighting" command class.
 const CLASS_LIGHTING: u8 = 0x0f;
 
-/// Classe de commande « informations » : version, numéro de série, mode.
+/// "Information" command class: version, serial number, mode.
 ///
-/// ⚠️ **On n'y fait que lire.** La même classe porte l'écriture du mode de
-/// l'appareil (`0x04`), qui ferait cesser au micrologiciel le traitement de
-/// certaines touches — décision consignée au §8 du relevé de ne jamais y
-/// toucher. Aucun constructeur de ce module ne sait donc former une commande de
-/// cette classe sous `0x80`, et c'est la seule garantie qui ne dépende pas de la
-/// vigilance d'un relecteur.
+/// ⚠️ **We only read from it.** The same class carries the write of the device
+/// mode (`0x04`), which would make the firmware stop handling some keys — a
+/// decision recorded in §8 of the survey never to touch it. No constructor in
+/// this module can therefore form a command of this class below `0x80`, and
+/// that is the only guarantee that does not depend on a reviewer's vigilance.
 const CLASS_INFO: u8 = 0x00;
 
-/// Identifiant de transaction observé sur toutes les trames capturées.
-/// Aucune variation n'a été constatée ; l'appareil ne semble pas le vérifier,
-/// mais on reproduit la valeur d'origine par prudence.
+/// Transaction id observed on every captured frame.
+/// No variation was seen; the device does not seem to check it, but we
+/// reproduce the original value out of caution.
 const TRANSACTION_ID: u8 = 0x9f;
 
-/// Une commande, sans ses arguments : le couple classe / commande.
+/// A command, without its arguments: the class / command pair.
 ///
-/// C'est **exactement** ce que l'appareil valide, et rien de plus : une commande
-/// inconnue rend l'état `0x05`, mais une valeur d'argument absurde sur une
-/// commande connue rend quand même `0x02` (§8 du relevé). Le type ne porte donc
-/// que ce qu'un octet d'état peut confirmer.
+/// This is **exactly** what the device validates, and nothing more: an unknown
+/// command returns status `0x05`, but an absurd argument value on a known
+/// command still returns `0x02` (§8 of the survey). The type therefore carries
+/// only what a status byte can confirm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CommandId {
     pub class: u8,
@@ -59,65 +58,64 @@ impl std::fmt::Display for CommandId {
     }
 }
 
-/// Définir l'effet. Commande `0x0f` / `0x02`.
+/// Set the effect. Command `0x0f` / `0x02`.
 pub const SET_EFFECT: CommandId = CommandId {
     class: CLASS_LIGHTING,
     command: 0x02,
 };
-/// Écrire un segment de rangée. Commande `0x0f` / `0x03`.
+/// Write a row segment. Command `0x0f` / `0x03`.
 pub const WRITE_ROW: CommandId = CommandId {
     class: CLASS_LIGHTING,
     command: 0x03,
 };
-/// Définir la luminosité. Commande `0x0f` / `0x04`.
+/// Set the brightness. Command `0x0f` / `0x04`.
 pub const SET_BRIGHTNESS: CommandId = CommandId {
     class: CLASS_LIGHTING,
     command: 0x04,
 };
 
-/// Lire l'effet courant. `0x0f` / `0x82`, taille `0x03` comme au relevé.
+/// Read the current effect. `0x0f` / `0x82`, length `0x03` as in the survey.
 const READ_EFFECT: CommandId = CommandId {
     class: CLASS_LIGHTING,
     command: 0x82,
 };
-/// Lire la luminosité courante. `0x0f` / `0x84`, taille `0x03` comme au relevé.
+/// Read the current brightness. `0x0f` / `0x84`, length `0x03` as in the survey.
 const READ_BRIGHTNESS: CommandId = CommandId {
     class: CLASS_LIGHTING,
     command: 0x84,
 };
-/// Lire la version du micrologiciel. `0x00` / `0x81`.
+/// Read the firmware version. `0x00` / `0x81`.
 const READ_FIRMWARE: CommandId = CommandId {
     class: CLASS_INFO,
     command: 0x81,
 };
-/// Lire le numéro de série. `0x00` / `0x82`.
+/// Read the serial number. `0x00` / `0x82`.
 const READ_SERIAL: CommandId = CommandId {
     class: CLASS_INFO,
     command: 0x82,
 };
 
-/// Taille annoncée pour les lectures de l'éclairage : celle du relevé.
+/// Length announced for lighting reads: the one from the survey.
 const READ_LIGHTING_LEN: u8 = 0x03;
 
-/// Taille annoncée pour les lectures de la classe `0x00` : celle de la sonde
-/// qui a établi le tableau du §8. Le numéro de série y tient — 15 caractères.
+/// Length announced for class `0x00` reads: the one used by the probe that
+/// established the table in §8. The serial number fits in it — 15 characters.
 const READ_INFO_LEN: u8 = 0x16;
 
-/// Effets pris en charge par le micrologiciel.
+/// Effects supported by the firmware.
 ///
-/// Les variantes autres que [`Effect::Custom`] sont animées par l'appareil
-/// lui-même : elles survivent à l'extinction du logiciel hôte et ne coûtent
-/// aucun temps processeur.
+/// Variants other than [`Effect::Custom`] are animated by the device itself:
+/// they survive the host software shutting down and cost no CPU time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
     Off,
     SpectrumCycle,
-    /// `direction` et `speed` observés à 0x02 et 0x28 respectivement.
+    /// `direction` and `speed` observed at 0x02 and 0x28 respectively.
     Wave {
         direction: u8,
         speed: u8,
     },
-    /// Mode piloté par l'hôte : l'appareil n'affiche que ce qu'on lui pousse.
+    /// Host-driven mode: the device shows only what it is pushed.
     Custom,
 }
 
@@ -132,26 +130,25 @@ impl Effect {
     }
 }
 
-/// Un rapport de 90 octets prêt à être envoyé.
+/// A 90-byte report ready to be sent.
 #[derive(Debug, Clone)]
 pub struct Report(pub [u8; REPORT_LEN]);
 
 impl Report {
     fn new(id: CommandId, args: &[u8]) -> Self {
-        assert!(args.len() <= REPORT_LEN - 10, "arguments trop longs");
+        assert!(args.len() <= REPORT_LEN - 10, "arguments too long");
         let mut r = Self::header(id, args.len() as u8);
         r[8..8 + args.len()].copy_from_slice(args);
         r[88] = checksum(&r);
         Self(r)
     }
 
-    /// Une demande de lecture : aucun argument, seulement la taille qu'on
-    /// attend en retour.
+    /// A read request: no arguments, only the length expected in return.
     ///
-    /// Séparée de [`Self::new`] parce que la taille n'y décrit pas les octets
-    /// envoyés — il n'y en a pas — mais la réponse. Les tailles sont celles du
-    /// relevé, et c'est délibéré : c'est sous cette forme que l'appareil a
-    /// répondu, et rien n'a établi qu'il répondrait pareil à une autre.
+    /// Separate from [`Self::new`] because the length here does not describe
+    /// the bytes sent — there are none — but the response. The lengths are the
+    /// survey's, and on purpose: that is the form the device answered to, and
+    /// nothing established that it would answer the same to another one.
     fn query(id: CommandId, len: u8) -> Self {
         let mut r = Self::header(id, len);
         r[88] = checksum(&r);
@@ -167,7 +164,7 @@ impl Report {
         r
     }
 
-    /// Le couple classe / commande que porte ce rapport.
+    /// The class / command pair this report carries.
     pub fn id(&self) -> CommandId {
         CommandId {
             class: self.0[6],
@@ -175,42 +172,42 @@ impl Report {
         }
     }
 
-    /// Sélectionne un effet. Commande `0x0f` / `0x02`.
+    /// Selects an effect. Command `0x0f` / `0x02`.
     pub fn set_effect(effect: Effect) -> Self {
         Self::new(SET_EFFECT, &effect.args())
     }
 
-    /// Règle la luminosité globale. Commande `0x0f` / `0x04`.
+    /// Sets the global brightness. Command `0x0f` / `0x04`.
     pub fn set_brightness(level: u8) -> Self {
         Self::new(SET_BRIGHTNESS, &[0, 0, level])
     }
 
-    /// Demande la version du micrologiciel. Voir [`Response::firmware`].
+    /// Requests the firmware version. See [`Response::firmware`].
     pub fn read_firmware() -> Self {
         Self::query(READ_FIRMWARE, READ_INFO_LEN)
     }
 
-    /// Demande le numéro de série. Voir [`Response::serial`].
+    /// Requests the serial number. See [`Response::serial`].
     pub fn read_serial() -> Self {
         Self::query(READ_SERIAL, READ_INFO_LEN)
     }
 
-    /// Demande l'effet courant. Voir [`Response::effect`].
+    /// Requests the current effect. See [`Response::effect`].
     pub fn read_effect() -> Self {
         Self::query(READ_EFFECT, READ_LIGHTING_LEN)
     }
 
-    /// Demande la luminosité courante. Voir [`Response::brightness`].
+    /// Requests the current brightness. See [`Response::brightness`].
     pub fn read_brightness() -> Self {
         Self::query(READ_BRIGHTNESS, READ_LIGHTING_LEN)
     }
 
-    /// Écrit un segment de rangée. Commande `0x0f` / `0x03`.
+    /// Writes a row segment. Command `0x0f` / `0x03`.
     ///
-    /// L'écriture partielle est prise en charge : `col_start` et `col_end`
-    /// délimitent le segment, ce qui a été vérifié sur le matériel.
+    /// Partial writes are supported: `col_start` and `col_end` bound the
+    /// segment, which was verified on hardware.
     pub fn write_row(row: u8, col_start: u8, colors: &[Rgb]) -> Self {
-        assert!(!colors.is_empty(), "segment vide");
+        assert!(!colors.is_empty(), "empty segment");
         let col_end = col_start + colors.len() as u8 - 1;
         let mut args = Vec::with_capacity(5 + colors.len() * 3);
         args.extend_from_slice(&[0, 0, row, col_start, col_end]);
@@ -220,7 +217,7 @@ impl Report {
         Self::new(WRITE_ROW, &args)
     }
 
-    /// Tampon prêt pour `HidD_SetFeature` : octet 0 = identifiant de rapport.
+    /// Buffer ready for `HidD_SetFeature`: byte 0 = report id.
     pub fn to_feature_buffer(&self) -> [u8; FEATURE_BUF_LEN] {
         let mut buf = [0u8; FEATURE_BUF_LEN];
         buf[1..].copy_from_slice(&self.0);
@@ -228,49 +225,47 @@ impl Report {
     }
 }
 
-/// Somme de contrôle : XOR des octets 2 à 87 inclus, placée en octet 88.
+/// Checksum: XOR of bytes 2 to 87 inclusive, stored in byte 88.
 ///
-/// Vérifiée sur l'intégralité des trames capturées, toutes commandes
-/// confondues, sans exception.
+/// Verified on every captured frame, across all commands, without exception.
 ///
-/// ⚠️ **`pub` pour les sondes**, comme [`REPORT_LEN`] et pour la même raison :
-/// le constructeur interne de [`Report`] l'appelle déjà pour tout ce que
-/// l'application envoie, et le seul appelant externe est le `sonde.rs` de
-/// `candeo-desktop`, compilé
-/// uniquement en test. Une sonde fabrique ses trames **à la main**, sans passer
-/// par [`Report`] — c'est tout l'intérêt : elle interroge des commandes que le
-/// constructeur ne sait pas former, dont celles qui n'existent peut-être pas.
-/// Lui retirer la somme de contrôle reviendrait à lui faire émettre des trames
-/// que l'appareil refuse, et le relevé ne serait plus rejouable.
+/// ⚠️ **`pub` for the probes**, like [`REPORT_LEN`] and for the same reason:
+/// the internal constructor of [`Report`] already calls it for everything the
+/// application sends, and the only external caller is the `sonde.rs` of
+/// `candeo-desktop`, compiled only in tests. A probe builds its frames **by
+/// hand**, without going through [`Report`] — that is the whole point: it
+/// queries commands the constructor cannot form, including ones that may not
+/// exist. Taking the checksum away from it would make it send frames the
+/// device refuses, and the survey could no longer be replayed.
 pub fn checksum(report: &[u8; REPORT_LEN]) -> u8 {
     report[2..88].iter().fold(0u8, |acc, b| acc ^ b)
 }
 
-// ---------------------------------------------------------------- réponses
+// ---------------------------------------------------------------- responses
 
-/// L'octet d'état d'une réponse (offset 0) — §8 du relevé.
+/// The status byte of a response (offset 0) — §8 of the survey.
 ///
-/// ⚠️ **`Understood` veut dire « cette commande existe », pas « elle a fait ce
-/// que je voulais ».** Mesuré : poser l'effet `0x05`, que ce clavier refuse,
-/// rend `0x02` — l'appareil valide le couple classe / commande, jamais la valeur
-/// d'un argument. Aucun octet d'état ne remplace une relecture.
+/// ⚠️ **`Understood` means "this command exists", not "it did what I
+/// wanted".** Measured: setting effect `0x05`, which this keyboard refuses,
+/// returns `0x02` — the device validates the class / command pair, never the
+/// value of an argument. No status byte replaces a read-back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
-    /// `0x00` — aucune réponse posée.
+    /// `0x00` — no response set.
     Empty,
-    /// `0x01` — l'appareil n'a pas fini.
+    /// `0x01` — the device has not finished.
     Busy,
-    /// `0x02` — le couple classe / commande est connu.
+    /// `0x02` — the class / command pair is known.
     Understood,
     /// `0x03`
     Failed,
     /// `0x04`
     TimedOut,
-    /// `0x05` — classe ou commande inconnue de ce micrologiciel. **Vérifié qu'il
-    /// discrimine** : une classe et une commande inexistantes le rendent toutes
-    /// deux, là où une commande valide rend `0x02`.
+    /// `0x05` — class or command unknown to this firmware. **Verified to
+    /// discriminate**: a nonexistent class and a nonexistent command both
+    /// return it, where a valid command returns `0x02`.
     Unsupported,
-    /// Aucune valeur relevée ne s'écrit ainsi.
+    /// No surveyed value is written this way.
     Other(u8),
 }
 
@@ -283,7 +278,7 @@ impl Status {
             0x03 => Self::Failed,
             0x04 => Self::TimedOut,
             0x05 => Self::Unsupported,
-            autre => Self::Other(autre),
+            other => Self::Other(other),
         }
     }
 }
@@ -302,53 +297,54 @@ impl std::fmt::Display for Status {
     }
 }
 
-/// Version du micrologiciel, telle que `0x00`/`0x81` la rend.
+/// Firmware version, as `0x00`/`0x81` returns it.
 ///
-/// Deux octets gardés comme deux nombres plutôt qu'une chaîne : le relevé écrit
-/// tantôt « v1.5 » (§1, et ce que l'appareil déclare par ailleurs) tantôt
-/// « 1.05 » (§8), pour les mêmes octets `01 05`. Comparer des chaînes ferait de
-/// cette différence de plume une différence de version.
+/// Two bytes kept as two numbers rather than a string: the survey writes
+/// sometimes "v1.5" (§1, and what the device reports elsewhere) and sometimes
+/// "1.05" (§8), for the same bytes `01 05`. Comparing strings would turn that
+/// difference in notation into a difference in version.
 ///
-/// **Ce n'est pas `release_number`.** L'énumération HID rend `0x0200` sur tout
-/// le composite : c'est le `bcdDevice`, une révision matérielle figée.
+/// **This is not `release_number`.** HID enumeration returns `0x0200` across
+/// the whole composite: that is the `bcdDevice`, a frozen hardware revision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Firmware {
     pub major: u8,
     pub minor: u8,
 }
 
-/// Comme l'appareil se déclare : `v1.5`.
+/// As the device reports itself: `v1.5`.
 impl std::fmt::Display for Firmware {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "v{}.{}", self.major, self.minor)
     }
 }
 
-/// La réponse du périphérique à la dernière commande reçue.
+/// The device's response to the last command it received.
 ///
-/// Même structure que [`Report`] (§3), avec deux différences qui la rendent
-/// utile : l'octet 0 porte un [`Status`], et les octets 6 et 7 renvoient **en
-/// écho** la classe et la commande. L'écho n'est pas décoratif — c'est lui qui
-/// dit si l'on relit bien la réponse attendue et non celle d'une commande
-/// émise entre-temps par quelqu'un d'autre.
+/// Same structure as [`Report`] (§3), with two differences that make it
+/// useful: byte 0 carries a [`Status`], and bytes 6 and 7 **echo** the class
+/// and the command. The echo is not decorative — it is what tells whether we
+/// are reading back the expected response and not that of a command sent in
+/// the meantime by someone else.
 ///
-/// La somme de contrôle n'est pas vérifiée : rien au relevé n'établit que
-/// l'appareil en pose une juste dans ses réponses.
+/// The checksum is not verified: nothing in the survey establishes that the
+/// device sets a correct one in its responses.
 #[derive(Debug, Clone)]
 pub struct Response([u8; REPORT_LEN]);
 
 impl Response {
-    /// Le tampon qu'attend `HidD_GetFeature` : identifiant de rapport compris.
+    /// The buffer `HidD_GetFeature` expects: report id included.
     pub const fn buffer() -> [u8; FEATURE_BUF_LEN] {
         [0u8; FEATURE_BUF_LEN]
     }
 
-    /// La réponse contenue dans un tampon rempli par `get_feature_report`.
+    /// The response held in a buffer filled by `get_feature_report`.
     ///
-    /// `read` est le compte rendu par l'appel. Le seuil est celui des sondes qui
-    /// ont établi le sens retour — au moins les 90 octets du rapport — et non un
-    /// seuil plus strict jamais essayé : une lecture refusée ici pour un octet
-    /// d'identifiant manquant serait une panne qu'on aurait fabriquée.
+    /// `read` is the count returned by the call. The threshold is the one of
+    /// the probes that established the return direction — at least the 90
+    /// bytes of the report — and not a stricter threshold never tried: a read
+    /// refused here for one missing id byte would be a failure of our own
+    /// making.
     pub fn from_feature_buffer(buf: &[u8; FEATURE_BUF_LEN], read: usize) -> Option<Self> {
         if read < REPORT_LEN {
             return None;
@@ -362,7 +358,7 @@ impl Response {
         Status::from_byte(self.0[0])
     }
 
-    /// Le couple renvoyé en écho.
+    /// The echoed pair.
     pub fn id(&self) -> CommandId {
         CommandId {
             class: self.0[6],
@@ -370,7 +366,7 @@ impl Response {
         }
     }
 
-    /// Vrai si cette réponse est celle de `request`, d'après l'écho.
+    /// True if this response is the one to `request`, according to the echo.
     pub fn answers(&self, request: &Report) -> bool {
         self.id() == request.id()
     }
@@ -379,11 +375,11 @@ impl Response {
         &self.0[8..88]
     }
 
-    /// La version, lue dans la réponse à [`Report::read_firmware`].
+    /// The version, read from the response to [`Report::read_firmware`].
     ///
-    /// `None` pour `00 00` : c'est ce que rend un tampon resté vide, pas un
-    /// micrologiciel — et annoncer « v0.0 » ferait comparer au relevé une
-    /// version qui n'existe pas.
+    /// `None` for `00 00`: that is what a buffer left empty returns, not a
+    /// firmware — and announcing "v0.0" would compare against the survey a
+    /// version that does not exist.
     pub fn firmware(&self) -> Option<Firmware> {
         let a = self.args();
         let version = Firmware {
@@ -393,34 +389,36 @@ impl Response {
         (version != Firmware { major: 0, minor: 0 }).then_some(version)
     }
 
-    /// Le numéro de série, lu dans la réponse à [`Report::read_serial`].
+    /// The serial number, read from the response to [`Report::read_serial`].
     ///
-    /// ASCII jusqu'au premier octet nul, et imprimable de bout en bout : 15
-    /// caractères au relevé. Ce qui ne ressemble pas à ça rend `None` plutôt
-    /// qu'une chaîne approximative — une série sert à **apparier**, et deux
-    /// lectures abîmées différemment désapparieraient le même exemplaire.
+    /// ASCII up to the first NUL byte, and printable from end to end: 15
+    /// characters in the survey. Anything that does not look like that returns
+    /// `None` rather than an approximate string — a serial is used to
+    /// **match**, and two reads damaged differently would unmatch the same
+    /// unit.
     pub fn serial(&self) -> Option<String> {
         let a = &self.args()[..READ_INFO_LEN as usize];
-        let fin = a.iter().position(|&b| b == 0).unwrap_or(a.len());
-        let serie = &a[..fin];
-        if serie.is_empty() || !serie.iter().all(|b| b.is_ascii_graphic()) {
+        let end = a.iter().position(|&b| b == 0).unwrap_or(a.len());
+        let serial = &a[..end];
+        if serial.is_empty() || !serial.iter().all(|b| b.is_ascii_graphic()) {
             return None;
         }
-        Some(serie.iter().map(|&b| char::from(b)).collect())
+        Some(serial.iter().map(|&b| char::from(b)).collect())
     }
 
-    /// L'effet courant, lu dans la réponse à [`Report::read_effect`].
+    /// The current effect, read from the response to [`Report::read_effect`].
     ///
-    /// La relecture place l'identifiant et ses deux paramètres **aux mêmes
-    /// positions** que l'écriture (`00 00 <effet> <p1> <p2>`) — c'est ce qui a
-    /// permis de relire la Vague « à l'identique, paramètres compris ».
+    /// The read-back places the id and its two parameters **at the same
+    /// positions** as the write (`00 00 <effect> <p1> <p2>`) — that is what
+    /// made it possible to read back the Wave "identically, parameters
+    /// included".
     ///
-    /// `None` pour tout ce que [`Effect`] ne sait pas réécrire à l'identique :
-    /// `Statique` et `Respiration` portent une couleur dont la place dans la
-    /// relecture n'est pas établie, et un octet inattendu là où le relevé n'a vu
-    /// que des zéros veut dire qu'on ne comprend pas ce qu'on lit. Dans les deux
-    /// cas, mieux vaut ne rien conclure que réécrire autre chose que ce qui est
-    /// affiché.
+    /// `None` for anything [`Effect`] cannot rewrite identically: `Static` and
+    /// `Breathing` carry a color whose place in the read-back is not
+    /// established, and an unexpected byte where the survey saw only zeros
+    /// means we do not understand what we are reading. In both cases, better
+    /// to conclude nothing than to rewrite something other than what is
+    /// displayed.
     pub fn effect(&self) -> Option<Effect> {
         let a = self.args();
         if a[0] != 0 || a[1] != 0 || a[5] != 0 {
@@ -429,27 +427,27 @@ impl Response {
         match (a[2], a[3], a[4]) {
             (0x00, 0, 0) => Some(Effect::Off),
             (0x03, 0, 0) => Some(Effect::SpectrumCycle),
-            // Direction bornée à `00`–`02` au relevé ; au-delà, ce n'est plus
-            // une Vague qu'on sait décrire.
+            // Direction bounded to `00`–`02` in the survey; beyond that, it is
+            // no longer a Wave we know how to describe.
             (0x04, direction @ 0..=2, speed) => Some(Effect::Wave { direction, speed }),
             (0x08, 0, 0) => Some(Effect::Custom),
             _ => None,
         }
     }
 
-    /// La luminosité courante, lue dans la réponse à [`Report::read_brightness`].
+    /// The current brightness, read from the response to [`Report::read_brightness`].
     ///
-    /// Relevée sous la forme `00 00 <niveau>`, comme l'écriture.
+    /// Surveyed in the form `00 00 <level>`, like the write.
     pub fn brightness(&self) -> Option<u8> {
         let a = self.args();
         (a[0] == 0 && a[1] == 0).then_some(a[2])
     }
 }
 
-/// Couleur, dans l'ordre du protocole : R, G, B.
+/// Color, in protocol order: R, G, B.
 ///
-/// Attention : le SDK Chroma de Razer utilise `0x00BBGGRR`. Le protocole de
-/// l'appareil, lui, est bien en RGB — ne pas déduire l'un de l'autre.
+/// Beware: Razer's Chroma SDK uses `0x00BBGGRR`. The device protocol itself is
+/// indeed RGB — do not infer one from the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Rgb {
     pub r: u8,
@@ -467,8 +465,8 @@ impl Rgb {
 mod tests {
     use super::*;
 
-    /// Trame réellement capturée : rangée 0 entièrement en rouge.
-    /// La somme de contrôle observée sur le bus était `0x5e`.
+    /// Frame actually captured: row 0 entirely red.
+    /// The checksum observed on the bus was `0x5e`.
     #[test]
     fn checksum_matches_captured_frame() {
         let colors = [Rgb::new(0xff, 0, 0); 22];
@@ -481,22 +479,22 @@ mod tests {
         let colors = [Rgb::new(0xff, 0, 0); 22];
         let r = Report::write_row(0, 0, &colors).0;
         assert_eq!(r[0], 0x00, "status");
-        assert_eq!(r[1], 0x9f, "identifiant de transaction");
-        assert_eq!(r[5], 0x47, "taille des arguments : 5 + 22*3");
-        assert_eq!(r[6], 0x0f, "classe");
-        assert_eq!(r[7], 0x03, "identifiant de commande");
-        assert_eq!(r[12], 0x15, "colonne de fin = 21");
-        assert_eq!(&r[13..16], &[0xff, 0x00, 0x00], "ordre RGB");
+        assert_eq!(r[1], 0x9f, "transaction id");
+        assert_eq!(r[5], 0x47, "argument length: 5 + 22*3");
+        assert_eq!(r[6], 0x0f, "class");
+        assert_eq!(r[7], 0x03, "command id");
+        assert_eq!(r[12], 0x15, "end column = 21");
+        assert_eq!(&r[13..16], &[0xff, 0x00, 0x00], "RGB order");
     }
 
     #[test]
     fn partial_row_sets_boundaries() {
         let colors = [Rgb::new(255, 255, 255); 6];
         let r = Report::write_row(2, 5, &colors).0;
-        assert_eq!(r[10], 2, "rangée");
-        assert_eq!(r[11], 5, "colonne de début");
-        assert_eq!(r[12], 10, "colonne de fin");
-        assert_eq!(r[5], 5 + 6 * 3, "taille des arguments");
+        assert_eq!(r[10], 2, "row");
+        assert_eq!(r[11], 5, "start column");
+        assert_eq!(r[12], 10, "end column");
+        assert_eq!(r[5], 5 + 6 * 3, "argument length");
     }
 
     #[test]
@@ -516,36 +514,33 @@ mod tests {
     fn feature_buffer_has_leading_report_id() {
         let buf = Report::set_brightness(0xff).to_feature_buffer();
         assert_eq!(buf.len(), 91);
-        assert_eq!(buf[0], 0x00, "identifiant de rapport HID");
-        assert_eq!(buf[7], 0x0f, "classe, décalée d'un octet");
+        assert_eq!(buf[0], 0x00, "HID report id");
+        assert_eq!(buf[7], 0x0f, "class, shifted by one byte");
     }
 
-    // -------------------------------------------------------- lectures
+    // -------------------------------------------------------- reads
 
-    /// Une réponse telle que `get_feature_report` la remplit : identifiant de
-    /// rapport, état, écho, arguments.
-    fn reponse(etat: u8, id: CommandId, args: &[u8]) -> Response {
+    /// A response as `get_feature_report` fills it: report id, status, echo,
+    /// arguments.
+    fn response(status_byte: u8, id: CommandId, args: &[u8]) -> Response {
         let mut buf = Response::buffer();
-        buf[1] = etat;
+        buf[1] = status_byte;
         buf[1 + 6] = id.class;
         buf[1 + 7] = id.command;
         buf[1 + 8..1 + 8 + args.len()].copy_from_slice(args);
-        Response::from_feature_buffer(&buf, buf.len()).expect("tampon complet")
+        Response::from_feature_buffer(&buf, buf.len()).expect("full buffer")
     }
 
-    /// Les demandes sont formées comme la sonde qui a établi le §8 les formait :
-    /// aucun argument, la taille attendue en octet 5, et une somme de contrôle
-    /// juste — sans quoi l'appareil refuserait la trame et non la commande.
+    /// Requests are formed the way the probe that established §8 formed them:
+    /// no arguments, the expected length in byte 5, and a correct checksum —
+    /// otherwise the device would refuse the frame rather than the command.
     #[test]
-    fn une_demande_de_lecture_est_formee_comme_au_releve() {
+    fn read_request_is_formed_as_in_survey() {
         let r = Report::read_firmware().0;
-        assert_eq!(r[1], 0x9f, "identifiant de transaction");
-        assert_eq!(r[5], 0x16, "taille attendue");
+        assert_eq!(r[1], 0x9f, "transaction id");
+        assert_eq!(r[5], 0x16, "expected length");
         assert_eq!((r[6], r[7]), (0x00, 0x81));
-        assert!(
-            r[8..88].iter().all(|&b| b == 0),
-            "une lecture n'a pas d'argument"
-        );
+        assert!(r[8..88].iter().all(|&b| b == 0), "a read has no arguments");
         assert_eq!(r[88], checksum(&r));
 
         let e = Report::read_effect().0;
@@ -554,12 +549,12 @@ mod tests {
         assert_eq!((l[5], l[6], l[7]), (0x03, 0x0f, 0x84));
     }
 
-    /// **Le mode pilote ne s'écrit pas d'ici.** Dans la classe `0x00`, seules
-    /// les lectures (`0x80` et au-delà) sont formables ; `0x00`/`0x04` ferait
-    /// cesser au micrologiciel le traitement de certaines touches.
+    /// **Driver mode is not written from here.** In class `0x00`, only reads
+    /// (`0x80` and above) can be formed; `0x00`/`0x04` would make the firmware
+    /// stop handling some keys.
     #[test]
-    fn aucun_constructeur_n_ecrit_dans_la_classe_information() {
-        let tous = [
+    fn no_constructor_writes_to_info_class() {
+        let all = [
             Report::read_firmware(),
             Report::read_serial(),
             Report::read_effect(),
@@ -568,39 +563,39 @@ mod tests {
             Report::set_brightness(0x80),
             Report::write_row(0, 0, &[Rgb::default()]),
         ];
-        for r in tous {
+        for r in all {
             let id = r.id();
             assert!(
                 id.class != 0x00 || id.command >= 0x80,
-                "{id} écrit dans la classe information"
+                "{id} writes to the information class"
             );
         }
     }
 
     #[test]
-    fn l_etat_se_decode_comme_au_releve() {
-        let s = |b| reponse(b, SET_BRIGHTNESS, &[]).status();
+    fn status_decodes_as_in_survey() {
+        let s = |b| response(b, SET_BRIGHTNESS, &[]).status();
         assert_eq!(s(0x02), Status::Understood);
         assert_eq!(s(0x05), Status::Unsupported);
         assert_eq!(s(0x01), Status::Busy);
         assert_eq!(s(0x07), Status::Other(0x07));
     }
 
-    /// L'écho désigne la commande répondue : une réponse à la luminosité ne se
-    /// lit pas comme une version, même si ses octets s'y prêteraient.
+    /// The echo names the command being answered: a brightness response is not
+    /// read as a version, even if its bytes would lend themselves to it.
     #[test]
-    fn l_echo_designe_la_commande_repondue() {
-        let r = reponse(0x02, READ_FIRMWARE, &[0x01, 0x05]);
+    fn echo_names_answered_command() {
+        let r = response(0x02, READ_FIRMWARE, &[0x01, 0x05]);
         assert!(r.answers(&Report::read_firmware()));
         assert!(!r.answers(&Report::read_serial()));
         assert!(!r.answers(&Report::read_brightness()));
     }
 
-    /// `01 05`, relevé le 12/09/2026 — ce que l'appareil déclare par ailleurs
-    /// comme **v1.5**. La concordance a servi de validation.
+    /// `01 05`, surveyed on 12/09/2026 — what the device reports elsewhere as
+    /// **v1.5**. The match served as validation.
     #[test]
-    fn la_version_01_05_se_lit_v1_5() {
-        let v = reponse(0x02, READ_FIRMWARE, &[0x01, 0x05])
+    fn version_01_05_reads_as_v1_5() {
+        let v = response(0x02, READ_FIRMWARE, &[0x01, 0x05])
             .firmware()
             .expect("version");
         assert_eq!(v, Firmware { major: 1, minor: 5 });
@@ -609,32 +604,32 @@ mod tests {
     }
 
     #[test]
-    fn un_tampon_vide_n_est_pas_une_version() {
-        assert_eq!(reponse(0x02, READ_FIRMWARE, &[0, 0]).firmware(), None);
+    fn empty_buffer_is_not_a_version() {
+        assert_eq!(response(0x02, READ_FIRMWARE, &[0, 0]).firmware(), None);
     }
 
-    /// Série inventée, de la forme relevée : 15 caractères ASCII.
+    /// Made-up serial, in the surveyed form: 15 ASCII characters.
     #[test]
-    fn le_numero_de_serie_s_arrete_au_premier_octet_nul() {
-        let r = reponse(0x02, READ_SERIAL, b"XY24ABCDEFG0001\0\0\0");
+    fn serial_number_stops_at_first_nul_byte() {
+        let r = response(0x02, READ_SERIAL, b"XY24ABCDEFG0001\0\0\0");
         assert_eq!(r.serial().as_deref(), Some("XY24ABCDEFG0001"));
     }
 
-    /// Une série sert à apparier : une lecture abîmée ne doit pas en inventer
-    /// une seconde pour le même exemplaire.
+    /// A serial is used to match: a damaged read must not invent a second one
+    /// for the same unit.
     #[test]
-    fn une_serie_illisible_ne_se_devine_pas() {
-        assert_eq!(reponse(0x02, READ_SERIAL, &[]).serial(), None);
-        assert_eq!(reponse(0x02, READ_SERIAL, b"XY24\x07BCD").serial(), None);
-        assert_eq!(reponse(0x02, READ_SERIAL, b"XY 24").serial(), None);
+    fn unreadable_serial_is_not_guessed() {
+        assert_eq!(response(0x02, READ_SERIAL, &[]).serial(), None);
+        assert_eq!(response(0x02, READ_SERIAL, b"XY24\x07BCD").serial(), None);
+        assert_eq!(response(0x02, READ_SERIAL, b"XY 24").serial(), None);
     }
 
-    /// La relecture place l'effet aux positions de l'écriture : un effet posé se
-    /// relit tel quel. C'est la condition pour pouvoir le **réécrire à
-    /// l'identique** sans rien changer à ce que montre le clavier.
+    /// The read-back places the effect at the write positions: an effect that
+    /// was set reads back as is. That is the condition for being able to
+    /// **rewrite it identically** without changing anything the keyboard shows.
     #[test]
-    fn un_effet_relu_se_reecrit_a_l_identique() {
-        for effet in [
+    fn read_back_effect_rewrites_identically() {
+        for effect in [
             Effect::Off,
             Effect::SpectrumCycle,
             Effect::Wave {
@@ -643,36 +638,36 @@ mod tests {
             },
             Effect::Custom,
         ] {
-            let pose = Report::set_effect(effet).0;
-            let relu = reponse(0x02, READ_EFFECT, &pose[8..14]).effect();
-            assert_eq!(relu, Some(effet));
+            let written = Report::set_effect(effect).0;
+            let read_back = response(0x02, READ_EFFECT, &written[8..14]).effect();
+            assert_eq!(read_back, Some(effect));
         }
     }
 
-    /// `Statique` porte une couleur dont la place dans la relecture n'est pas
-    /// établie : la réécrire « à l'identique » pourrait l'éteindre.
+    /// `Static` carries a color whose place in the read-back is not
+    /// established: rewriting it "identically" could turn it off.
     #[test]
-    fn un_effet_colore_ne_se_relit_pas() {
-        let statique = [0, 0, 0x01, 0, 0, 0x01, 0xff, 0x00, 0x00];
-        assert_eq!(reponse(0x02, READ_EFFECT, &statique).effect(), None);
-        // Identifiant de LED non nul : ce n'est plus la forme relevée.
-        assert_eq!(reponse(0x02, READ_EFFECT, &[0x05, 0, 0x03]).effect(), None);
+    fn colored_effect_is_not_read_back() {
+        let static_args = [0, 0, 0x01, 0, 0, 0x01, 0xff, 0x00, 0x00];
+        assert_eq!(response(0x02, READ_EFFECT, &static_args).effect(), None);
+        // Non-zero LED id: no longer the surveyed form.
+        assert_eq!(response(0x02, READ_EFFECT, &[0x05, 0, 0x03]).effect(), None);
     }
 
     #[test]
-    fn la_luminosite_se_relit_comme_elle_s_ecrit() {
-        let pose = Report::set_brightness(0x80).0;
-        let relu = reponse(0x02, READ_BRIGHTNESS, &pose[8..11]).brightness();
-        assert_eq!(relu, Some(0x80));
+    fn brightness_reads_back_as_written() {
+        let written = Report::set_brightness(0x80).0;
+        let read_back = response(0x02, READ_BRIGHTNESS, &written[8..11]).brightness();
+        assert_eq!(read_back, Some(0x80));
         assert_eq!(
-            reponse(0x02, READ_BRIGHTNESS, &[0x05, 0, 0x80]).brightness(),
+            response(0x02, READ_BRIGHTNESS, &[0x05, 0, 0x80]).brightness(),
             None
         );
     }
 
-    /// Le seuil est celui des sondes : 90 octets au moins.
+    /// The threshold is the probes' one: at least 90 bytes.
     #[test]
-    fn une_reponse_tronquee_est_refusee() {
+    fn truncated_response_is_refused() {
         let buf = Response::buffer();
         assert!(Response::from_feature_buffer(&buf, 89).is_none());
         assert!(Response::from_feature_buffer(&buf, 90).is_some());
