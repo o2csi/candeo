@@ -1,94 +1,93 @@
-//! Repère de couleurs d'un effet — prélevé **en l'exécutant**.
+//! Color swatch of an effect — sampled **by running it**.
 //!
-//! Dans la bibliothèque, chaque effet porte quelques couleurs qui aident à le
-//! retrouver sans le lancer. Elles sont échantillonnées sur le rendu, jamais
-//! déclarées dans le manifeste ni dessinées à la main, pour deux raisons :
+//! In the library, each effect carries a few colors that help find it again
+//! without launching it. They are sampled from the render, never declared in the
+//! manifest nor drawn by hand, for two reasons:
 //!
-//! 1. l'auteur n'a rien à fournir — on écrit son effet, il a son repère ;
-//! 2. surtout, **le repère ne peut pas mentir**. Déclaré à la main, il
-//!    dériverait dès la première modification du code : un effet devenu bleu
-//!    garderait sa vignette rouge. Ici, il *vient* de l'effet.
+//! 1. the author has nothing to provide — you write your effect, it has its
+//!    swatch;
+//! 2. above all, **the swatch cannot lie**. Declared by hand, it would drift
+//!    from the first change to the code: an effect turned blue would keep its
+//!    red thumbnail. Here, it *comes* from the effect.
 //!
-//! Le moteur sait déjà produire une image sans toucher au matériel —
-//! [`super::prepare_bounded`] puis [`super::render_once`]. L'échantillonnage
-//! n'est que quelques appels de plus, sur le même chemin que la production : ce
-//! qu'on montre dans la liste est rendu par le code qui allumera le clavier.
+//! The engine can already produce a frame without touching the hardware —
+//! [`super::prepare_bounded`] then [`super::render_once`]. Sampling is only a
+//! few more calls, on the same path as production: what the list shows is
+//! rendered by the code that will light the keyboard.
 //!
-//! # Où l'on prélève, et pourquoi
+//! # Where we sample, and why
 //!
-//! [`SAMPLES`] images, à des instants différents, et une couleur par image —
-//! mais **pas au même endroit du clavier** d'une image à la suivante.
+//! [`SAMPLES`] frames, at different instants, and one color per frame — but
+//! **not at the same place on the keyboard** from one frame to the next.
 //!
-//! Prendre une touche toujours à la même place ne distinguerait pas un dégradé
-//! immobile d'un aplat uni : les deux rendraient quatre fois la même couleur.
-//! Moyenner l'image entière ne les distinguerait pas davantage — la moyenne
-//! réduit toute image à une seule teinte, et un arc-en-ciel moyenné est gris.
+//! Always taking a key at the same place would not tell a still gradient from a
+//! flat fill: both would render the same color four times. Averaging the whole
+//! frame would not tell them apart either — the average reduces any frame to a
+//! single hue, and an averaged rainbow is grey.
 //!
-//! Chaque prélèvement est donc la moyenne d'une **bande diagonale** du clavier,
-//! et les bandes avancent d'une image à l'autre. Diagonale, et non une rangée
-//! ni une colonne : un dégradé horizontal ne varie que selon la colonne, un
-//! balayage vertical que selon la rangée. Découper selon l'une des deux rendrait
-//! l'autre parfaitement uniforme — donc invisible dans le repère.
+//! Each sample is therefore the average of a **diagonal band** of the keyboard,
+//! and the bands move on from one frame to the next. Diagonal, and not a row
+//! or a column: a horizontal gradient only varies by column, a vertical sweep
+//! only by row. Slicing along either one would make the other perfectly
+//! uniform — and so invisible in the swatch.
 //!
-//! Une bande, et non une touche : un effet peut laisser la majeure partie du
-//! clavier éteinte — « Balayage » est exactement cela —, et une touche isolée
-//! tomberait sur du noir par hasard. La moyenne d'un quart des LED, elle, dit
-//! quelque chose de vrai : un effet majoritairement sombre donne un repère
-//! sombre, et c'est précisément ce qui le distingue d'un effet qui remplit tout.
+//! A band, and not a key: an effect may leave most of the keyboard dark —
+//! "Balayage" (Sweep) is exactly that —, and a single key would land on black
+//! by chance. The average of a quarter of the LEDs does say something true: a
+//! mostly dark effect gives a dark swatch, and that is precisely what sets it
+//! apart from an effect that fills everything.
 //!
-//! Les instants sont **irrégulièrement espacés**. Régulièrement espacés, ils se
-//! caleraient sur la période d'un effet cyclique et rendraient quatre fois la
-//! même couleur — la panne même qu'on cherche à éviter.
+//! The instants are **irregularly spaced**. Regularly spaced, they would lock
+//! onto the period of a cyclic effect and render the same color four times —
+//! the very failure we are trying to avoid.
 //!
-//! # Ce que le format ne fige pas
+//! # What the format does not freeze
 //!
-//! Un repère est une **liste** de couleurs, pas un quadruplet. Le jour où la
-//! galerie voudra des vignettes animées, il suffira de ne pas s'arrêter à
-//! quelques images : ni le stockage ni le type exposé n'ont à changer.
+//! A swatch is a **list** of colors, not a quadruplet. The day the gallery wants
+//! animated thumbnails, it will be enough not to stop at a few frames: neither
+//! the storage nor the exposed type has to change.
 
 use std::time::{Duration, Instant};
 
 use candeo_device::Layout;
 use rquickjs::Context;
 
-/// Nombre de couleurs d'un repère.
+/// Number of colors in a swatch.
 ///
-/// Quatre : assez pour qu'un dégradé se lise comme un dégradé et qu'un cycle se
-/// lise comme un cycle, assez peu pour que l'échantillonnage reste imperceptible
-/// à l'installation.
+/// Four: enough for a gradient to read as a gradient and a cycle to read as a
+/// cycle, few enough for sampling to stay imperceptible at install time.
 pub const SAMPLES: usize = 4;
 
-/// Instants de rendu, en secondes.
+/// Render instants, in seconds.
 ///
-/// Irrégulièrement espacés : voir l'en-tête du module. Ils couvrent un peu plus
-/// de deux secondes, ce qui laisse le temps à un effet lent — « Respiration »
-/// respire en cinq secondes — de montrer autre chose que son image de départ.
+/// Irregularly spaced: see the module header. They cover a little over two
+/// seconds, which gives a slow effect — "Respiration" (Breathing) breathes in
+/// five seconds — time to show something other than its first frame.
 const INSTANTS: [f64; SAMPLES] = [0.0, 0.37, 1.13, 2.61];
 
-/// Temps maximal accordé à un échantillonnage complet, chargement compris.
+/// Maximum time allowed for a complete sampling, loading included.
 ///
-/// C'est du code utilisateur : il peut lever, mais il peut aussi boucler sans
-/// fin. Sans cette borne, un effet qui boucle **empêcherait son installation**
-/// pour toujours — le contraire de ce qu'on veut d'un repère, qui n'est qu'un
-/// agrément. Quelques millisecondes suffisent en pratique ; deux secondes sont
-/// deux ordres de grandeur au-dessus.
+/// This is user code: it may throw, but it may also loop forever. Without this
+/// bound, a looping effect **would block its own installation** forever — the
+/// opposite of what we want from a swatch, which is only a nicety. A few
+/// milliseconds are enough in practice; two seconds is two orders of magnitude
+/// above that.
 const BUDGET: Duration = Duration::from_secs(2);
 
-/// Le repère d'un effet : quelques couleurs `#rrggbb`.
+/// The swatch of an effect: a few `#rrggbb` colors.
 ///
-/// Des chaînes hexadécimales plutôt que des triplets : l'interface les pose
-/// telles quelles en CSS, et le fichier reste lisible quand on l'ouvre.
+/// Hexadecimal strings rather than triplets: the interface puts them into CSS as
+/// they are, and the file stays readable when you open it.
 pub type Swatch = Vec<String>;
 
-/// Échantillonne le repère d'un effet.
+/// Samples the swatch of an effect.
 ///
-/// **N'échoue jamais.** Un effet qui ne charge pas, qui lève ou qui boucle rend
-/// un repère vide ; c'est à l'appelant de retomber sur quelque chose de neutre.
-/// Un repère manquant n'est pas une raison de refuser un effet par ailleurs
-/// valide.
+/// **Never fails.** An effect that does not load, throws or loops gives an
+/// empty swatch; it is up to the caller to fall back on something neutral. A
+/// missing swatch is no reason to reject an otherwise valid effect.
 ///
-/// Un effet qui rend du noir partout, en revanche, n'est **pas** un échec : son
-/// repère est noir, et c'est la vérité sur ce qu'il fait.
+/// An effect that renders black everywhere, on the other hand, is **not** a
+/// failure: its swatch is black, and that is the truth about what it does.
 pub fn sample(js: &str, layout: &'static Layout) -> Swatch {
     let deadline = Instant::now() + BUDGET;
 
@@ -102,12 +101,12 @@ pub fn sample(js: &str, layout: &'static Layout) -> Swatch {
 
     let mut swatch = Swatch::with_capacity(SAMPLES);
     for (&time, band) in INSTANTS.iter().zip(&bands) {
-        // L'index d'image est celui qu'aurait la boucle à cet instant : un effet
-        // qui compte les images plutôt que les secondes doit avancer lui aussi.
+        // The frame index is the one the loop would have at this instant: an
+        // effect that counts frames rather than seconds must move on too.
         let frame_index = (time * f64::from(super::FPS)).round() as u32;
 
-        // Une image qui lève est sautée, pas fatale : un effet qui ne trébuche
-        // qu'à un instant garde les couleurs qu'on a pu prélever ailleurs.
+        // A frame that throws is skipped, not fatal: an effect that only trips
+        // at one instant keeps the colors we could sample elsewhere.
         let Ok(bytes) = super::render_once(&ctx, time, frame_index, &params, frame_len) else {
             continue;
         };
@@ -116,17 +115,17 @@ pub fn sample(js: &str, layout: &'static Layout) -> Swatch {
     swatch
 }
 
-/// Les paramètres avec lesquels échantillonner : **les valeurs par défaut**
-/// déclarées par l'effet lui-même.
+/// The parameters to sample with: **the default values** declared by the effect
+/// itself.
 ///
-/// Pas un objet vide : rien n'oblige un effet à se replier sur une valeur quand
-/// un paramètre manque, et `params.couleur.r` sur `undefined` donne du noir. Le
-/// repère montrerait alors un effet que personne ne verra jamais — la galerie,
-/// elle, lance l'effet avec ses défauts.
+/// Not an empty object: nothing forces an effect to fall back on a value when a
+/// parameter is missing, and `params.couleur.r` on `undefined` gives black. The
+/// swatch would then show an effect nobody will ever see — the gallery launches
+/// the effect with its defaults.
 ///
-/// Ils sont lus dans le manifeste que le **module** déclare, pas dans celui que
-/// le Rust annonce : c'est le module qui fait foi, et cela laisse la fonction
-/// n'avoir besoin que du JavaScript.
+/// They are read from the manifest the **module** declares, not from the one the
+/// Rust side announces: the module is authoritative, and this lets the function
+/// need nothing but the JavaScript.
 fn default_params(ctx: &Context) -> String {
     let declared: Option<String> = ctx.with(|ctx| ctx.globals().get("__candeo_manifest").ok());
     let Some(declared) = declared else {
@@ -146,22 +145,20 @@ fn default_params(ctx: &Context) -> String {
     serde_json::Value::Object(values).to_string()
 }
 
-/// Découpe les positions allumées en [`SAMPLES`] bandes diagonales.
+/// Splits the lit positions into [`SAMPLES`] diagonal bands.
 ///
-/// La diagonale est une coordonnée unique, `rangée + colonne`, chacune
-/// normalisée : elle avance donc quand on descend **et** quand on va vers la
-/// droite. Les positions sont triées le long de cette coordonnée puis coupées en
-/// groupes de **même effectif**, et non en tranches de même largeur — aucune
-/// bande ne peut alors se retrouver vide sur un gabarit dont les LED sont
-/// inégalement réparties, et chaque prélèvement pèse le même nombre de LED.
+/// The diagonal is a single coordinate, `row + column`, each normalized: it
+/// therefore moves on when going down **and** when going right. Positions are
+/// sorted along this coordinate then cut into groups of **equal size**, not
+/// slices of equal width — no band can then end up empty on a layout whose LEDs
+/// are unevenly spread, and every sample weighs the same number of LEDs.
 ///
-/// Les égalités sont nombreuses (toute une anti-diagonale partage sa
-/// coordonnée) : le tri est stable et le parcours se fait rangée par rangée, le
-/// découpage est donc déterministe. Il le faut — le même effet doit donner le
-/// même repère à chaque installation.
+/// Ties are many (a whole anti-diagonal shares its coordinate): the sort is
+/// stable and the walk goes row by row, so the split is deterministic. It has
+/// to be — the same effect must give the same swatch at every installation.
 fn bands(layout: &'static Layout) -> Vec<Vec<u16>> {
-    // Un gabarit d'une seule rangée ou d'une seule colonne ne divise pas par
-    // zéro : le terme correspondant reste simplement nul.
+    // A single-row or single-column layout does not divide by zero: the
+    // matching term simply stays zero.
     let last_row = f32::from(layout.rows.saturating_sub(1).max(1));
     let last_col = f32::from(layout.cols.saturating_sub(1).max(1));
 
@@ -185,19 +182,19 @@ fn bands(layout: &'static Layout) -> Vec<Vec<u16>> {
         .collect()
 }
 
-/// Couleur moyenne d'une bande, sur une image brute.
+/// Average color of a band, over a raw frame.
 ///
-/// Moyenne arithmétique des octets, sans correction gamma : ce qu'on montre est
-/// une pastille de quelques pixels, pas une image à reproduire fidèlement, et
-/// une bande noire doit rester noire.
+/// Arithmetic mean of the bytes, without gamma correction: what we show is a
+/// dot a few pixels wide, not a frame to reproduce faithfully, and a black band
+/// must stay black.
 fn average(bytes: &[u8], band: &[u16]) -> [u8; 3] {
     let mut sum = [0u32; 3];
     let mut counted = 0u32;
 
     for &index in band {
         let at = index as usize * 3;
-        // Une image plus courte que le gabarit est déjà refusée par
-        // `render_once` ; la garde protège d'un gabarit changé sous nos pieds.
+        // A frame shorter than the layout is already rejected by
+        // `render_once`; the guard protects against a layout changed under us.
         let Some(color) = bytes.get(at..at + 3) else {
             continue;
         };
@@ -229,7 +226,7 @@ mod tests {
         &candeo_device::DEATHSTALKER_V2_PRO
     }
 
-    fn est_du_rrggbb(c: &str) -> bool {
+    fn is_rrggbb(c: &str) -> bool {
         c.len() == 7
             && c.starts_with('#')
             && c[1..]
@@ -237,57 +234,57 @@ mod tests {
                 .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
     }
 
-    /// Chacun des effets livrés doit produire un repère complet : c'est la
-    /// promesse de la galerie, et un intégré sans repère se verrait au premier
-    /// lancement.
+    /// Every shipped effect must produce a complete swatch: that is the promise
+    /// of the gallery, and a built-in without a swatch would show at first
+    /// launch.
     #[test]
-    fn chaque_effet_integre_produit_un_repere() {
+    fn every_builtin_effect_produces_a_swatch() {
         for b in &crate::builtins::ALL {
             let swatch = sample(b.js, layout());
-            assert_eq!(swatch.len(), SAMPLES, "« {} » : repère incomplet", b.id);
+            assert_eq!(swatch.len(), SAMPLES, "\"{}\": incomplete swatch", b.id);
             for c in &swatch {
-                assert!(est_du_rrggbb(c), "« {} » : couleur « {c} »", b.id);
+                assert!(is_rrggbb(c), "\"{}\": color \"{c}\"", b.id);
             }
         }
     }
 
-    /// Un effet qui lève rend un repère vide plutôt que de faire échouer
-    /// l'appelant. C'est du code utilisateur : il a le droit d'être cassé.
+    /// An effect that throws gives an empty swatch rather than failing the
+    /// caller. This is user code: it is allowed to be broken.
     #[test]
-    fn un_effet_qui_leve_ne_donne_pas_de_repere() {
+    fn an_effect_that_throws_gives_no_swatch() {
         let js = "export default { name: 'X', render() { throw new Error('boum') } }";
         assert!(sample(js, layout()).is_empty());
     }
 
-    /// Le chargement peut échouer avant même le premier rendu.
+    /// Loading can fail before the first render even happens.
     #[test]
-    fn un_effet_qui_ne_charge_pas_ne_donne_pas_de_repere() {
-        assert!(sample("ceci n'est pas du JavaScript {{{", layout()).is_empty());
+    fn an_effect_that_does_not_load_gives_no_swatch() {
+        assert!(sample("this is not JavaScript {{{", layout()).is_empty());
     }
 
-    /// Un effet qui boucle sans fin est **interrompu**, pas attendu. Sans cette
-    /// borne, il suffirait d'un `while (true)` pour qu'une installation ne
-    /// revienne jamais.
+    /// An effect that loops forever is **interrupted**, not waited for. Without
+    /// this bound, a single `while (true)` would be enough for an installation
+    /// never to return.
     #[test]
-    fn un_effet_qui_boucle_est_interrompu() {
+    fn an_effect_that_loops_is_interrupted() {
         let js = "export default { name: 'X', render() { for (;;) {} } }";
 
-        let debut = Instant::now();
+        let start = Instant::now();
         let swatch = sample(js, layout());
 
         assert!(swatch.is_empty());
         assert!(
-            debut.elapsed() < BUDGET * 3,
-            "l'échantillonnage a duré {:?}",
-            debut.elapsed()
+            start.elapsed() < BUDGET * 3,
+            "sampling took {:?}",
+            start.elapsed()
         );
     }
 
-    /// Le noir n'est pas un échec. Un effet « Éteint » a un repère, et il est
-    /// noir — ce qui le distingue d'un effet dont le repère n'a pas pu être
-    /// calculé, qui n'en a aucun.
+    /// Black is not a failure. An "Éteint" (Off) effect has a swatch, and it is
+    /// black — which sets it apart from an effect whose swatch could not be
+    /// computed, which has none.
     #[test]
-    fn un_effet_tout_noir_a_un_repere_noir() {
+    fn an_all_black_effect_has_a_black_swatch() {
         let js = r#"
             import { BLACK } from '@candeo/effects-api'
             export default { name: 'Éteint', render({ frame }) { frame.fill(BLACK) } }
@@ -295,13 +292,14 @@ mod tests {
         assert_eq!(sample(js, layout()), vec!["#000000"; SAMPLES]);
     }
 
-    /// Le cœur du sujet : un effet uniforme et un effet spatial ne doivent pas
-    /// se ressembler. L'uniforme rend la même couleur partout et à tout instant,
-    /// donc quatre fois la même ; le dégradé varie selon la colonne, donc quatre
-    /// couleurs différentes. Prélever toujours au même endroit les confondrait.
+    /// The heart of the matter: a uniform effect and a spatial effect must not
+    /// look alike. The uniform one renders the same color everywhere and at every
+    /// instant, so the same one four times; the gradient varies by column, so
+    /// four different colors. Always sampling at the same place would confuse
+    /// them.
     #[test]
-    fn un_effet_uniforme_et_un_effet_spatial_ont_des_reperes_distincts() {
-        let uniforme = r#"
+    fn a_uniform_effect_and_a_spatial_effect_have_distinct_swatches() {
+        let uniform = r#"
             import { rgb } from '@candeo/effects-api'
             export default {
               name: 'Uni',
@@ -322,50 +320,54 @@ mod tests {
             }
         "#;
 
-        let uni = sample(uniforme, layout());
-        let deg = sample(spatial, layout());
+        let flat = sample(uniform, layout());
+        let gradient = sample(spatial, layout());
 
         assert_eq!(
-            uni,
+            flat,
             vec!["#c82828"; SAMPLES],
-            "l'aplat doit rester un aplat"
+            "a flat fill must stay a flat fill"
         );
-        assert_eq!(deg.len(), SAMPLES);
+        assert_eq!(gradient.len(), SAMPLES);
         assert_eq!(
-            deg.iter().collect::<std::collections::HashSet<_>>().len(),
+            gradient
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
             SAMPLES,
-            "le dégradé doit donner quatre couleurs différentes : {deg:?}"
+            "the gradient must give four different colors: {gradient:?}"
         );
-        assert_ne!(uni, deg);
+        assert_ne!(flat, gradient);
     }
 
-    /// Deux effets livrés visuellement distincts donnent des repères distincts.
-    /// C'est la même propriété que ci-dessus, vérifiée sur ce qu'on livre.
+    /// Two visually distinct shipped effects give distinct swatches. This is the
+    /// same property as above, checked on what we ship.
     #[test]
-    fn deux_effets_integres_distincts_ont_des_reperes_distincts() {
-        let respiration = sample(
-            crate::builtins::find("respiration").expect("intégré").js,
+    fn two_distinct_builtin_effects_have_distinct_swatches() {
+        let breathing = sample(
+            crate::builtins::find("respiration").expect("built-in").js,
             layout(),
         );
-        let degrade = sample(
-            crate::builtins::find("degrade-fixe").expect("intégré").js,
+        let fixed_gradient = sample(
+            crate::builtins::find("degrade-fixe").expect("built-in").js,
             layout(),
         );
-        assert_ne!(respiration, degrade);
+        assert_ne!(breathing, fixed_gradient);
     }
 
-    /// Le repère est calculé une fois et rangé : il doit donc être reproductible,
-    /// sans quoi réenregistrer un effet inchangé en changerait la vignette.
+    /// The swatch is computed once and stored: it must therefore be
+    /// reproducible, or saving an unchanged effect again would change its
+    /// thumbnail.
     #[test]
-    fn le_meme_effet_donne_toujours_le_meme_repere() {
-        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
+    fn the_same_effect_always_gives_the_same_swatch() {
+        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
         assert_eq!(sample(js, layout()), sample(js, layout()));
     }
 
-    /// Les valeurs par défaut du module sont utilisées : sans elles, un effet
-    /// qui ne se replie sur rien rendrait du noir, et son repère mentirait.
+    /// The module's default values are used: without them, an effect that falls
+    /// back on nothing would render black, and its swatch would lie.
     #[test]
-    fn les_parametres_sont_pris_a_leur_valeur_par_defaut() {
+    fn parameters_are_taken_at_their_default_value() {
         let js = r#"
             export default {
               name: 'X',
@@ -378,21 +380,21 @@ mod tests {
         assert_eq!(sample(js, layout()), vec!["#00ff00"; SAMPLES]);
     }
 
-    /// Les bandes couvrent toutes les LED, une fois chacune, en parts égales à
-    /// une unité près. Une bande vide donnerait du noir sans que rien ne le dise.
+    /// The bands cover every LED, once each, in parts equal to within one. An
+    /// empty band would give black with nothing to say so.
     #[test]
-    fn les_bandes_partagent_toutes_les_led() {
+    fn the_bands_share_out_every_led() {
         let bands = bands(layout());
         let total: usize = bands.iter().map(Vec::len).sum();
         assert_eq!(total, layout().lit_count());
 
-        let mut vues: Vec<u16> = bands.concat();
-        vues.sort_unstable();
-        vues.dedup();
-        assert_eq!(vues.len(), total, "une LED apparaît dans deux bandes");
+        let mut seen: Vec<u16> = bands.concat();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), total, "an LED appears in two bands");
 
-        let plus_petite = bands.iter().map(Vec::len).min().unwrap();
-        let plus_grande = bands.iter().map(Vec::len).max().unwrap();
-        assert!(plus_grande - plus_petite <= 1, "bandes déséquilibrées");
+        let smallest = bands.iter().map(Vec::len).min().unwrap();
+        let largest = bands.iter().map(Vec::len).max().unwrap();
+        assert!(largest - smallest <= 1, "unbalanced bands");
     }
 }

@@ -506,7 +506,7 @@ hex dump, and the byte positions give the component order without inferring it.
 - [ ] Second byte of the locale layout, `0x86` → `04 80`: what does `0x80` mean?
 - [x] **A phantom HID entry `interface -1`** — virtual collection of the manufacturer's driver (`RZVIRTUAL`), not the keyboard; ruled out by the interface filter, §1
 - [ ] Does reading back `Statique` and `Respiration` via `0x0f`/`0x82` return the color, and at which position? Until established, the inspection on open does not rewrite them
-- [ ] **Is rewriting the current effect and brightness identically invisible?** That is the assumption that allows the inspection to send on every open — to be confirmed by `sonde_inspection_a_l_ouverture`, with the application closed
+- [ ] **Is rewriting the current effect and brightness identically invisible?** That is the assumption that allows the inspection to send on every open — to be confirmed by `probe_inspection_on_open`, with the application closed
 
 ---
 

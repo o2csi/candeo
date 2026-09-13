@@ -1,8 +1,8 @@
-//! Liaison entre l'interface et le matériel.
+//! Bridge between the interface and the hardware.
 //!
-//! Les types exposés au front sont définis ici plutôt que dans les crates :
-//! `candeo-protocol` et `candeo-device` restent ainsi sans dépendance à serde
-//! ni à Tauri, et donc réutilisables et testables hors application.
+//! The types exposed to the front end are defined here rather than in the crates:
+//! `candeo-protocol` and `candeo-device` thus stay free of any serde or Tauri
+//! dependency, and so reusable and testable outside the application.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -18,37 +18,37 @@ mod builtins;
 mod journal;
 mod runtime;
 mod single_instance;
-/// Sondes matérielles, toutes `#[ignore]` — voir le module.
+/// Hardware probes, all `#[ignore]` — see the module.
 #[cfg(test)]
 mod sonde;
 mod storage;
 mod tray;
 
-/// Gabarits connus. Un seul pour l'instant.
+/// Known layouts. Only one for now.
 ///
-/// Visible dans la crate : le diagnostic de [`journal`] énumère les mêmes
-/// appareils que [`list_devices`], et les recopier là-bas en ferait une seconde
-/// liste qui divergerait au premier gabarit ajouté.
+/// Visible in the crate: the [`journal`] diagnostic lists the same devices as
+/// [`list_devices`], and copying them over there would make a second list that
+/// would diverge at the first added layout.
 pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
 
-// ---------------------------------------------------------------- types exposés
+// ---------------------------------------------------------------- exposed types
 
-// Les champs partent en camelCase : c'est la convention du côté qui les lit.
-// Laisser filtrer le nommage Rust jusque dans l'interface serait une fuite
-// d'abstraction, et elle ne se verrait qu'à l'exécution.
+// Fields go out in camelCase: that is the convention of the side that reads
+// them. Letting Rust naming leak all the way into the interface would be a
+// leaky abstraction, and it would only show at runtime.
 
-/// Désigne un appareil, et rien d'autre.
+/// Designates a device, and nothing else.
 ///
-/// VID et PID, comme l'adoption les identifie (issue #25) : c'est la clé de la
-/// table des appareils ouverts, de celle des échecs d'ouverture et de celle des
-/// boucles de rendu. Le numéro de série départage deux exemplaires du même
-/// modèle dans `settings.json`, mais il ne peut pas servir de clé ici — une
-/// énumération muette (hidraw sans règle udev) n'en déclare aucun, et l'appareil
-/// deviendrait indésignable.
+/// VID and PID, as adoption identifies them (issue #25): it is the key of the
+/// open devices table, of the open failures table and of the render loops
+/// table. The serial number tells two units of the same model apart in
+/// `settings.json`, but it cannot serve as a key here — a silent enumeration
+/// (hidraw without a udev rule) declares none, and the device would become
+/// impossible to designate.
 ///
-/// Un type plutôt que deux entiers baladés côte à côte : il apparaît en argument
-/// de commande **et** dans l'état que rend le moteur, et les inverser ne se
-/// verrait qu'à l'exécution.
+/// A type rather than two integers carried side by side: it appears as a
+/// command argument **and** in the state the engine returns, and swapping them
+/// would only show at runtime.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRef {
@@ -65,7 +65,7 @@ impl DeviceRef {
     }
 }
 
-/// Tel qu'il apparaît dans un message destiné à être lu.
+/// As it appears in a message meant to be read.
 impl std::fmt::Display for DeviceRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:#06x}:{:#06x}", self.vid, self.pid)
@@ -78,60 +78,59 @@ pub struct DeviceInfo {
     pub name: String,
     pub vid: u16,
     pub pid: u16,
-    /// Vrai si le périphérique est effectivement branché.
+    /// True if the device is actually plugged in.
     pub present: bool,
-    /// Décision prise pour cet appareil, relue dans `settings.json`.
+    /// Decision taken for this device, read back from `settings.json`.
     ///
-    /// `present` dit ce que voit le système, `state` ce que l'utilisateur a
-    /// décidé : les deux sont indépendants. Un appareil adopté peut être
-    /// débranché, un appareil branché peut être ignoré.
+    /// `present` says what the system sees, `state` what the user decided: the
+    /// two are independent. An adopted device can be unplugged, a plugged-in
+    /// device can be ignored.
     pub state: DeviceState,
-    /// Vrai si c'est **cet** appareil qui est ouvert en ce moment.
+    /// True if **this** device is the one open right now.
     pub open: bool,
-    /// Dernier échec d'ouverture **de cet appareil**.
+    /// Last open failure **of this device**.
     ///
-    /// Chacun porte le sien : une ouverture qui échoue ne doit ni empêcher les
-    /// autres de fonctionner, ni leur faire porter son message.
+    /// Each carries its own: an opening that fails must neither stop the others
+    /// from working, nor make them carry its message.
     pub error: Option<String>,
-    /// Micrologiciel contre lequel le gabarit a été relevé, `v1.5`.
+    /// Firmware the layout was surveyed against, `v1.5`.
     ///
-    /// Connu sans rien ouvrir : c'est une donnée du gabarit. L'afficher même
-    /// appareil fermé dit contre quoi le code a été établi, ce qui est la
-    /// première question devant un comportement inexpliqué.
+    /// Known without opening anything: it is layout data. Showing it even with
+    /// the device closed says what the code was established against, which is
+    /// the first question when facing unexplained behavior.
     pub surveyed_firmware: String,
-    /// Micrologiciel **lu** à l'ouverture.
+    /// Firmware **read** on opening.
     ///
-    /// `None` quand l'appareil n'est pas ouvert — rien n'a été demandé, et
-    /// garder la version d'une ouverture précédente la ferait attribuer à
-    /// l'exemplaire branché depuis — ou quand la lecture a échoué, ce que
-    /// `warnings` dit alors.
+    /// `None` when the device is not open — nothing was asked, and keeping the
+    /// version from a previous opening would attribute it to the unit plugged
+    /// in since — or when the read failed, which `warnings` then says.
     pub firmware: Option<String>,
-    /// Ce que l'inspection à l'ouverture a trouvé qui mérite d'être vu.
+    /// What the inspection on opening found that deserves to be seen.
     ///
-    /// **Vide veut dire « rien à signaler », pas « compatible ».** L'octet d'état
-    /// de l'appareil confirme qu'une commande existe, jamais que ses arguments
-    /// sont bons. Aucun de ces avertissements ne bloque quoi que ce soit.
+    /// **Empty means "nothing to report", not "compatible".** The device status
+    /// byte confirms that a command exists, never that its arguments are right.
+    /// None of these warnings blocks anything.
     pub warnings: Vec<String>,
 }
 
-/// Une touche, telle que le simulateur doit la dessiner.
+/// A key, as the simulator must draw it.
 ///
-/// Deux systèmes de coordonnées cohabitent, et ils ne disent pas la même chose :
+/// Two coordinate systems coexist, and they do not say the same thing:
 ///
-/// - `row` / `col` situent la LED dans la matrice, donc son rang dans une image ;
-/// - `x` / `y` / `w` / `h` donnent le rectangle physique, en unités de pas de
-///   clavier (1 u = une touche alphabétique), origine en haut à gauche.
+/// - `row` / `col` locate the LED in the matrix, hence its rank in a frame;
+/// - `x` / `y` / `w` / `h` give the physical rectangle, in keyboard pitch units
+///   (1 u = one alphabetic key), origin at the top left.
 ///
-/// Le second ne se déduit pas du premier : le périphérique ne déclare aucune
-/// dimension, la géométrie est une transcription manuelle de la disposition ISO
-/// pleine taille. Voir `candeo_device::Key`.
+/// The second does not follow from the first: the device declares no
+/// dimension, the geometry is a manual transcription of the full-size ISO
+/// layout. See `candeo_device::Key`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyInfo {
     pub index: u16,
     pub row: u8,
     pub col: u8,
-    /// Nom gravé, variante French (ISO).
+    /// Engraved name, French (ISO) variant.
     pub name: &'static str,
     pub x: f32,
     pub y: f32,
@@ -145,18 +144,17 @@ pub struct LayoutInfo {
     pub name: String,
     pub rows: u8,
     pub cols: u8,
-    /// Taille d'une image : **toutes** les cases, trous compris.
+    /// Size of a frame: **all** cells, gaps included.
     pub frame_len: usize,
-    /// Uniquement les cases portant une LED.
+    /// Only the cells carrying an LED.
     pub keys: Vec<KeyInfo>,
 }
 
 impl From<&'static Layout> for LayoutInfo {
     fn from(l: &'static Layout) -> Self {
-        // Parcours ligne par ligne de la matrice, pour que `keys` sorte dans
-        // l'ordre des index. La table de `candeo-device` couvre toutes les
-        // positions allumées — invariant tenu par son test
-        // `every_lit_position_has_a_key`.
+        // Walk the matrix row by row, so that `keys` comes out in index order.
+        // The `candeo-device` table covers every lit position — an invariant
+        // held by its `every_lit_position_has_a_key` test.
         let mut keys = Vec::with_capacity(l.lit_count());
         for row in 0..l.rows {
             for col in 0..l.cols {
@@ -186,7 +184,7 @@ impl From<&'static Layout> for LayoutInfo {
     }
 }
 
-/// Effet, tel que nommé côté interface.
+/// Effect, as named on the interface side.
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum EffectDto {
@@ -207,89 +205,87 @@ impl From<EffectDto> for Effect {
     }
 }
 
-// ---------------------------------------------------------------- état
+// ---------------------------------------------------------------- state
 
-/// Tout ce que l'application tient ouvert, **appareil par appareil**.
+/// Everything the application holds open, **device by device**.
 ///
-/// # Ordre de prise des verrous
+/// # Lock ordering
 ///
-/// Un interblocage a déjà été attrapé ici : `list_devices` prenait le verrou du
-/// clavier puis celui des échecs, `ignore_device` l'inverse. Avec une table
-/// d'appareils et une boucle de rendu par appareil, la règle est donc explicite
-/// et tenue :
+/// A deadlock has already been caught here: `list_devices` took the keyboard
+/// lock then the failures lock, `ignore_device` the reverse. With a device
+/// table and one render loop per device, the rule is therefore explicit and
+/// held:
 ///
-/// > **Aucun code ne tient deux de ces verrous en même temps.** Une table est
-/// > verrouillée le temps d'y lire ou d'y poser un `Arc`, jamais le temps d'une
-/// > écriture HID, d'un démarrage de boucle ni d'une attente de fin.
+/// > **No code holds two of these locks at the same time.** A table is locked
+/// > for as long as it takes to read or put an `Arc` in it, never for an HID
+/// > write, a loop start or a wait for completion.
 ///
-/// C'est ce que font [`AppState::handle`] et [`AppState::open_handles`] : elles
-/// clonent sous le verrou de la table et rendent celui-ci avant d'interroger
-/// quoi que ce soit. Si deux verrous devenaient inévitables, l'ordre est celui
-/// de la déclaration ci-dessous — `devices`, puis `engine`, puis `failures`,
-/// puis la poignée d'un appareil, puis l'état partagé d'une boucle. Le fil de
-/// rendu, lui, ne connaît que les deux derniers : il n'a aucun moyen de prendre
-/// un verrou de l'application, donc aucun moyen d'en bloquer une commande.
+/// This is what [`AppState::handle`] and [`AppState::open_handles`] do: they
+/// clone under the table lock and release it before querying anything. If two
+/// locks became unavoidable, the order is that of the declaration below —
+/// `devices`, then `engine`, then `failures`, then a device's handle, then a
+/// loop's shared state. The render thread only knows the last two: it has no
+/// way to take an application lock, hence no way to block a command with one.
 #[derive(Default)]
 pub struct AppState {
-    /// Les appareils, **un par poignée**.
+    /// The devices, **one per handle**.
     ///
-    /// Une entrée apparaît dès qu'un appareil est visé et n'est plus retirée ;
-    /// c'est son contenu qui dit s'il est ouvert. Refermer met l'`Option` à
-    /// `None` sans toucher à l'`Arc` : la boucle qui en tient une copie s'en
-    /// aperçoit à l'image suivante et cesse d'écrire, au lieu de continuer sur
-    /// une poignée que plus personne ne regarde.
+    /// An entry appears as soon as a device is targeted and is never removed;
+    /// its content says whether it is open. Closing sets the `Option` to `None`
+    /// without touching the `Arc`: the loop holding a copy notices at the next
+    /// frame and stops writing, instead of carrying on with a handle nobody
+    /// looks at anymore.
     pub(crate) devices: Mutex<HashMap<DeviceRef, runtime::Handle>>,
-    /// Les boucles de rendu, une par appareil. Voir [`runtime`].
+    /// The render loops, one per device. See [`runtime`].
     pub(crate) engine: runtime::Engine,
-    /// Dernier échec d'ouverture, **par appareil**.
+    /// Last open failure, **per device**.
     ///
-    /// Une table plutôt qu'un champ unique : c'est ce qui fait qu'un appareil
-    /// en échec n'en entraîne aucun autre. Un message global obligerait à
-    /// choisir lequel afficher, et le suivant effacerait le précédent.
+    /// A table rather than a single field: that is what keeps a failing device
+    /// from dragging down any other. A global message would force choosing
+    /// which one to show, and the next one would erase the previous one.
     pub(crate) failures: Mutex<HashMap<DeviceRef, String>>,
 }
 
 impl AppState {
-    /// La poignée de cet appareil, créée fermée si elle n'existait pas.
+    /// This device's handle, created closed if it did not exist.
     ///
-    /// Le verrou de la table n'est tenu que le temps du clonage : ce qu'on fera
-    /// ensuite de la poignée — une écriture HID, une boucle qui démarre — ne
-    /// doit retenir aucune commande visant un autre appareil.
+    /// The table lock is held only for the clone: whatever is done with the
+    /// handle next — an HID write, a loop starting — must hold back no command
+    /// targeting another device.
     pub(crate) fn handle(&self, device: DeviceRef) -> runtime::Handle {
         Arc::clone(self.devices.lock().unwrap().entry(device).or_default())
     }
 
-    /// La poignée de cet appareil, **sans en créer une**.
+    /// This device's handle, **without creating one**.
     ///
-    /// Les commandes qui exigent un appareil ouvert passent par ici : viser un
-    /// appareil inconnu doit être un refus, pas une ligne de plus dans la table.
+    /// Commands that require an open device go through here: targeting an
+    /// unknown device must be a refusal, not one more row in the table.
     fn opened(&self, device: DeviceRef) -> Option<runtime::Handle> {
         self.devices.lock().unwrap().get(&device).map(Arc::clone)
     }
 
-    /// Ce que cet appareil a dit de lui-même à l'ouverture — **s'il est ouvert**.
+    /// What this device said about itself on opening — **if it is open**.
     ///
-    /// Une copie, prise sous le seul verrou de la poignée et rendue aussitôt :
-    /// l'inspection a été faite une fois, à l'ouverture, et la relire ici ne
-    /// coûte aucun échange USB. C'est ce qui permet à la liste des appareils et
-    /// au diagnostic de l'afficher sans jamais toucher à la boucle de rendu.
+    /// A copy, taken under the handle lock alone and released at once: the
+    /// inspection was done once, on opening, and reading it back here costs no
+    /// USB exchange. That is what lets the device list and the diagnostic show
+    /// it without ever touching the render loop.
     pub(crate) fn inspection(&self, device: DeviceRef) -> Option<Inspection> {
         let handle = self.opened(device)?;
         let guard = handle.lock().unwrap();
         guard.as_ref().map(|kb| kb.inspection().clone())
     }
 
-    /// Ouvre — ou referme, avec `None` — cet appareil.
+    /// Opens — or closes, with `None` — this device.
     fn set_open(&self, device: DeviceRef, keyboard: Option<Keyboard>) {
         *self.handle(device).lock().unwrap() = keyboard;
     }
 
-    /// Les appareils réellement ouverts en ce moment.
+    /// The devices actually open right now.
     ///
-    /// Deux temps, et jamais les deux verrous ensemble : on copie les poignées
-    /// sous le verrou de la table, on le rend, puis on les interroge. Les
-    /// interroger sur place bloquerait toute la table pendant l'écriture HID
-    /// d'une boucle.
+    /// Two steps, and never both locks together: copy the handles under the
+    /// table lock, release it, then query them. Querying them in place would
+    /// block the whole table during a loop's HID write.
     fn open_handles(&self) -> HashSet<DeviceRef> {
         let handles: Vec<(DeviceRef, runtime::Handle)> = self
             .devices
@@ -307,16 +303,16 @@ impl AppState {
     }
 }
 
-/// Gabarit utilisé quand aucun périphérique n'est connecté.
+/// Layout used when no device is connected.
 ///
-/// Sert au moteur et au simulateur : écrire un effet ne doit pas exiger de
-/// posséder le clavier.
+/// Serves the engine and the simulator: writing an effect must not require
+/// owning the keyboard.
 pub(crate) fn default_layout() -> &'static Layout {
     LAYOUTS[0]
 }
 
-/// Les erreurs remontent au front sous forme de chaîne : l'interface les
-/// affiche telles quelles, elles doivent donc rester lisibles.
+/// Errors go up to the front end as a string: the interface shows them as
+/// they are, so they must stay readable.
 type CmdResult<T> = Result<T, String>;
 
 pub(crate) fn hid() -> CmdResult<hidapi::HidApi> {
@@ -331,16 +327,16 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
         .ok_or_else(|| format!("aucun gabarit connu pour {device}"))
 }
 
-/// Numéro de série de l'exemplaire branché — s'il y en a un de branché.
+/// Serial number of the plugged-in unit — if one is plugged in.
 ///
-/// Les deux niveaux disent deux choses différentes et ne se confondent pas :
-/// `None` veut dire **débranché**, `Some(None)` **branché sans série déclarée**.
-/// Le second n'est pas un cas dégénéré — c'est ce que rend hidraw sous Linux
-/// quand la règle udev n'accorde pas la lecture des attributs.
+/// The two levels say two different things and must not be confused: `None`
+/// means **unplugged**, `Some(None)` **plugged in with no declared serial**.
+/// The second is not a degenerate case — it is what hidraw returns on Linux
+/// when the udev rule does not grant reading the attributes.
 ///
-/// ⚠️ **Le descripteur USB du DeathStalker n'en porte aucun**, sur aucune
-/// interface. La série qui apparie vraiment vient du protocole, à l'ouverture :
-/// voir [`serie_connue`].
+/// ⚠️ **The DeathStalker USB descriptor carries none**, on any interface. The
+/// serial that truly matches comes from the protocol, on opening: see
+/// [`known_serial`].
 pub(crate) fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
     api.device_list()
         .find(|d| layout.is_lighting_interface(d.vendor_id(), d.product_id(), d.interface_number()))
@@ -351,73 +347,73 @@ pub(crate) fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<St
         })
 }
 
-/// La série de l'exemplaire : **celle du protocole d'abord**, celle du
-/// descripteur USB à défaut.
+/// The unit's serial: **the protocol one first**, the USB descriptor one
+/// otherwise.
 ///
-/// Le protocole (`0x00`/`0x82`) est la seule source qui en donne une sur ce
-/// matériel, mais il ne se lit qu'appareil ouvert — et un appareil ignoré ou
-/// détecté ne s'ouvre pas pour qu'on lui pose la question. Le descripteur reste
-/// donc le repli, et [`storage::DeviceRecord::matches`] tolère qu'il soit muet.
-pub(crate) fn serie_connue(inspection: Option<&Inspection>, usb: Option<String>) -> Option<String> {
+/// The protocol (`0x00`/`0x82`) is the only source that gives one on this
+/// hardware, but it can only be read with the device open — and an ignored or
+/// detected device is not opened just to ask it. The descriptor therefore
+/// stays the fallback, and [`storage::DeviceRecord::matches`] tolerates it
+/// being silent.
+pub(crate) fn known_serial(inspection: Option<&Inspection>, usb: Option<String>) -> Option<String> {
     inspection.and_then(|i| i.serial.clone().ok()).or(usb)
 }
 
-/// Consigne une ouverture, et ce que l'inspection y a trouvé.
+/// Logs an opening, and what the inspection found in it.
 ///
-/// Une ligne `info` pour l'ouverture elle-même — le micrologiciel y figure, c'est
-/// le premier champ qu'on cherchera — puis une ligne `warn` par avertissement.
-/// **À l'ouverture et à elle seule** : c'est une transition, et l'inspection
-/// n'est jamais refaite.
+/// One `info` line for the opening itself — the firmware is in it, it is the
+/// first field anyone will look for — then one `warn` line per warning. **On
+/// opening and only then**: it is a transition, and the inspection is never
+/// redone.
 ///
-/// L'empreinte de la série, jamais la série : elle identifie un exemplaire
-/// précis, et un journal finit collé dans un rapport de bogue.
-fn consigner_l_ouverture(device: DeviceRef, keyboard: &Keyboard, usb: Option<String>, quoi: &str) {
+/// The serial's fingerprint, never the serial: it identifies a specific unit,
+/// and a log ends up pasted into a bug report.
+fn log_opening(device: DeviceRef, keyboard: &Keyboard, usb: Option<String>, what: &str) {
     let inspection = keyboard.inspection();
-    let serie = serie_connue(Some(inspection), usb);
+    let serial = known_serial(Some(inspection), usb);
     tracing::info!(
-        appareil = %device,
-        serie = journal::empreinte_de(serie.as_deref()),
-        micrologiciel = %inspection
+        device = %device,
+        serial = journal::fingerprint_of(serial.as_deref()),
+        firmware = %inspection
             .firmware
             .as_ref()
-            .map_or_else(|e| format!("non lu ({e})"), ToString::to_string),
-        "{quoi}"
+            .map_or_else(|e| format!("not read ({e})"), ToString::to_string),
+        "{what}"
     );
-    for avertissement in inspection.warnings(keyboard.layout()) {
-        tracing::warn!(appareil = %device, "{avertissement}");
+    for warning in inspection.warnings(keyboard.layout()) {
+        tracing::warn!(device = %device, "{warning}");
     }
 }
 
 // ---------------------------------------------------------------- adoption
 
-/// Ce qu'a donné la tentative d'ouverture d'**un** appareil.
+/// What the attempt to open **one** device produced.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct OpenOutcome {
     pub device: DeviceRef,
     pub error: Option<String>,
 }
 
-/// Ouvre **tous** les appareils pilotés et présents, un par un.
+/// Opens **all** controlled and present devices, one by one.
 ///
-/// C'est la boucle de démarrage, écrite sans Tauri ni HID — la présence et
-/// l'ouverture arrivent en argument — pour que son invariant soit vérifiable
-/// par un test ordinaire : *l'échec d'un appareil n'en entraîne aucun autre*.
-/// Chaque tentative produit sa propre ligne de compte-rendu, et une erreur
-/// n'interrompt pas la boucle.
+/// This is the startup loop, written without Tauri or HID — presence and
+/// opening come in as arguments — so that its invariant can be checked by an
+/// ordinary test: *one device's failure drags down no other*. Each attempt
+/// produces its own report line, and an error does not interrupt the loop.
 ///
-/// Tous, et non plus un seul : `AppState` porte désormais une table d'appareils
-/// ouverts (issue #26). Le second appareil piloté n'est donc plus laissé fermé
-/// faute de place pour lui.
+/// All of them, and no longer a single one: `AppState` now carries a table of
+/// open devices (issue #26). The second controlled device is therefore no
+/// longer left closed for lack of room.
 ///
-/// # La série se vérifie **après** l'ouverture
+/// # The serial is checked **after** opening
 ///
-/// Le descripteur USB ne porte pas de série sur ce matériel : avant d'ouvrir,
-/// la décision ne peut s'apparier que sur le VID et le PID, et n'importe quel
-/// exemplaire du modèle passe. `serial_of` rend celle que l'appareil a donnée
-/// par le protocole ; si elle désigne un exemplaire que la décision ne couvre
-/// pas, la poignée est **relâchée** et la tentative rend compte de pourquoi.
-/// Sans quoi brancher le clavier d'un collègue — même modèle — le ferait
-/// piloter au nom d'une décision prise pour un autre.
+/// The USB descriptor carries no serial on this hardware: before opening, the
+/// decision can only match on VID and PID, and any unit of the model passes.
+/// `serial_of` returns the one the device gave over the protocol; if it
+/// designates a unit the decision does not cover, the handle is **released**
+/// and the attempt reports why. Otherwise plugging in a colleague's keyboard —
+/// same model — would have it controlled on behalf of a decision taken for
+/// another.
 fn open_adopted<K>(
     layouts: &[&'static Layout],
     settings: &Settings,
@@ -429,7 +425,7 @@ fn open_adopted<K>(
     let mut outcomes = Vec::new();
 
     for layout in layouts {
-        // Débranché : rien à ouvrir, et rien à signaler non plus.
+        // Unplugged: nothing to open, and nothing to report either.
         let Some(serial) = present(layout) else {
             continue;
         };
@@ -438,13 +434,13 @@ fn open_adopted<K>(
             continue;
         }
         let error = match open(layout) {
-            Ok(k) => match autre_exemplaire(settings, layout, serial_of(&k).as_deref()) {
+            Ok(k) => match wrong_unit(settings, layout, serial_of(&k).as_deref()) {
                 None => {
                     opened.push((*layout, k));
                     None
                 }
-                // `k` tombe ici, et la poignée se referme avec lui.
-                Some(refus) => Some(refus),
+                // `k` is dropped here, and the handle closes with it.
+                Some(refusal) => Some(refusal),
             },
             Err(e) => Some(e),
         };
@@ -457,50 +453,50 @@ fn open_adopted<K>(
     (opened, outcomes)
 }
 
-/// `Some(raison)` si l'exemplaire ouvert n'est pas celui que la décision désigne.
+/// `Some(reason)` if the opened unit is not the one the decision designates.
 ///
-/// Sans série lue, rien ne se conclut : un appareil qui ne répond pas aux
-/// lectures reste apparié comme avant, sur son VID et son PID. Refuser pour une
-/// question restée sans réponse éteindrait l'éclairage de quelqu'un qui n'a
-/// qu'un exemplaire.
-fn autre_exemplaire(settings: &Settings, layout: &Layout, serie: Option<&str>) -> Option<String> {
-    let serie = serie?;
-    (settings.device_state(layout.vid, layout.pid, Some(serie)) != DeviceState::Adopted).then(
+/// Without a read serial, nothing is concluded: a device that does not answer
+/// reads stays matched as before, on its VID and PID. Refusing over a question
+/// left unanswered would turn off the lighting of someone who has only one
+/// unit.
+fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Option<String> {
+    let serial = serial?;
+    (settings.device_state(layout.vid, layout.pid, Some(serial)) != DeviceState::Adopted).then(
         || {
             format!(
                 "l'exemplaire branché (série {}) n'est pas celui qui a été piloté : il reste \
                  fermé. « Piloter » l'adopte à son tour.",
-                journal::empreinte(serie)
+                journal::fingerprint(serial)
             )
         },
     )
 }
 
-/// Applique les décisions retenues, au démarrage de l'application.
+/// Applies the stored decisions, at application startup.
 ///
-/// Ne renvoie rien et ne peut pas échouer : des réglages illisibles ou un HID
-/// absent ne doivent pas empêcher la fenêtre de s'ouvrir — c'est elle qui
-/// permettrait de corriger la situation.
+/// Returns nothing and cannot fail: unreadable settings or a missing HID must
+/// not stop the window from opening — it is what would let the situation be
+/// fixed.
 fn apply_adoptions(app: &AppHandle, state: &AppState) {
     let (store, settings) = match storage::store(app).and_then(|s| {
         let settings = s.read_settings()?;
         Ok((s, settings))
     }) {
-        Ok(lus) => lus,
+        Ok(loaded) => loaded,
         Err(e) => {
-            tracing::error!("adoption abandonnée, aucun appareil ouvert : {e}");
+            tracing::error!("adoption abandoned, no device opened: {e}");
             return;
         }
     };
     let api = match hid() {
         Ok(api) => api,
         Err(e) => {
-            tracing::error!("adoption abandonnée, aucun appareil ouvert : {e}");
+            tracing::error!("adoption abandoned, no device opened: {e}");
             return;
         }
     };
 
-    let (ouverts, outcomes) = open_adopted(
+    let (newly_opened, outcomes) = open_adopted(
         LAYOUTS,
         &settings,
         |l| plugged(&api, l),
@@ -508,45 +504,46 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         |kb| kb.inspection().serial.clone().ok(),
     );
 
-    // Ce que les ouvertures apprennent, à retenir une fois la boucle finie.
-    let mut appris = settings.clone();
+    // What the openings learn, to be stored once the loop is done.
+    let mut learned = settings.clone();
 
-    // Les poignées d'abord, les échecs ensuite : deux tables, jamais verrouillées
-    // ensemble. Rien d'autre n'a encore pu ouvrir quoi que ce soit — l'état vient
-    // d'être construit et n'est pas encore confié au gestionnaire.
-    for (layout, keyboard) in ouverts {
+    // Handles first, failures next: two tables, never locked together. Nothing
+    // else could have opened anything yet — the state has just been built and
+    // is not yet handed to the manager.
+    for (layout, keyboard) in newly_opened {
         let device = DeviceRef::of(layout);
-        // Le second `plugged` ne réénumère rien — il relit la liste que `api`
-        // tient déjà — et il évite de faire porter la série par [`OpenOutcome`],
-        // qui rend compte d'une tentative et n'a pas à décrire l'appareil.
+        // The second `plugged` enumerates nothing again — it reads back the
+        // list `api` already holds — and it avoids making [`OpenOutcome`]
+        // carry the serial, which reports an attempt and has no business
+        // describing the device.
         let usb = plugged(&api, layout).flatten();
-        let serie = serie_connue(Some(keyboard.inspection()), usb.clone());
-        consigner_l_ouverture(device, &keyboard, usb, "appareil adopté ouvert");
-        // Une décision prise sans série **se complète** dès qu'on la connaît :
-        // c'est la règle de [`storage::Settings::set_device_state`]. Sans elle,
-        // une adoption antérieure à la lecture par protocole resterait appariée
-        // sur le seul modèle, et le premier exemplaire venu passerait toujours.
-        appris.set_device_state(
+        let serial = known_serial(Some(keyboard.inspection()), usb.clone());
+        log_opening(device, &keyboard, usb, "appareil adopté ouvert");
+        // A decision taken without a serial **is completed** as soon as it is
+        // known: that is the rule of [`storage::Settings::set_device_state`].
+        // Without it, an adoption older than protocol reads would stay matched
+        // on the model alone, and the first unit to come along would always
+        // pass.
+        learned.set_device_state(
             layout.vid,
             layout.pid,
-            serie.as_deref(),
+            serial.as_deref(),
             DeviceState::Adopted,
         );
-        // **Avant** de déposer la poignée : la luminosité se réapplique sur le
-        // clavier qu'on vient d'ouvrir, et on la tient encore en main.
-        reappliquer_la_luminosite(&keyboard, &settings, layout, serie.as_deref());
+        // **Before** handing over the handle: brightness is reapplied on the
+        // keyboard just opened, while we still hold it.
+        reapply_brightness(&keyboard, &settings, layout, serial.as_deref());
         state.set_open(device, Some(keyboard));
     }
 
-    // Seulement si quelque chose a été appris : réécrire à chaque démarrage un
-    // fichier inchangé ne servirait qu'à multiplier les occasions de le
-    // tronquer.
-    if appris != settings {
-        match store.write_settings(&appris) {
-            Ok(()) => tracing::info!("série lue par le protocole, retenue pour l'appariement"),
-            // `warn` : l'appareil est ouvert et fonctionne. On perd seulement la
-            // distinction entre deux exemplaires, jusqu'au démarrage suivant.
-            Err(e) => tracing::warn!("série lue mais non retenue : {e}"),
+    // Only if something was learned: rewriting an unchanged file at every
+    // startup would only multiply the chances of truncating it.
+    if learned != settings {
+        match store.write_settings(&learned) {
+            Ok(()) => tracing::info!("serial read over the protocol, stored for matching"),
+            // `warn`: the device is open and works. Only the distinction
+            // between two units is lost, until the next startup.
+            Err(e) => tracing::warn!("serial read but not stored: {e}"),
         }
     }
 
@@ -554,9 +551,9 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
     for outcome in outcomes {
         match outcome.error {
             Some(e) => {
-                // `error` et non `warn` : un appareil adopté qui ne s'ouvre pas,
-                // c'est l'éclairage de l'utilisateur qui ne s'allumera pas.
-                tracing::error!(appareil = %outcome.device, "appareil adopté non ouvert : {e}");
+                // `error` and not `warn`: an adopted device that does not open
+                // means the user's lighting will not come on.
+                tracing::error!(device = %outcome.device, "adopted device not opened: {e}");
                 failures.insert(outcome.device, e);
             }
             None => {
@@ -566,67 +563,68 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
     }
 }
 
-/// Repose sur le clavier la luminosité qu'on avait retenue pour lui.
+/// Puts back on the keyboard the brightness stored for it.
 ///
-/// **Un niveau retenu qui ne se réapplique pas au branchement ne sert à rien** :
-/// c'est toute la raison de le retenir. Le protocole relevé sait écrire la
-/// luminosité, pas la relire — sans ce geste, un clavier rebranché repart à ce
-/// que son micrologiciel a gardé, et le réglage de `settings.json` décrit un
-/// état que rien ne produit.
+/// **A stored level that is not reapplied on plug-in is useless**: it is the
+/// whole reason for storing it. The surveyed protocol can write brightness, not
+/// read it back — without this step, a replugged keyboard restarts at whatever
+/// its firmware kept, and the setting in `settings.json` describes a state
+/// that nothing produces.
 ///
-/// Rien n'est réécrit quand c'est le défaut : le clavier y est déjà, et une
-/// écriture HID de plus au démarrage de chaque appareil n'achèterait rien.
+/// Nothing is rewritten when it is the default: the keyboard is already there,
+/// and one more HID write at each device's startup would buy nothing.
 ///
-/// Rien ne remonte : un refus d'écriture ne doit pas empêcher l'adoption
-/// d'aboutir — l'appareil est ouvert, l'effet pourra tourner, et c'est
-/// l'essentiel. Il est consigné, parce qu'un clavier plus sombre que demandé
-/// sans un mot nulle part est exactement le genre d'écart qui coûte une session.
-fn reappliquer_la_luminosite(
+/// Nothing goes up: a refused write must not stop the adoption from
+/// completing — the device is open, the effect can run, and that is what
+/// matters. It is logged, because a keyboard dimmer than requested without a
+/// word anywhere is exactly the kind of gap that takes hours to track down.
+fn reapply_brightness(
     keyboard: &Keyboard,
     settings: &Settings,
     layout: &Layout,
     serial: Option<&str>,
 ) {
-    let niveau = settings.brightness(layout.vid, layout.pid, serial);
-    if niveau == storage::BRIGHTNESS_DEFAUT {
+    let level = settings.brightness(layout.vid, layout.pid, serial);
+    if level == storage::DEFAULT_BRIGHTNESS {
         return;
     }
-    match keyboard.set_brightness(niveau) {
+    match keyboard.set_brightness(level) {
         Ok(()) => tracing::info!(
-            appareil = %DeviceRef::of(layout),
-            niveau,
-            "luminosité retenue réappliquée"
+            device = %DeviceRef::of(layout),
+            level,
+            "stored brightness reapplied"
         ),
         Err(e) => tracing::warn!(
-            appareil = %DeviceRef::of(layout),
-            niveau,
-            "luminosité retenue non réappliquée : {e}"
+            device = %DeviceRef::of(layout),
+            level,
+            "stored brightness not reapplied: {e}"
         ),
     }
 }
 
-// ---------------------------------------------------------------- commandes
+// ---------------------------------------------------------------- commands
 
-/// Liste les gabarits connus : branchés ou non, et surtout **dans quel état**.
+/// Lists the known layouts: plugged in or not, and above all **in which state**.
 #[tauri::command]
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
     let settings = storage::store(&app)?.read_settings()?;
     let api = hid()?;
-    // Les relevés sont faits l'un après l'autre, chacun rendant son verrou avant
-    // le suivant. C'est la règle documentée sur [`AppState`], et elle vient d'un
-    // interblocage réel : cette commande prenait le clavier puis les échecs,
-    // `ignore_device` l'inverse, et les deux se bloquaient l'une l'autre.
+    // The readings are taken one after another, each releasing its lock before
+    // the next. That is the rule documented on [`AppState`], and it comes from a
+    // real deadlock: this command took the keyboard then the failures,
+    // `ignore_device` the reverse, and the two blocked each other.
     let failures = state.failures.lock().unwrap().clone();
 
     Ok(LAYOUTS
         .iter()
         .map(|l| {
             let device = DeviceRef::of(l);
-            let branche = plugged(&api, l);
-            let present = branche.is_some();
-            // Relue sur la poignée, sans échange USB : `None` dit fermé.
+            let plugged_in = plugged(&api, l);
+            let present = plugged_in.is_some();
+            // Read back from the handle, with no USB exchange: `None` means
+            // closed.
             let inspection = state.inspection(device);
-            let serial = serie_connue(inspection.as_ref(), branche.flatten());
+            let serial = known_serial(inspection.as_ref(), plugged_in.flatten());
             DeviceInfo {
                 name: l.name.to_string(),
                 vid: l.vid,
@@ -646,25 +644,25 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
         .collect())
 }
 
-/// Retient « piloté » pour cet appareil, et l'ouvre s'il est là.
+/// Stores "piloté" (controlled) for this device, and opens it if it is there.
 ///
-/// La décision est écrite **quelle que soit l'issue de l'ouverture** : c'est une
-/// décision, pas le compte rendu d'une tentative. Le prochain démarrage la
-/// rejouera, ce qui est précisément ce qu'on veut d'un clavier qu'un
-/// concentrateur n'a pas encore fini d'énumérer.
+/// The decision is written **whatever the outcome of the opening**: it is a
+/// decision, not the report of an attempt. The next startup will replay it,
+/// which is precisely what we want from a keyboard that a hub has not finished
+/// enumerating yet.
 ///
-/// # L'ouverture précède l'écriture, et c'est pour la série
+/// # Opening comes before writing, and it is for the serial
 ///
-/// Le descripteur USB n'en porte aucune : seule l'ouverture la lit, par le
-/// protocole. Écrire la décision d'abord la retiendrait sans série — donc pour
-/// **tout** exemplaire du modèle — et adopter un second clavier identique
-/// retomberait sur l'entrée du premier au lieu d'en créer une. Si l'écriture
-/// échoue ensuite, la poignée tombe avec la fonction : rien n'est ouvert sans
-/// décision pour le justifier.
+/// The USB descriptor carries none: only opening reads it, over the protocol.
+/// Writing the decision first would store it without a serial — hence for
+/// **every** unit of the model — and adopting a second identical keyboard
+/// would land on the first one's entry instead of creating one. If the write
+/// then fails, the handle is dropped with the function: nothing is left open
+/// without a decision to justify it.
 ///
-/// Rend le gabarit quand l'appareil a été ouvert, `None` quand il est adopté
-/// mais débranché — ce n'est pas une erreur, il sera ouvert au branchement
-/// suivant.
+/// Returns the layout when the device was opened, `None` when it is adopted but
+/// unplugged — that is not an error, it will be opened the next time it is
+/// plugged in.
 #[tauri::command]
 fn adopt_device(
     app: AppHandle,
@@ -675,11 +673,11 @@ fn adopt_device(
     let device = DeviceRef { vid, pid };
     let layout = find_layout(device)?;
     let api = hid()?;
-    let branche = plugged(&api, layout);
-    let ouverture = branche.is_some().then(|| Keyboard::open(&api, layout));
-    let usb = branche.flatten();
-    let serial = serie_connue(
-        ouverture
+    let plugged_in = plugged(&api, layout);
+    let opening = plugged_in.is_some().then(|| Keyboard::open(&api, layout));
+    let usb = plugged_in.flatten();
+    let serial = known_serial(
+        opening
             .as_ref()
             .and_then(|o| o.as_ref().ok())
             .map(Keyboard::inspection),
@@ -691,24 +689,24 @@ fn adopt_device(
     settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Adopted);
     store.write_settings(&settings)?;
 
-    let Some(ouverture) = ouverture else {
+    let Some(opening) = opening else {
         return Ok(None);
     };
-    match ouverture {
+    match opening {
         Ok(kb) => {
-            consigner_l_ouverture(device, &kb, usb, "appareil piloté");
-            // Comme au démarrage : ce qu'on avait retenu pour ce clavier reprend
-            // effet à l'instant où on l'ouvre, pas au lancement suivant.
-            reappliquer_la_luminosite(&kb, &settings, layout, serial.as_deref());
-            // Les autres appareils ouverts le restent : adopter celui-ci n'est
-            // pas un choix à la place des autres.
+            log_opening(device, &kb, usb, "appareil piloté");
+            // As at startup: what was stored for this keyboard takes effect the
+            // moment it is opened, not at the next launch.
+            reapply_brightness(&kb, &settings, layout, serial.as_deref());
+            // The other open devices stay open: adopting this one is not a
+            // choice made in place of the others.
             state.set_open(device, Some(kb));
             state.failures.lock().unwrap().remove(&device);
             Ok(Some(LayoutInfo::from(layout)))
         }
         Err(e) => {
             let message = e.to_string();
-            tracing::error!(appareil = %device, "appareil non ouvert : {message}");
+            tracing::error!(device = %device, "device not opened: {message}");
             state
                 .failures
                 .lock()
@@ -719,20 +717,21 @@ fn adopt_device(
     }
 }
 
-/// Retient « ignoré », et referme l'appareil s'il était ouvert.
+/// Stores "ignoré" (ignored), and closes the device if it was open.
 ///
-/// Ne passe pas par HID : ignorer un appareil doit rester possible quand c'est
-/// justement l'accès HID qui pose problème. La série n'est donc relevée que si
-/// elle se donne — [`storage::DeviceRecord::matches`] retrouve l'entrée sans.
+/// Does not go through HID: ignoring a device must stay possible when HID
+/// access is precisely what is failing. The serial is therefore only picked up
+/// if it is available — [`storage::DeviceRecord::matches`] finds the entry
+/// without it.
 ///
-/// Celle du protocole, quand l'appareil est ouvert, est relue **avant** de le
-/// refermer : c'est la seule qui distingue l'exemplaire, et elle disparaît avec
-/// la poignée.
+/// The protocol one, when the device is open, is read back **before** closing
+/// it: it is the only one that tells the unit apart, and it goes away with the
+/// handle.
 #[tauri::command]
 fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<()> {
     let device = DeviceRef { vid, pid };
     let layout = find_layout(device)?;
-    let serial = serie_connue(
+    let serial = known_serial(
         state.inspection(device).as_ref(),
         hid().ok().and_then(|api| plugged(&api, layout)).flatten(),
     );
@@ -742,42 +741,42 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
     settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Ignored);
     store.write_settings(&settings)?;
 
-    tracing::info!(appareil = %device, "appareil ignoré et refermé");
+    tracing::info!(device = %device, "device ignored and closed");
 
-    // « Laissé tranquille » : on ne garde pas ouvert ce qu'on s'engage à ne plus
-    // toucher. La poignée est vidée, pas retirée : la boucle qui l'alimentait en
-    // tient une copie, elle s'en aperçoit à l'image suivante et cesse d'écrire —
-    // sans que les autres appareils soient touchés.
+    // "Left alone": we do not keep open what we commit to no longer touching.
+    // The handle is emptied, not removed: the loop that fed it holds a copy,
+    // notices at the next frame and stops writing — without the other devices
+    // being touched.
     state.set_open(device, None);
     state.failures.lock().unwrap().remove(&device);
     Ok(())
 }
 
-/// Ramène **tous** les appareils à un état connu : rien ne tourne, rien n'est
-/// allumé, rien n'est ouvert.
+/// Brings **all** devices back to a known state: nothing running, nothing lit,
+/// nothing open.
 ///
-/// Le pendant de [`apply_adoptions`], et ce qui permet à
-/// [`storage::reset_settings`] de tenir sa promesse : après elle, plus aucune
-/// boucle ni aucune poignée ne dépend de décisions que le fichier ne porte plus.
+/// The counterpart of [`apply_adoptions`], and what lets
+/// [`storage::reset_settings`] keep its promise: after it, no loop or handle
+/// depends any longer on decisions the file no longer carries.
 ///
-/// Trois temps, et l'ordre n'est pas indifférent :
+/// Three steps, and the order matters:
 ///
-/// 1. les boucles s'arrêtent, et l'arrêt est **attendu** — l'image suivante
-///    rallumerait ce qu'on est sur le point d'éteindre ;
-/// 2. le rétroéclairage s'éteint. Arrêter une boucle laisse le clavier sur sa
-///    dernière image, et une image figée ressemble à un effet qui tourne encore ;
-///    `Effect::Off` laisse l'appareil dans un état qui se lit, pour un coût nul —
-///    c'est le micrologiciel qui l'exécute ;
-/// 3. les poignées sont vidées, comme le fait [`ignore_device`] : on ne garde pas
-///    ouvert un appareil que plus aucune décision ne désigne.
+/// 1. the loops stop, and the stop is **awaited** — the next frame would light
+///    up again what we are about to turn off;
+/// 2. the backlight turns off. Stopping a loop leaves the keyboard on its last
+///    frame, and a frozen frame looks like an effect still running;
+///    `Effect::Off` leaves the device in a readable state, at no cost — the
+///    firmware runs it;
+/// 3. the handles are emptied, as [`ignore_device`] does: we do not keep open a
+///    device that no decision designates anymore.
 ///
-/// Les échecs d'ouverture partent avec : ils rendaient compte de tentatives
-/// faites pour des adoptions qui n'existent plus, et les garder afficherait une
-/// erreur rouge sur un appareil dont personne n'a plus rien demandé.
+/// Open failures go too: they reported attempts made for adoptions that no
+/// longer exist, and keeping them would show a red error on a device nobody has
+/// asked anything of anymore.
 ///
-/// Rien ne remonte, et c'est délibéré : un clavier qui refuse de s'éteindre —
-/// débranché entre-temps, accès perdu — ne doit pas empêcher la remise à zéro.
-/// L'extinction est un agrément, pas le geste.
+/// Nothing goes up, and that is deliberate: a keyboard that refuses to turn
+/// off — unplugged in the meantime, access lost — must not stop the reset.
+/// Turning off is a nicety, not the point.
 pub(crate) fn release_devices(state: &AppState) {
     state.engine.stop_all();
 
@@ -791,16 +790,17 @@ pub(crate) fn release_devices(state: &AppState) {
     state.failures.lock().unwrap().clear();
 }
 
-/// Ouverture ponctuelle, sans rien décider.
+/// One-off opening, deciding nothing.
 ///
-/// Distincte d'[`adopt_device`] : elle ne touche pas à `settings.json`, donc
-/// elle ne survit pas au redémarrage. C'est ce qu'on veut pour essayer un
-/// appareil sans s'engager.
+/// Distinct from [`adopt_device`]: it does not touch `settings.json`, so it
+/// does not survive a restart. That is what we want to try a device without
+/// committing.
 ///
-/// Sans appelant depuis un écran, comme [`disconnect`] et pour la même raison :
-/// l'interface ne propose aujourd'hui qu'adopter ou ignorer, c'est-à-dire les
-/// deux gestes qui **décident**. Celui qui n'engage à rien n'a pas encore son
-/// bouton — et c'est la paire qu'il faudra câbler ensemble, pas l'une des deux.
+/// No caller from any screen, like [`disconnect`] and for the same reason: the
+/// interface today only offers adopting or ignoring, that is, the two actions
+/// that **decide**. The one that commits to nothing does not have its button
+/// yet — and it is the pair that will have to be wired together, not one of
+/// the two.
 #[tauri::command]
 fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutInfo> {
     let device = DeviceRef { vid, pid };
@@ -808,7 +808,7 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
 
     let api = hid()?;
     let kb = Keyboard::open(&api, layout).map_err(|e| e.to_string())?;
-    consigner_l_ouverture(
+    log_opening(
         device,
         &kb,
         plugged(&api, layout).flatten(),
@@ -819,36 +819,36 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
     Ok(LayoutInfo::from(layout))
 }
 
-/// Referme **un** appareil. Les autres ne sont pas touchés.
+/// Closes **one** device. The others are not touched.
 ///
-/// Aucun écran ne l'appelle aujourd'hui — `useDevice` l'enveloppe, personne ne
-/// déstructure l'enveloppe. Elle reste parce qu'elle est le seul geste qui
-/// **referme sans décider** : `ignore_device` écrit dans `settings.json` et vaut
-/// pour les fois suivantes, celle-ci relâche la poignée et rien d'autre. Ce qui
-/// manque est un bouton, pas une commande.
+/// No screen calls it today — `useDevice` wraps it, nobody destructures the
+/// wrapper. It stays because it is the only action that **closes without
+/// deciding**: `ignore_device` writes to `settings.json` and holds for the
+/// next times, this one releases the handle and nothing else. What is missing
+/// is a button, not a command.
 #[tauri::command]
 fn disconnect(state: State<'_, AppState>, device: DeviceRef) {
     state.set_open(device, None);
 }
 
-/// Gabarit servant de repli quand rien n'est connecté.
+/// Layout used as a fallback when nothing is connected.
 ///
-/// `get_layout` refuse hors connexion, et c'est justement le cas qu'il faut
-/// servir : on dessine le clavier et on écrit un effet **avant** d'avoir
-/// branché quoi que ce soit, ou sans posséder le clavier.
+/// `get_layout` refuses when disconnected, and that is exactly the case to
+/// serve: we draw the keyboard and write an effect **before** plugging
+/// anything in, or without owning the keyboard.
 ///
-/// Sans cette commande, l'interface n'aurait d'autre choix que de recopier la
-/// géométrie — une seconde source de vérité qui divergerait en silence.
+/// Without this command, the interface would have no choice but to copy the
+/// geometry — a second source of truth that would silently diverge.
 #[tauri::command]
 fn get_default_layout() -> LayoutInfo {
     LayoutInfo::from(default_layout())
 }
 
-/// Agit sur la poignée d'un appareil, **si** il est ouvert.
+/// Acts on a device's handle, **if** it is open.
 ///
-/// Un seul verrou est tenu, celui de la poignée, et jamais celui d'une table :
-/// une écriture HID prend quelques millisecondes et ne doit retenir aucune
-/// commande visant un autre appareil.
+/// A single lock is held, the handle's, and never a table's: an HID write
+/// takes a few milliseconds and must hold back no command targeting another
+/// device.
 fn with_keyboard<T>(
     state: &AppState,
     device: DeviceRef,
@@ -864,19 +864,19 @@ fn with_keyboard<T>(
     f(kb)
 }
 
-/// Gabarit d'un appareil ouvert.
+/// Layout of an open device.
 #[tauri::command]
 fn get_layout(state: State<'_, AppState>, device: DeviceRef) -> CmdResult<LayoutInfo> {
     with_keyboard(&state, device, |kb| Ok(LayoutInfo::from(kb.layout())))
 }
 
-/// Écrit la luminosité **sur le clavier**, et rien d'autre.
+/// Writes the brightness **to the keyboard**, and nothing else.
 ///
-/// Ne touche pas à `settings.json` : c'est [`remember_brightness`]. Les deux sont
-/// séparées comme le sont `set_effect_params` et `remember_effect_params`, et
-/// pour la même raison — elles n'ont ni la même cadence ni la même destination.
-/// Un curseur qu'on glisse produit des dizaines d'écritures HID par seconde, et
-/// une seule écriture disque, quand il s'arrête.
+/// Does not touch `settings.json`: that is [`remember_brightness`]. The two are
+/// separate just as `set_effect_params` and `remember_effect_params` are, and
+/// for the same reason — they have neither the same rate nor the same
+/// destination. A slider being dragged produces dozens of HID writes per
+/// second, and a single disk write, when it stops.
 #[tauri::command]
 fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
@@ -884,19 +884,20 @@ fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> C
     })
 }
 
-/// Retient la luminosité de cet appareil, sans toucher au clavier.
+/// Stores this device's brightness, without touching the keyboard.
 ///
-/// Le pendant disque de [`set_brightness`]. Comme `remember_effect_params`, la
-/// lecture, la modification et l'écriture se font ici d'un seul tenant : renvoyer
-/// tout le fichier depuis la fenêtre écraserait une adoption décidée entre-temps.
+/// The disk counterpart of [`set_brightness`]. As with
+/// `remember_effect_params`, reading, modifying and writing happen here in one
+/// go: sending the whole file back from the window would overwrite an adoption
+/// decided in the meantime.
 ///
-/// La série est relevée **si elle se donne**, comme le fait [`ignore_device`] :
-/// elle fait atterrir le niveau sur l'entrée du bon exemplaire quand il y en a
-/// deux du même modèle, et son absence ne bloque rien —
-/// [`storage::DeviceRecord::matches`] retrouve l'entrée sans elle.
+/// The serial is picked up **if it is available**, as [`ignore_device`] does:
+/// it lands the level on the right unit's entry when there are two of the same
+/// model, and its absence blocks nothing —
+/// [`storage::DeviceRecord::matches`] finds the entry without it.
 ///
-/// Ramener le curseur au maximum **retire** l'entrée plutôt que d'écrire 255 :
-/// voir [`storage::Settings::set_brightness`].
+/// Bringing the slider back to the maximum **removes** the entry rather than
+/// writing 255: see [`storage::Settings::set_brightness`].
 #[tauri::command]
 fn remember_brightness(
     app: AppHandle,
@@ -905,15 +906,15 @@ fn remember_brightness(
     level: u8,
 ) -> CmdResult<()> {
     let layout = find_layout(device)?;
-    let serial = serie_connue(
+    let serial = known_serial(
         state.inspection(device).as_ref(),
         hid().ok().and_then(|api| plugged(&api, layout)).flatten(),
     );
 
     let store = storage::store(&app)?;
     let mut settings = store.read_settings()?;
-    // Rien de neuf : on ne réécrit pas le fichier. Un curseur qu'on déplace puis
-    // qu'on ramène repasse par ici.
+    // Nothing new: the file is not rewritten. A slider moved and then brought
+    // back comes through here.
     if !settings.set_brightness(device.vid, device.pid, serial.as_deref(), level) {
         return Ok(());
     }
@@ -927,24 +928,24 @@ fn set_effect(state: State<'_, AppState>, device: DeviceRef, effect: EffectDto) 
     })
 }
 
-/// Pousse une image complète.
+/// Pushes a complete frame.
 ///
-/// `frame` est une suite plate de triplets RGB et doit couvrir **toutes** les
-/// cases de la matrice. En envoyer moins laisse les dernières rangées figées
-/// sur leur valeur précédente — c'est le piège classique de ce matériel.
+/// `frame` is a flat sequence of RGB triplets and must cover **all** the
+/// matrix cells. Sending fewer leaves the last rows frozen on their previous
+/// value — that is the classic trap of this hardware.
 ///
-/// # Exposée sans appelant, et délibérément
+/// # Exposed without a caller, and deliberately
 ///
-/// La fenêtre n'envoie pas d'images : c'est la boucle de [`crate::runtime`] qui
-/// les produit et les écrit, et l'aperçu les **reçoit** par canal au lieu de les
-/// pousser. Aucun écran n'appellera donc celle-ci tant que l'architecture reste
-/// celle-là.
+/// The window does not send frames: the [`crate::runtime`] loop produces and
+/// writes them, and the preview **receives** them over a channel instead of
+/// pushing them. No screen will therefore call this one as long as the
+/// architecture stays that way.
 ///
-/// Elle reste le seul chemin qui met une image précise sur le clavier **sans
-/// moteur d'effets** — ce qui a servi à établir que l'image doit couvrir 132
-/// cases et non 106, et qui resservira le jour où un appareil répondra
-/// autrement. Même raison que les `pub` de `candeo-protocol` : ce qui a permis
-/// le relevé reste en état de le refaire.
+/// It remains the only path that puts a precise frame on the keyboard
+/// **without the effects engine** — which served to establish that the frame
+/// must cover 132 cells and not 106, and will serve again the day a device
+/// answers differently. Same reason as the `pub` items of `candeo-protocol`:
+/// what made the survey possible stays able to redo it.
 #[tauri::command]
 fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
@@ -964,14 +965,14 @@ fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> Cmd
     })
 }
 
-/// Écrit un segment de rangée, sans toucher au reste.
+/// Writes a row segment, without touching the rest.
 ///
-/// Sans appelant elle aussi, et gardée pour une raison nommée : l'écriture
-/// partielle est **la** piste si la cadence doit remonter au-dessus de 30 —
-/// n'envoyer que les rangées qui changent, au lieu des six à chaque image. Le
-/// commentaire de `runtime::FPS` la désigne comme telle. C'est par ici que cette
-/// piste se vérifie sur le matériel avant d'être écrite dans la boucle ; la
-/// retirer reviendrait à retirer l'outil de mesure avant la mesure.
+/// Also without a caller, and kept for a named reason: partial writing is
+/// **the** lead if the frame rate must go above 30 — sending only the rows
+/// that change, instead of all six on every frame. The `runtime::FPS` comment
+/// names it as such. This is where that lead is checked on the hardware before
+/// being written into the loop; removing it would mean removing the measuring
+/// tool before the measurement.
 #[tauri::command]
 fn write_row(
     state: State<'_, AppState>,
@@ -992,69 +993,69 @@ fn write_row(
     })
 }
 
-// ---------------------------------------------------------------- point d'entrée
+// ---------------------------------------------------------------- entry point
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // En tête, et l'ordre n'est pas décoratif : c'est là que le second
-        // processus s'arrête, et il doit le faire avant d'avoir touché au
-        // clavier. Voir [`single_instance`].
+        // First, and the order is not decorative: this is where the second
+        // process stops, and it must do so before touching the keyboard. See
+        // [`single_instance`].
         .plugin(single_instance::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // **En tout premier**, et avant que le magasin ne soit résolu : un
-            // échec de résolution du dossier de configuration est exactement ce
-            // qu'on veut voir, et il arriverait sinon avant qu'il n'y ait de quoi
-            // l'écrire. C'est aussi le premier instant où `app_log_dir()` existe
-            // — tout ce qui précède, l'enregistrement des plugins, ne journalise
-            // pas. Le niveau retenu, lui, est relu juste après : on démarre au
-            // défaut puis on ajuste, jamais l'inverse.
+            // **First of all**, and before the store is resolved: a failure to
+            // resolve the configuration folder is exactly what we want to see,
+            // and it would otherwise happen before there is anywhere to write
+            // it. It is also the first moment `app_log_dir()` exists —
+            // everything before it, plugin registration, does not log. The
+            // stored level is read back right after: start at the default then
+            // adjust, never the reverse.
             journal::init(app.handle());
-            journal::relire_le_reglage(app.handle());
+            journal::reload_level_setting(app.handle());
 
             let state = AppState::default();
-            // Avant `manage` : l'état n'est plus accessible ensuite qu'à
-            // travers le gestionnaire, et l'adoption n'a besoin que de lui.
+            // Before `manage`: the state is afterwards only reachable through
+            // the manager, and adoption needs nothing but the state.
             apply_adoptions(app.handle(), &state);
             app.manage(state);
 
-            // **Après `manage`**, et l'ordre est contraignant : le menu se bâtit
-            // sur l'état réel du moteur, qu'il va chercher par le gestionnaire.
-            // Après l'adoption aussi, pour que le premier menu montre les
-            // appareils déjà ouverts plutôt qu'une liste vide.
-            tray::installer(app.handle());
+            // **After `manage`**, and the order is binding: the menu is built
+            // on the engine's real state, which it fetches through the manager.
+            // After adoption too, so that the first menu shows the devices
+            // already open rather than an empty list.
+            tray::install(app.handle());
             Ok(())
         })
-        // La croix **replie**, elle ne quitte pas — tant qu'il y a une icône de
-        // zone de notification pour rendre l'application atteignable. Voir
-        // [`tray`] pour le pourquoi, et pour ce qui arrive quand l'icône manque.
+        // The close button **hides**, it does not quit — as long as there is a
+        // tray icon to keep the application reachable. See [`tray`] for the
+        // why, and for what happens when the icon is missing.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Seulement la fenêtre principale, alors qu'il n'y en a qu'une :
-                // le jour où une seconde apparaîtra — une boîte de dialogue, un
-                // écran détaché —, la refermer la masquerait au lieu de la
-                // détruire, et elle réapparaîtrait telle quelle au rendez-vous
-                // suivant. La panne se chercherait loin d'ici.
-                if window.label() == single_instance::MAIN_WINDOW && tray::installee() {
+                // Only the main window, even though there is only one: the day
+                // a second one appears — a dialog, a detached screen —, closing
+                // it would hide it instead of destroying it, and it would
+                // reappear as is the next time. The fault would be looked for
+                // far from here.
+                if window.label() == single_instance::MAIN_WINDOW && tray::installed() {
                     api.prevent_close();
-                    // **L'aperçu s'arrête ici, et l'effet appliqué non.** C'est
-                    // toute la différence entre les deux : l'un est ce que le
-                    // clavier fait — il survit à la fenêtre, c'est la promesse de
-                    // [`tray`] —, l'autre est ce qu'on regarde, et il n'y a plus
-                    // personne pour regarder.
+                    // **The preview stops here, and the applied effect does
+                    // not.** That is the whole difference between the two: one
+                    // is what the keyboard does — it outlives the window, that
+                    // is the promise of [`tray`] —, the other is what we watch,
+                    // and there is nobody left to watch.
                     //
-                    // Ici plutôt que dans la fenêtre : replier ne détruit pas la
-                    // vue web, donc ni `onBeforeUnmount` ni `pagehide` ne
-                    // passent. Un contexte QuickJS et un fil resteraient
-                    // entretenus pour un écran masqué, indéfiniment.
+                    // Here rather than in the window: hiding does not destroy
+                    // the web view, so neither `onBeforeUnmount` nor `pagehide`
+                    // fire. A QuickJS context and a thread would be kept alive
+                    // for a hidden screen, indefinitely.
                     window.state::<AppState>().engine.stop_preview();
-                    // Masquer, et non détruire : la vue web garde son état, et
-                    // rouvrir est instantané. C'est aussi ce qui laisse la
-                    // fenêtre entendre `candeo://etat-change` pendant qu'elle est
-                    // repliée, donc revenir déjà à jour.
+                    // Hide, not destroy: the web view keeps its state, and
+                    // reopening is instant. That is also what lets the window
+                    // hear `candeo://etat-change` while it is hidden, and so
+                    // come back already up to date.
                     if let Err(e) = window.hide() {
-                        tracing::warn!("fenêtre non repliée : {e}");
+                        tracing::warn!("window not hidden: {e}");
                     }
                 }
             }
@@ -1099,31 +1100,29 @@ pub fn run() {
             journal::log_from_webview,
         ])
         .build(tauri::generate_context!())
-        .expect("erreur au lancement de l'application")
-        // `build` puis `run`, et non `run` seul : c'est la seule façon d'obtenir
-        // le gestionnaire d'événements de l'application — donc d'empêcher
-        // `ExitRequested`.
+        .expect("error while running the application")
+        // `build` then `run`, not `run` alone: it is the only way to get the
+        // application event handler — hence to prevent `ExitRequested`.
         //
-        // **C'est ici que « un effet tourne fenêtre fermée » devient vrai.** Sans
-        // ce gestionnaire, rien n'empêche la sortie : sous Windows comme sous
-        // Linux le processus s'arrête avec sa dernière fenêtre, et le fil de
-        // rendu part avec lui. Trois documents affirmaient le contraire, et c'est
-        // l'argument qui avait fait écarter l'exécution des effets dans le
-        // WebView — la conception était juste, l'implémentation s'arrêtait avant
-        // la fin.
+        // **This is where "an effect runs with the window closed" becomes
+        // true.** Without this handler, nothing prevents the exit: on Windows as
+        // on Linux the process stops with its last window, and the render thread
+        // goes with it. Three documents claimed the opposite, and it was the
+        // argument that had ruled out running effects in the WebView — the
+        // design was right, the implementation stopped short of the end.
         .run(|_app, event| {
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
-                // `None` désigne une sortie demandée par l'utilisateur — la
-                // dernière fenêtre qui se ferme — et `Some` une sortie demandée
-                // par le code, c'est-à-dire notre propre « Quitter ». La
-                // distinction est tout le mécanisme : empêcher sans la faire
-                // rendrait candeo impossible à quitter, y compris par son seul
-                // article prévu pour ça.
+                // `None` designates an exit requested by the user — the last
+                // window closing — and `Some` an exit requested by the code,
+                // that is, our own "Quitter" (Quit). The distinction is the
+                // whole mechanism: preventing without making it would make
+                // candeo impossible to quit, even through its only menu item
+                // meant for that.
                 //
-                // Et seulement tant qu'il y a une icône : sans elle, plus rien ne
-                // commanderait l'application ni ne la terminerait. Voir
-                // [`tray::installee`].
-                if code.is_none() && tray::installee() {
+                // And only as long as there is an icon: without it, nothing
+                // would control the application or terminate it anymore. See
+                // [`tray::installed`].
+                if code.is_none() && tray::installed() {
                     api.prevent_exit();
                 }
             }
@@ -1136,11 +1135,10 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    /// Deux gabarits inventés : le seul gabarit réel est unique, et l'invariant
-    /// à vérifier — un appareil n'en entraîne aucun autre — n'a de sens qu'à
-    /// partir de deux. Ils ne servent qu'à être identifiés, d'où la matrice
-    /// minimale.
-    static PREMIER: Layout = Layout {
+    /// Two made-up layouts: the only real layout is unique, and the invariant
+    /// to check — one device drags down no other — only makes sense from two
+    /// onwards. They only serve to be identified, hence the minimal matrix.
+    static FIRST: Layout = Layout {
         name: "Premier",
         vid: 0x1532,
         pid: 0x1111,
@@ -1163,276 +1161,276 @@ mod tests {
         keys: &[],
     };
 
-    /// Série propre à chaque gabarit, comme une énumération réelle.
-    fn branches(l: &Layout) -> Option<Option<String>> {
+    /// A serial specific to each layout, as in a real enumeration.
+    fn plugged_with_serial(l: &Layout) -> Option<Option<String>> {
         Some(Some(format!("S{:04x}", l.pid)))
     }
 
-    /// Un appareil ouvert qui ne répond pas aux lectures : aucune série par le
-    /// protocole, l'appariement reste celui de l'énumération.
-    fn muet(_: &&'static str) -> Option<String> {
+    /// An open device that does not answer reads: no serial over the protocol,
+    /// the matching stays that of the enumeration.
+    fn silent(_: &&'static str) -> Option<String> {
         None
     }
 
-    fn pilotes() -> Settings {
+    fn both_controlled() -> Settings {
         let mut settings = Settings::default();
-        for l in [&PREMIER, &SECOND] {
+        for l in [&FIRST, &SECOND] {
             settings.set_device_state(
                 l.vid,
                 l.pid,
-                branches(l).flatten().as_deref(),
+                plugged_with_serial(l).flatten().as_deref(),
                 DeviceState::Adopted,
             );
         }
         settings
     }
 
-    /// Les gabarits réellement ouverts, par leur nom — la valeur que rend le
-    /// faux « ouvrir » des tests.
-    fn ouverts(opened: &[(&'static Layout, &'static str)]) -> Vec<&'static str> {
+    /// The layouts actually opened, by name — the value returned by the tests'
+    /// fake "open".
+    fn newly_opened(opened: &[(&'static Layout, &'static str)]) -> Vec<&'static str> {
         opened.iter().map(|(_, name)| *name).collect()
     }
 
-    /// **Le cœur de l'adoption.** Le premier appareil refuse de s'ouvrir ; le
-    /// second doit s'ouvrir quand même, et le message d'échec rester attaché à
-    /// celui qui a échoué.
+    /// **The heart of adoption.** The first device refuses to open; the second
+    /// must open anyway, and the failure message must stay attached to the one
+    /// that failed.
     #[test]
-    fn un_appareil_en_echec_n_en_bloque_aucun_autre() {
-        let mut tentatives = Vec::new();
+    fn a_failing_device_blocks_no_other() {
+        let mut attempts = Vec::new();
 
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER, &SECOND],
-            &pilotes(),
-            branches,
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST, &SECOND],
+            &both_controlled(),
+            plugged_with_serial,
             |l| {
-                tentatives.push(l.pid);
-                if l.pid == PREMIER.pid {
+                attempts.push(l.pid);
+                if l.pid == FIRST.pid {
                     Err("accès refusé par le système".into())
                 } else {
                     Ok(l.name)
                 }
             },
-            muet,
+            silent,
         );
 
         assert_eq!(
-            tentatives,
-            vec![PREMIER.pid, SECOND.pid],
-            "la boucle s'est arrêtée au premier échec"
+            attempts,
+            vec![FIRST.pid, SECOND.pid],
+            "the loop stopped at the first failure"
         );
-        assert_eq!(ouverts(&opened), vec!["Second"]);
+        assert_eq!(newly_opened(&opened), vec!["Second"]);
 
-        assert_eq!(comptes.len(), 2);
+        assert_eq!(outcomes.len(), 2);
         assert_eq!(
-            comptes[0],
+            outcomes[0],
             OpenOutcome {
-                device: DeviceRef::of(&PREMIER),
+                device: DeviceRef::of(&FIRST),
                 error: Some("accès refusé par le système".into()),
             }
         );
         assert_eq!(
-            comptes[1],
+            outcomes[1],
             OpenOutcome {
                 device: DeviceRef::of(&SECOND),
                 error: None,
             },
-            "l'échec du premier a débordé sur le second"
+            "the first one's failure spilled over onto the second"
         );
     }
 
-    /// Ni « détecté » ni « ignoré » ne doivent produire la moindre ouverture :
-    /// c'est toute la raison d'être des trois états.
+    /// Neither "detected" nor "ignored" may produce the slightest opening: that
+    /// is the whole point of the three states.
     #[test]
-    fn seul_un_appareil_pilote_est_ouvert() {
+    fn only_a_controlled_device_is_opened() {
         let mut settings = Settings::default();
         settings.set_device_state(
             SECOND.vid,
             SECOND.pid,
-            branches(&SECOND).flatten().as_deref(),
+            plugged_with_serial(&SECOND).flatten().as_deref(),
             DeviceState::Ignored,
         );
 
-        let mut tentatives = 0;
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER, &SECOND], // PREMIER n'a jamais été vu : détecté
+        let mut attempts = 0;
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST, &SECOND], // FIRST was never seen: detected
             &settings,
-            branches,
+            plugged_with_serial,
             |l| {
-                tentatives += 1;
+                attempts += 1;
                 Ok(l.name)
             },
-            muet,
+            silent,
         );
 
-        assert_eq!(tentatives, 0, "un appareil non piloté a été ouvert");
+        assert_eq!(attempts, 0, "a device not controlled was opened");
         assert!(opened.is_empty());
-        assert!(comptes.is_empty());
+        assert!(outcomes.is_empty());
     }
 
-    /// Adopté mais débranché : rien à ouvrir, et surtout rien à signaler — ce
-    /// n'est pas un échec, l'appareil est simplement ailleurs.
+    /// Adopted but unplugged: nothing to open, and above all nothing to
+    /// report — it is not a failure, the device is simply elsewhere.
     #[test]
-    fn un_appareil_pilote_mais_debranche_ne_produit_aucune_erreur() {
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER, &SECOND],
-            &pilotes(),
+    fn a_controlled_but_unplugged_device_produces_no_error() {
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST, &SECOND],
+            &both_controlled(),
             |_| None,
             |l| Ok(l.name) as Result<&'static str, String>,
-            muet,
+            silent,
         );
 
         assert!(opened.is_empty());
-        assert!(comptes.is_empty());
+        assert!(outcomes.is_empty());
     }
 
-    /// Ce que l'issue #26 change : `AppState` porte une **table** d'appareils, le
-    /// second piloté n'est donc plus laissé fermé faute de place. Chacun aura sa
-    /// poignée, sa boucle et son effet.
+    /// What issue #26 changes: `AppState` carries a **table** of devices, so
+    /// the second controlled one is no longer left closed for lack of room.
+    /// Each will have its handle, its loop and its effect.
     #[test]
-    fn tous_les_appareils_pilotes_sont_ouverts() {
-        let mut tentatives = Vec::new();
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER, &SECOND],
-            &pilotes(),
-            branches,
+    fn all_controlled_devices_are_opened() {
+        let mut attempts = Vec::new();
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST, &SECOND],
+            &both_controlled(),
+            plugged_with_serial,
             |l| {
-                tentatives.push(l.pid);
+                attempts.push(l.pid);
                 Ok(l.name)
             },
-            muet,
+            silent,
         );
 
-        assert_eq!(tentatives, vec![PREMIER.pid, SECOND.pid]);
-        assert_eq!(ouverts(&opened), vec!["Premier", "Second"]);
-        assert_eq!(comptes.len(), 2);
-        assert!(comptes.iter().all(|c| c.error.is_none()));
+        assert_eq!(attempts, vec![FIRST.pid, SECOND.pid]);
+        assert_eq!(newly_opened(&opened), vec!["Premier", "Second"]);
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().all(|c| c.error.is_none()));
     }
 
-    // -------------------------------------------------------- série par protocole
+    // -------------------------------------------------------- serial over protocol
 
-    /// L'énumération du DeathStalker : branché, **sans série**.
-    fn branche_muet(_: &Layout) -> Option<Option<String>> {
+    /// The DeathStalker enumeration: plugged in, **without a serial**.
+    fn plugged_without_serial(_: &Layout) -> Option<Option<String>> {
         Some(None)
     }
 
-    /// Une décision prise pour un exemplaire — ou pour tout le modèle, sans série.
-    fn pilote_pour(serie: Option<&str>) -> Settings {
+    /// A decision taken for one unit — or for the whole model, without a serial.
+    fn controlled_for(serial: Option<&str>) -> Settings {
         let mut settings = Settings::default();
-        settings.set_device_state(PREMIER.vid, PREMIER.pid, serie, DeviceState::Adopted);
+        settings.set_device_state(FIRST.vid, FIRST.pid, serial, DeviceState::Adopted);
         settings
     }
 
-    /// **Ce que la série par protocole change.** Le descripteur USB muet laisse
-    /// passer n'importe quel exemplaire du modèle ; la série lue à l'ouverture
-    /// dit que ce n'est pas le bon, et la poignée est relâchée.
+    /// **What the protocol serial changes.** The silent USB descriptor lets any
+    /// unit of the model through; the serial read on opening says it is not the
+    /// right one, and the handle is released.
     #[test]
-    fn un_autre_exemplaire_du_modele_n_est_pas_pilote() {
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER],
-            &pilote_pour(Some("XY01")),
-            branche_muet,
+    fn another_unit_of_the_model_is_not_controlled() {
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST],
+            &controlled_for(Some("XY01")),
+            plugged_without_serial,
             |l| Ok(l.name),
             |_| Some("XY02".to_string()),
         );
 
-        assert!(opened.is_empty(), "l'exemplaire voisin a été piloté");
-        assert_eq!(comptes.len(), 1);
-        let raison = comptes[0].error.as_deref().expect("aucune raison donnée");
-        assert!(raison.contains("n'est pas celui"), "{raison}");
-        // La raison s'affiche et part au journal : la série n'y figure pas,
-        // son empreinte si.
-        assert!(!raison.contains("XY02"), "la série a fuité : {raison}");
-        assert!(raison.contains(&journal::empreinte("XY02")), "{raison}");
+        assert!(opened.is_empty(), "the neighboring unit was controlled");
+        assert_eq!(outcomes.len(), 1);
+        let reason = outcomes[0].error.as_deref().expect("no reason given");
+        assert!(reason.contains("n'est pas celui"), "{reason}");
+        // The reason is shown and goes to the log: the serial is not in it, its
+        // fingerprint is.
+        assert!(!reason.contains("XY02"), "the serial leaked: {reason}");
+        assert!(reason.contains(&journal::fingerprint("XY02")), "{reason}");
     }
 
     #[test]
-    fn l_exemplaire_adopte_est_reconnu_a_sa_serie() {
-        let (opened, comptes) = open_adopted(
-            &[&PREMIER],
-            &pilote_pour(Some("XY01")),
-            branche_muet,
+    fn the_adopted_unit_is_recognized_by_its_serial() {
+        let (opened, outcomes) = open_adopted(
+            &[&FIRST],
+            &controlled_for(Some("XY01")),
+            plugged_without_serial,
             |l| Ok(l.name),
             |_| Some("XY01".to_string()),
         );
 
-        assert_eq!(ouverts(&opened), vec!["Premier"]);
-        assert!(comptes[0].error.is_none());
+        assert_eq!(newly_opened(&opened), vec!["Premier"]);
+        assert!(outcomes[0].error.is_none());
     }
 
-    /// Une adoption antérieure à la lecture par protocole ne porte pas de série :
-    /// elle ne doit pas refuser l'exemplaire qu'on a — elle l'apprendra.
+    /// An adoption older than protocol reads carries no serial: it must not
+    /// refuse the unit at hand — it will learn it.
     #[test]
-    fn une_adoption_sans_serie_accepte_l_exemplaire_branche() {
+    fn an_adoption_without_serial_accepts_the_plugged_in_unit() {
         let (opened, _) = open_adopted(
-            &[&PREMIER],
-            &pilote_pour(None),
-            branche_muet,
+            &[&FIRST],
+            &controlled_for(None),
+            plugged_without_serial,
             |l| Ok(l.name),
             |_| Some("XY02".to_string()),
         );
-        assert_eq!(ouverts(&opened), vec!["Premier"]);
+        assert_eq!(newly_opened(&opened), vec!["Premier"]);
     }
 
-    /// Une série qu'on n'a pas pu lire ne conclut rien : refuser pour une
-    /// question sans réponse éteindrait l'éclairage de qui n'a qu'un clavier.
+    /// A serial that could not be read concludes nothing: refusing over an
+    /// unanswered question would turn off the lighting of someone with only
+    /// one keyboard.
     #[test]
-    fn sans_serie_lue_rien_ne_se_conclut() {
+    fn without_a_read_serial_nothing_is_concluded() {
         let (opened, _) = open_adopted(
-            &[&PREMIER],
-            &pilote_pour(Some("XY01")),
-            branche_muet,
+            &[&FIRST],
+            &controlled_for(Some("XY01")),
+            plugged_without_serial,
             |l| Ok(l.name),
-            muet,
+            silent,
         );
-        assert_eq!(ouverts(&opened), vec!["Premier"]);
+        assert_eq!(newly_opened(&opened), vec!["Premier"]);
     }
 
-    /// Le protocole l'emporte sur le descripteur, et le descripteur reste le
-    /// repli d'un appareil fermé.
+    /// The protocol wins over the descriptor, and the descriptor stays the
+    /// fallback of a closed device.
     #[test]
-    fn la_serie_du_protocole_passe_avant_celle_du_descripteur() {
+    fn the_protocol_serial_comes_before_the_descriptor_one() {
         let inspection = Inspection {
             firmware: Err("non lue".into()),
             serial: Ok("XY01".into()),
             checks: Vec::new(),
         };
         assert_eq!(
-            serie_connue(Some(&inspection), Some("USB".into())).as_deref(),
+            known_serial(Some(&inspection), Some("USB".into())).as_deref(),
             Some("XY01")
         );
         assert_eq!(
-            serie_connue(None, Some("USB".into())).as_deref(),
+            known_serial(None, Some("USB".into())).as_deref(),
             Some("USB")
         );
-        let muette = Inspection {
+        let unreadable = Inspection {
             serial: Err("illisible".into()),
             ..inspection
         };
-        assert_eq!(serie_connue(Some(&muette), None), None);
+        assert_eq!(known_serial(Some(&unreadable), None), None);
     }
 
-    /// La table est indexée sur VID/PID : deux appareils du même fabricant ne
-    /// doivent pas se confondre, sans quoi ouvrir le second refermerait le
-    /// premier.
+    /// The table is keyed on VID/PID: two devices from the same vendor must
+    /// not be confused, otherwise opening the second would close the first.
     #[test]
-    fn deux_appareils_du_meme_fabricant_ont_des_cles_distinctes() {
+    fn two_devices_from_the_same_vendor_have_distinct_keys() {
         let state = AppState::default();
-        let premier = DeviceRef::of(&PREMIER);
+        let first = DeviceRef::of(&FIRST);
         let second = DeviceRef::of(&SECOND);
 
-        assert_ne!(premier, second);
+        assert_ne!(first, second);
         assert!(state.open_handles().is_empty());
 
-        // Sans matériel on ne peut pas poser de `Keyboard` : on vérifie ce qui
-        // ne dépend que de la table — la poignée d'un appareil est bien la
-        // sienne, et viser un appareil jamais ouvert n'en fabrique aucune.
-        assert!(state.opened(premier).is_none());
-        let handle = state.handle(premier);
-        assert!(state.opened(premier).is_some());
+        // Without hardware we cannot put a `Keyboard` in: we check what depends
+        // only on the table — a device's handle is indeed its own, and
+        // targeting a device never opened creates none.
+        assert!(state.opened(first).is_none());
+        let handle = state.handle(first);
+        assert!(state.opened(first).is_some());
         assert!(
             state.opened(second).is_none(),
-            "viser un appareil en a ouvert un autre"
+            "targeting one device opened another"
         );
-        assert!(Arc::ptr_eq(&handle, &state.handle(premier)));
+        assert!(Arc::ptr_eq(&handle, &state.handle(first)));
     }
 }

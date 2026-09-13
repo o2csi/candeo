@@ -1,49 +1,48 @@
-//! Effets livrés avec l'application.
+//! Effects shipped with the application.
 //!
-//! Ce sont des **modules JavaScript**, chargés par le même moteur, contre la
-//! même API et avec le même `export default` que les effets écrits par
-//! l'utilisateur. Les écrire en Rust natif les rendrait plus rapides et ne
-//! prouverait rien : le premier exemple qu'on ouvre doit être exactement ce
-//! qu'on peut écrire soi-même.
+//! They are **JavaScript modules**, loaded by the same engine, against the same
+//! API and with the same `export default` as effects written by the user.
+//! Writing them in native Rust would make them faster and prove nothing: the
+//! first example you open must be exactly what you could write yourself.
 //!
-//! Ils n'ont pas de dossier : `include_str!` les compile dans le binaire. Leur
-//! JavaScript est donc aussi leur source — il n'y a pas de `.ts` à transpiler,
-//! et c'est ce qui permet de les lire tels qu'ils s'exécutent.
+//! They have no folder: `include_str!` compiles them into the binary. Their
+//! JavaScript is therefore also their source — there is no `.ts` to transpile,
+//! and that is what lets you read them as they run.
 //!
-//! ## Deux déclarations, un seul contenu
+//! ## Two declarations, one content
 //!
-//! Le manifeste est écrit ici, en Rust, pour que lister la bibliothèque ne
-//! coûte pas l'instanciation de cinq contextes QuickJS ; le module, lui, le
-//! déclare aussi dans son `export default`, parce que c'est le contrat de
-//! l'API. Le test `runtime::tests::les_manifestes_integres_correspondent_aux_modules`
-//! interdit la divergence : c'est le module qui fait foi.
+//! The manifest is written here, in Rust, so that listing the library does not
+//! cost instantiating five QuickJS contexts; the module also declares it in its
+//! `export default`, because that is the API contract. The test
+//! `runtime::tests::built_in_manifests_match_their_modules` forbids them from
+//! diverging: the module is authoritative.
 
 use std::sync::OnceLock;
 
 use crate::runtime::swatch::{self, Swatch};
 
-/// Un effet compilé dans le binaire.
+/// An effect compiled into the binary.
 pub struct Builtin {
-    /// Identifiant stable, écrit à la main et non dérivé du nom : il est
-    /// enregistré dans `settings.json` comme effet actif, renommer l'effet ne
-    /// doit donc pas le changer.
+    /// Stable identifier, written by hand and not derived from the name: it is
+    /// saved in `settings.json` as the active effect, so renaming the effect
+    /// must not change it.
     pub id: &'static str,
-    /// Le module, tel que le moteur le charge.
+    /// The module, as the engine loads it.
     pub js: &'static str,
     pub name: &'static str,
     pub description: &'static str,
-    /// Paramètres déclarés, en JSON, à la forme de `ParamSpec` côté TypeScript.
+    /// Declared parameters, as JSON, in the shape of `ParamSpec` on the
+    /// TypeScript side.
     pub params: &'static str,
 }
 
-/// Les effets livrés, dans l'ordre où la galerie les présente.
+/// The shipped effects, in the order the gallery presents them.
 ///
-/// Cinq, et la règle n'a pas bougé : ils sont là pour être lus, et deux
-/// variantes d'un même mouvement n'apprendraient rien de plus. Les deux ondes
-/// n'en sont pas une — elles mesurent **deux espaces différents**, l'une la
-/// distance physique des capuchons, l'autre le nombre de cases de matrice. La
-/// différence ne se voit que côte à côte, et c'est pour qu'elle se voie
-/// qu'elles se suivent ici.
+/// Five, and the rule has not moved: they are there to be read, and two
+/// variants of the same motion would teach nothing more. The two waves are not
+/// one — they measure **two different spaces**, one the physical distance
+/// between keycaps, the other the number of matrix cells. The difference only
+/// shows side by side, and they follow each other here so that it shows.
 pub static ALL: [Builtin; 5] = [
     Builtin {
         id: "onde-radiale",
@@ -100,40 +99,41 @@ pub static ALL: [Builtin; 5] = [
     },
 ];
 
-/// L'effet intégré portant cet identifiant, s'il existe.
+/// The built-in effect with this identifier, if there is one.
 ///
-/// C'est le point d'entrée unique de la priorité décrite dans
-/// [`crate::storage`] : un identifiant intégré est résolu ici **avant** tout
-/// accès au disque.
+/// This is the single entry point of the precedence described in
+/// [`crate::storage`]: a built-in identifier is resolved here **before** any
+/// disk access.
 pub fn find(id: &str) -> Option<&'static Builtin> {
     ALL.iter().find(|b| b.id == id)
 }
 
-/// Repères de couleurs des effets livrés, **dans l'ordre de [`ALL`]**.
+/// Color swatches of the shipped effects, **in the order of [`ALL`]**.
 ///
-/// # Pourquoi ils ne sont pas sur disque
+/// # Why they are not on disk
 ///
-/// Un effet installé range son repère à côté de son manifeste ; un intégré n'a
-/// ni dossier ni manifeste sur disque, la question se repose donc entièrement.
+/// An installed effect stores its swatch next to its manifest; a built-in has
+/// neither a folder nor a manifest on disk, so the question is entirely open
+/// again.
 ///
-/// Le repère d'un intégré est une propriété du **binaire**, pas de la
-/// bibliothèque de l'utilisateur : il change quand l'application change, jamais
-/// autrement. L'écrire dans le dossier de données créerait un cache à invalider
-/// à chaque mise à jour — une date de version à comparer, un fichier à réécrire,
-/// et une occasion de montrer le repère de la version précédente. Tout cela pour
-/// cinq effets dont l'échantillonnage coûte quelques millisecondes.
+/// The swatch of a built-in is a property of the **binary**, not of the user's
+/// library: it changes when the application changes, never otherwise. Writing
+/// it to the data folder would create a cache to invalidate on every update — a
+/// version date to compare, a file to rewrite, and a chance to show the swatch
+/// of the previous version. All that for five effects whose sampling costs a few
+/// milliseconds.
 ///
-/// L'écrire à la main dans ce fichier est exclu par le principe même du repère :
-/// il doit venir de l'exécution, sans quoi il finirait par mentir.
+/// Writing it by hand in this file is ruled out by the very principle of the
+/// swatch: it must come from execution, or it would end up lying.
 ///
-/// Reste donc la mémoire : calculé à la première demande, retenu pour la durée
-/// du processus. C'est la seule initialisation paresseuse du module — les
-/// manifestes, eux, sont reconstruits à chaque appel parce qu'ils ne coûtent que
-/// cinq petits objets JSON, là où ceci instancie cinq moteurs QuickJS.
+/// That leaves memory: computed on first request, kept for the lifetime of the
+/// process. This is the only lazy initialization in the module — the manifests
+/// are rebuilt on every call because they only cost five small JSON objects,
+/// whereas this instantiates five QuickJS engines.
 ///
-/// Le gabarit est celui par défaut, et non celui du clavier branché : un repère
-/// qui dépendrait du matériel présent ne serait pas comparable d'une machine à
-/// l'autre.
+/// The layout is the default one, not that of the plugged-in keyboard: a swatch
+/// that depended on the hardware present would not be comparable from one
+/// machine to another.
 pub fn swatches() -> &'static [Swatch] {
     static SWATCHES: OnceLock<Vec<Swatch>> = OnceLock::new();
     SWATCHES.get_or_init(|| {
@@ -147,52 +147,52 @@ pub fn swatches() -> &'static [Swatch] {
 mod tests {
     use super::*;
 
-    /// Un identifiant intégré vit dans le **même** espace de noms que ceux des
-    /// effets utilisateur : il est enregistré dans les réglages et affiché
-    /// comme les autres. S'il ne satisfaisait pas la même validation, la
-    /// réservation faite à l'installation ne protégerait rien.
+    /// A built-in identifier lives in the **same** namespace as those of user
+    /// effects: it is saved in the settings and displayed like the others. If
+    /// it did not pass the same validation, the reservation made at install
+    /// time would protect nothing.
     #[test]
-    fn les_identifiants_integres_sont_des_identifiants_valides() {
+    fn builtin_ids_are_valid_ids() {
         for b in &ALL {
-            crate::storage::validate_id(b.id).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+            crate::storage::validate_id(b.id).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
         }
     }
 
     #[test]
-    fn les_identifiants_integres_sont_uniques() {
+    fn builtin_ids_are_unique() {
         for (i, b) in ALL.iter().enumerate() {
             assert!(
                 ALL[i + 1..].iter().all(|o| o.id != b.id),
-                "« {} » est livré deux fois",
+                "\"{}\" is shipped twice",
                 b.id
             );
         }
     }
 
-    /// Chaque effet livré a son repère, et l'ordre suit celui de [`ALL`] — c'est
-    /// ce qui permet à la bibliothèque de les apparier par position.
+    /// Every shipped effect has its swatch, and the order follows that of
+    /// [`ALL`] — which is what lets the library pair them by position.
     #[test]
-    fn chaque_effet_integre_a_son_repere() {
+    fn every_builtin_effect_has_its_swatch() {
         let swatches = swatches();
         assert_eq!(swatches.len(), ALL.len());
         for (b, swatch) in ALL.iter().zip(swatches) {
-            assert!(!swatch.is_empty(), "« {} » n'a pas de repère", b.id);
+            assert!(!swatch.is_empty(), "\"{}\" has no swatch", b.id);
         }
-        // Retenu, donc rendu à l'identique : rien n'est recalculé à chaque
-        // ouverture de la bibliothèque.
+        // Kept, so returned identically: nothing is recomputed each time the
+        // library is opened.
         assert_eq!(swatches, self::swatches());
     }
 
-    /// Un manifeste intégré est écrit à la main : un JSON invalide passerait la
-    /// compilation et ne se verrait qu'à l'ouverture de la galerie.
+    /// A built-in manifest is written by hand: invalid JSON would pass
+    /// compilation and only show when the gallery is opened.
     #[test]
-    fn les_parametres_integres_sont_du_json_valide() {
+    fn builtin_params_are_valid_json() {
         for b in &ALL {
             let params: serde_json::Value =
-                serde_json::from_str(b.params).unwrap_or_else(|e| panic!("« {} » : {e}", b.id));
+                serde_json::from_str(b.params).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
             assert!(
                 params.as_object().is_some_and(|o| !o.is_empty()),
-                "« {} » ne déclare aucun paramètre",
+                "\"{}\" declares no parameters",
                 b.id
             );
         }

@@ -425,7 +425,7 @@ udev rule (§6) — must not unpair an already adopted device.
 This is the startup invariant, and it is verified rather than assumed. The open
 loop knows neither Tauri nor HID: presence and opening reach it
 as arguments, which makes the invariant testable with an ordinary test.
-`un_appareil_en_echec_n_en_bloque_aucun_autre` makes opening the
+`a_failing_device_blocks_no_other` makes opening the
 first of two controlled devices fail and checks three things:
 
 1. the loop went on to the second, which is indeed open;
@@ -438,7 +438,7 @@ display, and the next would overwrite the previous.
 
 **The invariant also holds while running, not only at open.** A device
 that was opened successfully can very well refuse every write afterwards — unplugged,
-put to sleep, preempted by a vendor driver. `un_appareil_en_panne_n_en_affecte_aucun_autre`
+put to sleep, preempted by a vendor driver. `a_broken_device_affects_no_other`
 starts two real loops, makes all writes of one fail, and checks
 that the other keeps its loop, its frames and its clean state — and that stopping the
 first does not stop the second. See §4.
@@ -573,7 +573,7 @@ the keyboard.
 cargo test -p candeo-desktop bout_en_bout -- --ignored --nocapture
 ```
 
-`bout_en_bout_sur_le_vrai_clavier` opens the device, runs a built-in
+`end_to_end_on_the_real_keyboard` opens the device, runs a built-in
 effect for three seconds on **this device**, checks that the loop holds, that no
 frame threw and that frames do reach the keyboard (`reachingKeyboard`),
 then stops. Marked `#[ignore]`: it requires a plugged-in keyboard, so it has no place
