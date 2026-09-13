@@ -20,7 +20,7 @@
  * autant le dessiner.
  *
  * **Pas un canevas** : la charge invoquée pour le justifier n'existe pas. 106
- * rectangles à 60 Hz, c'est 106 écritures d'attribut `fill` par trame — le
+ * rectangles à 30 Hz, c'est 106 écritures d'attribut `fill` par trame — le
  * `<text>` ne change que de couleur, et sa taille qu'au redimensionnement. Le
  * canevas coûterait en échange le redessin intégral du texte à chaque trame, la
  * gestion manuelle du rapport de pixels, et la perte de tout ce que le DOM donne
@@ -128,7 +128,7 @@ function linear(v: number): number {
  * Encre du libellé : noir ou blanc, celui des deux qui contraste le mieux.
  *
  * Calculé, pas deviné — une touche peut être blanche comme noire, et la couleur
- * change soixante fois par seconde. On compare les deux rapports de contraste
+ * change trente fois par seconde. On compare les deux rapports de contraste
  * WCAG : `(L + 0,05) / 0,05` sur noir contre `1,05 / (L + 0,05)` sur blanc,
  * égalité en `L ≈ 0,179`. Ni l'un ni l'autre ne peut venir des jetons : un
  * jeton suit le thème, alors que le fond à contraster est une couleur émise.

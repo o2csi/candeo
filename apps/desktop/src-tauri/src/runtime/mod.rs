@@ -1238,7 +1238,7 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
     }
 
     // Binaire brut : sérialiser en tableau JSON d'entiers ferait passer une
-    // image de 396 octets à plus de 1,5 Ko, soixante fois par seconde.
+    // image de 396 octets à plus de 1,5 Ko, trente fois par seconde.
     if let Some(ch) = shared.frames.lock().unwrap().as_ref() {
         let _ = ch.send(InvokeResponseBody::Raw(bytes.to_vec()));
     }

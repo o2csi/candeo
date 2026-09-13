@@ -79,7 +79,7 @@ function dark(layout: LayoutView | null): readonly Rgb[] {
  *
  * `shallowRef` côté appelant : l'image est remplacée en bloc, jamais modifiée
  * en place. Un `ref` profond envelopperait 132 triplets dans autant de
- * mandataires réactifs, soixante fois par seconde.
+ * mandataires réactifs, trente fois par seconde.
  */
 function colors(bytes: Uint8Array): Rgb[] {
   const out = new Array<Rgb>(Math.floor(bytes.length / 3))

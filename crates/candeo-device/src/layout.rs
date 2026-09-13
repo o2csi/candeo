@@ -1,7 +1,14 @@
 //! Description physique des périphériques pris en charge.
 
 /// Position sans LED dans la matrice.
-pub const EMPTY: u16 = u16::MAX;
+///
+/// Interne : la sentinelle ne sert qu'à écrire et à lire [`Layout::matrix`], et
+/// tout ce qui sort d'ici l'a déjà traversée — [`Layout::lit_count`] l'écarte du
+/// compte, [`Layout::at`] la traduit en `None`. Un appelant qui lirait `matrix`
+/// directement en aurait besoin ; aucun ne le fait, et la valeur brute
+/// `u16::MAX` est écrite dans la documentation du champ pour celui qui s'y
+/// mettrait.
+pub(crate) const EMPTY: u16 = u16::MAX;
 
 /// Une touche : sa LED, son nom gravé, et son rectangle physique.
 ///
@@ -43,7 +50,7 @@ pub struct Layout {
     pub interface: u8,
     pub rows: u8,
     pub cols: u8,
-    /// Index de LED par position, ligne par ligne. [`EMPTY`] = pas de LED.
+    /// Index de LED par position, ligne par ligne. `u16::MAX` = pas de LED.
     pub matrix: &'static [u16],
     /// Nom et géométrie de chaque position occupée, dans l'ordre des index.
     pub keys: &'static [Key],

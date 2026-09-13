@@ -85,7 +85,7 @@ Les trois partis pris qui structurent le reste :
   indépendant de la fenêtre. Le front n'exécute jamais de code utilisateur : il
   envoie la source et reçoit les images. L'aperçu **est** donc la production, et
   un effet continue de tourner fenêtre fermée. Le motif n'a jamais été la
-  performance — 132 LED × 60 img/s = 7 920 couleurs/s, trivial.
+  performance — 132 LED × 30 img/s = 3 960 couleurs/s, trivial.
 - **Fermer la fenêtre replie candeo dans la zone de notification.** C'est la
   seconde moitié de la phrase précédente, et elle n'était pas tenue jusqu'à
   l'issue #46 : un fil indépendant de la fenêtre ne survit pas au processus, et

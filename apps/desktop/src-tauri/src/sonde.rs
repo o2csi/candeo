@@ -363,11 +363,15 @@ fn sonde_descripteurs_eclairage() {
 
 /// **Quelle cadence l'appareil soutient-il réellement ?**
 ///
-/// Répond au « débit maximal accepté avant décrochage » du §9, et tranche une
-/// question de conception : la boucle vise 60 images par seconde, or une mise à
-/// jour complète coûte **7 transferts de contrôle** — 6 rangées puis le passage
-/// en mode custom. À 60 Hz cela fait 420 transferts par seconde sur une seule
-/// interface.
+/// Répond au « débit maximal accepté avant décrochage » du §9, et a tranché une
+/// question de conception : la boucle visait alors 60 images par seconde, or une
+/// mise à jour complète coûte **7 transferts de contrôle** — 6 rangées puis le
+/// passage en mode custom. À 60 Hz cela faisait 420 transferts par seconde sur
+/// une seule interface.
+///
+/// C'est cette sonde qui a répondu non, et `runtime::FPS` vaut 30 depuis. Le
+/// temps de verbe est au passé pour cette raison, et non par négligence : garder
+/// l'énoncé d'origine est ce qui permet de rejouer la mesure et de la comparer.
 ///
 /// L'enjeu n'est pas le confort : si l'appareil ne suit pas, la moitié de nos
 /// images est jetée par lui, et **le simulateur est alors plus fluide que le

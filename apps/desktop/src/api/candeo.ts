@@ -44,13 +44,15 @@ export function connect(vid: number, pid: number): Promise<LayoutInfo> {
   return invoke('connect', { vid, pid })
 }
 
-/** Referme **un** appareil. Les autres ne sont pas touchés. */
+/**
+ * Referme **un** appareil. Les autres ne sont pas touchés.
+ *
+ * Avec {@link connect}, la paire qui ouvre et referme **sans décider** — là où
+ * {@link adoptDevice} et {@link ignoreDevice} écrivent dans `settings.json`.
+ * `useDevice` les enveloppe toutes deux ; aucun écran ne les appelle encore.
+ */
 export function disconnect(device: DeviceRef): Promise<void> {
   return invoke('disconnect', { device })
-}
-
-export function isConnected(device: DeviceRef): Promise<boolean> {
-  return invoke('is_connected', { device })
 }
 
 /** Gabarit d'un appareil ouvert. Échoue s'il ne l'est pas. */
@@ -120,6 +122,13 @@ export function setEffect(device: DeviceRef, effect: Effect): Promise<void> {
  * `frame` doit compter exactement `layout.frameLen` couleurs — **toutes** les
  * cases de la matrice, y compris celles sans LED. En envoyer moins laisse les
  * dernières rangées figées sur leur valeur précédente.
+ *
+ * ⚠️ **La fenêtre n'envoie pas d'images.** C'est la boucle Rust qui les produit
+ * et les écrit ; le simulateur les **reçoit** par canal. Cette enveloppe et
+ * {@link writeRow} sont les primitives de bas niveau qui ont servi à établir le
+ * protocole, gardées pour pouvoir le refaire — le pourquoi est écrit sur les
+ * commandes, dans `src-tauri/src/lib.rs`. Les appeler depuis un écran
+ * entrerait en concurrence avec la boucle sur la même poignée HID.
  */
 export function present(device: DeviceRef, frame: readonly Rgb[]): Promise<void> {
   const flat = new Array<number>(frame.length * 3)

@@ -1,7 +1,34 @@
-# Tauri + Vue + TypeScript
+# candeo — application de bureau
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+La fenêtre et son hôte Tauri. Le reste de l'espace de travail vit ailleurs :
+`crates/candeo-protocol` construit les rapports HID, `crates/candeo-device` les
+envoie, `packages/effects-api` décrit l'API offerte à l'auteur d'effet.
 
-## Recommended IDE Setup
+```
+src/         la fenêtre — Vue 3, TypeScript, l'éditeur Monaco
+src-tauri/   l'hôte Rust — commandes, moteur d'effets, journal, stockage
+```
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Lancer
+
+Depuis la **racine** du dépôt, pas d'ici — les scripts passent par le filtre
+pnpm et les chemins de `tauri.conf.json` sont relatifs à `src-tauri/` :
+
+```sh
+pnpm dev             # fenêtre en développement, rechargement à chaud
+pnpm build           # vue-tsc puis vite build
+pnpm tauri build     # application empaquetée
+pnpm check           # clippy et tests Rust
+```
+
+## Où lire la suite
+
+- [`README.md`](../../README.md) à la racine — ce que fait candeo, et pourquoi.
+- [`docs/design/studio.md`](../../docs/design/studio.md) — les décisions
+  d'architecture de la fenêtre et de l'éditeur.
+- [`docs/design/effects-runtime.md`](../../docs/design/effects-runtime.md) — le
+  moteur d'effets, la boucle de rendu et le chemin des images.
+- [`docs/api/commands.md`](../../docs/api/commands.md) — chaque commande Tauri,
+  ses arguments et ses modes d'échec.
+- [`docs/protocol/`](../../docs/protocol/) — le relevé du protocole, d'où tout
+  le reste dérive.

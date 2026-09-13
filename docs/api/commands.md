@@ -144,10 +144,21 @@ sans s'engager ; `adopt_device` est ce qu'on veut pour ne plus avoir à le faire
 
 Échoue si aucun gabarit connu ne correspond, ou si l'ouverture HID échoue.
 
-### `disconnect(device)` · `is_connected(device) -> boolean`
+### `disconnect(device)`
 
-Libération explicite d'**un** appareil, et interrogation de son état. Les autres
-ne sont pas touchés.
+Libération explicite d'**un** appareil. Les autres ne sont pas touchés.
+
+Avec `connect`, la paire qui ouvre et referme **sans décider**, là où
+`adopt_device` et `ignore_device` écrivent dans `settings.json`. Les deux sont
+enveloppées par `useDevice` et aucun écran ne les appelle encore : ce qui manque
+est un bouton, pas une commande.
+
+> **`is_connected` a été retirée** (audit #65). Elle répondait ce que
+> `list_devices` porte déjà dans le champ `open` de chaque appareil, et que la
+> fenêtre lit par là — une seconde source de vérité pour un état que le Rust est
+> seul à connaître. Interroger appareil par appareil ce qu'une seule commande
+> énumère n'apportait rien, et faisait diverger les deux réponses le jour où
+> l'une des deux aurait été rafraîchie sans l'autre.
 
 ### Au démarrage
 
@@ -158,7 +169,8 @@ s'ouvrent normalement.
 
 Des réglages illisibles ou un HID indisponible n'empêchent pas le démarrage — ce
 serait retirer le seul moyen de corriger la situation. Rien n'est ouvert, la
-raison part sur la sortie d'erreur, la fenêtre s'affiche.
+raison part au journal (`tracing::error!`, donc dans le fichier du jour), la
+fenêtre s'affiche.
 
 ---
 
@@ -910,7 +922,7 @@ indépendantes, et chacune peut être absente :
 
 ### `subscribe_frames(device, channel)` · `unsubscribe_frames(device)`
 
-Une commande répond **une fois** ; un effet produit 60 images par seconde. La
+Une commande répond **une fois** ; un effet produit 30 images par seconde. La
 remontée passe donc par `tauri::ipc::Channel`, créé côté front et passé en
 argument. Les images y circulent en binaire (`InvokeResponseBody::Raw`) :
 396 octets, contre plus de 1,5 Ko sérialisées en tableau JSON d'entiers.

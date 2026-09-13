@@ -4,7 +4,7 @@
 //! pannes se lisent mal :
 //!
 //! - **Le matériel.** Chacun ouvrirait sa poignée HID et ferait tourner ses
-//!   propres boucles à 60 img/s sur la même interface. Le clavier papillonnerait
+//!   propres boucles à 30 img/s sur la même interface. Le clavier papillonnerait
 //!   entre deux effets sans qu'aucune des deux fenêtres ne montre quoi que ce
 //!   soit d'anormal : chacune affiche *son* rendu au simulateur, et il est juste.
 //! - **Les réglages.** [`crate::storage::Store::write_settings`] écrit dans un
