@@ -65,6 +65,19 @@ as they are and flag any new one in the pull request.
 - **Guards:** a test checks that `en.json` and `fr.json` have the same keys and
   that every key used from Rust exists.
 
+## Interface text
+
+- **The interface shows states and actions.** Why the app works the way it
+  does belongs in `docs/`, not on screen.
+- **A warning only for what is irreversible or surprising**, said once, in one
+  place.
+- **An error is one sentence and the action to take.** Technical detail goes to
+  the log and the copied diagnostic, never raw into the window or the tray.
+- **One term per state:** *piloté*, *non ouvert*, *débranché*; the action is
+  *Piloter*. Settle a new term before using it anywhere.
+- The copied diagnostic is for bug reports: it stays in English and does not go
+  through the catalogs.
+
 ## Code and comments
 
 - **Comments explain why, not what:** the constraint, the measurement or the
