@@ -325,6 +325,33 @@ onMounted(async () => {
     </section>
 
     <!--
+      La croix ne quitte plus : c'est ce qui permet à un effet de continuer, et
+      c'est aussi ce qui rend la sortie non évidente. Le rail le rappelle en une
+      ligne ; ici on l'explique, parce que c'est ici qu'on vient quand quelque
+      chose ne se comporte pas comme on l'attendait.
+    -->
+    <section class="repli" aria-labelledby="repli-title">
+      <h2 id="repli-title">Fenêtre et sortie</h2>
+      <p class="note">
+        Fermer la fenêtre <strong>replie candeo dans la zone de notification</strong> : l'effet en
+        cours continue de tourner sur le clavier, et l'icône garde la main dessus — choisir un autre
+        effet, couper l'envoi au clavier, éteindre. C'est tout l'intérêt : le moteur vit dans un fil
+        indépendant de la fenêtre, et il n'y a aucune raison qu'il s'arrête parce qu'on a fini de
+        regarder.
+      </p>
+      <p class="note">
+        Pour quitter vraiment, <strong>clic droit sur l'icône, puis « Quitter candeo »</strong>.
+        C'est la seule sortie franche.
+      </p>
+      <p class="note">
+        Quitter <strong>n'éteint pas le clavier</strong> : il reste tel que le dernier effet l'a
+        laissé. Les effets du micrologiciel survivent de toute façon à l'extinction de
+        l'application, et un clavier qui s'éteindrait en quittant surprendrait davantage. Pour le
+        noir, « Éteindre » est dans le menu de l'icône.
+      </p>
+    </section>
+
+    <!--
       La configuration, et elle seule. Le dire ici est ce qui empêche de
       confondre « je désadopte un clavier » et « je vide ce que j'ai écrit » :
       les effets sont une bibliothèque, pas un réglage, et ils se suppriment un
@@ -609,6 +636,7 @@ onMounted(async () => {
 }
 
 /* En dernier, et séparée : ce qui s'y trouve ne se reprend pas. */
+.repli,
 .config {
   display: flex;
   flex-direction: column;

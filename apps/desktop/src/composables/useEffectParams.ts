@@ -249,6 +249,39 @@ const writes = new Map<string, Write>()
 const written = new Map<string, number>()
 
 /**
+ * Écritures **parties vers le Rust et pas encore confirmées**, par paire.
+ *
+ * C'est le second morceau de ce que {@link read} doit protéger, et il ne se
+ * déduit pas de {@link writes} : `persist` retire l'entrée de la table des
+ * écritures en attente **avant** l'aller-retour, sans quoi un `flushAll` ou un
+ * `settleOne` la referait partir une seconde fois. Entre ce retrait et le retour
+ * du Rust, la paire n'apparaît donc nulle part — et une relecture qui tomberait
+ * dans cette fenêtre rendrait la valeur d'avant l'écriture, c'est-à-dire
+ * défaisant sous les yeux de l'utilisateur le réglage qu'il vient de poser.
+ *
+ * Inobservable tant que rien n'appelait {@link reload}. L'icône de zone de
+ * notification est le premier à l'appeler, et elle le fait précisément quand
+ * quelque chose vient de bouger — donc au pire moment.
+ *
+ * Un **compte** et non un drapeau : deux écritures de la même paire peuvent se
+ * chevaucher — la temporisation part, un `settle` en déclenche une autre aussitôt
+ * — et un drapeau baissé par la première rouvrirait la fenêtre pendant que la
+ * seconde vole encore.
+ */
+const inflight = new Map<string, number>()
+
+/** Retient qu'une écriture part, et de quoi savoir quand elle est revenue. */
+function takeOff(k: string): void {
+  inflight.set(k, (inflight.get(k) ?? 0) + 1)
+}
+
+function landed(k: string): void {
+  const reste = (inflight.get(k) ?? 1) - 1
+  if (reste > 0) inflight.set(k, reste)
+  else inflight.delete(k)
+}
+
+/**
  * Écrit au plus tard après {@link DISK_DELAY} sans mouvement.
  *
  * Chaque nouvelle valeur remplace la précédente : un glissement de deux
@@ -262,11 +295,20 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
   if (previous) window.clearTimeout(previous.timer)
 
   const run = () => {
+    // Retirée d'abord, pour qu'un `flushAll` ou un `settleOne` ne la refasse pas
+    // partir ; comptée comme en vol dans la foulée, pour qu'elle ne disparaisse
+    // pas de ce que {@link read} protège entre les deux. Voir {@link inflight}.
     writes.delete(k)
     written.set(k, Date.now())
-    api.rememberEffectParams(device, effect, values).catch((e: unknown) => {
-      error.value = message(e)
-    })
+    takeOff(k)
+    api
+      .rememberEffectParams(device, effect, values)
+      .catch((e: unknown) => {
+        error.value = message(e)
+      })
+      .finally(() => {
+        landed(k)
+      })
   }
   writes.set(k, { timer: window.setTimeout(run, DISK_DELAY), run })
 }
@@ -312,6 +354,11 @@ function flushAll(): void {
  * vient de retirer ces entrées de `settings.json` : une temporisation qui
  * partirait après coup les y réécrirait, ressuscitant précisément ce qu'on
  * venait d'effacer.
+ *
+ * Ne rappelle pas ce qui est déjà parti — rien ne le peut, l'appel est en vol.
+ * Une écriture qui atterrit juste après une remise à zéro réécrit donc sa paire ;
+ * la fenêtre, elle, ne s'en souvient plus ({@link inflight} ne protège que ce que
+ * `remembered` porte encore), et le prochain lancement repart du fichier.
  */
 function cancelWrites(keep: (key: string) => boolean): void {
   for (const [k, w] of [...writes.entries()]) {
@@ -364,14 +411,16 @@ function read(): Promise<void> {
       // Reprendre le fichier tel quel ferait donc reculer un curseur sous la main
       // de celui qui le tient.
       //
-      // Couvre ce qui attend, pas ce qui est déjà parti : `persist` retire
-      // l'entrée de `writes` **avant** que le Rust n'ait écrit. Une relecture qui
-      // tomberait dans cet aller-retour rendrait la valeur d'avant. Fenêtre
-      // connue et sans conséquence tant que rien n'appelle `reload` — à traiter
-      // avec #46, qui sera le premier à le faire.
-      for (const k of writes.keys()) {
-        const enVol = remembered.value[k]
-        if (enVol !== undefined) disque[k] = enVol
+      // **Les deux tables, et c'est la correction que #46 imposait** : ce qui
+      // attend ({@link writes}) et ce qui est parti sans être confirmé
+      // ({@link inflight}). `persist` retire l'entrée de la première avant
+      // l'aller-retour ; sans la seconde, une relecture tombant dans cette
+      // fenêtre rendrait la valeur d'avant l'écriture. Inobservable tant que rien
+      // n'appelait `reload` — l'icône de zone de notification l'appelle, et
+      // justement quand quelque chose vient de bouger.
+      for (const k of [...writes.keys(), ...inflight.keys()]) {
+        const aNous = remembered.value[k]
+        if (aNous !== undefined) disque[k] = aNous
       }
 
       remembered.value = disque
@@ -409,14 +458,16 @@ export function useEffectParams() {
   /**
    * Relit `settings.json`, mémoïsation comprise.
    *
-   * Pour ce qui écrit les réglages **hors de la fenêtre** — l'icône de zone de
-   * notification (#46) est le premier cas attendu. Sans ce point d'entrée,
-   * `load` ne relirait jamais après un premier succès, et la fenêtre
-   * travaillerait indéfiniment sur l'instantané de son démarrage.
+   * Pour ce qui bouge **hors de la fenêtre** : l'icône de zone de notification
+   * commande les effets sans elle, et la fenêtre lui survit désormais repliée —
+   * son instantané peut donc vieillir des jours. Sans ce point d'entrée, `load`
+   * ne relirait jamais après un premier succès.
    *
    * Ne rejoint pas une lecture déjà en vol : celle-ci a pu partir **avant**
    * l'écriture qu'on vient d'apprendre, et rendrait alors le contenu même qu'on
-   * cherche à remplacer.
+   * cherche à remplacer. Ce que la fenêtre n'a pas fini d'écrire est préservé
+   * par {@link read} — voir {@link inflight}, qui est la moitié de cette
+   * protection que l'appel de `reload` a rendue nécessaire.
    */
   function reload(): Promise<void> {
     loaded = false

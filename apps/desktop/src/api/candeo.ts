@@ -7,6 +7,7 @@
  */
 
 import { Channel, invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import type { DeviceInfo, DeviceRef, DeviceState, Effect, LayoutInfo, Rgb } from './types'
@@ -223,6 +224,14 @@ export function listEffects(): Promise<EffectEntry[]> {
  * Ici, avec le manifeste qui les porte, et non dans l'éditeur : la galerie lance
  * désormais un effet, et elle n'a aucune raison de charger le module d'analyse
  * syntaxique pour recopier quatre valeurs par défaut.
+ *
+ * ⚠️ **La même règle est écrite en Rust**, dans `storage::starting_params` :
+ * l'icône de zone de notification lance un effet sans fenêtre, elle ne peut donc
+ * rien emprunter d'ici. Ce que les deux doivent dire pareil : les défauts du
+ * manifeste, recouverts par ce qu'on a retenu (`merge`, dans
+ * `useEffectParams`), et **bornés aux paramètres déclarés**. Les désaccorder
+ * donnerait deux éclairages différents pour le même effet selon l'endroit d'où
+ * on l'a lancé.
  */
 export function startingParams(declaring: Pick<EffectManifest, 'params'>): EffectParams {
   const out: EffectParams = {}
@@ -429,6 +438,43 @@ export function subscribeFrames(
  */
 export function engineStatus(): Promise<DeviceEngineStatus[]> {
   return invoke('engine_status')
+}
+
+// ------------------------------------------------------- changements hors fenêtre
+
+/**
+ * L'état a changé **sans la fenêtre**.
+ *
+ * Écrit ici *et* dans `src-tauri/src/tray.rs`, qui confronte les deux par un
+ * test : rien ne relie ces deux chaînes à la compilation, et les désaccorder
+ * donnerait une fenêtre qui ne se resynchronise plus jamais, sans une erreur
+ * nulle part.
+ */
+const ETAT_CHANGE = 'candeo://etat-change'
+
+/**
+ * Prévient quand l'icône de zone de notification a commandé quelque chose, ou
+ * quand la fenêtre revient après avoir été repliée.
+ *
+ * # Pourquoi un événement, ici, alors que tout le reste est interrogé
+ *
+ * Ce qui est **interrogeable** l'est resté : l'état du moteur se relit toutes
+ * les secondes, précisément parce qu'une erreur survenue fenêtre fermée doit se
+ * lire à la réouverture. Ce qui ne l'est pas, c'est ce que la fenêtre ne lit
+ * qu'**une fois**, au montage — la liste des appareils, `settings.json` — parce
+ * qu'elle en était jusqu'ici la seule source.
+ *
+ * Elle ne l'est plus, et surtout elle ne meurt plus : fermer la fenêtre la
+ * replie, son instantané peut donc vieillir des jours pendant que le menu
+ * commande les effets. Sonder le disque en boucle pour cela serait payer à
+ * chaque seconde ce qui arrive quelques fois par session.
+ *
+ * Rend de quoi se désabonner, comme {@link subscribeFrames}.
+ */
+export function onStateChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen(ETAT_CHANGE, () => {
+    handler()
+  })
 }
 
 // ---------------------------------------------------------------- journal

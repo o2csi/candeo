@@ -35,7 +35,7 @@ use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WebviewWindowBuilder};
 /// dans `tauri.conf.json` — une fenêtre sans `label` prend « main », c'est le
 /// défaut de Tauri — et dans `capabilities/default.json`, qui n'accorde ses
 /// permissions qu'à elle. Le test en fin de module confronte les trois.
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 
 /// Le plugin d'instance unique, **à enregistrer avant tous les autres**.
 ///
@@ -67,15 +67,29 @@ pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
     })
 }
 
-/// Remet l'instance vivante sous les yeux de qui vient de relancer candeo.
+/// Remet la fenêtre principale sous les yeux de qui la réclame.
 ///
 /// Sans cela, le second lancement disparaîtrait en silence, et un lancement sans
 /// effet visible se lit comme un refus de démarrer.
-fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+///
+/// Deux appelants désormais, et c'est délibérément le même chemin : le second
+/// lancement, et « Ouvrir la fenêtre » de la zone de notification
+/// ([`crate::tray`]). Les deux demandent exactement la même chose — une fenêtre
+/// masquée à montrer, ou une fenêtre détruite à rouvrir depuis sa déclaration —
+/// et en écrire deux versions les ferait diverger à la première correction.
+pub(crate) fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let window = match app.get_webview_window(MAIN_WINDOW) {
         Some(window) => window,
         None => reopen(app)?,
     };
+
+    // La fenêtre revient : son instantané peut dater de la dernière fois qu'on
+    // l'a repliée, c'est-à-dire d'il y a des jours. Prévenir avant de la montrer
+    // plutôt qu'après est sans importance — l'événement est asynchrone — mais le
+    // faire ici couvre les deux appelants d'un coup. Une fenêtre qu'on vient de
+    // **rouvrir**, elle, ne l'entendra pas : elle n'a pas encore chargé son
+    // JavaScript, et elle n'en a pas besoin — elle lit tout au montage.
+    crate::tray::signaler(app);
 
     // Les trois, parce qu'aucune n'implique les autres : une fenêtre masquée que
     // l'on ne fait que mettre au premier plan reste invisible, une fenêtre
@@ -99,12 +113,15 @@ fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// redimensionnée dans la configuration. Elle reprend au passage son étiquette,
 /// donc les permissions que la capability n'accorde qu'à elle.
 ///
-/// Aujourd'hui le processus s'arrête avec sa dernière fenêtre : cette branche ne
-/// sert donc jamais. Elle est écrite quand même parce que l'icône de zone de
-/// notification (#46) sépare précisément les deux — fenêtre fermée, effets
-/// toujours en cours dans leurs fils, qui ne dépendent pas d'elle. Son absence se
-/// paierait alors par un relancement qui ne fait rien de visible, sur une
-/// application qui tourne : la panne la plus longue à diagnostiquer.
+/// Cette branche a servi de filet pendant tout le temps où le processus
+/// s'arrêtait avec sa dernière fenêtre ; elle est devenue le chemin nominal le
+/// jour où [`crate::tray`] a séparé les deux — fenêtre fermée, effets toujours
+/// en cours dans leurs fils, qui ne dépendent pas d'elle.
+///
+/// Aujourd'hui la croix **replie** au lieu de détruire, et c'est donc [`reveal`]
+/// qui rend la main la plupart du temps. Reste le cas qui justifie d'écrire
+/// ceci : une fenêtre déclarée `create: false` — un démarrage replié, que rien
+/// n'empêche de configurer — n'existe pas encore quand on demande à la voir.
 fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
     let config = app
         .config()

@@ -178,6 +178,17 @@ Deux contraintes réelles, elles, commandent tout :
    WebView, fermer la fenêtre éteint le clavier.
 2. **L'aperçu doit être la production, pas sa ressemblance.**
 
+> ⚠️ **Sortir le rendu du WebView est nécessaire, et ne suffit pas.** Un fil ne
+> survit pas au processus, et le processus s'arrêtait avec sa dernière fenêtre :
+> pendant tout ce temps, la contrainte n° 1 était un argument tenu par la
+> conception et démenti par l'exécution. Ce qui la tient réellement, c'est
+> l'icône de zone de notification (issue #46) : elle intercepte
+> `RunEvent::ExitRequested`, et la croix de la fenêtre **replie** au lieu de
+> quitter. Voir [`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs).
+>
+> Les deux moitiés ne se défont pas l'une sans l'autre. Retirer l'icône, c'est
+> rendre à nouveau faux tout ce que ce paragraphe justifie.
+
 ### La version écartée, et pourquoi
 
 La première rédaction de ce document proposait ceci :
@@ -304,7 +315,10 @@ Aucune dépendance nouvelle côté Rust hors `rquickjs`, aucune côté front hor
   précédent — le moteur ne le remplacerait pas, et les deux flux alimenteraient
   le même simulateur.
 - **Quitter l'éditeur n'arrête pas l'effet.** Le canal libéré coupe le flux
-  d'images ; la boucle continue d'alimenter le clavier, fenêtre fermée comprise.
+  d'images ; la boucle continue d'alimenter le clavier, fenêtre fermée comprise —
+  la croix replie l'application dans la zone de notification, elle ne la quitte
+  pas. La quitter, c'est « Quitter candeo » dans le menu de l'icône, et c'est le
+  seul geste qui arrête les effets.
 
 ---
 
@@ -451,11 +465,28 @@ s'écrit par fichier temporaire puis renommage, c'est un geste complet.
 
 La distinction n'est pas cosmétique. Une simple temporisation — « 600 ms sans
 mouvement » — perdrait le dernier réglage à chaque fois qu'on **ferme la
-fenêtre** dans la foulée : fermer détruit la vue web sans passer par les crochets
-de Vue, et c'est le mode d'emploi de l'application, pas un cas limite — un effet
-continue de tourner fenêtre fermée. La temporisation reste, en filet pour les cas
-où `change` n'arrive pas, doublée d'un `pagehide` ; mais aucun des deux n'est le
-chemin nominal, et aucun des deux ne pouvait l'être.
+fenêtre** dans la foulée : fermer détruisait la vue web sans passer par les
+crochets de Vue, et c'est le mode d'emploi de l'application, pas un cas limite —
+un effet continue de tourner fenêtre fermée. La temporisation reste, en filet
+pour les cas où `change` n'arrive pas, doublée d'un `pagehide` ; mais aucun des
+deux n'est le chemin nominal, et aucun des deux ne pouvait l'être.
+
+> **Depuis l'issue #46, la croix replie au lieu de détruire** : la vue web
+> survit, ses minuteries avec elle, et `pagehide` ne se déclenche donc plus à la
+> fermeture de la fenêtre — seulement à la sortie de l'application. Le filet
+> perd de sa portée et la temporisation en gagne autant ; ce qui ne change pas,
+> c'est que le chemin nominal reste l'écriture à la fin du geste. Le seul reste
+> est une écriture en attente au moment où l'on choisit « Quitter candeo », et
+> `change` l'a presque toujours déjà fait partir.
+>
+> Une fenêtre qui survit repliée a un second effet, et il porte plus loin :
+> **son instantané vieillit**. Ce qu'elle ne lit qu'au montage — la liste des
+> appareils, `settings.json` — peut dater de plusieurs jours quand elle revient,
+> et le menu de l'icône a commandé les effets entre-temps. D'où l'événement
+> `candeo://etat-change`, émis par l'icône et à la réouverture de la fenêtre :
+> c'est la seule chose qui soit poussée plutôt qu'interrogée, et elle l'est
+> parce que sonder le disque chaque seconde pour quelques changements par
+> session serait le mauvais échange.
 
 La fin d'un geste n'est d'ailleurs pas toujours rare : une flèche du clavier
 maintenue enfoncée sur un curseur émet `change` **à chaque répétition**. Deux

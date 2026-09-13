@@ -22,6 +22,7 @@ mod single_instance;
 #[cfg(test)]
 mod sonde;
 mod storage;
+mod tray;
 
 /// Gabarits connus. Un seul pour l'instant.
 ///
@@ -743,7 +744,35 @@ pub fn run() {
             // travers le gestionnaire, et l'adoption n'a besoin que de lui.
             apply_adoptions(app.handle(), &state);
             app.manage(state);
+
+            // **Après `manage`**, et l'ordre est contraignant : le menu se bâtit
+            // sur l'état réel du moteur, qu'il va chercher par le gestionnaire.
+            // Après l'adoption aussi, pour que le premier menu montre les
+            // appareils déjà ouverts plutôt qu'une liste vide.
+            tray::installer(app.handle());
             Ok(())
+        })
+        // La croix **replie**, elle ne quitte pas — tant qu'il y a une icône de
+        // zone de notification pour rendre l'application atteignable. Voir
+        // [`tray`] pour le pourquoi, et pour ce qui arrive quand l'icône manque.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Seulement la fenêtre principale, alors qu'il n'y en a qu'une :
+                // le jour où une seconde apparaîtra — une boîte de dialogue, un
+                // écran détaché —, la refermer la masquerait au lieu de la
+                // détruire, et elle réapparaîtrait telle quelle au rendez-vous
+                // suivant. La panne se chercherait loin d'ici.
+                if window.label() == single_instance::MAIN_WINDOW && tray::installee() {
+                    api.prevent_close();
+                    // Masquer, et non détruire : la vue web garde son état, et
+                    // rouvrir est instantané. C'est aussi ce qui laisse la
+                    // fenêtre entendre `candeo://etat-change` pendant qu'elle est
+                    // repliée, donc revenir déjà à jour.
+                    if let Err(e) = window.hide() {
+                        tracing::warn!("fenêtre non repliée : {e}");
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             list_devices,
@@ -779,8 +808,36 @@ pub fn run() {
             journal::diagnostic,
             journal::log_from_webview,
         ])
-        .run(tauri::generate_context!())
-        .expect("erreur au lancement de l'application");
+        .build(tauri::generate_context!())
+        .expect("erreur au lancement de l'application")
+        // `build` puis `run`, et non `run` seul : c'est la seule façon d'obtenir
+        // le gestionnaire d'événements de l'application — donc d'empêcher
+        // `ExitRequested`.
+        //
+        // **C'est ici que « un effet tourne fenêtre fermée » devient vrai.** Sans
+        // ce gestionnaire, rien n'empêche la sortie : sous Windows comme sous
+        // Linux le processus s'arrête avec sa dernière fenêtre, et le fil de
+        // rendu part avec lui. Trois documents affirmaient le contraire, et c'est
+        // l'argument qui avait fait écarter l'exécution des effets dans le
+        // WebView — la conception était juste, l'implémentation s'arrêtait avant
+        // la fin.
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                // `None` désigne une sortie demandée par l'utilisateur — la
+                // dernière fenêtre qui se ferme — et `Some` une sortie demandée
+                // par le code, c'est-à-dire notre propre « Quitter ». La
+                // distinction est tout le mécanisme : empêcher sans la faire
+                // rendrait candeo impossible à quitter, y compris par son seul
+                // article prévu pour ça.
+                //
+                // Et seulement tant qu'il y a une icône : sans elle, plus rien ne
+                // commanderait l'application ni ne la terminerait. Voir
+                // [`tray::installee`].
+                if code.is_none() && tray::installee() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
 // ---------------------------------------------------------------- tests

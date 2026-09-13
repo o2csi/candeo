@@ -20,7 +20,11 @@ candeo-protocol.workspace = true
 candeo-device.workspace = true
 hidapi.workspace = true
 serde.workspace = true
-tauri = { version = "2", features = [] }
+# `tray-icon` : l'icône de zone de notification — voir `src/tray.rs`. Ce n'est
+# pas un agrément d'interface, c'est ce qui rend vraie la promesse « un effet
+# tourne fenêtre fermée » : sans quelque chose qui survive à la dernière fenêtre,
+# la fermer arrête le processus, donc les fils de rendu.
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 serde_json = "1"
 

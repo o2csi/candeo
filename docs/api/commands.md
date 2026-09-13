@@ -878,3 +878,39 @@ rattrapée par image, exposée ici, et effacée dès que l'effet se rétablit. A
 trente images consécutives en échec, la boucle s'arrête — un effet qui lève à
 chaque image ne se rétablira pas tout seul. Et elle n'arrête que **sa** boucle :
 les autres appareils continuent.
+
+---
+
+## Le seul événement : `candeo://etat-change`
+
+```ts
+listen('candeo://etat-change', () => { /* charge utile vide */ })
+```
+
+Tout le reste de cette page est **interrogé**. Celui-ci est poussé, et il l'est
+pour une raison précise : depuis l'icône de zone de notification
+([`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs)), l'état peut changer
+**sans la fenêtre** — un effet lancé, une sortie coupée, un clavier éteint — et
+la fenêtre ne meurt plus quand on la ferme, elle se replie. Son instantané peut
+donc vieillir des jours.
+
+Ce qu'elle réinterroge déjà chaque seconde — `engine_status` — n'a pas besoin de
+cet événement. Ce qu'elle ne lit qu'**une fois**, au montage, en a besoin : la
+liste des appareils, et `settings.json`. Sonder le disque et l'USB en boucle pour
+couvrir quelques changements par session serait le mauvais échange.
+
+Émis dans deux cas, et la charge utile est vide dans les deux : rien ne dit *ce*
+qui a changé, parce que le destinataire relit de toute façon.
+
+1. après chaque action du menu de l'icône ;
+2. quand la fenêtre est ramenée au premier plan — c'est le même chemin que le
+   second lancement de l'application, voir `single_instance::reveal`. Une fenêtre
+   qui vient d'être **rouverte** ne l'entend pas : son JavaScript n'est pas
+   encore chargé, et elle lit tout au montage.
+
+Aucune permission supplémentaire : `core:event:default`, que `core:default`
+comprend, accorde déjà `listen`.
+
+Le nom est écrit des deux côtés — `tray::ETAT_CHANGE` et `src/api/candeo.ts` — et
+un test Rust confronte les deux : rien d'autre ne les relie, et les désaccorder
+donnerait une fenêtre qui ne se resynchronise plus, sans une erreur nulle part.

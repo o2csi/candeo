@@ -705,6 +705,20 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         ),
     );
 
+    // Ce qui décide si fermer la fenêtre arrête les effets. Sans cette ligne, un
+    // rapport disant « mon effet s'arrête quand je ferme » et un autre disant le
+    // contraire seraient indiscernables — la pose de l'icône peut échouer, et
+    // c'est alors la croix qui redevient une sortie. Voir [`crate::tray`].
+    ligne(
+        &mut out,
+        "zone de notification",
+        if crate::tray::installee() {
+            "posée — fermer la fenêtre replie, « Quitter candeo » quitte"
+        } else {
+            "absente — fermer la fenêtre arrête les effets"
+        },
+    );
+
     out.push_str("\nAppareils\n");
     for layout in crate::LAYOUTS {
         let device = DeviceRef::of(layout);

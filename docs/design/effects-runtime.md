@@ -160,6 +160,16 @@ C'est cette dernière propriété qui justifie le moteur unique — au sens : un
 endroit où le code d'effet s'exécute. Le simulateur n'interprète pas le code, il
 affiche le résultat.
 
+> ⚠️ **« Fenêtre fermée » n'a rien de gratuit, et ne l'a pas toujours été.** Un
+> fil indépendant de la fenêtre ne survit pas au processus, et le processus
+> s'arrêtait avec sa dernière fenêtre — rien n'empêchait
+> `RunEvent::ExitRequested`. Ce que ce paragraphe décrit n'a donc été vrai qu'à
+> partir de l'issue #46 : l'icône de zone de notification retient la sortie, et
+> la croix de la fenêtre **replie** au lieu de quitter. « Quitter candeo », dans
+> le menu de l'icône, est la seule chose qui arrête une boucle de rendu par la
+> fin du processus — et elle laisse l'éclairage tel quel plutôt que de
+> l'éteindre. Voir [`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs).
+
 ### Un appareil, un effet
 
 Chaque appareil porte sa boucle, donc sa cadence, ses paramètres, son état
@@ -505,7 +515,9 @@ permet d'arrêter d'écrire sur un appareil sans arrêter l'effet qui tourne des
   empêchait une installation d'aboutir. Ça l'est maintenant de la boucle de
   rendu, où l'absence de borne était pire : le drapeau `stop` est lu *entre* deux
   images, un rendu qui ne revient pas ne le relit jamais — et comme un effet
-  tourne fenêtre fermée, la fermer ne sauvait pas.
+  tourne fenêtre fermée, la fermer ne sauve pas. Depuis que la croix replie au
+  lieu de quitter, elle le sauve encore moins : le dernier recours est
+  « Quitter candeo » dans le menu de l'icône, qui prend le processus entier.
 - **La forme des deux bornes n'est pas la même**, parce que le gestionnaire
   d'interruption se pose sur le `Runtime` **une fois**. L'échantillonnage n'a
   besoin que d'une échéance, capturée par valeur ; la boucle en change à chaque
