@@ -518,7 +518,7 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         // describing the device.
         let usb = plugged(&api, layout).flatten();
         let serial = known_serial(Some(keyboard.inspection()), usb.clone());
-        log_opening(device, &keyboard, usb, "appareil adopté ouvert");
+        log_opening(device, &keyboard, usb, "adopted device opened");
         // A decision taken without a serial **is completed** as soon as it is
         // known: that is the rule of [`storage::Settings::set_device_state`].
         // Without it, an adoption older than protocol reads would stay matched
@@ -694,7 +694,7 @@ fn adopt_device(
     };
     match opening {
         Ok(kb) => {
-            log_opening(device, &kb, usb, "appareil piloté");
+            log_opening(device, &kb, usb, "device controlled");
             // As at startup: what was stored for this keyboard takes effect the
             // moment it is opened, not at the next launch.
             reapply_brightness(&kb, &settings, layout, serial.as_deref());
@@ -812,7 +812,7 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
         device,
         &kb,
         plugged(&api, layout).flatten(),
-        "appareil ouvert, sans décision",
+        "device opened, no decision saved",
     );
     state.set_open(device, Some(kb));
     state.failures.lock().unwrap().remove(&device);
