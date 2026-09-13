@@ -412,8 +412,15 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         // second `plugged` ne réénumère rien — il relit la liste que `api` tient
         // déjà — et il évite de faire porter la série par [`OpenOutcome`], qui
         // rend compte d'une tentative et n'a pas à décrire l'appareil.
-        let serie = journal::empreinte_de(plugged(&api, layout).flatten().as_deref());
-        tracing::info!(appareil = %device, serie, "appareil adopté ouvert");
+        let serie = plugged(&api, layout).flatten();
+        tracing::info!(
+            appareil = %device,
+            serie = journal::empreinte_de(serie.as_deref()),
+            "appareil adopté ouvert"
+        );
+        // **Avant** de déposer la poignée : la luminosité se réapplique sur le
+        // clavier qu'on vient d'ouvrir, et on la tient encore en main.
+        reappliquer_la_luminosite(&keyboard, &settings, layout, serie.as_deref());
         state.set_open(device, Some(keyboard));
     }
 
@@ -430,6 +437,45 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
                 failures.remove(&outcome.device);
             }
         }
+    }
+}
+
+/// Repose sur le clavier la luminosité qu'on avait retenue pour lui.
+///
+/// **Un niveau retenu qui ne se réapplique pas au branchement ne sert à rien** :
+/// c'est toute la raison de le retenir. Le protocole relevé sait écrire la
+/// luminosité, pas la relire — sans ce geste, un clavier rebranché repart à ce
+/// que son micrologiciel a gardé, et le réglage de `settings.json` décrit un
+/// état que rien ne produit.
+///
+/// Rien n'est réécrit quand c'est le défaut : le clavier y est déjà, et une
+/// écriture HID de plus au démarrage de chaque appareil n'achèterait rien.
+///
+/// Rien ne remonte : un refus d'écriture ne doit pas empêcher l'adoption
+/// d'aboutir — l'appareil est ouvert, l'effet pourra tourner, et c'est
+/// l'essentiel. Il est consigné, parce qu'un clavier plus sombre que demandé
+/// sans un mot nulle part est exactement le genre d'écart qui coûte une session.
+fn reappliquer_la_luminosite(
+    keyboard: &Keyboard,
+    settings: &Settings,
+    layout: &Layout,
+    serial: Option<&str>,
+) {
+    let niveau = settings.brightness(layout.vid, layout.pid, serial);
+    if niveau == storage::BRIGHTNESS_DEFAUT {
+        return;
+    }
+    match keyboard.set_brightness(niveau) {
+        Ok(()) => tracing::info!(
+            appareil = %DeviceRef::of(layout),
+            niveau,
+            "luminosité retenue réappliquée"
+        ),
+        Err(e) => tracing::warn!(
+            appareil = %DeviceRef::of(layout),
+            niveau,
+            "luminosité retenue non réappliquée : {e}"
+        ),
     }
 }
 
@@ -506,6 +552,9 @@ fn adopt_device(
                 serie = journal::empreinte_de(serial.as_deref()),
                 "appareil piloté"
             );
+            // Comme au démarrage : ce qu'on avait retenu pour ce clavier reprend
+            // effet à l'instant où on l'ouvre, pas au lancement suivant.
+            reappliquer_la_luminosite(&kb, &settings, layout, serial.as_deref());
             // Les autres appareils ouverts le restent : adopter celui-ci n'est
             // pas un choix à la place des autres.
             state.set_open(device, Some(kb));
@@ -659,11 +708,46 @@ fn get_layout(state: State<'_, AppState>, device: DeviceRef) -> CmdResult<Layout
     with_keyboard(&state, device, |kb| Ok(LayoutInfo::from(kb.layout())))
 }
 
+/// Écrit la luminosité **sur le clavier**, et rien d'autre.
+///
+/// Ne touche pas à `settings.json` : c'est [`remember_brightness`]. Les deux sont
+/// séparées comme le sont `set_effect_params` et `remember_effect_params`, et
+/// pour la même raison — elles n'ont ni la même cadence ni la même destination.
+/// Un curseur qu'on glisse produit des dizaines d'écritures HID par seconde, et
+/// une seule écriture disque, quand il s'arrête.
 #[tauri::command]
 fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
         kb.set_brightness(level).map_err(|e| e.to_string())
     })
+}
+
+/// Retient la luminosité de cet appareil, sans toucher au clavier.
+///
+/// Le pendant disque de [`set_brightness`]. Comme `remember_effect_params`, la
+/// lecture, la modification et l'écriture se font ici d'un seul tenant : renvoyer
+/// tout le fichier depuis la fenêtre écraserait une adoption décidée entre-temps.
+///
+/// La série est relevée **si elle se donne**, comme le fait [`ignore_device`] :
+/// elle fait atterrir le niveau sur l'entrée du bon exemplaire quand il y en a
+/// deux du même modèle, et son absence ne bloque rien —
+/// [`storage::DeviceRecord::matches`] retrouve l'entrée sans elle.
+///
+/// Ramener le curseur au maximum **retire** l'entrée plutôt que d'écrire 255 :
+/// voir [`storage::Settings::set_brightness`].
+#[tauri::command]
+fn remember_brightness(app: AppHandle, device: DeviceRef, level: u8) -> CmdResult<()> {
+    let layout = find_layout(device)?;
+    let serial = hid().ok().and_then(|api| plugged(&api, layout)).flatten();
+
+    let store = storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    // Rien de neuf : on ne réécrit pas le fichier. Un curseur qu'on déplace puis
+    // qu'on ramène repasse par ici.
+    if !settings.set_brightness(device.vid, device.pid, serial.as_deref(), level) {
+        return Ok(());
+    }
+    store.write_settings(&settings)
 }
 
 #[tauri::command]
@@ -764,6 +848,17 @@ pub fn run() {
                 // suivant. La panne se chercherait loin d'ici.
                 if window.label() == single_instance::MAIN_WINDOW && tray::installee() {
                     api.prevent_close();
+                    // **L'aperçu s'arrête ici, et l'effet appliqué non.** C'est
+                    // toute la différence entre les deux : l'un est ce que le
+                    // clavier fait — il survit à la fenêtre, c'est la promesse de
+                    // [`tray`] —, l'autre est ce qu'on regarde, et il n'y a plus
+                    // personne pour regarder.
+                    //
+                    // Ici plutôt que dans la fenêtre : replier ne détruit pas la
+                    // vue web, donc ni `onBeforeUnmount` ni `pagehide` ne
+                    // passent. Un contexte QuickJS et un fil resteraient
+                    // entretenus pour un écran masqué, indéfiniment.
+                    window.state::<AppState>().engine.stop_preview();
                     // Masquer, et non détruire : la vue web garde son état, et
                     // rouvrir est instantané. C'est aussi ce qui laisse la
                     // fenêtre entendre `candeo://etat-change` pendant qu'elle est
@@ -784,6 +879,7 @@ pub fn run() {
             get_layout,
             get_default_layout,
             set_brightness,
+            remember_brightness,
             set_effect,
             present,
             write_row,
@@ -793,6 +889,11 @@ pub fn run() {
             runtime::set_output_to_keyboard,
             runtime::subscribe_frames,
             runtime::unsubscribe_frames,
+            runtime::start_preview,
+            runtime::stop_preview,
+            runtime::set_preview_params,
+            runtime::subscribe_preview_frames,
+            runtime::unsubscribe_preview_frames,
             runtime::engine_status,
             storage::install_effect,
             storage::list_effects,

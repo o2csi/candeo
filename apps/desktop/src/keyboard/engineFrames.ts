@@ -17,6 +17,15 @@
  * Chaque appareil a sa boucle et son canal : le simulateur suit celui qu'on a
  * sélectionné, changer de sélection ferme un canal et en ouvre un autre.
  *
+ * ## Deux sources, jamais les deux à la fois
+ *
+ * Le moteur produit deux flux distincts : celui d'un **appareil**, qui est
+ * exactement ce qui part vers ses LED, et celui de l'**aperçu**, qui ne part
+ * nulle part. Le simulateur n'en dessine qu'un, et l'écran dit lequel — sans
+ * quoi on regarderait un aperçu en croyant voir son clavier, ce que l'issue #63
+ * refuse. C'est ce que tient {@link Source} : basculer de l'un à l'autre ferme
+ * le précédent, il n'y a jamais deux canaux ouverts sur ce composant.
+ *
  * ## Se désabonner n'arrête pas l'effet
  *
  * Quitter l'éditeur libère le canal et le flux s'arrête ; la boucle, elle,
@@ -33,11 +42,25 @@
 
 import { computed, onBeforeUnmount, shallowRef } from 'vue'
 
-import { subscribeFrames } from '../api/candeo'
+import { subscribeFrames, subscribePreviewFrames } from '../api/candeo'
 import type { DeviceRef, Rgb } from '../api/types'
 import type { LayoutView } from './layout'
 
 const BLACK: Rgb = [0, 0, 0]
+
+/**
+ * D'où viennent les images affichées : un appareil, ou l'aperçu.
+ *
+ * `'preview'` plutôt qu'un second drapeau à côté du `DeviceRef` : les deux
+ * s'excluent, et un type qui le dit vaut mieux qu'une paire de variables dont
+ * une combinaison sur quatre n'a pas de sens.
+ */
+type Source = DeviceRef | 'preview'
+
+function sameSource(a: Source, b: Source): boolean {
+  if (a === 'preview' || b === 'preview') return a === b
+  return a.vid === b.vid && a.pid === b.pid
+}
 
 /**
  * Une image noire complète.
@@ -77,35 +100,50 @@ export function useEngineFrames(layout: () => LayoutView | null) {
 
   /** Ce qui ferme le canal. `null` quand personne n'écoute. */
   let release: (() => void) | null = null
-  /** L'appareil auquel ce canal est abonné, pour savoir quand il faut le fermer. */
-  let source: DeviceRef | null = null
+  /** Ce à quoi ce canal est abonné, pour savoir quand il faut le fermer. */
+  let source: Source | null = null
   /** Faux dès la destruction : l'abonnement est asynchrone, il peut aboutir après. */
   let alive = true
 
   /**
-   * S'abonne au flux d'un appareil. Réabonnable : le moteur ne retient qu'un
-   * canal **par appareil**, le nouveau remplace l'ancien.
+   * S'abonne au flux d'une source. Réabonnable : le moteur ne retient qu'un
+   * canal **par boucle**, le nouveau remplace l'ancien.
    *
-   * Sur le même appareil, on ne se **désabonne pas d'abord** : ce serait deux
+   * Sur la même source, on ne se **désabonne pas d'abord** : ce serait deux
    * commandes en vol dont l'ordre d'arrivée n'est pas garanti, et un
    * désabonnement qui arriverait le second effacerait le canal qu'on vient
    * d'ouvrir — le simulateur resterait figé sans que rien ne le signale.
    *
-   * Changer d'appareil, en revanche, exige de fermer l'ancien : le moteur ne
+   * Changer de source, en revanche, exige de fermer l'ancienne : le moteur ne
    * remplacerait pas un canal posé sur une autre boucle, et les deux flux
    * alimenteraient le même simulateur.
    */
-  async function listen(device: DeviceRef): Promise<void> {
-    if (source && (source.vid !== device.vid || source.pid !== device.pid)) stop()
+  async function subscribe(voulue: Source): Promise<void> {
+    if (source !== null && !sameSource(source, voulue)) stop()
 
-    source = device
-    const close = await subscribeFrames(device, (bytes) => {
-      received.value = colors(bytes)
-    })
+    source = voulue
+    const close =
+      voulue === 'preview'
+        ? await subscribePreviewFrames((bytes) => {
+            received.value = colors(bytes)
+          })
+        : await subscribeFrames(voulue, (bytes) => {
+            received.value = colors(bytes)
+          })
     // Le composant a pu disparaître pendant l'aller-retour. Fermer tout de
     // suite plutôt que de laisser un canal alimenter une vue détruite.
     if (alive) release = close
     else close()
+  }
+
+  /** Les images qui partent vers **cet appareil**, octet pour octet. */
+  function listen(device: DeviceRef): Promise<void> {
+    return subscribe(device)
+  }
+
+  /** Les images de l'aperçu, qui ne partent nulle part. */
+  function listenPreview(): Promise<void> {
+    return subscribe('preview')
   }
 
   /**
@@ -123,5 +161,5 @@ export function useEngineFrames(layout: () => LayoutView | null) {
     stop()
   })
 
-  return { frame, listen, stop }
+  return { frame, listen, listenPreview, stop }
 }

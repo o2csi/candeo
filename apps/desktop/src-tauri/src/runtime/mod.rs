@@ -16,6 +16,22 @@
 //! Le jour où un gabarit couvrira plusieurs appareils, c'est [`DeviceOut`] qui
 //! répartira l'image, et le code des effets ne changera pas d'une ligne.
 //!
+//! # Et une boucle d'aperçu, qui n'est celle d'aucun appareil
+//!
+//! **Prévisualiser ne doit jamais interrompre l'effet en cours sur le clavier.**
+//! Le moteur étant à un effet par appareil, prévisualiser Y sur un clavier qui
+//! exécute X arrêterait X : parcourir la galerie éteindrait l'éclairage en cours
+//! (issue #63). La sortie est une boucle **séparée**, une seule, dont la sortie
+//! matérielle est [`SansSortie`] — `DeviceOut::present` rendant `None` veut déjà
+//! dire « aucun appareil ouvert, ce n'est pas un échec ».
+//!
+//! Elle **emprunte le gabarit** de l'appareil sélectionné, pour ressembler à ce
+//! qu'on obtiendra, sans rien lui prendre d'autre : ni sa boucle, ni sa poignée,
+//! ni sa ligne d'état.
+//!
+//! C'est pourquoi [`EngineReport`] range les deux dans **deux champs distincts**
+//! plutôt que dans une liste à filtrer. Voir [`PreviewStatus`].
+//!
 //! # Ce qu'un effet ne peut pas faire durer
 //!
 //! Un `while (true)` dans `render` gèlerait son fil définitivement : le drapeau
@@ -277,6 +293,54 @@ pub struct DeviceEngineStatus {
     pub status: EngineStatus,
 }
 
+/// Ce que la fenêtre **regarde**, et qui n'atteint aucun clavier.
+///
+/// # Un type à part, et non une ligne de plus dans la liste des appareils
+///
+/// C'est la quatrième fois dans ce projet qu'un état qui ment coûte une session
+/// de diagnostic — le clavier non adopté, l'écriture « acceptée », l'image figée
+/// après arrêt automatique, et maintenant l'aperçu. Un drapeau à filtrer se
+/// filtre mal : il suffit d'un appelant qui l'oublie — l'icône de zone de
+/// notification, le journal, la galerie — pour annoncer comme tournant sur le
+/// clavier un effet qu'on ne fait que regarder. Ici il n'y a **rien à filtrer** :
+/// l'aperçu n'est pas dans la liste, et un appelant ne peut pas l'y trouver par
+/// mégarde.
+///
+/// # Ce qu'il ne porte pas est aussi délibéré
+///
+/// Ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError`. Une boucle d'aperçu
+/// n'a **aucune** sortie matérielle ; ces trois champs à faux ne décriraient pas
+/// un aperçu, ils décriraient un effet qui n'arrive pas à écrire — c'est-à-dire
+/// une panne, là où il n'y a qu'un choix.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewStatus {
+    /// L'appareil dont l'aperçu **emprunte** le gabarit.
+    ///
+    /// Il n'est pas piloté, il n'est même pas forcément branché : c'est une
+    /// géométrie, pas une destination. Le nommer permet à l'interface de dire « à
+    /// quoi ça ressemblera sur ce clavier-là ».
+    pub layout_of: DeviceRef,
+    pub running: bool,
+    pub effect_id: Option<String>,
+    /// Erreur venant du code de l'effet, déjà lisible : affichée telle quelle.
+    pub error: Option<String>,
+}
+
+/// Tout ce que le moteur sait, **rangé de façon à ne pas se confondre**.
+///
+/// Deux champs, pas une liste : `devices` décrit ce qui tourne sur le matériel,
+/// `preview` ce que la fenêtre regarde. La zone de notification, le journal et la
+/// galerie ne lisent que le premier — voir [`PreviewStatus`] pour le pourquoi.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineReport {
+    pub devices: Vec<DeviceEngineStatus>,
+    /// `None` quand rien n'est prévisualisé — ce qui est le cas dès que la
+    /// fenêtre est fermée, voir [`Engine::stop_preview`].
+    pub preview: Option<PreviewStatus>,
+}
+
 // ---------------------------------------------------------------- sortie
 
 /// La sortie matérielle d'une boucle.
@@ -318,6 +382,36 @@ impl DeviceOut for Handle {
     }
 }
 
+/// La sortie de l'aperçu : **aucune**.
+///
+/// Rien à inventer ici — `None` veut déjà dire « aucun appareil ouvert, ce n'est
+/// pas un échec », et c'est exactement ce qu'est un aperçu. La boucle alimente
+/// donc son canal d'images et rien d'autre, `reachingKeyboard` reste faux, et
+/// aucun octet ne part vers un clavier.
+struct SansSortie;
+
+impl DeviceOut for SansSortie {
+    fn present(&self, _colors: &[Rgb]) -> Option<Result<(), String>> {
+        None
+    }
+}
+
+/// À qui appartient une boucle de rendu.
+///
+/// Un type, et non un `bool` en plus du [`DeviceRef`] : les deux cas ne se
+/// journalisent ni au même niveau ni sous le même mot, et « l'appareil de
+/// l'aperçu » n'existe pas — il n'y a qu'un gabarit emprunté. Le compilateur
+/// tient ici une distinction que deux arguments côte à côte laisseraient
+/// confondre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cible {
+    /// La boucle d'un appareil : elle écrit sur le matériel.
+    Appareil(DeviceRef),
+    /// La boucle d'aperçu, qui emprunte le gabarit de cet appareil sans le
+    /// piloter.
+    Apercu(DeviceRef),
+}
+
 // ---------------------------------------------------------------- moteur
 
 /// Les boucles en cours, une par appareil.
@@ -330,6 +424,20 @@ impl DeviceOut for Handle {
 #[derive(Default)]
 pub struct Engine {
     loops: Mutex<HashMap<DeviceRef, Arc<DeviceLoop>>>,
+    /// La boucle d'aperçu : **une seule**, sans sortie matérielle.
+    ///
+    /// Une par fenêtre, et il n'y en a qu'une — la promesse « un effet tourne
+    /// fenêtre fermée » ne vaut que pour les appareils, et un aperçu que
+    /// personne ne regarde est un contexte QuickJS entretenu pour rien.
+    ///
+    /// Elle vit **à côté** de la table, jamais dedans : une entrée de la table
+    /// serait trouvée par `all()`, donc arrêtée par `stop_everywhere`, comptée par
+    /// `status()`, et il aurait fallu l'exclure à chaque fois. La sortir de la
+    /// table, c'est faire tenir par le type ce qu'on aurait sinon tenu par
+    /// vigilance.
+    preview: Arc<DeviceLoop>,
+    /// Le gabarit que l'aperçu emprunte, écrit et effacé avec la boucle.
+    preview_layout: Mutex<Option<DeviceRef>>,
 }
 
 /// La boucle d'**un** appareil.
@@ -382,10 +490,10 @@ impl DeviceLoop {
     /// temps que la première s'aperçoive qu'elle doit s'arrêter. Le raisonnement
     /// vaut par appareil, et le verrou attendu l'est aussi.
     ///
-    /// `device` ne sert qu'au journal : une boucle ne connaît pas son appareil —
+    /// `cible` ne sert qu'au journal : une boucle ne connaît pas son appareil —
     /// elle reçoit un gabarit et une sortie — et « effet arrêté » sans dire lequel
     /// ne vaudrait rien avec deux claviers branchés.
-    fn stop(&self, device: DeviceRef) {
+    fn stop(&self, cible: Cible) {
         let mut thread = self.thread.lock().unwrap();
         let tournait = self.shared.lock().unwrap().take().inspect(|s| {
             s.stop.store(true, Ordering::Relaxed);
@@ -398,14 +506,19 @@ impl DeviceLoop {
         // et n'apprend rien à personne.
         if let Some(s) = tournait {
             let effet = s.effect_id.lock().unwrap().clone();
-            tracing::info!(appareil = %device, effet, "effet arrêté");
+            match cible {
+                Cible::Appareil(d) => tracing::info!(appareil = %d, effet, "effet arrêté"),
+                // `debug` : voir [`DeviceLoop::start`]. Le niveau « cycle de vie »
+                // décrit ce que fait le clavier, et un aperçu ne le touche pas.
+                Cible::Apercu(d) => tracing::debug!(gabarit = %d, effet, "aperçu arrêté"),
+            }
         }
     }
 
-    /// Démarre un effet sur cet appareil. Remplace celui qui tournait.
+    /// Démarre un effet sur cette cible. Remplace celui qui tournait.
     fn start(
         &self,
-        device: DeviceRef,
+        cible: Cible,
         effect_id: String,
         js: String,
         params: String,
@@ -436,31 +549,53 @@ impl DeviceLoop {
         let pour_le_fil = effect_id.clone();
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
-            .spawn(move || render_loop(device, pour_le_fil, s, js, layout, out, ready_tx))
+            .spawn(move || render_loop(cible, pour_le_fil, s, js, layout, out, ready_tx))
             .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
 
         // On attend le verdict du chargement : une erreur de syntaxe doit
         // remonter à l'appel, pas se découvrir dans un état plus tard.
         match ready_rx.recv() {
             Ok(Ok(())) => {
-                tracing::info!(appareil = %device, effet = %effect_id, "effet démarré");
+                match cible {
+                    Cible::Appareil(d) => {
+                        tracing::info!(appareil = %d, effet = %effect_id, "effet démarré")
+                    }
+                    // `debug` et non `info`, et ce n'est pas une timidité :
+                    // « cycle de vie » est le niveau qui décrit **ce que fait le
+                    // clavier**, et un aperçu ne le touche pas. Parcourir la
+                    // galerie remplirait sinon le journal de lignes qui ne
+                    // correspondent à rien d'allumé.
+                    Cible::Apercu(d) => {
+                        tracing::debug!(gabarit = %d, effet = %effect_id, "aperçu démarré")
+                    }
+                }
                 *self.shared.lock().unwrap() = Some(shared);
                 *thread = Some(handle);
                 Ok(())
             }
             Ok(Err(e)) => {
                 let _ = handle.join();
-                // `error` : l'effet demandé ne tournera pas, donc l'éclairage
-                // n'est pas celui qu'on a demandé. L'appelant reçoit le même
-                // message — le journal sert à qui lit après coup, et à qui n'a
-                // pas la fenêtre sous les yeux.
-                tracing::error!(appareil = %device, effet = %effect_id, "effet non démarré : {e}");
+                match cible {
+                    // `error` : l'effet demandé ne tournera pas, donc l'éclairage
+                    // n'est pas celui qu'on a demandé. L'appelant reçoit le même
+                    // message — le journal sert à qui lit après coup, et à qui n'a
+                    // pas la fenêtre sous les yeux.
+                    Cible::Appareil(d) => {
+                        tracing::error!(appareil = %d, effet = %effect_id, "effet non démarré : {e}")
+                    }
+                    // `warn` : rien n'est cassé sur le matériel, mais l'écran ne
+                    // montrera pas ce qu'on a demandé — et c'est justement le
+                    // premier endroit où un effet fraîchement écrit se casse.
+                    Cible::Apercu(d) => {
+                        tracing::warn!(gabarit = %d, effet = %effect_id, "aperçu non démarré : {e}")
+                    }
+                }
                 Err(e)
             }
             Err(_) => {
                 let _ = handle.join();
                 let e = "le fil de rendu s'est arrêté avant d'avoir chargé l'effet".to_string();
-                tracing::error!(appareil = %device, effet = %effect_id, "{e}");
+                tracing::error!(cible = ?cible, effet = %effect_id, "{e}");
                 Err(e)
             }
         }
@@ -505,7 +640,11 @@ impl Engine {
     }
 
     /// État de chaque appareil visé depuis le démarrage de l'application.
-    pub fn status(&self) -> Vec<DeviceEngineStatus> {
+    ///
+    /// **L'aperçu n'y figure pas, et ne peut pas y figurer** : il ne vit pas dans
+    /// la table. C'est ce que lisent l'icône de zone de notification et le
+    /// diagnostic — les deux endroits qui décrivent le matériel.
+    pub fn device_status(&self) -> Vec<DeviceEngineStatus> {
         self.all()
             .into_iter()
             .map(|(device, l)| DeviceEngineStatus {
@@ -515,6 +654,33 @@ impl Engine {
             .collect()
     }
 
+    /// L'aperçu en cours, s'il y en a un.
+    ///
+    /// `None` dès que la boucle est arrêtée par [`Self::stop_preview`] : un
+    /// aperçu est transitoire, et « le dernier effet que vous avez regardé » n'est
+    /// une information pour personne. Un aperçu qui s'est coupé **tout seul** —
+    /// trente images en échec — reste en revanche visible, `running` à faux et
+    /// l'erreur avec : c'est la seule façon de savoir pourquoi l'écran s'est figé.
+    pub fn preview_status(&self) -> Option<PreviewStatus> {
+        let layout_of = (*self.preview_layout.lock().unwrap())?;
+        let s = self.preview.current()?;
+        let etat = PreviewStatus {
+            layout_of,
+            running: !s.stop.load(Ordering::Relaxed),
+            effect_id: s.effect_id.lock().unwrap().clone(),
+            error: s.error.lock().unwrap().clone(),
+        };
+        Some(etat)
+    }
+
+    /// Tout ce que le moteur sait, appareils et aperçu **séparés**.
+    pub fn report(&self) -> EngineReport {
+        EngineReport {
+            devices: self.device_status(),
+            preview: self.preview_status(),
+        }
+    }
+
     /// L'état partagé de la boucle en cours sur cet appareil, s'il y en a une.
     fn shared(&self, device: DeviceRef) -> Option<Arc<Shared>> {
         self.existing(device).and_then(|l| l.current())
@@ -522,18 +688,79 @@ impl Engine {
 
     pub fn stop(&self, device: DeviceRef) {
         if let Some(l) = self.existing(device) {
-            l.stop(device);
+            l.stop(Cible::Appareil(device));
         }
     }
 
-    /// Arrête **toutes** les boucles, et attend leur fin.
+    /// Arrête **toutes** les boucles, aperçu compris, et attend leur fin.
     ///
     /// Sert à la fin du processus comme à la remise à zéro de la configuration :
     /// dans les deux cas on repart d'un état connu, et laisser tourner des
-    /// boucles que plus rien ne désigne serait exactement le contraire.
+    /// boucles que plus rien ne désigne serait exactement le contraire. L'aperçu
+    /// en fait partie — il n'écrit sur aucun clavier, mais il entretient un
+    /// contexte QuickJS et un fil.
     pub fn stop_all(&self) {
+        self.stop_preview();
         for (device, l) in self.all() {
-            l.stop(device);
+            l.stop(Cible::Appareil(device));
+        }
+    }
+
+    // ------------------------------------------------------------ aperçu
+
+    /// Démarre — ou remplace — l'aperçu, **sans toucher à aucun appareil**.
+    ///
+    /// `layout_of` désigne l'appareil dont on emprunte le gabarit ; il n'est ni
+    /// ouvert, ni piloté, ni même nécessairement branché. La sortie est
+    /// [`SansSortie`] : aucun octet ne part vers un clavier, quoi qu'il arrive.
+    ///
+    /// Remplacer coûte un contexte QuickJS détruit et un autre construit. Ce
+    /// n'est pas gratuit, et c'est pourquoi la cadence est bornée **du côté du
+    /// geste** — la fenêtre attend que la sélection se pose avant d'appeler. La
+    /// borner ici aurait obligé à choisir entre faire attendre la dernière
+    /// sélection et la perdre, et la fenêtre aurait dû réconcilier ce qu'elle
+    /// croyait avoir demandé avec ce qui tourne.
+    pub fn start_preview(
+        &self,
+        layout_of: DeviceRef,
+        effect_id: String,
+        js: String,
+        params: String,
+        layout: &'static Layout,
+    ) -> Result<(), String> {
+        // Écrit **avant** le démarrage : si celui-ci échoue, la boucle est vide
+        // et `preview_status` rend `None` de toute façon — alors qu'un gabarit
+        // posé après coup manquerait pendant tout le chargement.
+        *self.preview_layout.lock().unwrap() = Some(layout_of);
+        self.preview.start(
+            Cible::Apercu(layout_of),
+            effect_id,
+            js,
+            params,
+            layout,
+            Box::new(SansSortie),
+        )
+    }
+
+    /// Arrête l'aperçu. Aucun effet d'appareil n'est touché.
+    pub fn stop_preview(&self) {
+        // Le gabarit est relevé avant l'arrêt, pour que la ligne de journal
+        // nomme celui qu'on empruntait plutôt que rien.
+        let emprunte = self.preview_layout.lock().unwrap().take();
+        if let Some(device) = emprunte {
+            self.preview.stop(Cible::Apercu(device));
+        }
+    }
+
+    pub fn set_preview_params(&self, params: String) {
+        if let Some(s) = self.preview.current() {
+            *s.params.lock().unwrap() = params;
+        }
+    }
+
+    pub fn set_preview_channel(&self, channel: Option<Channel<InvokeResponseBody>>) {
+        if let Some(s) = self.preview.current() {
+            *s.frames.lock().unwrap() = channel;
         }
     }
 
@@ -552,13 +779,21 @@ impl Engine {
     /// l'effet — c'est ce que fait [`DeviceLoop::stop`], et c'est bien ce qu'on
     /// veut ici : l'identifiant ne désigne plus rien.
     pub fn stop_everywhere(&self, effect: &str) -> Vec<DeviceRef> {
+        // **L'aperçu aussi**, et pour exactement la même raison : il exécute le
+        // même `effect.js` chargé en mémoire, et le laisser tourner donnerait un
+        // écran qui anime un effet absent de la bibliothèque. Il ne figure pas
+        // dans la liste rendue — aucun appareil n'a été touché.
+        if self.preview.runs(effect) {
+            self.stop_preview();
+        }
+
         let mut stopped = Vec::new();
         for (device, l) in self.all() {
             // Le verrou de la table est déjà rendu — `all` a copié les pointeurs.
             // Un arrêt attend la fin d'un fil, et on ne fait jamais attendre une
             // commande visant un autre appareil.
             if l.runs(effect) {
-                l.stop(device);
+                l.stop(Cible::Appareil(device));
                 stopped.push(device);
             }
         }
@@ -597,7 +832,7 @@ impl Engine {
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
         self.device_loop(device)
-            .start(device, effect_id, js, params, layout, out)
+            .start(Cible::Appareil(device), effect_id, js, params, layout, out)
     }
 }
 
@@ -609,7 +844,7 @@ impl Drop for Engine {
 
 /// Prépare le contexte QuickJS, puis tourne jusqu'à l'arrêt.
 fn render_loop(
-    device: DeviceRef,
+    cible: Cible,
     effect_id: String,
     shared: Arc<Shared>,
     js: String,
@@ -622,7 +857,14 @@ fn render_loop(
     // Ouvert ici, il porte l'appareil et l'effet jusqu'à la fin du fil, et tout ce
     // qui se journalise en dessous — y compris dans [`emit`] — les porte aussi,
     // sans qu'un seul appel n'ait à les passer.
-    let span = tracing::info_span!("rendu", appareil = %device, effet = %effect_id);
+    //
+    // Deux noms, et non un champ à lire : dans un journal relu après coup,
+    // « rendu » et « aperçu » doivent se distinguer d'un coup d'œil — une erreur
+    // d'effet dans l'un n'a pas éteint le clavier, dans l'autre si.
+    let span = match cible {
+        Cible::Appareil(d) => tracing::info_span!("rendu", appareil = %d, effet = %effect_id),
+        Cible::Apercu(d) => tracing::info_span!("aperçu", gabarit = %d, effet = %effect_id),
+    };
     let _entree = span.enter();
 
     let frame_len = layout.led_count();
@@ -1051,6 +1293,13 @@ use tauri::{AppHandle, State};
 /// et le gabarit d'un appareil ne dépend pas de sa présence. Viser un appareil
 /// débranché lance donc l'effet, alimente le simulateur, et `reachingKeyboard`
 /// reste faux jusqu'à l'ouverture.
+///
+/// # C'est le geste qui **engage** le clavier
+///
+/// Prévisualiser est l'autre chemin, et il ne passe pas par ici :
+/// [`start_preview`] n'ouvre aucune sortie matérielle et n'écrit rien sur disque.
+/// « Appliquer » fait les deux — il envoie au clavier, et il **retient** l'effet
+/// pour cet appareil.
 #[tauri::command]
 pub fn start_effect(
     app: AppHandle,
@@ -1068,12 +1317,109 @@ pub fn start_effect(
     // La poignée est partagée avec la boucle, pas copiée : refermer l'appareil
     // plus tard — ignoré, débranché — se voit à l'image suivante.
     let out = Box::new(state.handle(device));
-    state.engine.start(device, id, js, params, layout, out)
+    state
+        .engine
+        .start(device, id.clone(), js, params, layout, out)?;
+
+    // **Après** le démarrage, jamais avant : on ne retient que ce qui tourne
+    // vraiment. Un effet dont le chargement échoue ne doit pas laisser derrière
+    // lui un identifiant que le fichier présente comme appliqué.
+    retenir_l_effet_actif(&app, device, Some(&id));
+    Ok(())
 }
 
 #[tauri::command]
-pub fn stop_effect(state: State<'_, AppState>, device: DeviceRef) {
+pub fn stop_effect(app: AppHandle, state: State<'_, AppState>, device: DeviceRef) {
     state.engine.stop(device);
+    retenir_l_effet_actif(&app, device, None);
+}
+
+/// Retient — ou oublie, avec `None` — l'effet appliqué sur cet appareil.
+///
+/// # Un échec est journalisé, pas remonté
+///
+/// L'effet tourne, le clavier est éclairé : faire échouer « Appliquer » parce que
+/// le disque n'a pas pris note ferait payer à l'éclairage un incident qui ne le
+/// concerne pas. Ce qu'on perd est borné et se dit en une ligne — le fichier ne
+/// reprendra pas cet effet plus tard.
+pub(crate) fn retenir_l_effet_actif(app: &AppHandle, device: DeviceRef, effect: Option<&str>) {
+    let ecrire = || -> CmdResult<()> {
+        let store = crate::storage::store(app)?;
+        let mut settings = store.read_settings()?;
+        // Rien de neuf : on ne repasse pas par le fichier temporaire et son
+        // renommage. Relancer deux fois le même effet est un double-clic.
+        if settings.set_active_effect(device.vid, device.pid, effect) {
+            store.write_settings(&settings)?;
+        }
+        Ok(())
+    };
+    if let Err(e) = ecrire() {
+        tracing::warn!(appareil = %device, "effet appliqué non retenu : {e}");
+    }
+}
+
+// ---------------------------------------------------------------- aperçu
+
+/// Démarre l'aperçu d'un effet, **sans toucher au clavier ni au disque**.
+///
+/// C'est le pendant exact de [`start_effect`], moins tout ce qui engage :
+/// aucune sortie matérielle, aucune écriture dans `settings.json`, et surtout
+/// **aucune boucle d'appareil arrêtée**. Sélectionner un effet dans la galerie
+/// passe par ici ; l'effet qui tourne sur le clavier continue de tourner.
+///
+/// `device` désigne l'appareil dont on **emprunte le gabarit**. `None` retombe
+/// sur le gabarit par défaut : on prévisualise sans posséder le clavier, et sans
+/// en avoir adopté aucun — c'est la même raison qui fait exister
+/// `get_default_layout`.
+#[tauri::command]
+pub fn start_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: Option<DeviceRef>,
+    id: String,
+    params: serde_json::Value,
+) -> CmdResult<()> {
+    let layout = match device {
+        Some(d) => crate::find_layout(d)?,
+        None => crate::default_layout(),
+    };
+    let js = crate::storage::store(&app)?.effect_js(&id)?;
+    let params = serde_json::to_string(&params)
+        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
+
+    state
+        .engine
+        .start_preview(DeviceRef::of(layout), id, js, params, layout)
+}
+
+#[tauri::command]
+pub fn stop_preview(state: State<'_, AppState>) {
+    state.engine.stop_preview();
+}
+
+/// Ajuste les paramètres de l'aperçu à chaud, comme [`set_effect_params`] le
+/// fait pour un appareil. La boucle relit le JSON à chaque image.
+#[tauri::command]
+pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
+    let params = serde_json::to_string(&params)
+        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
+    state.engine.set_preview_params(params);
+    Ok(())
+}
+
+/// Ouvre le flux d'images de l'aperçu vers le simulateur.
+///
+/// Un canal distinct de celui des appareils, et c'est ce qui permet de regarder
+/// un effet pendant qu'un autre tourne sur le clavier : les deux flux existent en
+/// même temps, et la fenêtre choisit lequel elle affiche.
+#[tauri::command]
+pub fn subscribe_preview_frames(state: State<'_, AppState>, channel: Channel<InvokeResponseBody>) {
+    state.engine.set_preview_channel(Some(channel));
+}
+
+#[tauri::command]
+pub fn unsubscribe_preview_frames(state: State<'_, AppState>) {
+    state.engine.set_preview_channel(None);
 }
 
 /// Ajuste les paramètres à chaud. La boucle ne redémarre pas : elle relit le
@@ -1119,18 +1465,21 @@ pub fn unsubscribe_frames(state: State<'_, AppState>, device: DeviceRef) {
     state.engine.set_channel(device, None);
 }
 
-/// État du moteur **par appareil**, dernière erreur de l'effet comprise.
+/// État du moteur : ce qui tourne **sur les appareils**, et ce qu'on **regarde**.
 ///
 /// Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit
 /// pouvoir être lue à la réouverture, ce qu'un événement ponctuel ne permet
 /// pas.
 ///
-/// Une entrée par appareil visé depuis le démarrage — pas seulement par appareil
-/// ouvert, ni par boucle en cours : « cet appareil ne fait rien » et « je ne
-/// sais rien de cet appareil » ne se disent pas pareil.
+/// `devices` porte une entrée par appareil visé depuis le démarrage — pas
+/// seulement par appareil ouvert, ni par boucle en cours : « cet appareil ne fait
+/// rien » et « je ne sais rien de cet appareil » ne se disent pas pareil.
+///
+/// `preview` est **à part**, et l'interface ne peut pas les confondre : voir
+/// [`PreviewStatus`].
 #[tauri::command]
-pub fn engine_status(state: State<'_, AppState>) -> Vec<DeviceEngineStatus> {
-    state.engine.status()
+pub fn engine_status(state: State<'_, AppState>) -> EngineReport {
+    state.engine.report()
 }
 
 #[cfg(test)]
@@ -1226,7 +1575,7 @@ mod tests {
     /// L'état d'un appareil, extrait de la liste que rend le moteur.
     fn etat(engine: &Engine, device: DeviceRef) -> EngineStatus {
         engine
-            .status()
+            .device_status()
             .into_iter()
             .find(|s| s.device == device)
             .unwrap_or_else(|| panic!("aucun état pour {device}"))
@@ -1364,7 +1713,7 @@ mod tests {
         let s = etat(&engine, PREMIER);
         assert!(!s.running);
         assert_eq!(s.effect_id, None);
-        assert_eq!(engine.status().len(), 1);
+        assert_eq!(engine.device_status().len(), 1);
     }
 
     /// **Ce que la suppression d'un effet doit obtenir du moteur.**
@@ -1429,19 +1778,159 @@ mod tests {
     }
 
     /// Ce que la remise à zéro de la configuration attend du moteur : plus une
-    /// seule boucle, quel que soit l'effet et quel que soit l'appareil.
+    /// seule boucle, quel que soit l'effet et quel que soit l'appareil — aperçu
+    /// compris, qui n'écrit sur rien mais entretient un contexte QuickJS.
     #[test]
     fn tout_arreter_ne_laisse_aucune_boucle() {
         let engine = Engine::default();
         demarrer(&engine, PREMIER, "premier", Arc::new(Sortie::default()));
         demarrer(&engine, SECOND, "second", Arc::new(Sortie::default()));
+        apercevoir(&engine, PREMIER, "regarde");
 
         engine.stop_all();
 
-        assert!(engine.status().iter().all(|s| !s.status.running));
+        assert!(engine.device_status().iter().all(|s| !s.status.running));
         // Les lignes restent : « cet appareil ne fait rien » et « je ne sais rien
         // de cet appareil » ne se disent pas pareil, remise à zéro ou non.
-        assert_eq!(engine.status().len(), 2);
+        assert_eq!(engine.device_status().len(), 2);
+        assert!(engine.preview_status().is_none());
+    }
+
+    // ------------------------------------------------------------ aperçu
+
+    fn apercevoir(engine: &Engine, layout_of: DeviceRef, effect_id: &str) {
+        engine
+            .start_preview(
+                layout_of,
+                effect_id.into(),
+                EFFET.into(),
+                "{}".into(),
+                layout(),
+            )
+            .expect("démarrage de l'aperçu");
+    }
+
+    /// **Le cœur de l'issue #63.** Prévisualiser Y pendant que X tourne sur le
+    /// clavier ne doit rien arrêter : parcourir la galerie éteindrait sinon
+    /// l'éclairage en cours, et ça ne se verrait qu'une fois livré.
+    #[test]
+    fn l_apercu_n_interrompt_pas_l_effet_de_l_appareil() {
+        let engine = Engine::default();
+        let sortie = Arc::new(Sortie::default());
+        demarrer(&engine, PREMIER, "applique", Arc::clone(&sortie));
+
+        // Trois aperçus à la suite, comme un parcours de galerie.
+        for effet in ["regarde-1", "regarde-2", "regarde-3"] {
+            apercevoir(&engine, PREMIER, effet);
+        }
+
+        let appareil = etat(&engine, PREMIER);
+        assert!(
+            appareil.running,
+            "l'aperçu a arrêté la boucle de l'appareil"
+        );
+        assert_eq!(appareil.effect_id.as_deref(), Some("applique"));
+
+        // Et les images continuent de partir vers le clavier pendant l'aperçu.
+        let avant = sortie.ecrites.load(Ordering::Relaxed);
+        attendre("le clavier n'est plus alimenté", || {
+            sortie.ecrites.load(Ordering::Relaxed) > avant + 2
+        });
+
+        engine.stop_all();
+    }
+
+    /// **Aucun octet ne part vers un clavier depuis un aperçu.** C'est ce que
+    /// [`SansSortie`] garantit, et c'est la seule garantie qui compte : une
+    /// sortie ouverte par inadvertance ferait de l'aperçu une application.
+    #[test]
+    fn l_apercu_n_ecrit_sur_aucun_appareil() {
+        let engine = Engine::default();
+        let sortie = Arc::new(Sortie::default());
+        demarrer(&engine, PREMIER, "applique", Arc::clone(&sortie));
+        engine.stop(PREMIER);
+
+        let fige = sortie.ecrites.load(Ordering::Relaxed);
+        apercevoir(&engine, PREMIER, "regarde");
+        attendre("l'aperçu n'a rendu aucune image", || {
+            engine
+                .preview_status()
+                .is_some_and(|p| p.running && p.error.is_none())
+        });
+        // Quelques images passent pendant que le test dort.
+        std::thread::sleep(Duration::from_millis(120));
+
+        assert_eq!(
+            sortie.ecrites.load(Ordering::Relaxed),
+            fige,
+            "l'aperçu a écrit sur la sortie de l'appareil"
+        );
+        engine.stop_all();
+    }
+
+    /// L'aperçu ne se confond avec aucun appareil : il n'ajoute aucune ligne à la
+    /// liste que lisent l'icône de zone de notification et le diagnostic.
+    #[test]
+    fn l_apercu_n_apparait_pas_dans_la_liste_des_appareils() {
+        let engine = Engine::default();
+        apercevoir(&engine, PREMIER, "regarde");
+
+        assert!(
+            engine.device_status().is_empty(),
+            "l'aperçu s'est glissé dans la liste des appareils"
+        );
+
+        let rapport = engine.report();
+        assert!(rapport.devices.is_empty());
+        let apercu = rapport.preview.expect("aucun aperçu");
+        assert_eq!(apercu.effect_id.as_deref(), Some("regarde"));
+        assert_eq!(
+            apercu.layout_of, PREMIER,
+            "le gabarit emprunté n'est pas celui qu'on a demandé"
+        );
+
+        engine.stop_preview();
+        assert!(
+            engine.preview_status().is_none(),
+            "un aperçu arrêté reste annoncé"
+        );
+    }
+
+    /// Supprimer un effet arrête aussi l'**aperçu** qui le fait tourner : le
+    /// JavaScript est chargé en mémoire, l'écran continuerait d'animer un effet
+    /// absent de la bibliothèque. Et il n'apparaît pas dans la liste des
+    /// appareils arrêtés — aucun appareil n'a été touché.
+    #[test]
+    fn supprimer_un_effet_arrete_aussi_son_apercu() {
+        let engine = Engine::default();
+        demarrer(&engine, PREMIER, "autre", Arc::new(Sortie::default()));
+        apercevoir(&engine, PREMIER, "a-supprimer");
+
+        assert!(engine.stop_everywhere("a-supprimer").is_empty());
+        assert!(engine.preview_status().is_none());
+        assert!(
+            etat(&engine, PREMIER).running,
+            "la boucle de l'appareil a été arrêtée au passage"
+        );
+
+        engine.stop_all();
+    }
+
+    /// Deux sélections à la suite : la seconde **remplace** la première, elle ne
+    /// s'y ajoute pas. Il n'y a qu'une boucle d'aperçu, donc qu'un contexte
+    /// QuickJS à la fois.
+    #[test]
+    fn changer_de_selection_remplace_l_apercu() {
+        let engine = Engine::default();
+        apercevoir(&engine, PREMIER, "premier-regarde");
+        apercevoir(&engine, SECOND, "second-regarde");
+
+        let apercu = engine.preview_status().expect("aucun aperçu");
+        assert_eq!(apercu.effect_id.as_deref(), Some("second-regarde"));
+        assert_eq!(apercu.layout_of, SECOND);
+        assert!(engine.device_status().is_empty());
+
+        engine.stop_preview();
     }
 
     /// BOUT EN BOUT — écrit sur le VRAI clavier. `#[ignore]` par défaut.

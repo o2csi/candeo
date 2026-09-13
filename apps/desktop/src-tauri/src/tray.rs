@@ -271,7 +271,12 @@ fn appareils(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
     let bibliotheque = store.list_effects()?;
     // L'état réel du moteur, et non un souvenir : c'est la même source que la
     // commande `engine_status` que lit la fenêtre.
-    let moteur = app.state::<AppState>().engine.status();
+    //
+    // **Les appareils seuls, jamais l'aperçu.** Ce menu décrit ce que font les
+    // claviers ; cocher ici un effet qu'on est seulement en train de regarder
+    // dans la fenêtre serait le mensonge que l'issue #63 refuse. Rien à filtrer —
+    // `device_status` ne peut pas rendre l'aperçu.
+    let moteur = app.state::<AppState>().engine.device_status();
 
     pilotes(&settings)
         .iter()
@@ -579,7 +584,7 @@ fn basculer(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     let Some(etat) = state
         .engine
-        .status()
+        .device_status()
         .into_iter()
         .find(|s| s.device == device)
     else {
@@ -598,6 +603,11 @@ fn basculer(app: &AppHandle, device: DeviceRef) {
 fn eteindre(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     state.engine.stop(device);
+    // Plus rien ne tourne sur cet appareil, et le fichier doit le dire : laisser
+    // l'identifiant en place ferait décrire par `settings.json` un effet que
+    // personne n'a plus demandé. C'est le même geste que `stop_effect` fait
+    // depuis la fenêtre.
+    crate::runtime::retenir_l_effet_actif(app, device, None);
 
     if let Err(e) = crate::with_keyboard(&state, device, |kb| {
         kb.set_effect(Effect::Off).map_err(|e| e.to_string())

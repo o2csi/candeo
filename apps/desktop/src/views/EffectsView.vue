@@ -36,18 +36,26 @@ const shut = { devices: ref(false), effects: ref(false) }
  * tous les appareils dans une liste qui décrit ce que fait *un* appareil n'est
  * pas une simplification, c'est une information fausse.
  *
- * ## L'aperçu suit l'appareil
+ * ## Sélectionner lance l'aperçu, « Appliquer » envoie au clavier
+ *
+ * On réglait à l'aveugle puis on découvrait le résultat sur le clavier ; c'est
+ * l'inverse désormais (issue #63). **Deux boucles, et elles ne se touchent
+ * pas** : celle de l'appareil écrit sur les LED, celle de l'aperçu n'écrit nulle
+ * part. Parcourir la galerie ne peut donc pas éteindre l'éclairage en cours — ce
+ * qui serait arrivé avec une seule boucle par appareil, et ne se serait vu
+ * qu'une fois livré.
+ *
+ * L'écran dit **lequel des deux** il montre, à chaque instant : `engine_status`
+ * les range dans deux champs distincts, et il n'y a rien à filtrer ici.
  *
  * Le simulateur vient dans le panneau de droite : liste à gauche / rendu à
  * droite ici, code à gauche / rendu à droite dans l'éditeur. Même grammaire, et
  * **un seul dessin** — `KeyboardSimulator` est le même composant des deux côtés,
  * il n'y a pas deux tracés à tenir d'accord.
  *
- * Il est alimenté par le canal d'images du moteur, celles-là mêmes qui partent
- * vers le clavier (`docs/design/studio.md` §3). D'où une différence assumée avec
- * la maquette : sans appareil piloté, l'aperçu **ne tourne pas**. Il n'y a pas
- * de boucle à faire tourner, et en animer une sur un appareil que l'utilisateur
- * n'a pas autorisé serait exactement ce que l'adoption interdit.
+ * Il est alimenté par un canal d'images du moteur, celles-là mêmes qui partent
+ * vers le clavier quand c'est l'appareil qu'on regarde (`docs/design/studio.md`
+ * §3).
  */
 
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
@@ -61,22 +69,53 @@ import {
   getLayout,
   listEffects,
   startEffect,
+  startPreview,
   stopEffect,
-  type DeviceEngineStatus,
+  stopPreview,
   type EffectEntry,
+  type EngineReport,
 } from '../api/candeo'
 import type { DeviceRef } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
-import { useEffectParams } from '../composables/useEffectParams'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
+import { useSettings } from '../composables/useSettings'
 import { useEngineFrames } from '../keyboard/engineFrames'
 import type { LayoutView } from '../keyboard/layout'
 
 /** Période d'interrogation du moteur, en millisecondes. */
 const STATUS_PERIOD = 1000
+
+/**
+ * Repos de la sélection avant de (re)lancer l'aperçu, en millisecondes.
+ *
+ * **Chaque aperçu construit un contexte QuickJS et en détruit un.** Parcourir la
+ * galerie à la flèche du clavier en produirait plusieurs par seconde, dont aucun
+ * n'aurait le temps de rendre une image qu'on regarde.
+ *
+ * Bornée ici, du côté du **geste**, et non dans le moteur : le Rust aurait dû
+ * choisir entre faire attendre la dernière sélection et la perdre, et la fenêtre
+ * aurait ensuite eu à réconcilier ce qu'elle croyait avoir demandé avec ce qui
+ * tourne. C'est la même leçon que l'échantillonnage du repère de couleurs, qui a
+ * eu à résoudre exactement ce problème (issue #29) : on ne paie pas un contexte
+ * par affichage.
+ *
+ * 180 ms : au-dessus du rythme d'une flèche maintenue, en dessous du temps qu'il
+ * faut pour décider qu'on regarde vraiment cet effet-là.
+ */
+const PREVIEW_DELAY = 180
+
+/**
+ * Plage de la luminosité.
+ *
+ * Un octet, parce que c'est ce que la trame porte (`0x0f`/`0x04`) — pas un choix
+ * d'interface. À ne pas confondre avec `BRIGHTNESS_DEFAULT`, qui vaut la même
+ * chose aujourd'hui pour une tout autre raison : le maximum est une contrainte du
+ * protocole, le défaut est une décision.
+ */
+const BRIGHTNESS_MAX = 255
 
 const shutDevices = shut.devices
 const shutEffects = shut.effects
@@ -87,15 +126,21 @@ const { devices, current, select, busy, refresh } = useDevice()
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
 const { appliedOn, apply, error: applyError } = useEffects()
 const {
-  load: loadParams,
+  load: loadSettings,
+  reload: reloadSettings,
   valuesFor,
+  keptFor,
   adjust,
+  adjustPreview,
   settle,
   forget,
   dropEffect,
+  lastAppliedOn,
+  brightnessOf,
+  setBrightness,
   flush: flushParams,
   error: paramsError,
-} = useEffectParams()
+} = useSettings()
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
@@ -261,24 +306,30 @@ const selectedEffect = computed<Choice | null>(
 // ---------------------------------------------------------------- moteur
 
 /**
- * L'état du moteur, appareil par appareil.
+ * L'état du moteur : ce qui tourne sur les appareils, et ce qu'on regarde.
  *
  * Tout est relu d'un coup : c'est un seul aller-retour par seconde, et la
  * colonne des appareils a besoin de chaque ligne pour dire ce que chacun fait
  * tourner.
+ *
+ * **Les deux champs ne se mélangent jamais.** `devices` décrit le matériel ;
+ * `preview` ce que le simulateur montre quand l'effet sélectionné n'est pas
+ * celui qui tourne. Tout ce qui parle d'« actif » dans cet écran lit le premier.
  */
-const statuses = ref<DeviceEngineStatus[]>([])
+const report = ref<EngineReport>({ devices: [], preview: null })
 
-function statusOf(d: { vid: number; pid: number } | null): DeviceEngineStatus | null {
+function statusOf(d: { vid: number; pid: number } | null) {
   if (!d) return null
-  return statuses.value.find((s) => s.device.vid === d.vid && s.device.pid === d.pid) ?? null
+  return report.value.devices.find((s) => s.device.vid === d.vid && s.device.pid === d.pid) ?? null
 }
 
 /**
- * L'effet qu'un appareil fait tourner.
+ * L'effet qu'un appareil fait tourner — **sur ses LED**.
  *
  * La boucle hôte l'emporte sur le mode matériel : tant qu'elle pousse des
  * images, c'est elle qu'on voit sur les LED, quel que soit le mode posé avant.
+ * L'aperçu n'entre pas dans ce calcul, et ne le peut pas : il n'est pas dans
+ * `devices`.
  */
 function runningOn(d: { vid: number; pid: number } | null): string | null {
   const s = statusOf(d)
@@ -291,15 +342,51 @@ function effectName(id: string | null): string | null {
   return choices.value.find((c) => c.id === id)?.name ?? id
 }
 
-/** Le seul effet marqué actif : celui de l'appareil sélectionné. */
+/**
+ * Ce que fait un appareil, en une ligne, pour la colonne de gauche.
+ *
+ * Un appareil au repos qui **se souvient** de son dernier effet le dit : c'est
+ * là que se voit le fait que la configuration est enregistrée, à l'endroit même
+ * où elle décrit quelque chose.
+ */
+function deviceLine(d: { vid: number; pid: number }): string {
+  const tourne = effectName(runningOn(d))
+  if (tourne !== null) return tourne
+  const retenu = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
+  return retenu !== null ? `arrêté · retenu : ${retenu}` : 'aucun effet'
+}
+
+/** Le seul effet marqué **appliqué** : celui de l'appareil sélectionné. */
 const activeId = computed(() => runningOn(selectedDevice.value))
 
 const status = computed(() => statusOf(selectedDevice.value))
 const runningHere = computed(() => status.value?.running === true)
 
+/** L'aperçu en cours, quand il montre bien l'effet sélectionné. */
+const preview = computed(() => {
+  const p = report.value.preview
+  if (!p || !p.running) return null
+  return p.effectId === selectedEffect.value?.id ? p : null
+})
+
+/**
+ * L'échec d'un aperçu, **quand il concerne l'effet qu'on regarde**.
+ *
+ * Le filtre sur l'identifiant n'est pas une précaution de style : l'état du
+ * moteur est relu chaque seconde, et l'aperçu d'un effet cassé survit à la
+ * sélection suivante le temps que le nouveau démarre. Sans lui, on attribuerait
+ * à un effet la panne d'un autre — la façon la plus rapide de faire chercher au
+ * mauvais endroit.
+ */
+const previewError = computed<string | null>(() => {
+  const p = report.value.preview
+  if (!p || p.running || p.effectId !== selectedEffect.value?.id) return null
+  return p.error
+})
+
 async function refreshStatus(): Promise<void> {
   try {
-    statuses.value = await engineStatus()
+    report.value = await engineStatus()
   } catch (e) {
     problem.value = message(e)
   }
@@ -338,18 +425,103 @@ watch(
   { immediate: true },
 )
 
-const { frame, listen, stop: stopFrames } = useEngineFrames(() => board.value)
+const { frame, listen, listenPreview, stop: stopFrames } = useEngineFrames(() => board.value)
 
 /**
- * Le canal d'images suit la sélection : changer d'appareil ferme l'un et ouvre
- * l'autre, sans quoi deux flux alimenteraient le même simulateur.
+ * L'effet sélectionné est-il déjà celui qui tourne **sur l'appareil** ?
+ *
+ * C'est la question qui décide de tout ce qui suit : dans ce cas le simulateur
+ * montre les vraies images du clavier, et il n'y a aucune raison d'entretenir un
+ * second contexte QuickJS pour afficher la même chose.
+ */
+const applied = computed(
+  () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
+)
+
+/** Vrai quand le simulateur doit afficher le flux de l'appareil. */
+const showsDevice = computed(() => runningHere.value && applied.value)
+
+/**
+ * Le canal d'images suit ce qu'on regarde : les images de l'appareil quand
+ * l'effet sélectionné est celui qui tourne dessus, rien sinon — c'est le
+ * démarrage de l'aperçu qui pose son propre abonnement, voir plus bas.
+ *
+ * Un seul canal à la fois — `useEngineFrames` ferme le précédent en changeant de
+ * source —, sans quoi deux flux alimenteraient le même simulateur et l'image
+ * sauterait de l'un à l'autre.
+ *
+ * ⚠️ **Surveiller l'état de l'aperçu ici serait un piège.** `engine_status` est
+ * relu chaque seconde et rend un objet neuf à chaque fois : la surveillance
+ * partirait une fois par seconde, et reposerait un canal par seconde pour rien.
+ * Ce qui est surveillé ici ne porte donc que des valeurs comparables.
  */
 watch(
-  [deviceKey, runningHere],
-  ([, running]) => {
+  [deviceKey, showsDevice],
+  ([, appareil]) => {
     const d = selectedDevice.value
-    if (d && running) void listen({ vid: d.vid, pid: d.pid })
+    if (d && appareil) void listen({ vid: d.vid, pid: d.pid })
     else stopFrames()
+  },
+  { immediate: true },
+)
+
+// ------------------------------------------------------- la boucle d'aperçu
+
+/** Temporisation de la sélection. Voir {@link PREVIEW_DELAY}. */
+let previewTimer = 0
+
+/**
+ * Ce que l'aperçu devrait montrer, ou `null` quand il n'a rien à montrer.
+ *
+ * Trois cas où l'on ne prévisualise pas, et aucun n'est un échec :
+ *
+ * - **l'effet est déjà appliqué ici** : le clavier produit les vraies images,
+ *   les doubler dans un second moteur coûterait un contexte pour rien ;
+ * - **c'est un effet matériel** : il est exécuté par le micrologiciel, et
+ *   l'application ne voit jamais ses images — en inventer serait décrire un
+ *   effet qu'on n'a pas regardé, exactement ce que le repère de couleurs refuse
+ *   déjà de faire pour les vignettes ;
+ * - **rien n'est sélectionné**.
+ */
+const toPreview = computed(() => {
+  const c = selectedEffect.value
+  if (!c || c.hardware || showsDevice.value) return null
+  return c
+})
+
+/**
+ * Démarre, remplace ou arrête l'aperçu, après le repos de la sélection.
+ *
+ * La temporisation couvre le cas qui compte : parcourir la galerie. L'arrêt, lui,
+ * part **sans attendre** — laisser un aperçu tourner 180 ms de plus quand on
+ * vient d'appliquer un effet ferait clignoter le simulateur entre deux sources.
+ */
+watch(
+  [toPreview, deviceKey],
+  ([c]) => {
+    window.clearTimeout(previewTimer)
+    if (!c) {
+      void stopPreview()
+      return
+    }
+    previewTimer = window.setTimeout(() => {
+      const d = selectedDevice.value
+      // Le **gabarit** de l'appareil sélectionné, pas l'appareil : l'aperçu lui
+      // ressemble sans rien lui prendre. `null` quand aucun n'est piloté — le
+      // Rust retombe alors sur le gabarit par défaut, et on prévisualise sans
+      // posséder de clavier.
+      const gabarit = d ? { vid: d.vid, pid: d.pid } : null
+      startPreview(gabarit, c.id, paramValues.value)
+        // **Le réabonnement est obligatoire après chaque démarrage.** Le canal
+        // vit dans l'état de la boucle, et `start_preview` en construit un neuf :
+        // celui de l'aperçu précédent est parti avec lui. Sans cette ligne, le
+        // simulateur resterait figé sur la dernière image du précédent, sans
+        // qu'aucune erreur ne le dise — même piège que dans l'éditeur.
+        .then(() => listenPreview())
+        .catch((e: unknown) => {
+          problem.value = message(e)
+        })
+    }, PREVIEW_DELAY)
   },
   { immediate: true },
 )
@@ -357,43 +529,53 @@ watch(
 /**
  * Ce que le simulateur montre, dit en toutes lettres plutôt que deviné.
  *
- * L'aperçu suit **l'appareil**, pas la sélection : il affiche les images que le
- * moteur produit pour lui. Sélectionner un effet sans l'appliquer ne change donc
- * rien au dessin — et le dire vaut mieux que de laisser croire le contraire, ce
- * qu'un aperçu calculé dans la fenêtre ferait au prix d'un second moteur
- * (`docs/design/studio.md` §3).
+ * **C'est ici que se joue le refus du mensonge.** Un aperçu qui ressemble à une
+ * application coûte une session de diagnostic — c'est la quatrième fois que ce
+ * motif se présente dans ce projet. La phrase dit donc les deux choses à la
+ * fois : ce qu'on regarde, et ce que le clavier fait pendant ce temps.
  */
 const previewNote = computed(() => {
   const c = selectedEffect.value
-  if (!selectedDevice.value) {
-    return "Aucun appareil piloté : il n'y a pas de boucle à alimenter, donc rien à animer."
-  }
-  if (runningHere.value) {
-    return c !== null && activeId.value !== c.id
-      ? `Images du moteur : c'est « ${effectName(activeId.value)} » qui tourne sur cet appareil.`
-      : 'Images du moteur, exactement celles qui partent vers le clavier.'
+  if (showsDevice.value) {
+    return 'Images du moteur, exactement celles qui partent vers le clavier.'
   }
   if (c?.hardware) {
     return "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici."
   }
-  return "Aucun effet en cours sur cet appareil — « Appliquer » lance celui-ci."
+
+  const tourne = effectName(activeId.value)
+  const ailleurs = runningHere.value && tourne !== null
+  if (preview.value) {
+    // Sans appareil piloté, ne pas promettre « Appliquer » : le bouton est
+    // désactivé, et l'annoncer enverrait chercher pourquoi il ne répond pas.
+    if (!selectedDevice.value) {
+      return "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté."
+    }
+    return ailleurs
+      ? `Aperçu : rien n'est envoyé au clavier, où « ${tourne} » continue de tourner.`
+      : "Aperçu : rien n'est envoyé au clavier. « Appliquer » y envoie celui-ci."
+  }
+  if (previewError.value !== null) return "L'aperçu s'est arrêté sur une erreur."
+  return 'Aperçu en préparation…'
 })
 
 // ---------------------------------------------------------------- actions
 
 const working = ref(false)
 
-const applied = computed(
-  () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
-)
-
 /**
- * « Appliquer » ouvre la sortie vers l'appareil sélectionné.
+ * « Appliquer » **promeut l'aperçu en effet d'appareil** : c'est le geste qui
+ * envoie au clavier, et le seul.
  *
  * Deux chemins, parce que les deux natures ne passent pas par le même endroit :
  * un effet matériel est un mode posé sur le micrologiciel, un effet hôte est une
  * boucle qu'on démarre. Poser un mode matériel arrête d'abord la boucle : sans
  * cela elle continuerait d'écrire par-dessus, et le mode resterait invisible.
+ *
+ * Rien n'arrête l'aperçu ici : `showsDevice` devient vrai dès la relecture de
+ * l'état, la surveillance plus haut le range d'elle-même, et le simulateur passe
+ * sur les images réelles. Le faire à la main en ferait deux chemins à tenir
+ * d'accord.
  */
 async function applyEffect(): Promise<void> {
   const c = selectedEffect.value
@@ -423,12 +605,19 @@ async function applyEffect(): Promise<void> {
   } finally {
     working.value = false
     await refreshStatus()
+    // Le Rust vient de retenir — ou non — l'effet appliqué : relire est la seule
+    // façon honnête de le savoir. Le deviner ici ferait de la fenêtre une
+    // seconde source de vérité, qui divergerait au premier échec d'écriture.
+    await reloadSettings()
   }
 }
 
 /**
- * Arrête la boucle. La dernière image reste affichée comme elle reste sur le
- * clavier : arrêter un effet n'éteint pas les LED.
+ * Arrête la boucle de l'**appareil**. La dernière image reste affichée comme
+ * elle reste sur le clavier : arrêter un effet n'éteint pas les LED.
+ *
+ * L'aperçu n'est pas concerné — et c'est bien le sujet : arrêter ce qui tourne
+ * sur le clavier ne doit pas fermer ce qu'on est en train de regarder.
  */
 async function halt(): Promise<void> {
   const d = selectedDevice.value
@@ -438,12 +627,15 @@ async function halt(): Promise<void> {
   working.value = true
   try {
     await stopEffect({ vid: d.vid, pid: d.pid })
-    stopFrames()
   } catch (e) {
     problem.value = message(e)
   } finally {
     working.value = false
     await refreshStatus()
+    // L'arrêt a **oublié** l'effet appliqué dans le fichier : sans cette
+    // relecture, la colonne annoncerait encore « retenu : … » pour un appareil
+    // dont plus rien n'est retenu.
+    await reloadSettings()
   }
 }
 
@@ -536,30 +728,28 @@ const paramValues = computed(() =>
 /**
  * Pourquoi les contrôles sont inertes, ou `null` s'ils sont vivants.
  *
- * **Un réglage n'a de sens que sur l'effet en cours sur l'appareil.** La boucle
- * est le seul endroit où un paramètre change quelque chose ; bouger un curseur
- * pour un effet qu'on n'a pas appliqué ne pourrait rien produire.
+ * **Ils sont vivants presque toujours, désormais.** Ils l'étaient au seul effet
+ * appliqué, ce qui obligeait à régler à l'aveugle puis à découvrir le résultat
+ * sur le clavier ; la boucle d'aperçu supprime ce marché (issue #63) — on ajuste
+ * en voyant, et sans rien envoyer nulle part.
  *
- * D'où le choix : figer et le dire, plutôt qu'appliquer l'effet au premier
- * mouvement de curseur. Lancer une boucle sur un clavier est un geste qu'on
- * décide — c'est tout le sens de « Appliquer », et de l'adoption avant lui.
- * Qu'un glissement de souris s'en charge à la place ferait d'un réglage une
- * prise de contrôle.
- *
- * Les valeurs restent **visibles** et retenues : ce sont celles avec lesquelles
- * « Appliquer » lancera l'effet.
+ * Reste le cas où il n'y a aucune boucle à ajuster : un effet matériel, dont le
+ * micrologiciel n'expose rien, et le court instant où l'aperçu n'a pas encore
+ * démarré.
  */
 const frozen = computed<string | null>(() => {
-  if (!selectedDevice.value) {
-    // L'avertissement plus haut dit déjà « aucun appareil piloté » : le répéter
-    // mot pour mot ferait lire deux fois la même phrase pour deux raisons
-    // différentes.
-    return "Un réglage agit sur la boucle d'un appareil, et il n'y en a aucune tant qu'aucun appareil n'est piloté."
-  }
-  if (!applied.value) {
-    return "Ces réglages agissent sur l'effet en cours sur l'appareil. « Appliquer » lance celui-ci avec les valeurs ci-dessous, et ils redeviennent réglables."
-  }
-  return null
+  if (preview.value || showsDevice.value) return null
+  // **Pas pendant que l'aperçu démarre.** Les contrôles restent vivants : ce
+  // qu'on règle est retenu, et l'aperçu démarrera avec ces valeurs-là — c'est
+  // `paramValues` qu'on lui passe. Les figer le temps d'un aller-retour ferait
+  // clignoter le formulaire à chaque changement de sélection, pour rien.
+  //
+  // Un effet matériel n'a rien à ajuster non plus, mais il ne déclare aucun
+  // paramètre : c'est `noParams` qui parle pour lui, et le redire ici ferait lire
+  // deux fois la même phrase.
+  return previewError.value === null
+    ? null
+    : "L'aperçu ne tourne pas. Les valeurs ci-dessous restent retenues, et « Appliquer » lancera l'effet avec."
 })
 
 /** Un effet sans paramètre le dit — et il ne le dit pas de la même façon selon sa nature. */
@@ -569,11 +759,38 @@ const noParams = computed(() =>
     : "Cet effet n'en déclare aucun : il fait la même chose à chaque lancement.",
 )
 
+/**
+ * Ce que la configuration retient, dit à l'endroit où on la fabrique.
+ *
+ * C'est le défaut réel que l'issue #64 relève : les réglages sont conservés
+ * depuis l'issue #28, et **rien à l'écran ne le laissait deviner**. On règle, on
+ * ferme, et on n'a aucune raison de croire que ça a tenu.
+ */
+const savedNote = computed<string | null>(() => {
+  const c = selectedEffect.value
+  const d = selectedDevice.value
+  if (!c || c.hardware || Object.keys(specs.value).length === 0) return null
+  if (!d) {
+    return "Valeurs déclarées par l'effet. Elles ne seront retenues que pour un appareil piloté."
+  }
+  return keptFor({ vid: d.vid, pid: d.pid }, c.id)
+    ? `Réglages enregistrés pour ${d.name} : ils sont repris au prochain lancement de cet effet, y compris depuis la zone de notification.`
+    : `Valeurs déclarées par l'effet. Ce qui s'en écarte est enregistré pour ${d.name}, sans rien demander.`
+})
+
+/**
+ * Un réglage part vers **la boucle qu'on regarde**, et sur disque.
+ *
+ * Vers les deux boucles quand elles existent, et c'est voulu : on peut régler
+ * l'effet appliqué pendant qu'on en prévisualise un autre — le simulateur montre
+ * alors l'aperçu, le clavier suit l'autre, et les deux restent justes.
+ */
 function onParamChange(id: string, value: ParamValue): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  adjust({ vid: d.vid, pid: d.pid }, c.id, specs.value, id, value)
+  const complete = adjust({ vid: d.vid, pid: d.pid }, c.id, specs.value, id, value)
+  if (preview.value) adjustPreview(complete)
 }
 
 /** Le geste est fini — curseur relâché, case cochée : on écrit maintenant. */
@@ -588,7 +805,39 @@ function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  forget({ vid: d.vid, pid: d.pid }, c.id, specs.value)
+  const declarees = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value)
+  if (preview.value) adjustPreview(declarees)
+}
+
+// ---------------------------------------------------------------- luminosité
+
+/**
+ * Le niveau de l'appareil sélectionné, de 0 à 255.
+ *
+ * Dans la colonne des périphériques, et non dans les réglages d'un effet : c'est
+ * une propriété de l'appareil — une commande distincte du protocole (`0x0f`/
+ * `0x04`), qui n'a rien à voir avec l'effet en cours. La commande existait depuis
+ * le premier jour et n'était affichée nulle part : ce n'était pas un bogue
+ * d'affichage, c'était une interface qui n'avait jamais été écrite (issue #64).
+ */
+const brightness = computed(() => brightnessOf(selectedDevice.value))
+
+/** En pourcentage, parce que 0-255 ne veut rien dire pour qui règle sa lumière. */
+const brightnessPercent = computed(() =>
+  Math.round((brightness.value / BRIGHTNESS_MAX) * 100),
+)
+
+/**
+ * `commit` sépare le glissement de sa fin : pendant, on écrit sur le clavier ;
+ * à la fin seulement, sur le disque. Même partage que pour les réglages d'effet,
+ * et pour la même raison — `settings.json` s'écrit par fichier temporaire puis
+ * renommage, c'est un geste disque complet.
+ */
+function onBrightness(event: Event, commit: boolean): void {
+  const d = selectedDevice.value
+  if (!d) return
+  const level = Number((event.target as HTMLInputElement).value)
+  setBrightness({ vid: d.vid, pid: d.pid }, level, commit)
 }
 
 // ---------------------------------------------------------------- cycle de vie
@@ -602,9 +851,10 @@ onMounted(async () => {
     fallback.value = l
   })
 
-  // Avant tout le reste : « Appliquer » part des valeurs retenues, et les lire
-  // après coup laisserait une fenêtre où l'effet démarrerait sur ses défauts.
-  await loadParams()
+  // Avant tout le reste : « Appliquer » et l'aperçu partent des valeurs
+  // retenues, et les lire après coup laisserait une fenêtre où l'effet
+  // démarrerait sur ses défauts.
+  await loadSettings()
 
   await refresh()
 
@@ -626,6 +876,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   alive = false
   window.clearInterval(statusTimer)
+  window.clearTimeout(previewTimer)
+  // **L'aperçu s'arrête avec l'écran, l'effet appliqué non.** C'est toute la
+  // différence entre les deux : l'un est ce que le clavier fait, l'autre ce
+  // qu'on regarde — et il n'y a plus personne pour regarder. Le Rust fait le
+  // même geste quand la fenêtre se replie, qui ne passe pas par ici.
+  void stopPreview()
   // Le dernier mouvement d'un curseur ne doit pas dépendre du fait qu'on soit
   // resté devant le temps du repos d'écriture.
   flushParams()
@@ -693,9 +949,51 @@ onBeforeUnmount(() => {
                  distingue deux claviers de la même marque. Il passe à la ligne
                  plutôt que d'être tronqué. -->
             <span class="dev-name">{{ d.name }}</span>
-            <span class="dev-fx">{{ effectName(runningOn(d)) ?? 'aucun effet' }}</span>
+            <span class="dev-fx">{{ deviceLine(d) }}</span>
           </span>
         </button>
+
+        <!--
+          La luminosité de l'appareil **sélectionné**, ici et pas ailleurs :
+          c'est une propriété de l'appareil, pas un réglage d'effet. Elle
+          n'apparaît que pour celui qu'on regarde — une par ligne alourdirait la
+          colonne pour un réglage qu'on pose une fois.
+
+          Aucune règle à écrire pour la colonne repliée : le bloc n'est ni
+          `.entry`, ni `.group`, ni `.new`, donc le masquage universel plus bas
+          l'emporte sans qu'on ait à le nommer.
+        -->
+        <div v-if="selectedDevice" class="lum">
+          <label class="lum-head" :for="`lum-${deviceKey}`">
+            <span>Luminosité</span>
+            <span class="lum-value">{{ brightnessPercent }} %</span>
+          </label>
+          <input
+            :id="`lum-${deviceKey}`"
+            type="range"
+            min="0"
+            :max="BRIGHTNESS_MAX"
+            step="1"
+            :value="brightness"
+            :disabled="!selectedDevice.open"
+            @input="onBrightness($event, false)"
+            @change="onBrightness($event, true)"
+          />
+          <!--
+            Deux phrases différentes, parce que ce sont deux situations
+            différentes : le niveau se retient toujours, mais il n'atteint le
+            clavier que s'il est ouvert. Le taire ferait glisser un curseur sans
+            effet visible, et c'est exactement le genre de silence qui coûte une
+            session.
+          -->
+          <p class="lum-note">
+            {{
+              selectedDevice.open
+                ? 'Retenue pour cet appareil, et réappliquée au branchement.'
+                : "Appareil non ouvert : le niveau est retenu et s'appliquera au branchement."
+            }}
+          </p>
+        </div>
 
         <p v-if="!piloted.length" class="none">
           Aucun appareil piloté.
@@ -723,19 +1021,25 @@ onBeforeUnmount(() => {
       <div id="col-effects" class="col-body">
         <template v-for="g in grouped" :key="g.nature">
           <p class="group">{{ g.title }}</p>
+          <!--
+            « appliqué », et non « actif ». Le mot d'avant valait pour les deux
+            états à la fois, or ils n'ont rien à voir : l'un dit ce que le
+            clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
+            déjà sur `aria-pressed` et sur la bordure.
+          -->
           <button
             v-for="c in g.items"
             :key="c.id"
             class="entry"
             type="button"
             :aria-pressed="selectedEffect?.id === c.id"
-            :aria-label="activeId === c.id ? `${c.name} — actif` : c.name"
+            :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
             :title="c.name"
             @click="chosenEffect = c.id"
           >
             <EffectSwatch class="mark" :colors="c.swatch" />
             <span class="fx-name">{{ c.name }}</span>
-            <span v-if="activeId === c.id" class="fx-state">actif</span>
+            <span v-if="activeId === c.id" class="fx-state">appliqué</span>
           </button>
         </template>
 
@@ -758,15 +1062,24 @@ onBeforeUnmount(() => {
       <p v-if="status?.deviceError" class="notice warn" role="alert">
         Écriture vers l'appareil impossible : {{ status.deviceError }}
       </p>
+      <!--
+        L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le
+        dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
+        clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
+      -->
+      <p v-if="previewError" class="notice warn" role="alert">
+        Erreur de l'effet prévisualisé, sans conséquence sur le clavier : {{ previewError }}
+      </p>
 
       <!--
         La bibliothèque se parcourt sans appareil : on doit pouvoir voir ce que
-        l'application propose avant d'autoriser quoi que ce soit. Mais l'écran
-        ne reste pas inerte, il dit ce qui manque et où aller.
+        l'application propose avant d'autoriser quoi que ce soit. L'aperçu, lui,
+        tourne quand même — sur le gabarit par défaut, sans rien écrire nulle
+        part. Mais l'écran dit ce qui manque et où aller.
       -->
       <p v-if="noDevice" class="notice" role="status">
-        Aucun appareil piloté : la bibliothèque se parcourt, mais appliquer un effet demande un
-        appareil que candeo a le droit de piloter.
+        Aucun appareil piloté : la bibliothèque se parcourt et l'aperçu tourne sur le gabarit par
+        défaut, mais appliquer un effet demande un appareil que candeo a le droit de piloter.
         <RouterLink to="/devices" class="link">Choisir un périphérique</RouterLink>
       </p>
 
@@ -807,6 +1120,9 @@ onBeforeUnmount(() => {
           @commit="onParamCommit"
           @reset="onParamReset"
         />
+
+        <!-- Ce qui est retenu, dit là où on le fabrique. Voir `savedNote`. -->
+        <p v-if="savedNote" class="cost">{{ savedNote }}</p>
 
         <footer class="actions">
           <button
@@ -859,7 +1175,7 @@ onBeforeUnmount(() => {
             {{
               selectedEffect.hardware
                 ? "exécuté par l'appareil · rien à modifier"
-                : "l'aperçu tourne dès le lancement · la sortie clavier se coupe dans l'éditeur"
+                : "l'aperçu tourne dès la sélection · « Appliquer » envoie au clavier"
             }}
           </p>
         </footer>
@@ -1040,6 +1356,50 @@ onBeforeUnmount(() => {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * La luminosité de l'appareil sélectionné. Séparée des entrées par un filet :
+ * c'est un réglage, pas une ligne de liste, et rien ne doit laisser croire qu'on
+ * peut cliquer dessus pour changer d'appareil.
+ */
+.lum {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--gap-3);
+  padding: var(--gap-2);
+  border-top: 1px solid var(--line);
+}
+
+.lum-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-2);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* Le chiffre en clair : un curseur sans valeur ne se repose pas au même endroit
+   d'une session à l'autre, et c'est justement ce qu'on retient ici. */
+.lum-value {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lum input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.lum input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lum-note {
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 .group {

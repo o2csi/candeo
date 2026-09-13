@@ -23,11 +23,11 @@ import {
 import { erreur } from '../api/journal'
 import type { DeviceState } from '../api/types'
 import { useDevice } from '../composables/useDevice'
-import { useEffectParams } from '../composables/useEffectParams'
 import { useEffects } from '../composables/useEffects'
+import { useSettings } from '../composables/useSettings'
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
-const { dropAll } = useEffectParams()
+const { dropAll } = useSettings()
 const { forgetPosed } = useEffects()
 
 /**
@@ -359,10 +359,16 @@ onMounted(async () => {
     -->
     <section class="config" aria-labelledby="config-title">
       <h2 id="config-title">Configuration</h2>
+      <!--
+        Dire ce qui est retenu, et où. C'était le défaut réel de la persistance :
+        tout tenait depuis l'issue #28, et rien à l'écran ne le laissait deviner.
+      -->
       <p class="note">
-        candeo retient les décisions prises ci-dessus et les réglages de chaque effet, appareil par
-        appareil. C'est par là qu'on repasse quand quelque chose se comporte mal, et c'est ce qui
-        rend un rapport de bogue exploitable : voilà ce qui se passe en repartant du défaut.
+        <strong>Tout est enregistré au fur et à mesure, sans rien demander.</strong> candeo retient
+        les décisions prises ci-dessus, la luminosité et l'effet appliqué de chaque appareil, et les
+        réglages de chaque effet, appareil par appareil. C'est par là qu'on repasse quand quelque
+        chose se comporte mal, et c'est ce qui rend un rapport de bogue exploitable : voilà ce qui se
+        passe en repartant du défaut.
       </p>
 
       <p v-if="problem" class="err" role="alert">{{ problem }}</p>
@@ -396,6 +402,10 @@ onMounted(async () => {
           <li>
             Les effets en cours s'arrêtent et le rétroéclairage s'éteint, plutôt que de rester figé
             sur la dernière image.
+          </li>
+          <li>
+            L'effet appliqué et la luminosité retenue de chaque appareil sont oubliés : tout repart
+            à pleine luminosité, sans effet.
           </li>
           <li>Les réglages retenus pour chaque effet, sur chaque appareil, sont oubliés.</li>
           <li>

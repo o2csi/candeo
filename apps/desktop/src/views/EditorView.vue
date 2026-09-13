@@ -98,6 +98,12 @@ const problem = ref<string | null>(null)
  * aller-retour par seconde, et l'écran à trois colonnes (issue #27) aura de
  * toute façon besoin des autres lignes.
  */
+/**
+ * Les **appareils** seuls. L'éditeur ne prévisualise pas : « Valider et lancer »
+ * démarre l'effet pour de bon, sur l'appareil visé, et c'est le geste attendu ici
+ * — on écrit un effet pour le voir tourner. La boucle d'aperçu sert la galerie,
+ * où l'on parcourt sans s'engager.
+ */
 const statuses = ref<DeviceEngineStatus[]>([])
 
 const status = computed(() => {
@@ -268,7 +274,7 @@ watch(source, (value) => {
 
 async function refreshStatus(): Promise<void> {
   try {
-    statuses.value = await engineStatus()
+    statuses.value = (await engineStatus()).devices
   } catch (e) {
     problem.value = message(e)
   }
