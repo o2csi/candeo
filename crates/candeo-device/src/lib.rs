@@ -1,7 +1,7 @@
-//! Accès matériel et description des périphériques.
+//! Hardware access and device descriptions.
 //!
-//! La couche transport est isolée ici pour que [`candeo_protocol`] reste pur,
-//! testable sans matériel, et sans dépendance système.
+//! The transport layer is isolated here so that [`candeo_protocol`] stays pure,
+//! testable without hardware, and free of system dependencies.
 
 use candeo_protocol::{CommandId, Effect, Report, Rgb};
 
@@ -26,7 +26,7 @@ pub enum Error {
     Refused { command: CommandId },
 }
 
-/// Un clavier ouvert, prêt à recevoir des commandes.
+/// An open keyboard, ready to receive commands.
 pub struct Keyboard {
     device: hidapi::HidDevice,
     layout: &'static Layout,
@@ -34,26 +34,23 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
-    /// Ouvre le premier périphérique correspondant au gabarit fourni, puis
-    /// l'inspecte.
+    /// Opens the first device matching the given layout, then inspects it.
     ///
-    /// Sur Windows, l'éclairage passe par une interface précise du composite
-    /// (`interface_number`) : ouvrir la mauvaise donne un handle valide sur
-    /// lequel toute écriture échoue silencieusement. Voir
-    /// [`Layout::is_lighting_interface`].
+    /// On Windows, lighting goes through one specific interface of the composite
+    /// device (`interface_number`): opening the wrong one yields a valid handle on
+    /// which every write fails silently. See [`Layout::is_lighting_interface`].
     ///
-    /// # L'inspection est ici, et nulle part ailleurs
+    /// # Inspection happens here, and nowhere else
     ///
-    /// Trois chemins ouvrent un appareil — l'adoption au démarrage, l'adoption
-    /// à la demande, l'ouverture ponctuelle — et un quatrième viendra. Laisser à
-    /// chacun le soin d'inspecter, c'est attendre celui qui l'oubliera, et
-    /// retrouver sur ce chemin-là un clavier dont personne ne sait ce qu'il
-    /// comprend. Ici, un `Keyboard` sans inspection ne peut pas exister.
+    /// Three paths open a device — adoption at startup, adoption on demand, the
+    /// one-off open — and a fourth is coming. Leaving each of them to inspect is
+    /// waiting for the one that forgets, and ending up, on that path, with a
+    /// keyboard nobody knows what it understands. Here, a `Keyboard` without an
+    /// inspection cannot exist.
     ///
-    /// Elle ne fait jamais échouer l'ouverture : un appareil qui ne répond pas
-    /// aux lectures reste un appareil qui reçoit nos écritures, et le refuser
-    /// pour ça bloquerait l'éclairage sur une question restée sans réponse.
-    /// Voir [`inspection`].
+    /// It never makes the open fail: a device that does not answer reads is still
+    /// a device that receives our writes, and refusing it for that would block the
+    /// lighting on a question left unanswered. See [`inspection`].
     pub fn open(api: &hidapi::HidApi, layout: &'static Layout) -> Result<Self, Error> {
         let info = api
             .device_list()
@@ -78,19 +75,19 @@ impl Keyboard {
         self.layout
     }
 
-    /// Ce que l'appareil a dit de lui-même à l'ouverture.
+    /// What the device said about itself when it was opened.
     pub fn inspection(&self) -> &Inspection {
         &self.inspection
     }
 
-    /// Envoie un rapport — **sauf** si l'appareil a déclaré ne pas le connaître.
+    /// Sends a report — **unless** the device declared it does not know it.
     ///
-    /// Le refus est ce qui rend l'inspection utile au-delà d'un avertissement :
-    /// sans lui, une commande rendue `0x05` partirait encore à chaque image,
-    /// `hidapi` l'accepterait, et la boucle se dirait saine au-dessus d'un
-    /// clavier qui jette tout. Avec lui, l'échec remonte par le chemin
-    /// d'erreur d'écriture que l'interface affiche déjà. Le coût est une
-    /// recherche dans trois entrées : rien n'est relu.
+    /// The refusal is what makes the inspection useful beyond a warning: without
+    /// it, a command answered `0x05` would still go out on every frame, `hidapi`
+    /// would accept it, and the loop would call itself healthy on top of a
+    /// keyboard that discards everything. With it, the failure travels up the
+    /// write error path the interface already displays. The cost is a lookup in
+    /// three entries: nothing is read back.
     fn send(&self, report: Report) -> Result<(), Error> {
         let command = report.id();
         if self.inspection.refuses(command) {
@@ -109,8 +106,8 @@ impl Keyboard {
         self.send(Report::set_brightness(level))
     }
 
-    /// Écrit un segment de rangée. L'écriture partielle est prise en charge
-    /// par l'appareil — vérifié sur le matériel.
+    /// Writes a row segment. The device handles partial writes — verified on
+    /// hardware.
     pub fn write_row(&self, row: u8, col_start: u8, colors: &[Rgb]) -> Result<(), Error> {
         if row >= self.layout.rows {
             return Err(Error::RowOutOfRange {
@@ -121,18 +118,18 @@ impl Keyboard {
         self.send(Report::write_row(row, col_start, colors))
     }
 
-    /// Pousse une image complète : une rangée par transfert, puis bascule en
-    /// mode piloté par l'hôte.
+    /// Pushes a full frame: one row per transfer, then switches to host-controlled
+    /// mode.
     ///
-    /// `frame` doit couvrir **toute** la matrice, y compris les positions sans
-    /// LED physique. En envoyer moins laisse les dernières rangées figées sur
-    /// leur valeur précédente.
+    /// `frame` must cover the **whole** matrix, including positions without a
+    /// physical LED. Sending less leaves the last rows frozen on their previous
+    /// value.
     pub fn present(&self, frame: &[Rgb]) -> Result<(), Error> {
         let expected = self.layout.led_count();
         assert_eq!(
             frame.len(),
             expected,
-            "l'image doit couvrir les {expected} positions de la matrice"
+            "the frame must cover all {expected} positions of the matrix"
         );
         let cols = self.layout.cols as usize;
         for row in 0..self.layout.rows {
