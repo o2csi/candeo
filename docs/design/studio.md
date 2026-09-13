@@ -168,7 +168,7 @@ l'objet du §3.
 
 Elle était : TypeScript à l'exécution tiendra-t-il la charge ?
 
-**Oui, largement.** 132 LED × 60 images/s = **7 920 couleurs par seconde**. C'est
+**Oui, largement.** 132 LED × 30 images/s = **3 960 couleurs par seconde**. C'est
 trivial pour n'importe quel moteur JavaScript, et le franchissement IPC par image
 l'est tout autant. La performance n'est **pas** un sujet, et ne l'a jamais été.
 
@@ -230,7 +230,7 @@ Monaco (TS)
 - Les imports depuis `@candeo/effects-api` (`hsv`, `mix`…) sont résolus par le
   chargeur de modules de `rquickjs` vers un module interne. **Pas de bundler.**
 
-Le simulateur coûte 396 octets par image, 60 fois par seconde — le chiffre déjà
+Le simulateur coûte 396 octets par image, 30 fois par seconde — le chiffre déjà
 jugé trivial plus haut. Il transite par un **canal** `tauri::ipc::Channel` et non
 par un événement global : la portée est explicite et le binaire passe brut, sans
 détour par un tableau JSON d'entiers. Détails dans
@@ -498,7 +498,7 @@ durée de vie :
 
 **Le débit vers le moteur est borné, et les états intermédiaires sont écrasés.**
 Un glissement de souris produit des dizaines d'événements par seconde ; la boucle
-relit les paramètres à chaque image, soit soixante fois par seconde. Envoyer plus
+relit les paramètres à chaque image, soit trente fois par seconde. Envoyer plus
 vite qu'elle ne lit, c'est remplacer un JSON que personne n'a encore regardé. Un
 seul envoi est en vol à la fois, et le dernier état demandé repart toujours — ce
 qu'on voit à l'écran est le seul qui compte, et il n'est jamais perdu.

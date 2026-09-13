@@ -60,11 +60,18 @@ import type { DeviceRef } from '../api/types'
  *
  * Un glissement de souris produit des dizaines d'événements par seconde, et le
  * `pointermove` d'un écran à 144 Hz bien davantage. La boucle, elle, relit les
- * paramètres **à chaque image** — 60 fois par seconde. Envoyer plus vite qu'elle
+ * paramètres **à chaque image** — 30 fois par seconde. Envoyer plus vite qu'elle
  * ne lit, c'est remplacer un JSON que personne n'a encore regardé.
  *
- * 40 ms, soit 25 envois par seconde au plus : en dessous de la cadence de rendu,
+ * 40 ms, soit 25 envois par seconde au plus : toujours sous la cadence de rendu,
  * donc invisible à l'œil, et un ordre de grandeur sous ce qu'un curseur produit.
+ *
+ * ⚠️ **La marge s'est resserrée avec la cadence.** Contre les 16,7 ms d'une
+ * boucle à 60, ces 40 ms laissaient un facteur deux ; contre les 33,3 ms d'une
+ * boucle à 30, il ne reste que 7 ms. L'invariant tient — on écrit toujours moins
+ * souvent que la boucle ne lit — mais il tient de peu : **descendre cette valeur
+ * sous 34 ms le casserait**, et on se remettrait à remplacer des JSON non lus.
+ * C'est le plancher, pas un réglage de confort.
  */
 const HOT_PERIOD = 40
 

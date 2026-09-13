@@ -5,10 +5,22 @@
 //! observées sur le matériel.
 
 /// Taille du rapport, hors identifiant de rapport HID.
+///
+/// ⚠️ **`pub` pour les sondes, et c'est délibéré.** Le seul consommateur hors de
+/// cette crate est `apps/desktop/src-tauri/src/sonde.rs`, qui est déclaré
+/// `#[cfg(test)] mod sonde;` et dont toutes les sondes sont `#[ignore]` : cette
+/// constante ne part donc jamais dans le binaire livré, et un balayage de code
+/// mort la donnera toujours pour restreignable.
+///
+/// Ne pas la restreindre. Ces sondes sont conservées pour **rejouer le relevé**
+/// sur un autre micrologiciel ou un autre exemplaire — c'est ce qui a établi le
+/// protocole, et c'est la seule façon de le réétablir le jour où un appareil
+/// répondra autrement. Les couper pour gagner deux caractères de visibilité
+/// coûterait cette capacité, et le lien ne se reverrait pas.
 pub const REPORT_LEN: usize = 90;
 
 /// Taille du tampon passé à `HidD_SetFeature` : identifiant de rapport + données.
-pub const FEATURE_BUF_LEN: usize = REPORT_LEN + 1;
+pub(crate) const FEATURE_BUF_LEN: usize = REPORT_LEN + 1;
 
 /// Classe de commande « éclairage ».
 const CLASS_LIGHTING: u8 = 0x0f;
@@ -101,6 +113,16 @@ impl Report {
 ///
 /// Vérifiée sur l'intégralité des trames capturées, toutes commandes
 /// confondues, sans exception.
+///
+/// ⚠️ **`pub` pour les sondes**, comme [`REPORT_LEN`] et pour la même raison :
+/// le constructeur interne de [`Report`] l'appelle déjà pour tout ce que
+/// l'application envoie, et le seul appelant externe est le `sonde.rs` de
+/// `candeo-desktop`, compilé
+/// uniquement en test. Une sonde fabrique ses trames **à la main**, sans passer
+/// par [`Report`] — c'est tout l'intérêt : elle interroge des commandes que le
+/// constructeur ne sait pas former, dont celles qui n'existent peut-être pas.
+/// Lui retirer la somme de contrôle reviendrait à lui faire émettre des trames
+/// que l'appareil refuse, et le relevé ne serait plus rejouable.
 pub fn checksum(report: &[u8; REPORT_LEN]) -> u8 {
     report[2..88].iter().fold(0u8, |acc, b| acc ^ b)
 }
@@ -117,8 +139,6 @@ pub struct Rgb {
 }
 
 impl Rgb {
-    pub const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
-
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         Self { r, g, b }
     }

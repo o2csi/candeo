@@ -20,6 +20,23 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"],
+  /* `example.ts` de `@candeo/effects-api` est désigné comme l'effet de
+     référence — le premier fichier qu'on montre à qui veut en écrire un — et
+     rien ne le compilait : le paquet n'a ni `tsconfig.json` ni script, et
+     l'application n'importe que `index.ts`, donc lui seul entrait dans le
+     programme.
+
+     Il est rattaché ici plutôt que dans un projet à part, et c'est le but :
+     `vue-tsc --noEmit` tourne déjà sur cette configuration, en local comme dans
+     le job `web`. Élargir ce qu'il lit ne coûte pas une étape d'intégration
+     continue de plus — les minutes sont comptées — et vérifie l'exemple contre
+     la version de l'API qui est dans l'arbre, pas contre une copie. */
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.tsx",
+    "src/**/*.vue",
+    "../../packages/effects-api/src/**/*.ts"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1288,6 +1288,8 @@ pub fn remember_effect_params(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
     /// Deux dossiers distincts, comme sous Linux : un test qui les
@@ -2367,5 +2369,152 @@ mod tests {
 
         assert!(!depart.contains_key("disparu"));
         assert_eq!(depart.get("speed"), Some(&serde_json::json!(40)));
+    }
+
+    // ------------------------------------------------- miroirs TypeScript
+
+    /// Le miroir, relu tel quel.
+    const CANDEO_TS: &str = include_str!("../../src/api/candeo.ts");
+
+    /// Les noms de champs d'une interface de `candeo.ts`.
+    ///
+    /// Une lecture au ras du texte, et c'est assez : on ne cherche pas à
+    /// comprendre TypeScript, seulement à relever l'identifiant en tête des
+    /// lignes d'un bloc `export interface X { … }`. Une ligne de commentaire n'en
+    /// porte pas — le filtre sur les caractères d'identifiant l'écarte, y compris
+    /// quand la phrase contient un deux-points.
+    fn champs_ts(nom: &str) -> BTreeSet<String> {
+        let entete = format!("export interface {nom} {{");
+        let debut = CANDEO_TS
+            .find(&entete)
+            .unwrap_or_else(|| panic!("« {entete} » introuvable dans src/api/candeo.ts"));
+        let corps = &CANDEO_TS[debut..];
+        let fin = corps
+            .find("\n}")
+            .unwrap_or_else(|| panic!("interface « {nom} » non refermée"));
+        corps[..fin]
+            .lines()
+            .skip(1)
+            .filter_map(|ligne| {
+                let (champ, _) = ligne.trim().split_once(':')?;
+                let champ = champ.trim_end_matches('?');
+                (!champ.is_empty() && champ.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .then(|| champ.to_string())
+            })
+            .collect()
+    }
+
+    /// Confronte les champs **sérialisés** d'une structure à ceux que `candeo.ts`
+    /// déclare pour son miroir.
+    ///
+    /// La sérialisation plutôt que la déclaration : c'est elle qui dit ce qui
+    /// atterrit vraiment dans `settings.json`, `rename_all` et `skip_serializing`
+    /// compris. `log_level_herite` en est donc absent de plein droit — il est lu,
+    /// jamais réécrit — et le miroir n'a pas à le porter.
+    fn miroir(nom_ts: &str, valeur: &impl Serialize) {
+        let json = serde_json::to_value(valeur).expect("sérialisation");
+        let rust: BTreeSet<String> = json
+            .as_object()
+            .unwrap_or_else(|| panic!("« {nom_ts} » ne se sérialise pas en objet"))
+            .keys()
+            .cloned()
+            .collect();
+        let ts = champs_ts(nom_ts);
+
+        let absents_du_ts: Vec<&String> = rust.difference(&ts).collect();
+        let absents_du_rust: Vec<&String> = ts.difference(&rust).collect();
+        assert!(
+            absents_du_ts.is_empty() && absents_du_rust.is_empty(),
+            "« {nom_ts} » a divergé de son miroir :\n  \
+             absents de src/api/candeo.ts : {absents_du_ts:?}\n  \
+             absents de storage.rs : {absents_du_rust:?}"
+        );
+    }
+
+    /// `Settings` est écrit des deux côtés de l'IPC, et rien ne relie les deux à
+    /// la compilation.
+    ///
+    /// Un champ ajouté ici et oublié dans `candeo.ts` ne se voit pas à la
+    /// lecture — `#[serde(default)]` le comble — mais la fenêtre qui relit puis
+    /// réécrit le fichier **efface ce que son type ne nomme pas**. Le champ qui a
+    /// failli partir ainsi est `logLevel`, c'est-à-dire précisément celui dont
+    /// dépend l'initialisation du journal : la perte se serait manifestée au
+    /// démarrage suivant, chez celui qui venait de monter le niveau pour
+    /// comprendre une panne — le seul moment où ce réglage sert.
+    ///
+    /// Même garde que `ETAT_CHANGE` et l'étiquette de la fenêtre : le mot
+    /// « miroir » est une promesse, celle-ci la tient.
+    #[test]
+    fn les_reglages_ont_les_memes_champs_des_deux_cotes() {
+        // Tous les `Option` renseignés : un champ omis par
+        // `skip_serializing_if` manquerait à la confrontation, et le test
+        // laisserait passer exactement ce qu'il surveille.
+        let preferences = Preferences {
+            log_level: Some(LogLevel::Debug),
+        };
+        miroir("Preferences", &preferences);
+        miroir(
+            "Settings",
+            &Settings {
+                preferences,
+                ..Settings::default()
+            },
+        );
+        miroir(
+            "DeviceRecord",
+            &DeviceRecord {
+                vid: 0x1532,
+                pid: 0x0290,
+                serial: Some("SN".into()),
+                state: DeviceState::Adopted,
+                brightness: Some(BRIGHTNESS_DEFAUT),
+            },
+        );
+        miroir(
+            "ActiveEffectRecord",
+            &ActiveEffectRecord {
+                vid: 0x1532,
+                pid: 0x0290,
+                effect: "onde".into(),
+            },
+        );
+        miroir(
+            "EffectParamsRecord",
+            &EffectParamsRecord {
+                vid: 0x1532,
+                pid: 0x0290,
+                effect: "onde".into(),
+                values: serde_json::Map::new(),
+            },
+        );
+    }
+
+    /// La divergence de `EFFECTS_API_VERSION` n'était rattrapée que dans **un**
+    /// sens.
+    ///
+    /// Un manifeste qui annonce une version plus récente que le Rust est refusé à
+    /// l'installation, et c'est ce que le commentaire de `candeo.ts` appelle « pas
+    /// silencieux ». Mais dans l'autre sens rien ne se déclenche : si le Rust
+    /// passait à 2 sans le TypeScript, l'éditeur continuerait d'estampiller
+    /// `apiVersion: 1` sur des effets écrits contre la nouvelle API, et la
+    /// comparaison les accepterait tous — 1 est bien inférieur à 2. Les effets
+    /// seraient installés sous une version qu'ils ne respectent pas, et le jour où
+    /// cette version servirait à refuser quelque chose, elle refuserait de travers.
+    #[test]
+    fn la_version_de_l_api_d_effets_est_la_meme_des_deux_cotes() {
+        let brut = CANDEO_TS
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("export const EFFECTS_API_VERSION = "))
+            .expect("« export const EFFECTS_API_VERSION » introuvable dans src/api/candeo.ts")
+            .trim()
+            .trim_end_matches(';');
+        let declaree: u32 = brut
+            .parse()
+            .unwrap_or_else(|e| panic!("version illisible « {brut} » dans candeo.ts : {e}"));
+
+        assert_eq!(
+            declaree, EFFECTS_API_VERSION,
+            "src/api/candeo.ts annonce la version {declaree}, storage.rs la {EFFECTS_API_VERSION}"
+        );
     }
 }

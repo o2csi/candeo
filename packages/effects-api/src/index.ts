@@ -74,7 +74,7 @@ export interface EffectContext<P = undefined> {
   /**
    * Numéro d'image, incrémenté à chaque rendu.
    *
-   * ⚠️ **Ce n'est pas une horloge.** La boucle vise 60 images par seconde mais
+   * ⚠️ **Ce n'est pas une horloge.** La boucle vise 30 images par seconde mais
    * ne les garantit pas : une machine chargée en fait moins, et les images
    * manquées ne sont **pas** rattrapées. `frameIndex * 0.016` n'est donc pas
    * une durée, et un effet animé dessus **ralentit** au lieu de sauter — sans

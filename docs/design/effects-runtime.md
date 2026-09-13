@@ -18,7 +18,7 @@ celui où une touche s'allume. Les décisions d'**interface** sont dans
   │                                │commande│        │                          │
   │                                │        │        ▼                          │
   │                                │        │  ┌── rquickjs ──┐                 │
-  │  simulateur  ◀─────────────────┼─ ② ────┼──│  boucle 60 Hz │──▶ HID ──▶ 🖮   │
+  │  simulateur  ◀─────────────────┼─ ② ────┼──│  boucle 30 Hz │──▶ HID ──▶ 🖮   │
   │              (images)          │ canal  │  └──────────────┘                 │
   └────────────────────────────────┘        └───────────────────────────────────┘
 ```
@@ -139,7 +139,7 @@ cadence fixe.
 ```
    appareil A                              appareil B
         ┌──────────────────────────┐            ┌───────────────┐
-        │  rquickjs — render(ctx)  │  60 Hz     │  rquickjs — … │
+        │  rquickjs — render(ctx)  │  30 Hz     │  rquickjs — … │
         └────────────┬─────────────┘            └───────┬───────┘
                      │  image : 132 triplets RGB        │
           ┌──────────┴───────────┐                      ▼
@@ -241,7 +241,7 @@ Tauri offre deux directions, et elles n'ont pas les mêmes primitives :
 | front → Rust | **commande** (`invoke`) | requête / réponse, attendue |
 | Rust → front | **événement** ou **canal** | poussée, sans réponse |
 
-Une commande ne peut pas « rendre » 60 images par seconde : elle répond une fois.
+Une commande ne peut pas « rendre » 30 images par seconde : elle répond une fois.
 La remontée passe donc par un canal — `tauri::ipc::Channel`, créé par le front et
 passé en argument d'une commande d'abonnement, avec **l'appareil dont on veut les
 images**. Le simulateur suit celui qui est sélectionné ; changer de sélection
@@ -255,9 +255,9 @@ ferme un canal et en ouvre un autre, plutôt que de multiplexer un flux unique.
    d'abonnement à la fermeture de l'éditeur ;
 3. il transporte du binaire. `InvokeResponseBody::Raw` évite de sérialiser une
    image en tableau JSON d'entiers, qui la ferait passer de **396 octets à plus
-   de 1,5 Ko de texte** — pour rien, 60 fois par seconde.
+   de 1,5 Ko de texte** — pour rien, 30 fois par seconde.
 
-Rappel de proportion : 132 LED × 60 images/s = **7 920 couleurs par seconde**.
+Rappel de proportion : 132 LED × 30 images/s = **3 960 couleurs par seconde**.
 Le choix du canal n'est pas une optimisation nécessaire, c'est simplement la
 primitive juste pour un flux ; autant la prendre.
 

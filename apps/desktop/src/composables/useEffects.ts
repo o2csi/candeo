@@ -66,7 +66,6 @@ export const hardwareEffects: readonly HardwareEffect[] = [
  * simplification, c'est une information fausse dès le second clavier.
  */
 const posed = ref<Record<string, string>>({})
-const applying = ref<string | null>(null)
 const error = ref<string | null>(null)
 
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
@@ -86,7 +85,6 @@ export function useEffects() {
    * puisqu'elle se tromperait silencieusement après un redémarrage.
    */
   async function apply(device: DeviceRef, e: HardwareEffect) {
-    applying.value = e.id
     error.value = null
     try {
       await api.setEffect(device, e.effect)
@@ -95,8 +93,6 @@ export function useEffects() {
       posed.value = { ...posed.value, [key(device)]: e.id }
     } catch (err) {
       error.value = message(err)
-    } finally {
-      applying.value = null
     }
   }
 
@@ -120,7 +116,6 @@ export function useEffects() {
 
   return {
     appliedOn,
-    applying: readonly(applying),
     error: readonly(error),
     apply,
     forgetPosed,

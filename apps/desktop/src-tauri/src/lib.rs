@@ -644,6 +644,11 @@ pub(crate) fn release_devices(state: &AppState) {
 /// Distincte d'[`adopt_device`] : elle ne touche pas à `settings.json`, donc
 /// elle ne survit pas au redémarrage. C'est ce qu'on veut pour essayer un
 /// appareil sans s'engager.
+///
+/// Sans appelant depuis un écran, comme [`disconnect`] et pour la même raison :
+/// l'interface ne propose aujourd'hui qu'adopter ou ignorer, c'est-à-dire les
+/// deux gestes qui **décident**. Celui qui n'engage à rien n'a pas encore son
+/// bouton — et c'est la paire qu'il faudra câbler ensemble, pas l'une des deux.
 #[tauri::command]
 fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutInfo> {
     let device = DeviceRef { vid, pid };
@@ -657,16 +662,15 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
 }
 
 /// Referme **un** appareil. Les autres ne sont pas touchés.
+///
+/// Aucun écran ne l'appelle aujourd'hui — `useDevice` l'enveloppe, personne ne
+/// déstructure l'enveloppe. Elle reste parce qu'elle est le seul geste qui
+/// **referme sans décider** : `ignore_device` écrit dans `settings.json` et vaut
+/// pour les fois suivantes, celle-ci relâche la poignée et rien d'autre. Ce qui
+/// manque est un bouton, pas une commande.
 #[tauri::command]
 fn disconnect(state: State<'_, AppState>, device: DeviceRef) {
     state.set_open(device, None);
-}
-
-#[tauri::command]
-fn is_connected(state: State<'_, AppState>, device: DeviceRef) -> bool {
-    state
-        .opened(device)
-        .is_some_and(|h| h.lock().unwrap().is_some())
 }
 
 /// Gabarit servant de repli quand rien n'est connecté.
@@ -762,6 +766,19 @@ fn set_effect(state: State<'_, AppState>, device: DeviceRef, effect: EffectDto) 
 /// `frame` est une suite plate de triplets RGB et doit couvrir **toutes** les
 /// cases de la matrice. En envoyer moins laisse les dernières rangées figées
 /// sur leur valeur précédente — c'est le piège classique de ce matériel.
+///
+/// # Exposée sans appelant, et délibérément
+///
+/// La fenêtre n'envoie pas d'images : c'est la boucle de [`crate::runtime`] qui
+/// les produit et les écrit, et l'aperçu les **reçoit** par canal au lieu de les
+/// pousser. Aucun écran n'appellera donc celle-ci tant que l'architecture reste
+/// celle-là.
+///
+/// Elle reste le seul chemin qui met une image précise sur le clavier **sans
+/// moteur d'effets** — ce qui a servi à établir que l'image doit couvrir 132
+/// cases et non 106, et qui resservira le jour où un appareil répondra
+/// autrement. Même raison que les `pub` de `candeo-protocol` : ce qui a permis
+/// le relevé reste en état de le refaire.
 #[tauri::command]
 fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
@@ -782,6 +799,13 @@ fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> Cmd
 }
 
 /// Écrit un segment de rangée, sans toucher au reste.
+///
+/// Sans appelant elle aussi, et gardée pour une raison nommée : l'écriture
+/// partielle est **la** piste si la cadence doit remonter au-dessus de 30 —
+/// n'envoyer que les rangées qui changent, au lieu des six à chaque image. Le
+/// commentaire de `runtime::FPS` la désigne comme telle. C'est par ici que cette
+/// piste se vérifie sur le matériel avant d'être écrite dans la boucle ; la
+/// retirer reviendrait à retirer l'outil de mesure avant la mesure.
 #[tauri::command]
 fn write_row(
     state: State<'_, AppState>,
@@ -875,7 +899,6 @@ pub fn run() {
             ignore_device,
             connect,
             disconnect,
-            is_connected,
             get_layout,
             get_default_layout,
             set_brightness,

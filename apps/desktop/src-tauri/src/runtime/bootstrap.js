@@ -37,8 +37,11 @@ globalThis.__candeo_manifest = JSON.stringify({
   params: effect.params ?? {},
 })
 
-// Tampon réutilisé d'une image à l'autre : l'allouer 60 fois par seconde
-// ferait travailler le ramasse-miettes pour rien.
+// Tampon réutilisé d'une image à l'autre : l'allouer 30 fois par seconde
+// ferait travailler le ramasse-miettes pour rien. La cadence a baissé, pas
+// l'argument — le ramasse-miettes de QuickJS se déclenche sur le volume alloué,
+// et 30 tableaux de 396 entrées par seconde restent 30 de trop quand un seul
+// suffit.
 const buf = new Array(FRAME_LEN * 3).fill(0)
 
 // Borne ici, et pas seulement dans `rgb()` : rien n'oblige un effet à passer

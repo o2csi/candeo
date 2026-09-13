@@ -9,9 +9,6 @@ pub mod layout;
 
 pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO};
 
-/// Identifiant fabricant Razer.
-pub const VID_RAZER: u16 = 0x1532;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("périphérique introuvable (VID {vid:#06x}, PID {pid:#06x})")]
