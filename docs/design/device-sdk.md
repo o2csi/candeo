@@ -127,7 +127,7 @@ vocabulary too coarse, that nobody can rely on.
 |---|---|---|
 | `directFrame` | the host can set a frame | **all of them** |
 | `color` | `rgb` or `mono` | anything that deals with hue |
-| `matrix` | positions form a grid, neighborhood has a meaning | "Balayage" (Sweep), "Onde matricielle" (Matrix wave) |
+| `matrix` | positions form a grid, neighborhood has a meaning | "Balayage" (Sweep), "Onde diagonale" (Diagonal wave) |
 | `geometry` | every position has a physical place | "Onde radiale" (Radial wave) |
 | `namedKeys` | every position carries the name of its key | highlighting a shortcut |
 | `zones` | named parts outside the grid | a wheel pulse |
@@ -173,7 +173,7 @@ everywhere and declared nowhere**. The three shipped effects read `key.row`:
 
 ```js
 const k = Math.max(0, 1 - Math.abs(key.row - head) / trail)   // balayage.js
-const d = Math.hypot(key.col - cx, key.row - cy)              // onde-matricielle.js
+const steps = key.col + key.row                               // onde-matricielle.js
 ```
 
 On a device without a grid, `key.row` would be `undefined`, the subtraction
@@ -198,11 +198,10 @@ What the device **does not declare**: it only exposes its logical grid. The
 rectangle of each key is a hand transcription of the ISO layout.
 
 The effect that depends on it has **existed** since [#60]: "Onde radiale"
-computes its distance on the rectangles, and "Onde matricielle" — the earlier
-version, kept as is — computes it in `(rangée, colonne)`. Both are shipped, and
-they do not render the same frame: in the grid, the numpad is four columns from
-the center when it is physically at the other end, the space bar takes one cell
-for 6.25 u, and gaps count as distance. Round in a grid, distorted on the desk.
+computes its distance on the rectangles, and "Onde diagonale" counts steps
+through the matrix, `column + row` from a corner. In the grid, the space bar
+takes one cell for 6.25 u and gaps count as distance: only the first one needs
+the drawing.
 
 What the term would add, and what is still missing: "Onde radiale" **throws** on
 an undrawn layout, instead of being refused before being offered. See §4.
@@ -401,7 +400,7 @@ to.**
 |---|---|---|---|
 | "Respiration" (Breathing) | `kinds: 'all'`, nothing | ✅ | ✅ |
 | "Balayage" | `matrix { rowsMin: 3 }` | ✅ | ❌ no grid |
-| "Onde matricielle" | `matrix` | ✅ | ❌ no grid |
+| "Onde diagonale" | `matrix` | ✅ | ❌ no grid |
 | "Onde radiale" | `geometry` | ✅ | ❌ nothing is drawn |
 | Highlight a shortcut | `namedKeys` | ✅ | ❌ nothing is named |
 | Wheel pulse | `zones: ['wheel']` | ❌ no wheel | ✅ |

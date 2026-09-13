@@ -242,7 +242,7 @@ export default defineEffect({
 })
 ```
 
-The five effects shipped with the application — radial wave, matrix wave,
+The five effects shipped with the application — radial wave, diagonal wave,
 breathing, sweep, static gradient — are written against this same API, in
 [`apps/desktop/src-tauri/src/builtins/`](apps/desktop/src-tauri/src/builtins/).
 They are compiled into the binary, not written in Rust: the first example you

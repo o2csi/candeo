@@ -2253,11 +2253,11 @@ mod tests {
         );
     }
 
-    /// And the matrix wave, for its part, does run there: that is the whole
+    /// And the diagonal wave, for its part, does run there: that is the whole
     /// point of having kept it rather than fixed it. A layout that has not been
     /// drawn keeps an effect.
     #[test]
-    fn the_matrix_wave_runs_without_geometry() {
+    fn the_diagonal_wave_runs_without_geometry() {
         let js = crate::builtins::find("onde-matricielle")
             .expect("built-in")
             .js;
@@ -2266,7 +2266,7 @@ mod tests {
         let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("render");
         assert!(
             bytes.iter().any(|&c| c != 0),
-            "the matrix wave only needs `row` and `col`"
+            "the diagonal wave only needs `row` and `col`"
         );
     }
 
@@ -2593,12 +2593,10 @@ mod tests {
     }
 
     /// "L" (index 75) and "ù" (index 77) are at the **same physical distance**
-    /// from the center of the drawing — 1 u on either side, 0.75 u lower — and at
-    /// two different matrix distances: 1.5 cells against 0.5.
+    /// from the center of the drawing — 1 u on either side, 0.75 u lower.
     ///
-    /// The radial wave must therefore paint them the same color, and the matrix
-    /// wave must not. That is the definition of "radial", checked rather than
-    /// announced.
+    /// The radial wave must therefore paint them the same color. That is the
+    /// definition of "radial", checked rather than announced.
     #[test]
     fn the_radial_wave_measures_physical_distance() {
         let radial = first_frame("onde-radiale");
@@ -2607,36 +2605,77 @@ mod tests {
             color_at(&radial, 77),
             "two keys at equal physical distance must have the same color"
         );
-
-        let matrix = first_frame("onde-matricielle");
-        assert_ne!(
-            color_at(&matrix, 75),
-            color_at(&matrix, 77),
-            "in matrix distance, they are not at equal distance"
-        );
     }
 
-    /// The symmetric pair: "L" (index 75) and "*" (index 78) are at the **same
-    /// matrix distance** — 1.5 cells on either side — but at 1.25 u and 2.14 u
-    /// from the center of the drawing, because the row is staggered and the
-    /// L-shaped Enter key does not fall on the grid.
-    ///
-    /// That is what makes the matrix wave an effect in its own right, and not a
-    /// wrong version of the other one: it renders exactly what it announces.
+    /// "L" (index 75) and "*" (index 78) are at 1.25 u and 2.14 u from the center
+    /// of the drawing, because the row is staggered and the L-shaped Enter key
+    /// does not fall on the grid: the radial wave tells them apart.
     #[test]
-    fn the_matrix_wave_measures_matrix_distance() {
-        let matrix = first_frame("onde-matricielle");
-        assert_eq!(
-            color_at(&matrix, 75),
-            color_at(&matrix, 78),
-            "two keys at equal matrix distance must have the same color"
-        );
-
+    fn the_radial_wave_follows_the_staggered_rows() {
         let radial = first_frame("onde-radiale");
         assert_ne!(
             color_at(&radial, 75),
             color_at(&radial, 78),
             "physically, they are not at equal distance"
+        );
+    }
+
+    /// **The diagonal wave leaves the top-left corner.** Any wave
+    /// measured from the center looked like the radial one on a keyboard 22 cells
+    /// wide and 6 high: both became near-vertical bands. Counting steps from a
+    /// corner changes the motion itself.
+    ///
+    /// Checked on every pair of keys of the real layout: the same diagonal
+    /// (column + row) gives the same color, and mirrored keys, at equal distance
+    /// from the center, no longer do.
+    #[test]
+    fn the_diagonal_wave_starts_from_the_corner() {
+        let diagonal = first_frame("onde-matricielle");
+        let l = layout();
+        let keys: Vec<(u16, u8, u8)> = (0..l.rows)
+            .flat_map(|row| (0..l.cols).map(move |col| (row, col)))
+            .filter_map(|(row, col)| l.at(row, col).map(|index| (index, row, col)))
+            .collect();
+
+        for (i, &(a, a_row, a_col)) in keys.iter().enumerate() {
+            for &(b, b_row, b_col) in &keys[i + 1..] {
+                if a_row + a_col == b_row + b_col {
+                    assert_eq!(
+                        color_at(&diagonal, a.into()),
+                        color_at(&diagonal, b.into()),
+                        "LEDs {a} and {b} are on the same diagonal"
+                    );
+                }
+            }
+        }
+
+        // "L" (row 3, column 9) and "*" (row 3, column 12) mirror each other
+        // around the center: a centered wave painted them alike.
+        assert_ne!(
+            color_at(&diagonal, 75),
+            color_at(&diagonal, 78),
+            "the wave must not be symmetric around the center any more"
+        );
+    }
+
+    /// The bands move **away** from the corner. With speed and scale equal, one
+    /// second moves them by exactly one step: "L" (row 3, column 9) then shows
+    /// the color "K" (row 3, column 8) had a second earlier.
+    #[test]
+    fn the_diagonal_wave_moves_away_from_the_corner() {
+        let js = crate::builtins::find("onde-matricielle")
+            .expect("built-in")
+            .js;
+        let (_rt, ctx) = prepare(js, layout()).expect("load");
+        let params = r#"{"speed":18,"scale":18}"#;
+        let len = layout().led_count();
+        let before = render_once(&ctx, 0.0, 0, params, len).expect("render");
+        let after = render_once(&ctx, 1.0, 1, params, len).expect("render");
+
+        assert_eq!(
+            color_at(&after, 75),
+            color_at(&before, 74),
+            "one second later, the color one step closer to the corner has moved on"
         );
     }
 

@@ -1,15 +1,14 @@
-// Onde radiale — une onde de teinte se propage en cercles depuis le centre du
-// clavier, à la distance **physique** des touches.
+// Radial wave — a hue wave spreads in circles from the center of the keyboard,
+// at the **physical** distance of the keys.
 //
-// « Radiale » est une promesse géométrique, et c'est la géométrie relevée qui la
-// tient : la barre d'espace est loin du centre parce qu'elle est large de
-// 6,25 u, et non parce qu'elle occuperait plusieurs cases — elle n'en occupe
-// qu'une. Les trous de la matrice, eux, ne comptent plus comme de la distance,
-// puisqu'ils n'occupent aucun espace.
+// "Radial" is a geometric promise, and the surveyed geometry keeps it: the space
+// bar is far from the center because it is 6.25 u wide, not because it would
+// take several cells — it takes one. Matrix holes no longer count as distance,
+// since they take no space.
 //
-// L'onde qui compte en cases n'a pas disparu pour autant : c'est « Onde
-// matricielle », et ce n'est pas le même effet. Les deux se suivent dans la
-// galerie parce que la différence ne se voit que côte à côte.
+// The wave that counts cells is "Onde diagonale", and it is a different
+// effect: it leaves a corner in diagonals. The two follow each other in the
+// gallery.
 
 import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
@@ -24,16 +23,16 @@ export default defineEffect({
     const speed = Number(params.speed ?? 120)
     const scale = Number(params.scale ?? 18)
 
-    // Le centre du dessin, et non celui de la matrice : sur un gabarit sans pavé
-    // numérique il se déplace avec lui, et l'onde reste centrée sur l'appareil
-    // qu'on a. `bounds` lève si le gabarit n'a pas été dessiné, plutôt que de
-    // laisser la distance valoir NaN et le clavier rester noir sans un mot.
-    const dessin = bounds(layout)
-    const cx = dessin.x + dessin.w / 2
-    const cy = dessin.y + dessin.h / 2
+    // The center of the drawing, not of the matrix: on a layout without a
+    // numpad it moves with it, and the wave stays centered on the device at
+    // hand. `bounds` throws if the layout was not drawn, rather than letting the
+    // distance be NaN and the keyboard stay dark without a word.
+    const drawing = bounds(layout)
+    const cx = drawing.x + drawing.w / 2
+    const cy = drawing.y + drawing.h / 2
 
-    // `layout.keys` ne contient que les positions portant une LED : les trous
-    // de la matrice restent noirs, ce qui est le bon défaut.
+    // `layout.keys` only holds positions that carry an LED: matrix holes stay
+    // dark, which is the right default.
     for (const key of layout.keys) {
       const c = center(key)
       const d = Math.hypot(c.x - cx, c.y - cy)
