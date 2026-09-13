@@ -47,9 +47,10 @@ other manifest field (#44 §2, "one file, one truth").
 **The directory keeps a readable name** derived from the title, with a numeric
 suffix on collision (#44). Nothing decides on it any more: the `uid` does.
 
-**Hardware effects** (`wave`, `off`, defined in the front end) currently share
-the id space: a user effect named "Wave" collides with them. They move to a
-namespace of their own, `hardware:wave`, outside the library.
+**Hardware effects** (`wave`, `off`, defined in the front end) shared the id
+space with effects named "Wave" or "Off". A uid can never be `wave`, so the
+collision is gone without a namespace of their own; `hardware:wave` would also
+have put a `:` into tray menu ids.
 
 ## 2. Format: one self-contained `.ts` file
 
@@ -154,12 +155,15 @@ One pass at the first launch of the new version, idempotent:
    (`onde-radiale`, `onde-matricielle`, `respiration`, `balayage`,
    `degrade-fixe`).
 2. **User effects** in `effects/<id>/` get a `uid` minted and written into their
-   `source.ts`; their directory is kept.
+   `manifest.json`; their directory is kept. The editor writes it into
+   `source.ts` at the next save, with the TypeScript parser, rather than Rust
+   editing a source by text.
 3. **`settings.json`**: every `activeEffects` and `effectParams` entry is
-   rewritten from id to `uid`, and a schema version is recorded.
-4. Front-end drafts stored under `candeo:brouillon:<id>` are renamed.
+   rewritten from id to `uid`, and `version: 1` is recorded so this runs once.
+4. Front-end drafts stored under `candeo:brouillon:<id>` are renamed when the
+   editor opens, from a table of old ids the Rust side computes from the disk.
 
-The migration is tested on a fixture of a real pre-migration data folder.
+The migration is tested on a fixture shaped like a pre-migration data folder.
 
 ## 8. Out of scope here
 
@@ -171,9 +175,9 @@ The migration is tested on a fixture of a real pre-migration data folder.
 
 ## Order of work
 
-1. `uid` and origin in the manifest, settings keyed by `uid`, and the migration.
+1. `uid` in the manifest, settings keyed by `uid`, and the migration.
 2. Shipped effects as `.ts` in `packages/effects`, generated JavaScript and its
-   CI check; seeding and updates.
+   CI check; origin, seeding and updates.
 3. Remove the built-in special cases (Rust and front end); Duplicate.
 4. Localized manifest text (with #73).
 5. Import and export (#44 §3–4).
