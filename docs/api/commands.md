@@ -384,14 +384,16 @@ Le résultat : un effet uniforme rend quatre fois sa couleur, un dégradé rend
 quatre couleurs échelonnées, un effet majoritairement sombre rend un repère
 sombre. Un effet spatial et un effet uniforme ne peuvent pas se ressembler.
 
-Les quatre effets livrés, tels que le moteur les rend :
-
-| `id` | Repère |
-|---|---|
-| `onde-radiale` | `#58f14a` `#38dc5b` `#3e71df` `#b4a209` |
-| `respiration` | `#803000` `#b94600` `#fe5f00` `#6e2900` |
-| `balayage` | `#0072a2` `#005072` `#004f6f` `#002332` |
-| `degrade-fixe` | `#c51c9c` `#a02faf` `#833dbd` `#475bdb` |
+> **Ce document ne liste plus les repères des effets livrés.** Il en portait un
+> tableau de valeurs hexadécimales, que **rien ne confrontait au résultat** : le
+> jour où « Onde radiale » est passée de la distance de grille à la distance
+> physique, ses quatre couleurs sont devenues fausses sans qu'aucun test, aucune
+> compilation et aucune relecture ne le signale.
+>
+> Un repère **se prélève en exécutant l'effet** — c'est tout l'objet du mécanisme
+> décrit ici. Le recopier dans une page, c'est fabriquer une seconde source de
+> vérité qui ne peut que dériver. La bibliothèque les affiche ; c'est là qu'il
+> faut les regarder.
 
 #### Quand il est calculé, et où il est rangé
 
@@ -407,8 +409,12 @@ processus. Il est une propriété du binaire et non de la bibliothèque de
 l'utilisateur : l'écrire dans le dossier de données créerait un cache à invalider
 à chaque mise à jour de l'application — une version à comparer, un fichier à
 réécrire, et une occasion de montrer le repère de la version précédente — pour
-quatre effets dont l'échantillonnage coûte quelques millisecondes. L'écrire à la
-main dans le Rust est exclu par le principe même du repère.
+une poignée d'effets dont l'échantillonnage coûte quelques millisecondes.
+L'écrire à la main dans le Rust est exclu par le principe même du repère.
+
+⚠️ Le coût, lui, **croît avec le nombre d'effets livrés** : chacun instancie son
+moteur au premier listage. C'est négligeable aujourd'hui et ça ne le restera pas
+indéfiniment — ne pas chiffrer ici, le nombre a déjà menti une fois.
 
 Un effet installé par une version antérieure n'a donc pas de repère tant qu'il
 n'est pas réenregistré. C'est le prix de cette règle, et il se paie en pastille
