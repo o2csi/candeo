@@ -1,52 +1,52 @@
 # candeo
 
-> *candeo*, verbe latin — « je brille, je rayonne ». La racine de *candela*,
-> l'unité SI d'intensité lumineuse.
+> *candeo*, Latin verb — "I shine, I glow". The root of *candela*,
+> the SI unit of luminous intensity.
 
-Contrôle de l'éclairage de claviers, par **accès HID direct**. Pas de runtime
-constructeur, pas de service tiers, pas de couche d'abstraction : l'application
-parle au périphérique.
+Keyboard lighting control, through **direct HID access**. No vendor runtime,
+no third-party service, no abstraction layer: the application talks to the
+device.
 
 ---
 
-## État
+## Status
 
-Preuve de concept fonctionnelle sur **Razer DeathStalker V2 Pro (filaire)**.
-Le protocole a été relevé par capture du bus USB, puis **validé en écriture
-directe** — couleurs unies, dégradé par rangée, écriture partielle de rangée et
-bascule d'effet micrologiciel, le tout sans aucun logiciel tiers actif.
+Working proof of concept on the **Razer DeathStalker V2 Pro (wired)**.
+The protocol was surveyed by capturing the USB bus, then **validated by direct
+writes** — solid colors, per-row gradient, partial row writes and firmware
+effect switching, all with no third-party software running.
 
-| Couche | État |
+| Layer | Status |
 |---|---|
-| `candeo-protocol` — rapports et somme de contrôle | fait, testé contre une trame capturée |
-| `candeo-device` — transport HID et gabarits | fait, validé sur matériel |
-| Commandes Tauri | câblées et documentées — voir [`docs/api/`](docs/api/commands.md) |
-| Interface Vue | trois écrans — bibliothèque, périphériques, éditeur ; décisions dans [`docs/design/`](docs/design/studio.md) |
-| Moteur d'effets utilisateur | moteur unique `rquickjs` côté Rust ; stockage, réglages et **cinq effets livrés** faits |
+| `candeo-protocol` — reports and checksum | done, tested against a captured frame |
+| `candeo-device` — HID transport and layouts | done, verified on hardware |
+| Tauri commands | wired and documented — see [`docs/api/`](docs/api/commands.md) |
+| Vue interface | three screens — library, devices, editor; decisions in [`docs/design/`](docs/design/studio.md) |
+| User effects engine | single `rquickjs` engine on the Rust side; storage, settings and **five shipped effects** done |
 
 ---
 
-## Origine du protocole
+## Protocol origin
 
-Le protocole a été établi **par observation du matériel** : énumération PnP
-Windows, interrogation d'un serveur SDK par son protocole réseau, capture du bus
-USB avec USBPcap et Wireshark, puis écriture et lecture directes via l'API HID.
+The protocol was established **by observing the hardware**: Windows PnP
+enumeration, querying an SDK server over its network protocol, capturing the USB
+bus with USBPcap and Wireshark, then direct writes and reads through the HID API.
 
-Chaque fait porte la date où il a été établi et **la version de micrologiciel
-contre laquelle il l'a été** — v1.5, les 11 et 12/09/2026. C'est ce qui permet de
-diagnostiquer un comportement inattendu.
+Each fact carries the date it was established and **the firmware version it was
+established against** — v1.5, on 11 and 12/09/2026. That is what makes it
+possible to diagnose unexpected behavior.
 
-Les faits relatifs à un protocole ne relèvent pas du droit d'auteur, et leur
-relevé aux fins d'interopérabilité est prévu par l'**article L.122-6-1 IV du
-Code de la propriété intellectuelle** (transposition de la directive 2009/24/CE,
-article 6).
+Facts about a protocol are not subject to copyright, and surveying them for
+interoperability purposes is provided for by **Article L.122-6-1 IV of the
+French Intellectual Property Code** (transposing Directive 2009/24/EC,
+Article 6).
 
-La documentation complète du protocole, avec les trames commentées et la méthode
-de capture reproductible, est dans [`docs/protocol/`](docs/protocol/).
+The full protocol documentation, with annotated frames and the reproducible
+capture method, is in [`docs/protocol/`](docs/protocol/).
 
 ---
 
-## Organisation
+## Structure
 
 ```
 candeo/
@@ -66,89 +66,87 @@ candeo/
     └── design/            décisions d'interface et d'exécution, prises avant code
 ```
 
-La séparation `protocol` / `device` est délibérée : la construction des rapports
-et la somme de contrôle se testent **sans matériel**, en intégration continue.
+The `protocol` / `device` split is deliberate: report construction and the
+checksum are tested **without hardware**, in continuous integration.
 
 ---
 
-## Conception de l'interface
+## Interface design
 
-Les décisions sont figées avant d'écrire du Vue, et documentées dans
-[`docs/design/studio.md`](docs/design/studio.md). Maquette de référence :
-non publiée
+Decisions are frozen before any Vue is written, and documented in
+[`docs/design/studio.md`](docs/design/studio.md). Reference mockup:
+not published
 
-Les trois partis pris qui structurent le reste :
+The three design choices that structure everything else:
 
-- **La galerie d'effets est l'écran d'accueil**, pas l'éditeur. Un « ＋ » entre en
-  édition ; la plupart des lancements servent à choisir, pas à écrire.
-- **Un seul moteur exécute les effets**, `rquickjs` côté Rust, dans un fil
-  indépendant de la fenêtre. Le front n'exécute jamais de code utilisateur : il
-  envoie la source et reçoit les images. L'aperçu **est** donc la production, et
-  un effet continue de tourner fenêtre fermée. Le motif n'a jamais été la
-  performance — 132 LED × 30 img/s = 3 960 couleurs/s, trivial.
-- **Fermer la fenêtre replie candeo dans la zone de notification.** C'est la
-  seconde moitié de la phrase précédente, et elle n'était pas tenue jusqu'à
-  l'issue #46 : un fil indépendant de la fenêtre ne survit pas au processus, et
-  le processus s'arrêtait avec sa dernière fenêtre. L'icône le retient — elle
-  intercepte `RunEvent::ExitRequested` — et donne de quoi piloter sans la
-  fenêtre : effet courant et bibliothèque par appareil piloté, envoi au clavier
-  en bascule, extinction. **« Quitter candeo » y est la seule sortie franche**,
-  et quitter laisse l'éclairage tel quel. Voir
+- **The effect gallery is the home screen**, not the editor. A "＋" enters
+  editing; most launches are for choosing, not for writing.
+- **A single engine runs effects**, `rquickjs` on the Rust side, in a thread
+  independent of the window. The front end never runs user code: it sends the
+  source and receives the frames. The preview therefore **is** production, and
+  an effect keeps running with the window closed. The motive was never
+  performance — 132 LEDs × 30 fps = 3,960 colors/s, trivial.
+- **Closing the window tucks candeo into the system tray.** This is the second
+  half of the previous sentence, and it did not hold until issue #46: a thread
+  independent of the window does not outlive the process, and the process exited
+  with its last window. The tray icon keeps it alive — it intercepts
+  `RunEvent::ExitRequested` — and provides what is needed to control things
+  without the window: current effect and library per controlled device, sending
+  to the keyboard as a toggle, lights off. **"Quitter candeo" (Quit candeo) is
+  the only real exit there**, and quitting leaves the lighting as it is. See
   [`src/tray.rs`](apps/desktop/src-tauri/src/tray.rs).
-- **Le simulateur dessine le vrai clavier**, disposition ISO pleine taille. Le
-  périphérique ne déclare que sa grille logique 6 × 22 ; la géométrie physique est
-  écrite à la main.
+- **The simulator draws the real keyboard**, full-size ISO layout. The device
+  only declares its 6 × 22 logical grid; the physical geometry is written by
+  hand.
 
-Le cycle de vie complet d'un effet — transpilation, stockage, boucle de rendu,
-remontée des images — est décrit dans
+The full lifecycle of an effect — transpilation, storage, render loop, frames
+flowing back — is described in
 [`docs/design/effects-runtime.md`](docs/design/effects-runtime.md).
 
 ---
 
-## Portabilité
+## Portability
 
-Développé sous Windows, écrit pour ne pas s'y enfermer. Personne n'a de machine
-Linux dans la boucle, alors la CI tient le rôle : le job `linux` construit
-l'espace de travail complet sous `ubuntu-latest`, joue les tests, empaquette en
-`.deb` et en `.rpm`, et **lit les paquets produits** pour vérifier que la règle
-udev s'y trouve.
+Developed on Windows, written so as not to be locked into it. Nobody has a Linux
+machine in the loop, so CI plays that role: the `linux` job builds the full
+workspace on `ubuntu-latest`, runs the tests, packages as `.deb` and `.rpm`,
+and **reads the produced packages** to check that the udev rule is in them.
 
-D'où la distinction que tient cette section : ce qui est **compilé** et ce qui
-reste **supposé**.
+Hence the distinction this section keeps: what is **compiled** and what remains
+**assumed**.
 
-### Compilé et vérifié
+### Compiled and verified
 
-- **Accès matériel.** La dorsale `hidraw` d'`hidapi` se construit sous Linux, et
-  rien dans les trois crates ne dépend de Windows pour compiler.
-- **Empaquetage.** `.deb` et `.rpm` sont produits, et la règle udev est présente
-  dans les deux à `/usr/lib/udev/rules.d/60-candeo.rules` — vérifié par lecture
-  des paquets, pas par relecture de la configuration. ⚠️ **Cette vérification ne
-  tourne plus sur les propositions de fusion**, seulement sur `main` et à la
-  demande : voir [Vérifier Linux en local](#vérifier-linux-en-local).
-- **Protocole.** `candeo-protocol` n'a aucune dépendance système : il construit
-  des octets, et ses tests tournent partout.
-- **Chemins.** Aucun chemin n'est écrit en dur : l'API de Tauri applique la
-  convention du système. Les effets vont dans `app_data_dir()`
-  (`%APPDATA%\com.oorabona.candeo` ou `~/.local/share/…`), les réglages dans
-  `app_config_dir()`. **Jamais dans `Program Files`** — lecture seule pour un
-  compte standard, et commun à tous les comptes.
+- **Hardware access.** The `hidraw` backend of `hidapi` builds on Linux, and
+  nothing in the three crates depends on Windows to compile.
+- **Packaging.** `.deb` and `.rpm` are produced, and the udev rule is present
+  in both at `/usr/lib/udev/rules.d/60-candeo.rules` — verified by reading the
+  packages, not by rereading the configuration. ⚠️ **This check no longer runs
+  on pull requests**, only on `main` and on demand: see
+  [Verifying Linux locally](#verifying-linux-locally).
+- **Protocol.** `candeo-protocol` has no system dependencies: it builds bytes,
+  and its tests run everywhere.
+- **Paths.** No path is hard-coded: Tauri's API applies the system's convention.
+  Effects go in `app_data_dir()`
+  (`%APPDATA%\com.oorabona.candeo` or `~/.local/share/…`), settings in
+  `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
+  account, and shared by all accounts.
 
-### Supposé, faute de matériel Linux
+### Assumed, for lack of Linux hardware
 
-Il n'y a pas d'USB derrière un coureur GitHub. Trois points attendent un clavier
-branché sur une machine Linux : que l'écriture de rapport de fonctionnalité
-aboutisse par hidraw, que `interface_number` distingue les interfaces du
-composite comme sous Windows, et que les dossiers résolus par Tauri tombent bien
-dans `~/.local/share` et `~/.config`.
+There is no USB behind a GitHub runner. Three points are waiting for a keyboard
+plugged into a Linux machine: that feature report writes go through over hidraw,
+that `interface_number` tells the composite device's interfaces apart as it does
+on Windows, and that the folders resolved by Tauri really do land in
+`~/.local/share` and `~/.config`.
 
-### Vérifier Linux en local
+### Verifying Linux locally
 
-Le job `linux` de la CI coûte un quart d'heure, dont une dizaine de minutes à
-recompresser un `.rpm` de débogage. Il ne tourne donc **pas** sur les
-propositions de fusion : seulement sur `main`, et à la demande via
-**Actions → CI → Run workflow** en choisissant la branche.
+The CI `linux` job takes a quarter of an hour, about ten minutes of which go into
+recompressing a debug `.rpm`. So it does **not** run on pull requests: only on
+`main`, and on demand via **Actions → CI → Run workflow**, picking the branch.
 
-Entre-temps, WSL fait le même travail sans attendre un coureur :
+In the meantime, WSL does the same work without waiting for a runner:
 
 ```bash
 sudo apt-get install -y \
@@ -160,9 +158,8 @@ cargo check --workspace --all-targets
 cargo test --workspace
 ```
 
-Et si le changement touche l'empaquetage, les I/O HID ou les dépendances
-système, la vérification complète — c'est l'étape lente, à ne lancer que dans ce
-cas :
+And if the change touches packaging, HID I/O or system dependencies, the full
+check — this is the slow step, to run only in that case:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -173,54 +170,53 @@ dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$regle"
 rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$regle"
 ```
 
-Les deux `grep` sont la preuve : la règle est bien **dans les paquets**, et pas
-seulement déclarée dans `tauri.conf.json`.
+The two `grep` calls are the proof: the rule really is **in the packages**, not
+merely declared in `tauri.conf.json`.
 
-### Règle udev
+### udev rule
 
-`/dev/hidraw*` est créé en `0600 root:root`. Le fichier est dans
-[`packaging/linux/`](packaging/linux/60-candeo.rules) ; les paquets `deb` et
-`rpm` l'installent. Depuis les sources, il faut le copier soi-même :
+`/dev/hidraw*` is created as `0600 root:root`. The file is in
+[`packaging/linux/`](packaging/linux/60-candeo.rules); the `deb` and
+`rpm` packages install it. From source, you have to copy it yourself:
 
 ```bash
 sudo cp packaging/linux/60-candeo.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Le détail — pourquoi `uaccess` plutôt qu'un groupe, pourquoi le préfixe 60,
-pourquoi les dorsales `*-native` d'`hidapi` ont été évaluées puis écartées — est
-dans [`docs/design/effects-runtime.md`](docs/design/effects-runtime.md) §6.
+The details — why `uaccess` rather than a group, why the 60 prefix, why the
+`*-native` backends of `hidapi` were evaluated and then set aside — are in
+[`docs/design/effects-runtime.md`](docs/design/effects-runtime.md) §6.
 
 ---
 
-## Le protocole en bref
+## The protocol at a glance
 
-Transfert de contrôle USB, `SET_REPORT` sur rapport de fonctionnalité, interface 3.
+USB control transfer, `SET_REPORT` on a feature report, interface 3.
 
 ```
 bmRequestType 0x21   bRequest 0x09   wValue 0x0300   wIndex 3   wLength 90
 ```
 
-Rapport de 90 octets :
+90-byte report:
 
-| Offset | Contenu |
+| Offset | Content |
 |---|---|
-| 1 | identifiant de transaction (`0x9f`) |
-| 5 | taille des arguments |
-| 6 | classe — `0x0f` = éclairage |
-| 7 | commande — `0x02` effet, `0x03` rangée, `0x04` luminosité |
+| 1 | transaction ID (`0x9f`) |
+| 5 | argument size |
+| 6 | class — `0x0f` = lighting |
+| 7 | command — `0x02` effect, `0x03` row, `0x04` brightness |
 | 8+ | arguments |
-| 88 | **XOR des octets 2 à 87** |
+| 88 | **XOR of bytes 2 to 87** |
 
-Couleurs en **RGB** — à ne pas confondre avec le SDK Chroma, qui est en `0x00BBGGRR`.
+Colors in **RGB** — not to be confused with the Chroma SDK, which uses `0x00BBGGRR`.
 
 ---
 
-## Écrire un effet
+## Writing an effect
 
-Un effet est une fonction du temps et de la position vers une couleur. C'est
-précisément pour cela que **YAML ne convient pas** : on y décrirait une
-configuration, pas un comportement.
+An effect is a function from time and position to a color. That is precisely
+why **YAML does not fit**: it would describe a configuration, not a behavior.
 
 ```ts
 import { defineEffect, hsv } from '@candeo/effects-api'
@@ -246,15 +242,15 @@ export default defineEffect({
 })
 ```
 
-Les cinq effets livrés avec l'application — onde radiale, onde matricielle,
-respiration, balayage, dégradé fixe — sont écrits contre cette même API, dans
+The five effects shipped with the application — radial wave, matrix wave,
+breathing, sweep, static gradient — are written against this same API, in
 [`apps/desktop/src-tauri/src/builtins/`](apps/desktop/src-tauri/src/builtins/).
-Ils sont compilés dans le binaire, pas écrits en Rust : le premier exemple qu'on
-ouvre doit être exactement ce qu'on peut écrire soi-même.
+They are compiled into the binary, not written in Rust: the first example you
+open must be exactly what you could write yourself.
 
 ---
 
-## Développement
+## Development
 
 ```bash
 pnpm install
@@ -263,14 +259,14 @@ pnpm check          # clippy + tests Rust
 cargo test -p candeo-protocol   # tests du protocole, sans materiel
 ```
 
-### Prérequis
+### Prerequisites
 
-Rust stable, Node 22+, pnpm 10+.
+Stable Rust, Node 22+, pnpm 10+.
 
-Sous **Windows**, le runtime WebView2 — présent par défaut sur Windows 11.
+On **Windows**, the WebView2 runtime — present by default on Windows 11.
 
-Sous **Debian / Ubuntu**, les dépendances système de Tauri 2, plus `libudev-dev`
-qu'`hidapi` résout par `pkg-config` :
+On **Debian / Ubuntu**, the Tauri 2 system dependencies, plus `libudev-dev`,
+which `hidapi` resolves through `pkg-config`:
 
 ```bash
 sudo apt-get install -y \
@@ -279,20 +275,36 @@ sudo apt-get install -y \
   libudev-dev build-essential pkg-config file
 ```
 
-C'est la liste qu'installe le job `linux` de la CI — si elle se périme, la CI le
-dit. Elle y ajoute `rpm`, qui ne sert qu'à relire le paquet produit.
+This is the list the CI `linux` job installs — if it goes stale, CI will say so.
+The job adds `rpm`, which is only used to read back the produced package.
 
 ---
 
-## Pièges rencontrés, pour mémoire
+## Pitfalls encountered, for the record
 
-- **132 et 106 ne sont pas la même chose.** La matrice fait 6 × 22 = **132**
-  cases, et c'est ce qu'une image doit couvrir ; **106** seulement portent une
-  touche. En envoyer 106 laisse les dernières rangées figées sur leur valeur
-  précédente — symptôme vécu : la rangée du bas restée blanche.
-- La chaîne de variante du périphérique **change avec le micrologiciel**
-  (`v1.4 / Unkown Variant` → `v1.5 / Quartz`). Identifier sur VID / PID / série.
-- Le tampon `HidD_SetFeature` fait **91 octets** : identifiant de rapport, puis
-  les 90 octets du rapport.
-- Sur un composite USB, ouvrir la mauvaise interface donne un handle valide sur
-  lequel toute écriture échoue.
+- **132 and 106 are not the same thing.** The matrix is 6 × 22 = **132**
+  cells, and that is what a frame must cover; only **106** of them carry a key.
+  Sending 106 leaves the last rows frozen at their previous value — symptom
+  actually seen: the bottom row stuck on white.
+- The device's variant string **changes with the firmware**
+  (`v1.4 / Unkown Variant` → `v1.5 / Quartz`). Identify by VID / PID / serial number.
+- The `HidD_SetFeature` buffer is **91 bytes**: report ID, then the 90 bytes of
+  the report.
+- On a USB composite device, opening the wrong interface gives a valid handle on
+  which every write fails.
+
+---
+
+## Issue history
+
+The project was developed in a private repository before being published. Its
+issues and pull requests have been recreated here **under their original
+numbers**, so that the `#N` references in commit messages, code and
+documentation lead to the right place. A pull request appears here as a closed
+issue, labeled `PR archivée` (archived PR), that links to its commit in the
+history of `main`.
+
+## License
+
+Distributed under the terms of the GNU General Public License, **version 3
+only** (`GPL-3.0-only`). See [`LICENSE`](LICENSE).
