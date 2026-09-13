@@ -1,8 +1,7 @@
 # The effects library — one kind of effect
 
-Status: **proposal**, to be validated before any code. Covers the redesign of the
-shipped effects and the identity and format of #44, which turn out to be one
-project.
+Status: **accepted**. Covers the redesign of the shipped effects and the identity
+and format of #44, which turn out to be one project.
 
 ## Why
 
@@ -85,10 +84,13 @@ starts. Three ways:
 | B. Type stripping in Rust (`oxc`) | one heavy dependency | also enables importing without a window |
 | C. Shipped sources restricted to TypeScript that is valid JavaScript | none | no types in the effects meant to be read and copied |
 
-**Recommendation: A.** The CI check keeps the executed bytes equal to what a
-reviewer reads, which is the principle of #44 §2. B stays open for the day
-import must work without a window. The Rust `rust` CI job has no Node, which
-rules out running `tsc` from `build.rs`.
+**Decision: A.** The CI check keeps the executed bytes equal to what a reviewer
+reads, which is the principle of #44 §2. B stays open for the day import must
+work without a window. The Rust `rust` CI job has no Node, which rules out
+running `tsc` from `build.rs`.
+
+Either way, the shipped sources and their JavaScript are **embedded in the
+binary**: seeding happens at first launch, window closed and possibly offline.
 
 ## 4. Seeding and updates
 
@@ -97,7 +99,7 @@ At startup, for each shipped effect, keyed by `uid`:
 | Library state | Action |
 |---|---|
 | Absent, never deleted | install it |
-| Present, source equal to the version shipped last time | update it silently if the shipped version changed |
+| Present, source equal to the version shipped last time | update it, **silently**, if the shipped version changed |
 | Present, source modified by the user | keep the user's version; mark "update available" |
 | Deleted by the user | leave it deleted |
 
@@ -106,9 +108,11 @@ To tell these apart, an installed effect records its **origin**: the shipped
 effect is remembered in `settings.json`, so it does not come back at the next
 launch.
 
-**"Restore shipped effects"** (Périphériques → Configuration) forgets those
-deletions and reinstalls the missing ones. It never overwrites a modified
-effect.
+**No "Restore shipped effects" action.** candeo is open source: a deleted shipped
+effect comes back by importing its file from the repository, once import exists
+(#44 §3–4). Until then it stays deleted on that machine, which costs one effect,
+never user work. The action is trivial to add later, since the sources are
+embedded anyway; it is left out to keep the interface for what is frequent.
 
 ## 5. What disappears, what stays
 
@@ -170,14 +174,14 @@ The migration is tested on a fixture of a real pre-migration data folder.
 1. `uid` and origin in the manifest, settings keyed by `uid`, and the migration.
 2. Shipped effects as `.ts` in `packages/effects`, generated JavaScript and its
    CI check; seeding and updates.
-3. Remove the built-in special cases (Rust and front end); Duplicate and
-   "Restore shipped effects".
+3. Remove the built-in special cases (Rust and front end); Duplicate.
 4. Localized manifest text (with #73).
 5. Import and export (#44 §3–4).
 
-## Open questions
+## Decisions taken on review
 
-1. Option A (generated JavaScript committed) or B (type stripping in Rust)?
-2. Should an update of an unmodified shipped effect be silent, or announced?
-3. Is "Restore shipped effects" worth a place in Configuration, or is reinstalling
-   a deleted effect from a future import enough?
+1. Compiling shipped effects: **A**, generated JavaScript committed and checked
+   by CI.
+2. Updating an unmodified shipped effect: **silent**.
+3. No "Restore shipped effects" action for now: a deleted shipped effect comes
+   back through import from the repository.
