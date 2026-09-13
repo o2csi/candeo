@@ -455,6 +455,15 @@ table. The loop that fed it holds a copy: it notices at the
 next frame, stops writing, and says so through `reachingKeyboard`. That is what
 makes it possible to stop writing to a device without stopping the effect running on it.
 
+**The loop also closes a device on its own** after one second of consecutive
+failed writes (`MAX_DEVICE_WRITE_ERRORS`). An unplugged keyboard leaves a dead
+handle: plugging it back in creates a new device instance that this handle never
+reaches again, and keeping it made the window and the tray report the device as
+open while nothing got through (#72). The close happens under the handle's lock,
+in the same critical section as the failing write, so it cannot drop a keyboard
+that a reconnection has just put back. The effect keeps running; reconnecting
+goes through the existing commands.
+
 ---
 
 ## 8. Still to do
