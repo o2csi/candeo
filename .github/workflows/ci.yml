@@ -1,15 +1,56 @@
 name: CI
 
+# Les minutes d'un dépôt privé sont facturées, et ce fichier les dépense. Trois
+# garde-fous sont posés ici, après une journée à 60 exécutions qui a épuisé le
+# quota et coupé Actions.
 on:
   push: { branches: [main] }
   pull_request:
+    # Une modification qui ne touche que de la prose ne casse ni la compilation,
+    # ni les tests, ni l'empaquetage. Plusieurs propositions d'une même journée
+    # sont purement rédactionnelles — relevé de protocole, README, documents de
+    # conception — et déclenchaient l'ensemble.
+    #
+    # ⚠️ Ne filtre QUE les propositions de fusion. Sur `main`, tout s'exécute :
+    # c'est là que les caches se sauvegardent, et un `main` qui saute des
+    # exécutions laisserait les caches vieillir.
+    paths-ignore: ["**/*.md", "docs/**", "LICENSE*"]
   # Permet de lancer le job `linux` à la demande sur une branche donnée, sans
   # attendre la fusion. Voir la condition portée par ce job.
   workflow_dispatch:
 
+# Une exécution rendue caduque par la suivante ne prouve plus rien, et coûte
+# autant. Une même proposition reçoit souvent trois à quatre poussées, et
+# chaque exécution dépassée allait jusqu'au bout.
+#
+# ⚠️ Jamais sur `main` : une exécution annulée **ne sauvegarde pas son cache**,
+# et deux fusions rapprochées suffiraient à ne jamais en écrire un seul. C'est
+# exactement le mécanisme qui a déjà gelé le cache du job `rust` pendant une
+# demi-journée.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  # ⚠️ Sur Ubuntu, et non plus Windows — c'est le poste le plus lourd du fichier
+  # et le coureur Windows est **facturé au double**.
+  #
+  # Ce qu'on garde : rien ici n'est spécifique à un système. `fmt` et `clippy`
+  # lisent du code, et aucun test ne touche au matériel — il n'y a pas d'USB
+  # derrière un coureur GitHub, quel que soit son système.
+  #
+  # Ce qu'on perd, et c'est nommé plutôt que passé sous silence : les tests ne
+  # s'exécutent plus sous Windows à chaque proposition. La **compilation**
+  # Windows, elle, reste prouvée par le job `build`, qui construit l'application
+  # entière en `release`. Et le développement se fait sous Windows : ces tests y
+  # tournent en local en permanence, ce qui est précisément le seul endroit où
+  # une divergence de chemins se verrait d'abord.
+  #
+  # Si une régression propre à Windows passait un jour au travers, la réponse
+  # est une exécution périodique ou à la demande — pas un coureur facturé double
+  # sur chaque poussée.
   rust:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       # Guillemets indispensables : en notation compacte, la virgule sépare deux
@@ -32,6 +73,16 @@ jobs:
       # bruit — cette clé est tout ce qui relie le cache aux profils.
       - uses: Swatinem/rust-cache@v2
         with: { key: "${{ hashFiles('Cargo.toml') }}" }
+      # `clippy --all-targets` compile `candeo-desktop`, donc lie webkit2gtk :
+      # sans ces paquets, il échoue à l'édition de liens et non à l'analyse.
+      # Même liste que le job `linux`, moins `rpm` — on n'empaquette rien ici.
+      - name: Dépendances système
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
+            libudev-dev build-essential pkg-config file
       - run: cargo fmt --all -- --check
       # Tout l'espace de travail, et non les deux seules crates sans Tauri :
       # les effets livrés avec l'application sont du JavaScript compilé dans le
@@ -95,11 +146,14 @@ jobs:
       # `tauri-build` se contente d'un `frontendDist` absent — c'est pourquoi le
       # job `rust`, sous Windows, compile `candeo-desktop` sans jamais voir pnpm.
       - run: pnpm install --frozen-lockfile
-      - run: cargo check --workspace --all-targets
-      # Aucun test ne touche au matériel. Les rejouer ici vérifie que la
-      # validation des identifiants et le moteur `rquickjs` se comportent de la
-      # même façon sur un système de fichiers sensible à la casse.
-      - run: cargo test --workspace
+      # Ni `cargo check` ni `cargo test` ici : depuis que le job `rust` tourne
+      # sous Ubuntu, il les a déjà exécutés **sur ce même système**, y compris la
+      # sensibilité à la casse du système de fichiers qui était l'argument de les
+      # rejouer. Les refaire coûterait le temps de compilation deux fois pour la
+      # même preuve.
+      #
+      # Ce job garde donc ce que lui seul établit : que l'application
+      # s'**empaquette**, et que la règle udev est dans les paquets produits.
       # Empaquetage en profil `debug` : on ne mesure pas le binaire, on lit le
       # contenu du paquet. Le profil `release` (lto, codegen-units = 1) coûterait
       # plusieurs minutes pour la même preuve. AppImage est écarté — il télécharge
@@ -198,14 +252,16 @@ jobs:
       # cache de sa base, et les caches de PR ne feraient qu'évincer celui dont
       # tout le monde repart.
       #
-      # Sans l'empreinte des profils ajoutée aux jobs `rust` et `linux`, et c'est
-      # délibéré : seul `[profile.dev.package."*"]` a bougé, et il ne touche pas
-      # `release` — ce job est resté à ses six minutes pendant que les deux autres
-      # passaient à trente. Le trou reste néanmoins ouvert ici : le jour où
-      # `[profile.release]` change, la clé ne bougera pas davantage et ce cache-ci
-      # se figera de la même façon. C'est la même clé qu'il faudra lui donner.
+      # Même empreinte des profils que les jobs `rust` et `linux`. Elle n'était
+      # pas nécessaire ici sur le moment — seul `[profile.dev.package."*"]` avait
+      # bougé, et ce job est resté à six minutes pendant que les deux autres
+      # passaient à trente — mais `[profile.release]` vit dans le **même**
+      # `Cargo.toml` : le jour où il change, ce cache se figerait exactement de la
+      # même façon, et personne ne ferait le lien une seconde fois.
       - uses: Swatinem/rust-cache@v2
-        with: { save-if: "${{ github.ref == 'refs/heads/main' }}" }
+        with:
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
+          key: "${{ hashFiles('Cargo.toml') }}"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with: { node-version: 24, cache: pnpm }
