@@ -877,12 +877,12 @@ fn render_loop(
     // and everything logged below — including in [`emit`] — carries them too,
     // without a single call having to pass them.
     //
-    // Two names, not a field to read: in a log read afterwards, "rendu"
-    // (render) and "aperçu" (preview) must be told apart at a glance — an
+    // Two names, not a field to read: in a log read afterwards, "render" and
+    // "preview" must be told apart at a glance — an
     // effect error in one did not turn off the keyboard, in the other it did.
     let span = match target {
-        Target::Device(d) => tracing::info_span!("rendu", device = %d, effect = %effect_id),
-        Target::Preview(d) => tracing::info_span!("aperçu", layout = %d, effect = %effect_id),
+        Target::Device(d) => tracing::info_span!("render", device = %d, effect = %effect_id),
+        Target::Preview(d) => tracing::info_span!("preview", layout = %d, effect = %effect_id),
     };
     let _entered = span.enter();
 
@@ -1759,7 +1759,7 @@ mod tests {
         start(&engine, FIRST, "casse", Arc::clone(&broken));
         start(&engine, SECOND, "sain", Arc::clone(&healthy));
 
-        wait_for("le voisin sain n'écrit rien", || {
+        wait_for("the healthy neighbor writes nothing", || {
             healthy.written.load(Ordering::Relaxed) >= 3
         });
 
@@ -1786,7 +1786,7 @@ mod tests {
         // share no thread, no lock and no state.
         let before = healthy.written.load(Ordering::Relaxed);
         engine.stop(FIRST);
-        wait_for("le voisin s'est arrêté avec son camarade", || {
+        wait_for("the neighbor stopped along with it", || {
             healthy.written.load(Ordering::Relaxed) > before
         });
         assert!(!status(&engine, FIRST).running);
@@ -1811,13 +1811,13 @@ mod tests {
         assert_eq!(status(&engine, SECOND).effect_id.as_deref(), Some("second"));
 
         engine.set_to_keyboard(SECOND, false);
-        wait_for("la sortie du second reste ouverte", || {
+        wait_for("the second output stays on", || {
             !status(&engine, SECOND).reaching_keyboard
         });
 
         let frozen = b.written.load(Ordering::Relaxed);
         let before = a.written.load(Ordering::Relaxed);
-        wait_for("le premier n'écrit plus", || {
+        wait_for("the first no longer writes", || {
             a.written.load(Ordering::Relaxed) > before + 2
         });
 
@@ -1877,7 +1877,7 @@ mod tests {
         // its frames keep going out.
         let before = neighbor.written.load(Ordering::Relaxed);
         assert!(status(&engine, SECOND).running);
-        wait_for("le voisin s'est arrêté avec son camarade", || {
+        wait_for("the neighbor stopped along with it", || {
             neighbor.written.load(Ordering::Relaxed) > before
         });
 
@@ -1962,7 +1962,7 @@ mod tests {
 
         // And frames keep going out to the keyboard during the preview.
         let before = output.written.load(Ordering::Relaxed);
-        wait_for("le clavier n'est plus alimenté", || {
+        wait_for("the keyboard is no longer fed", || {
             output.written.load(Ordering::Relaxed) > before + 2
         });
 
@@ -1981,7 +1981,7 @@ mod tests {
 
         let frozen = output.written.load(Ordering::Relaxed);
         preview_effect(&engine, FIRST, "regarde");
-        wait_for("l'aperçu n'a rendu aucune image", || {
+        wait_for("the preview rendered no frame", || {
             engine
                 .preview_status()
                 .is_some_and(|p| p.running && p.error.is_none())
@@ -2383,9 +2383,7 @@ mod tests {
         let out = Arc::new(Output::default());
         start_js(&engine, FIRST, ENDLESS_ALLOCATION, Arc::clone(&out)).expect("start");
 
-        wait_for("la boucle ne s'est pas arrêtée", || {
-            !status(&engine, FIRST).running
-        });
+        wait_for("the loop did not stop", || !status(&engine, FIRST).running);
 
         let error = status(&engine, FIRST).error.expect("no error recorded");
         assert!(error.contains("mémoire"), "the cause is not named: {error}");
@@ -2400,7 +2398,7 @@ mod tests {
     /// keyboard would never start or stop anything again.
     #[test]
     fn an_effect_looping_at_load_gives_control_back() {
-        let error = without_hanging(LOAD_BUDGET * 3, "le démarrage n'est jamais revenu", || {
+        let error = without_hanging(LOAD_BUDGET * 3, "starting never returned", || {
             let engine = Engine::default();
             start_js(
                 &engine,
@@ -2408,7 +2406,7 @@ mod tests {
                 "while (true) {}\nexport default { name: 'X', render() {} }",
                 Arc::new(Output::default()),
             )
-            .expect_err("le chargement aurait dû être interrompu")
+            .expect_err("loading should have been interrupted")
         });
 
         assert!(
@@ -2425,7 +2423,7 @@ mod tests {
         let js = "export default { name: 'X', render() { throw new Error('boum') } }";
         start_js(&engine, FIRST, js, Arc::new(Output::default())).expect("start");
 
-        wait_for("aucune erreur consignée", || {
+        wait_for("no error recorded", || {
             status(&engine, FIRST).error.is_some()
         });
         let error = status(&engine, FIRST).error.unwrap();

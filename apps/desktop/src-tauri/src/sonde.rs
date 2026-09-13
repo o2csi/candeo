@@ -15,7 +15,7 @@
 //!
 //! ⚠️ A costly lesson, set down here: the effect identifier probe first filtered
 //! out all-zero replies to discard noise, **hiding exactly the interesting
-//! case** (the "normal" mode reads `00 00`); and it set `Statique` and
+//! case** (the "normal" mode reads `00 00`); and it set `Static` and
 //! `Respiration` without a color, hence in **black** — indistinguishable by eye
 //! from a nonexistent effect. Verify by reading back (`0x0f`/`0x82`), never by
 //! eye alone.
@@ -73,10 +73,10 @@ fn open_keyboard() -> hidapi::HidDevice {
 fn probe_effect_ids() {
     let dev = open_keyboard();
     let known = |id: u8| match id {
-        0x00 => " (connu : Éteint)",
-        0x03 => " (connu : Spectrum Cycle)",
-        0x04 => " (connu : Wave)",
-        0x08 => " (connu : Direct/custom)",
+        0x00 => " (known: Off)",
+        0x03 => " (known: Spectrum Cycle)",
+        0x04 => " (known: Wave)",
+        0x08 => " (known: Direct/custom)",
         _ => "",
     };
 
@@ -127,12 +127,12 @@ fn read_reply(dev: &hidapi::HidDevice) -> Option<[u8; REPORT_LEN]> {
 
 fn status_name(code: u8) -> &'static str {
     match code {
-        0x00 => "aucune",
-        0x01 => "occupé",
-        0x02 => "compris",
-        0x03 => "échec",
-        0x04 => "expiré",
-        0x05 => "non pris en charge",
+        0x00 => "none",
+        0x01 => "busy",
+        0x02 => "understood",
+        0x03 => "failure",
+        0x04 => "timeout",
+        0x05 => "not supported",
         _ => "?",
     }
 }
@@ -238,19 +238,19 @@ fn probe_status_on_invalid_command() {
     let dev = open_keyboard();
 
     let cases: [(&str, [u8; REPORT_LEN + 1]); 4] = [
-        ("témoin — luminosité, valide", report(0x04, &[0, 0, 0x80])),
-        ("classe inexistante 0xee", class_report(0xee, 0x01, 0x02)),
+        ("control: brightness, valid", report(0x04, &[0, 0, 0x80])),
+        ("nonexistent class 0xee", class_report(0xee, 0x01, 0x02)),
         (
-            "classe éclairage, commande 0xee",
+            "lighting class, command 0xee",
             class_report(0x0f, 0xee, 0x02),
         ),
         (
-            "taille aberrante sur commande valide",
+            "absurd size on a valid command",
             class_report(0x0f, 0x04, 0x50),
         ),
     ];
 
-    for (nom, mut packet) in cases {
+    for (name, mut packet) in cases {
         // The checksum must stay correct: we are testing the refusal of a
         // command, not that of a corrupted packet.
         let mut r = [0u8; REPORT_LEN];
@@ -258,7 +258,7 @@ fn probe_status_on_invalid_command() {
         r[88] = checksum(&r);
         packet[1..].copy_from_slice(&r);
 
-        print!(">>> {nom:<40} ");
+        print!(">>> {name:<40} ");
         match dev.send_feature_report(&packet) {
             Ok(()) => match read_reply(&dev) {
                 Some(reply) => println!("→ 0x{:02x} ({})", reply[0], status_name(reply[0])),
@@ -301,14 +301,14 @@ fn probe_lighting_readback() {
     // Then: set an effect, read it back. If the readback follows, the
     // identifiers are established objectively.
     println!("\n>>> Setting an effect, then reading it back.");
-    for (nom, id) in [
-        ("Éteint", 0x00u8),
-        ("Statique", 0x01),
-        ("Respiration", 0x02),
-        ("Spectre", 0x03),
-        ("Vague", 0x04),
-        ("Réactif", 0x05),
-        ("Étoilé", 0x07),
+    for (name, id) in [
+        ("Off", 0x00u8),
+        ("Static", 0x01),
+        ("Breathing", 0x02),
+        ("Spectrum", 0x03),
+        ("Wave", 0x04),
+        ("Reactive", 0x05),
+        ("Starlight", 0x07),
         ("Direct/custom", 0x08),
     ] {
         // Static and Breathing want a color: without it, the first sweep set
@@ -326,11 +326,11 @@ fn probe_lighting_readback() {
         std::thread::sleep(Duration::from_millis(60));
         match read_reply(&dev) {
             Some(r) => println!(
-                "{nom:<14} set 0x{id:02x} → read back status 0x{:02x} · {:02x?}",
+                "{name:<14} set 0x{id:02x} → read back status 0x{:02x} · {:02x?}",
                 r[0],
                 &r[8..14]
             ),
-            None => println!("{nom:<14} set 0x{id:02x} → no readback"),
+            None => println!("{name:<14} set 0x{id:02x} → no readback"),
         }
     }
 
