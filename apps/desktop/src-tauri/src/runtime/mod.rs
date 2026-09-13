@@ -1054,13 +1054,31 @@ fn prepare_budgeted(
     prepare_with(js, layout, Some(Box::new(move || budget.expire())))
 }
 
-/// Le tronc commun : bornes posées, modules résolus, `__candeo_render` installé.
-///
-/// Les deux bornes sont posées **avant** toute évaluation — le corps du module
-/// est du code d'effet comme un autre.
+/// Le tronc commun, pour un gabarit du dépôt : il sérialise, puis délègue.
 fn prepare_with(
     js: &str,
     layout: &'static Layout,
+    interrupt: Option<InterruptHandler>,
+) -> Result<(Runtime, Context), String> {
+    prepare_with_layout(js, layout.led_count(), layout_json(layout), interrupt)
+}
+
+/// Le tronc : bornes posées, modules résolus, `__candeo_render` installé, pour
+/// un gabarit **déjà sérialisé**.
+///
+/// Les deux bornes sont posées **avant** toute évaluation — le corps du module
+/// est du code d'effet comme un autre.
+///
+/// Le gabarit arrive en JSON plutôt qu'en [`Layout`] pour une raison qui ne se
+/// voit qu'aux tests : `candeo_device::Key` porte un rectangle **obligatoire**,
+/// donc aucun gabarit de ce dépôt ne peut décrire un appareil sans géométrie
+/// relevée — et c'est pourtant le cas qu'un effet qui mesure des distances
+/// physiques doit refuser en le disant. L'écrire à la main est le seul moyen de
+/// vérifier ce refus tant que #34 n'a pas rendu le rectangle facultatif.
+fn prepare_with_layout(
+    js: &str,
+    frame_len: usize,
+    layout_json: String,
     interrupt: Option<InterruptHandler>,
 ) -> Result<(Runtime, Context), String> {
     let rt = Runtime::new().map_err(|e| format!("QuickJS : {e}"))?;
@@ -1085,10 +1103,9 @@ fn prepare_with(
 
     let ctx = Context::full(&rt).map_err(|e| format!("QuickJS : {e}"))?;
 
-    let layout_json = layout_json(layout);
     ctx.with(|ctx| -> Result<(), String> {
         let g = ctx.globals();
-        g.set("__candeo_frame_len", layout.led_count() as u32)
+        g.set("__candeo_frame_len", frame_len as u32)
             .map_err(js_error)?;
         g.set("__candeo_layout", layout_json).map_err(js_error)?;
 
@@ -1231,6 +1248,19 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
 ///
 /// Sérialisé à la main : `candeo-device` n'a pas serde, et c'est délibéré —
 /// ses tests tournent sans dépendance système.
+///
+/// # Deux espaces, et les deux voyagent
+///
+/// `row`/`col` situent la LED dans la matrice ; `x`/`y`/`w`/`h` donnent le
+/// rectangle du capuchon, en unités de pas de clavier — la même unité que
+/// [`candeo_device::Key`], sans conversion en chemin. Un effet qui parle de
+/// distance ne peut pas être juste sans le second : une case de matrice vaut une
+/// case, que la touche fasse 1 u ou 6,25 u.
+///
+/// La géométrie est **toujours** émise ici, parce que `candeo_device::Key` la
+/// porte toujours. Le jour où le rectangle deviendra facultatif (#34), ces
+/// quatre champs disparaîtront pour les gabarits non dessinés, et les effets qui
+/// les lisent échoueront en le disant — voir `bounds` et `center` dans `api.js`.
 fn layout_json(l: &'static Layout) -> String {
     let mut keys = String::new();
     for row in 0..l.rows {
@@ -1243,8 +1273,12 @@ fn layout_json(l: &'static Layout) -> String {
                 keys.push(',');
             }
             keys.push_str(&format!(
-                r#"{{"index":{index},"row":{row},"col":{col},"label":{}}}"#,
-                json_string(k.name)
+                r#"{{"index":{index},"row":{row},"col":{col},"label":{},"x":{},"y":{},"w":{},"h":{}}}"#,
+                json_string(k.name),
+                k.x,
+                k.y,
+                k.w,
+                k.h
             ));
         }
     }
@@ -2059,7 +2093,7 @@ mod tests {
             export default {
               name: 'X',
               render({ frame }) {
-                const manquants = ['rgb','hsv','mix','lerp','BLACK','defineEffect'].filter(n => api[n] === undefined)
+                const manquants = ['rgb','hsv','mix','lerp','BLACK','defineEffect','center','bounds'].filter(n => api[n] === undefined)
                 if (manquants.length) throw new Error('absents de api.js : ' + manquants.join(', '))
                 frame.fill(api.BLACK)
               },
@@ -2067,6 +2101,78 @@ mod tests {
         "#;
         let (_rt, ctx) = prepare(js, layout()).expect("chargement");
         render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu");
+    }
+
+    // ---------------------------------------------------------------- géométrie
+
+    /// Le rectangle des touches arrive jusqu'à l'effet, dans l'unité du Rust.
+    ///
+    /// La barre d'espace est le cas qui résume le sujet : **une** case de
+    /// matrice, **6,25 u** de capuchon. Sans le rectangle, un effet ne peut pas
+    /// faire la différence entre elle et une touche alphabétique.
+    #[test]
+    fn le_gabarit_remis_a_l_effet_porte_la_geometrie() {
+        let json: serde_json::Value =
+            serde_json::from_str(&layout_json(layout())).expect("gabarit JSON");
+        let keys = json["keys"].as_array().expect("touches");
+
+        let espace = keys
+            .iter()
+            .find(|k| k["label"] == "Espace")
+            .expect("la barre d'espace");
+        assert_eq!(espace["col"], 6, "une seule case de matrice");
+        assert_eq!(espace["w"], 6.25, "et 6,25 u de capuchon");
+        assert_eq!(espace["x"], 3.75);
+        assert_eq!(espace["y"], 5.5);
+        assert_eq!(espace["h"], 1.0);
+
+        assert!(
+            keys.iter().all(|k| k["w"].as_f64().unwrap_or(0.0) > 0.0),
+            "une touche sans largeur ne se distingue pas d'une touche sans géométrie"
+        );
+    }
+
+    /// Un gabarit dont personne n'a dessiné la disposition.
+    ///
+    /// Il n'en existe pas dans ce dépôt — `candeo_device::Key` porte un
+    /// rectangle obligatoire — mais c'est ce que sera un appareil contribué sans
+    /// la capacité `geometry` de `docs/design/device-sdk.md` §3.2. Deux
+    /// positions suffisent : ce qui est testé est l'absence des champs.
+    const SANS_GEOMETRIE: &str = r#"{"name":"Gabarit non dessiné","rows":1,"cols":2,"keys":[{"index":0,"row":0,"col":0,"label":"A"},{"index":1,"row":0,"col":1,"label":"B"}]}"#;
+
+    /// **Le motif qu'on combat.** Sans géométrie, `key.x` vaut `undefined`, la
+    /// distance `NaN`, et la couleur serait bornée à zéro : un clavier noir,
+    /// sans une erreur, et une session de diagnostic pour comprendre pourquoi.
+    /// L'effet doit échouer en nommant ce qui manque.
+    #[test]
+    fn l_onde_radiale_refuse_un_gabarit_sans_geometrie() {
+        let js = crate::builtins::find("onde-radiale").expect("intégré").js;
+        let (_rt, ctx) =
+            prepare_with_layout(js, 2, SANS_GEOMETRIE.to_string(), None).expect("chargement");
+
+        let err = render_once(&ctx, 0.0, 0, "{}", 2).unwrap_err();
+        assert!(err.contains("géométrie"), "message inattendu : {err}");
+        assert!(
+            err.contains('A') || err.contains('B'),
+            "le message doit nommer la touche fautive : {err}"
+        );
+    }
+
+    /// Et l'onde de matrice, elle, y tourne : c'est tout l'intérêt de l'avoir
+    /// gardée plutôt que corrigée. Un gabarit non dessiné garde un effet.
+    #[test]
+    fn l_onde_matricielle_tourne_sans_geometrie() {
+        let js = crate::builtins::find("onde-matricielle")
+            .expect("intégré")
+            .js;
+        let (_rt, ctx) =
+            prepare_with_layout(js, 2, SANS_GEOMETRIE.to_string(), None).expect("chargement");
+
+        let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("rendu");
+        assert!(
+            bytes.iter().any(|&c| c != 0),
+            "l'onde matricielle n'a besoin que de `row` et `col`"
+        );
     }
 
     // ------------------------------------------------------- bornes d'exécution
@@ -2384,5 +2490,103 @@ mod tests {
             });
             assert_eq!(declare, annonce, "« {} »", b.id);
         }
+    }
+
+    // ------------------------------------------------- les deux ondes, côte à côte
+    //
+    // Deux couples de touches du **vrai** gabarit, choisis pour que chacun
+    // départage les deux espaces. Rien n'est simulé ici : la géométrie vient de
+    // `layout.rs`, et c'est elle qui rend la vérification possible sans clavier.
+
+    /// La couleur d'une LED dans une image rendue.
+    fn couleur(image: &[u8], index: usize) -> &[u8] {
+        &image[index * 3..index * 3 + 3]
+    }
+
+    /// La première image d'un effet livré, sur le gabarit par défaut.
+    fn premiere_image(id: &str) -> Vec<u8> {
+        let js = crate::builtins::find(id)
+            .unwrap_or_else(|| panic!("« {id} » n'est pas livré"))
+            .js;
+        let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("« {id} » : {e}"));
+        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("rendu")
+    }
+
+    /// « L » (index 75) et « ù » (index 77) sont à la **même distance physique**
+    /// du centre du dessin — 1 u de part et d'autre, 0,75 u plus bas — et à deux
+    /// distances de matrice différentes : 1,5 case contre 0,5.
+    ///
+    /// L'onde radiale doit donc les peindre de la même couleur, et l'onde
+    /// matricielle non. C'est la définition de « radiale », vérifiée plutôt
+    /// qu'annoncée.
+    #[test]
+    fn l_onde_radiale_mesure_en_distance_physique() {
+        let radiale = premiere_image("onde-radiale");
+        assert_eq!(
+            couleur(&radiale, 75),
+            couleur(&radiale, 77),
+            "deux touches à égale distance physique doivent avoir la même couleur"
+        );
+
+        let matricielle = premiere_image("onde-matricielle");
+        assert_ne!(
+            couleur(&matricielle, 75),
+            couleur(&matricielle, 77),
+            "en distance de matrice, elles ne sont pas à égale distance"
+        );
+    }
+
+    /// Le couple symétrique : « L » (index 75) et « * » (index 78) sont à la
+    /// **même distance de matrice** — 1,5 case de part et d'autre — mais à
+    /// 1,25 u et 2,14 u du centre du dessin, parce que la rangée est décalée et
+    /// que l'Entrée en L ne tombe pas sur la grille.
+    ///
+    /// C'est ce qui fait de l'onde matricielle un effet à part entière, et non
+    /// une version fausse de l'autre : elle rend exactement ce qu'elle annonce.
+    #[test]
+    fn l_onde_matricielle_mesure_en_distance_de_matrice() {
+        let matricielle = premiere_image("onde-matricielle");
+        assert_eq!(
+            couleur(&matricielle, 75),
+            couleur(&matricielle, 78),
+            "deux touches à égale distance de matrice doivent avoir la même couleur"
+        );
+
+        let radiale = premiere_image("onde-radiale");
+        assert_ne!(
+            couleur(&radiale, 75),
+            couleur(&radiale, 78),
+            "physiquement, elles ne sont pas à égale distance"
+        );
+    }
+
+    /// La barre d'espace est peinte d'après le **milieu de son capuchon**.
+    ///
+    /// Une case de matrice, 6,25 u de large : son centre est à 6,875 u, pas au
+    /// bord gauche (3,75 u) ni à la colonne 6. La touche de la rangée du dessus
+    /// dont le capuchon est centré au même endroit — « B », à 6,75 u — doit donc
+    /// être presque à la même distance du centre, alors que rien dans la matrice
+    /// ne le dit.
+    #[test]
+    fn l_onde_radiale_place_la_barre_d_espace_au_milieu_de_son_capuchon() {
+        let radiale = premiere_image("onde-radiale");
+
+        // Distances au centre du dessin (11,25 ; 3,25) : « Espace » à 5,17 u,
+        // « B » à 4,83 u — 0,34 u d'écart, donc des teintes voisines. Mesurer
+        // depuis le bord gauche du capuchon (3,75 u) porterait l'écart à 2,7 u,
+        // et les deux couleurs n'auraient plus rien à voir.
+        let espace = couleur(&radiale, 116);
+        let touche_b = couleur(&radiale, 94);
+        let ecart = espace
+            .iter()
+            .zip(touche_b)
+            .map(|(e, t)| e.abs_diff(*t) as u32)
+            .max()
+            .expect("trois composantes");
+
+        assert!(
+            ecart < 60,
+            "« Espace » et « B » sont physiquement voisins, leurs couleurs devraient l'être : {espace:?} contre {touche_b:?}"
+        );
     }
 }

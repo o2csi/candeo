@@ -1,16 +1,22 @@
 /**
- * Effet de référence — onde circulaire partant du centre du clavier.
+ * Effet de référence — onde partant du centre de la matrice.
  *
  * Sert de modèle : un effet tient en quelques lignes et se lit comme ce qu'il
  * fait. C'est aussi la démonstration du contrat attendu par le moteur —
  * **un export par défaut**, et rien d'autre.
+ *
+ * Il mesure en **coordonnées de matrice** : une case par touche, quelle que soit
+ * sa taille. C'est le calcul qui fonctionne partout, y compris sur un gabarit
+ * dont personne n'a dessiné la disposition. Pour une onde ronde sur le bureau
+ * plutôt que dans la matrice, l'effet livré « Onde radiale » lit le rectangle
+ * des touches — voir `Key.x`, qui dit ce que ça engage.
  */
 
 import { defineEffect, hsv } from './index'
 
 export default defineEffect({
   name: 'Onde',
-  description: 'Une onde de teinte se propage depuis le centre',
+  description: 'Une onde de teinte se propage depuis le centre de la matrice',
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
     scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },

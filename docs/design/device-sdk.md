@@ -129,8 +129,8 @@ vocabulaire trop grossier, auquel personne ne peut se fier.
 |---|---|---|
 | `directFrame` | l'hôte peut poser une image | **tous** |
 | `color` | `rgb` ou `mono` | tout ce qui parle de teinte |
-| `matrix` | les positions forment une grille, le voisinage a un sens | Balayage, Onde radiale |
-| `geometry` | chaque position a une place physique | une onde vraiment radiale |
+| `matrix` | les positions forment une grille, le voisinage a un sens | Balayage, Onde matricielle |
+| `geometry` | chaque position a une place physique | Onde radiale |
 | `namedKeys` | chaque position porte le nom de sa touche | surligner un raccourci |
 | `zones` | des parties nommées hors grille | une pulsation de molette |
 
@@ -176,7 +176,7 @@ déclaré nulle part**. Les trois effets livrés lisent `key.row` :
 
 ```js
 const k = Math.max(0, 1 - Math.abs(key.row - head) / trail)   // balayage.js
-const d = Math.hypot(key.col - cx, key.row - cy)              // onde-radiale.js
+const d = Math.hypot(key.col - cx, key.row - cy)              // onde-matricielle.js
 ```
 
 Sur un appareil sans grille, `key.row` vaudrait `undefined`, la soustraction
@@ -198,17 +198,18 @@ dix colonnes » pour un effet qui dessine une jauge — sous une règle stricte 
 **`geometry` — chaque position a une place physique.**
 
 Ce que le périphérique **ne déclare pas** : il n'expose que sa grille logique. Le
-rectangle de chaque touche est une transcription à la main de la disposition ISO,
-et `layout.rs` le dit déjà sans pouvoir en tirer de conséquence.
+rectangle de chaque touche est une transcription à la main de la disposition ISO.
 
-L'effet qui en dépend n'existe pas encore, et c'est justement ce qui rend le
-terme utile. « Onde radiale » se dit radiale mais calcule sa distance en
-`(rangée, colonne)` : sur un clavier pleine taille, le pavé numérique est à
-quatre colonnes du centre alors qu'il en est physiquement à l'autre bout, et les
-trous de la matrice comptent comme de la distance. L'onde est donc ronde dans une
-grille et déformée sur le bureau. Une version qui exigerait `geometry` serait
-ronde pour de bon — et refuserait proprement les gabarits qui n'ont pas été
-dessinés.
+L'effet qui en dépend **existe** depuis [#60] : « Onde radiale » calcule sa
+distance sur les rectangles, et « Onde matricielle » — la version d'avant, gardée
+telle quelle — la calcule en `(rangée, colonne)`. Les deux sont livrées, et elles
+ne rendent pas la même image : dans la grille, le pavé numérique est à quatre
+colonnes du centre alors qu'il en est physiquement à l'autre bout, la barre
+d'espace occupe une case pour 6,25 u, et les trous comptent comme de la distance.
+Ronde dans une grille, déformée sur le bureau.
+
+Ce que le terme ajouterait, et qui manque encore : « Onde radiale » **lève** sur
+un gabarit non dessiné, au lieu d'être refusée avant d'être proposée. Voir §4.
 
 **Rempli par** : le contributeur a dessiné sa disposition, ou non. C'est du
 travail réel et facultatif ; ne pas le faire reste une contribution valable, qui
@@ -406,8 +407,8 @@ on parle.**
 |---|---|---|---|
 | Respiration | `kinds: 'all'`, rien | ✅ | ✅ |
 | Balayage | `matrix { rowsMin: 3 }` | ✅ | ❌ pas de grille |
-| Onde radiale | `matrix` | ✅ | ❌ pas de grille |
-| Onde radiale *physique* | `geometry` | ✅ | ❌ rien n'est dessiné |
+| Onde matricielle | `matrix` | ✅ | ❌ pas de grille |
+| Onde radiale | `geometry` | ✅ | ❌ rien n'est dessiné |
 | Surligner un raccourci | `namedKeys` | ✅ | ❌ rien n'est nommé |
 | Pulsation de molette | `zones: ['wheel']` | ❌ pas de molette | ✅ |
 
@@ -737,7 +738,9 @@ Décrit, non écrit : l'implémentation est le corps de [#34].
   gabarit, jamais un `Keyboard` : c'est ce joint qui rend tout ce document
   additif.
 - **L'API des effets gagne `kinds` et `requires`**, obligatoires, et son `Key`
-  gagne un rôle de zone. Les trois effets livrés gagnent une ligne chacun.
+  gagne un rôle de zone. Les effets livrés gagnent une ligne chacun. Son `Key`
+  porte déjà le rectangle, facultatif, depuis [#60] : c'est la moitié « côté
+  effet » de `geometry`, et elle n'attendait pas le reste.
 - **Le manifeste relevé dans l'arbre syntaxique** ([`effects-runtime.md`](effects-runtime.md))
   doit lire ces deux champs comme il lit déjà `name` et `params` : des littéraux,
   refusés à la validation plutôt que découverts à la première image.
@@ -764,9 +767,12 @@ Décrit, non écrit : l'implémentation est le corps de [#34].
 - **Deux exemplaires du même modèle restent indistinguables** quand le descripteur
   USB ne porte pas de numéro de série ([#35]). Le SDK n'y change rien, mais un
   catalogue de gabarits rend le cas plus fréquent.
-- **Une onde radiale physique** n'existe pas encore, et c'est le seul effet qui
-  justifierait `geometry` à lui seul. Tant qu'elle n'est pas écrite, le terme est
-  soutenu par un argument et non par un fichier.
+- ~~**Une onde radiale physique** n'existe pas encore~~ — elle existe depuis
+  [#60], et le terme `geometry` est désormais soutenu par un fichier. Ce qu'elle
+  montre en passant : faute de pouvoir **exiger** la capacité, elle lève à la
+  première image plutôt que d'être écartée de la galerie. Le message nomme la
+  touche sans rectangle, donc rien n'est silencieux — mais c'est un refus qui
+  arrive trop tard, et c'est exactement la moitié que [#34] doit fermer.
 
 ---
 
@@ -779,3 +785,4 @@ où la mettre, et qu'elle soit fausse faute d'avoir été datée.
 [#34]: https://github.com/oorabona/candeo/issues/34
 [#35]: https://github.com/oorabona/candeo/issues/35
 [#44]: https://github.com/oorabona/candeo/issues/44
+[#60]: https://github.com/oorabona/candeo/issues/60

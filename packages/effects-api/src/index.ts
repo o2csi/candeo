@@ -35,7 +35,22 @@ export interface Rgb {
   b: number
 }
 
-/** Une position de la matrice portant une LED. */
+/**
+ * Une position de la matrice portant une LED.
+ *
+ * **Deux espaces cohabitent ici, et ils ne disent pas la même chose.**
+ *
+ * - `row`/`col` situent la LED dans la **matrice**. Le voisinage y a un sens,
+ *   mais une case vaut une case : la barre d'espace en occupe **une seule**
+ *   malgré ses 6,25 u, et les trous de la matrice comptent comme de la distance
+ *   alors qu'ils n'occupent aucun espace.
+ * - `x`/`y`/`w`/`h` donnent le **rectangle physique** du capuchon, celui que le
+ *   simulateur dessine.
+ *
+ * Un effet qui parle de distance doit donc choisir ce qu'il mesure. C'est
+ * exactement ce qui sépare « Onde radiale » d'« Onde matricielle » parmi les
+ * effets livrés : même mouvement, deux espaces, deux images.
+ */
 export interface Key {
   /** Index de LED dans l'image. */
   readonly index: number
@@ -43,6 +58,48 @@ export interface Key {
   readonly col: number
   /** Nom lisible, quand le périphérique le fournit. */
   readonly label?: string
+  /**
+   * Bord gauche du capuchon, en **unités de pas de clavier** : 1 u = la largeur
+   * d'une touche alphabétique. L'origine est en haut à gauche, `y` croît vers le
+   * bas, et la touche occupe `[x, x + w[ × [y, y + h[`.
+   *
+   * ## Pourquoi `u`, et pas une fraction du clavier
+   *
+   * Le pas est une grandeur **absolue** — 19,05 mm sur tout clavier pleine
+   * taille. `1 u` désigne donc la même distance sur un pleine taille, un TKL ou
+   * un pavé de macros, et une échelle réglée en `u` garde son sens d'un appareil
+   * à l'autre : « un anneau toutes les six touches » reste un anneau toutes les
+   * six touches. Normaliser sur l'encombrement ferait l'inverse — le même `0,5`
+   * vaudrait onze touches ici et trois ailleurs, et l'effet changerait d'aspect
+   * sans qu'une ligne change.
+   *
+   * Ce qu'un appareil plus petit change, c'est le **nombre** d'anneaux visibles,
+   * pas leur taille. Ce qu'un effet ne doit pas supposer, en revanche, c'est où
+   * est le centre : il se lit dans {@link bounds}, jamais dans `rows`/`cols`.
+   *
+   * C'est aussi l'unité que porte le Rust (`crates/candeo-device/src/layout.rs`)
+   * : rien ne se convertit en chemin, donc rien ne peut s'y tromper.
+   *
+   * ## ⚠️ Facultatif, et c'est le fond du sujet
+   *
+   * La géométrie n'est pas une lecture du périphérique — il n'expose que sa
+   * grille logique — mais une transcription faite à la main. Tous les gabarits
+   * n'en ont pas : c'est la capacité `geometry` de `docs/design/device-sdk.md`
+   * §3.2.
+   *
+   * Un effet qui en dépend doit donc le **dire en échouant**, jamais soustraire
+   * `undefined` : la distance vaudrait `NaN`, la couleur serait bornée à zéro,
+   * et le clavier resterait noir sans un mot. {@link center} et {@link bounds}
+   * sont là pour ça — elles lèvent en nommant la touche qui n'a pas de
+   * rectangle.
+   */
+  readonly x?: number
+  /** Bord supérieur, en unités de pas. Voir {@link x}. */
+  readonly y?: number
+  /** Largeur, en unités de pas. Voir {@link x}. */
+  readonly w?: number
+  /** Hauteur, en unités de pas. Voir {@link x}. */
+  readonly h?: number
 }
 
 export interface Layout {
@@ -211,6 +268,88 @@ export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 
 export function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return rgb(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t))
+}
+
+// ------------------------------------------------------------------ géométrie
+//
+// Deux fonctions, et elles ont le même rôle : lire un rectangle **ou échouer en
+// le disant**. C'est tout ce qui sépare un effet spatial portable d'un effet qui
+// rend du noir sur les gabarits qu'on n'a pas sous la main. Voir {@link Key.x}.
+
+/** Un rectangle en unités de pas de clavier. */
+export interface Rect {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+}
+
+/**
+ * Le centre du capuchon d'une touche, en unités de pas.
+ *
+ * Le centre et non le coin : c'est là qu'est la LED, et c'est ce qui place la
+ * barre d'espace au milieu de ses 6,25 u plutôt qu'à son bord gauche.
+ *
+ * @throws si la touche n'a pas de rectangle — voir {@link Key.x}.
+ */
+export function center(key: Key): { x: number; y: number } {
+  const { x, y, w, h } = key
+  if (x === undefined || y === undefined || w === undefined || h === undefined) {
+    throw new TypeError(sansRectangle(key))
+  }
+  return { x: x + w / 2, y: y + h / 2 }
+}
+
+/**
+ * L'encombrement physique du dessin, en unités de pas.
+ *
+ * C'est ce qui remplace `rows`/`cols` dès qu'on parle de distance : le milieu du
+ * clavier est en `x + w / 2`, et il y reste sur un gabarit sans pavé numérique
+ * comme sur un pleine taille. `(cols - 1) / 2` désigne le milieu de la
+ * **matrice**, qui n'est le milieu de rien de visible.
+ *
+ * Même définition que le `viewBox` du simulateur : le centre d'une onde est
+ * donc le centre de ce qu'on regarde.
+ *
+ * Un gabarit sans aucune touche rend un rectangle nul — il n'y a rien à
+ * encadrer, et rien non plus à éclairer.
+ *
+ * @throws dès qu'une touche n'a pas de rectangle — voir {@link Key.x}.
+ */
+export function bounds(layout: Layout): Rect {
+  if (layout.keys.length === 0) return { x: 0, y: 0, w: 0, h: 0 }
+
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+
+  for (const key of layout.keys) {
+    const { x, y, w, h } = key
+    if (x === undefined || y === undefined || w === undefined || h === undefined) {
+      throw new TypeError(sansRectangle(key))
+    }
+    if (x < x0) x0 = x
+    if (y < y0) y0 = y
+    if (x + w > x1) x1 = x + w
+    if (y + h > y1) y1 = y + h
+  }
+
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+}
+
+/**
+ * La phrase que lisent {@link center} et {@link bounds} en échouant.
+ *
+ * Elle nomme la touche fautive : un gabarit contribué peut être dessiné à
+ * moitié, et « il manque un rectangle » sans dire lequel ne se corrige pas.
+ */
+function sansRectangle(key: Key): string {
+  const quoi = key.label === undefined ? `la position ${key.index}` : `« ${key.label} »`
+  return (
+    `${quoi} n'a pas de rectangle : ce gabarit n'a pas de géométrie relevée, ` +
+    "et un effet qui mesure des distances physiques n'a rien à y mesurer."
+  )
 }
 
 // L'exemple de référence vit dans `example.ts` : ce fichier décrit l'API, il

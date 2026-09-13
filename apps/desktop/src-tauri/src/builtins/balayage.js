@@ -2,6 +2,14 @@
 //
 // Le seul des effets livrés où la majeure partie du clavier est éteinte à tout
 // instant : c'est ce qui le rend reconnaissable au premier coup d'œil.
+//
+// Il compte en **rangées de matrice**, et ce n'est pas le défaut qu'était celui
+// d'« Onde radiale » : c'est son sujet. Ses deux réglages se lisent « rangées
+// par seconde » et « traînée en rangées », sa tête avance d'une rangée à la
+// fois, et une rangée est une notion de matrice. Le porter en unités physiques
+// en ferait un autre effet — qui s'attarderait sur les 1,5 u qui séparent la
+// rangée de fonctions du reste — sans que celui-ci ait rien à se reprocher, et
+// lui coûterait de tourner sur les gabarits qui ne sont pas dessinés.
 
 import { defineEffect, rgb } from '@candeo/effects-api'
 
