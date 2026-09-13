@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Keyboard, Layout, DEATHSTALKER_V2_PRO};
+use candeo_device::{Inspection, Keyboard, Layout, DEATHSTALKER_V2_PRO};
 use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -93,6 +93,25 @@ pub struct DeviceInfo {
     /// Chacun porte le sien : une ouverture qui échoue ne doit ni empêcher les
     /// autres de fonctionner, ni leur faire porter son message.
     pub error: Option<String>,
+    /// Micrologiciel contre lequel le gabarit a été relevé, `v1.5`.
+    ///
+    /// Connu sans rien ouvrir : c'est une donnée du gabarit. L'afficher même
+    /// appareil fermé dit contre quoi le code a été établi, ce qui est la
+    /// première question devant un comportement inexpliqué.
+    pub surveyed_firmware: String,
+    /// Micrologiciel **lu** à l'ouverture.
+    ///
+    /// `None` quand l'appareil n'est pas ouvert — rien n'a été demandé, et
+    /// garder la version d'une ouverture précédente la ferait attribuer à
+    /// l'exemplaire branché depuis — ou quand la lecture a échoué, ce que
+    /// `warnings` dit alors.
+    pub firmware: Option<String>,
+    /// Ce que l'inspection à l'ouverture a trouvé qui mérite d'être vu.
+    ///
+    /// **Vide veut dire « rien à signaler », pas « compatible ».** L'octet d'état
+    /// de l'appareil confirme qu'une commande existe, jamais que ses arguments
+    /// sont bons. Aucun de ces avertissements ne bloque quoi que ce soit.
+    pub warnings: Vec<String>,
 }
 
 /// Une touche, telle que le simulateur doit la dessiner.
@@ -248,6 +267,18 @@ impl AppState {
         self.devices.lock().unwrap().get(&device).map(Arc::clone)
     }
 
+    /// Ce que cet appareil a dit de lui-même à l'ouverture — **s'il est ouvert**.
+    ///
+    /// Une copie, prise sous le seul verrou de la poignée et rendue aussitôt :
+    /// l'inspection a été faite une fois, à l'ouverture, et la relire ici ne
+    /// coûte aucun échange USB. C'est ce qui permet à la liste des appareils et
+    /// au diagnostic de l'afficher sans jamais toucher à la boucle de rendu.
+    pub(crate) fn inspection(&self, device: DeviceRef) -> Option<Inspection> {
+        let handle = self.opened(device)?;
+        let guard = handle.lock().unwrap();
+        guard.as_ref().map(|kb| kb.inspection().clone())
+    }
+
     /// Ouvre — ou referme, avec `None` — cet appareil.
     fn set_open(&self, device: DeviceRef, keyboard: Option<Keyboard>) {
         *self.handle(device).lock().unwrap() = keyboard;
@@ -306,18 +337,55 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
 /// `None` veut dire **débranché**, `Some(None)` **branché sans série déclarée**.
 /// Le second n'est pas un cas dégénéré — c'est ce que rend hidraw sous Linux
 /// quand la règle udev n'accorde pas la lecture des attributs.
+///
+/// ⚠️ **Le descripteur USB du DeathStalker n'en porte aucun**, sur aucune
+/// interface. La série qui apparie vraiment vient du protocole, à l'ouverture :
+/// voir [`serie_connue`].
 pub(crate) fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
     api.device_list()
-        .find(|d| {
-            d.vendor_id() == layout.vid
-                && d.product_id() == layout.pid
-                && d.interface_number() == layout.interface as i32
-        })
+        .find(|d| layout.is_lighting_interface(d.vendor_id(), d.product_id(), d.interface_number()))
         .map(|d| {
             d.serial_number()
                 .map(str::to_owned)
                 .filter(|s| !s.is_empty())
         })
+}
+
+/// La série de l'exemplaire : **celle du protocole d'abord**, celle du
+/// descripteur USB à défaut.
+///
+/// Le protocole (`0x00`/`0x82`) est la seule source qui en donne une sur ce
+/// matériel, mais il ne se lit qu'appareil ouvert — et un appareil ignoré ou
+/// détecté ne s'ouvre pas pour qu'on lui pose la question. Le descripteur reste
+/// donc le repli, et [`storage::DeviceRecord::matches`] tolère qu'il soit muet.
+pub(crate) fn serie_connue(inspection: Option<&Inspection>, usb: Option<String>) -> Option<String> {
+    inspection.and_then(|i| i.serial.clone().ok()).or(usb)
+}
+
+/// Consigne une ouverture, et ce que l'inspection y a trouvé.
+///
+/// Une ligne `info` pour l'ouverture elle-même — le micrologiciel y figure, c'est
+/// le premier champ qu'on cherchera — puis une ligne `warn` par avertissement.
+/// **À l'ouverture et à elle seule** : c'est une transition, et l'inspection
+/// n'est jamais refaite.
+///
+/// L'empreinte de la série, jamais la série : elle identifie un exemplaire
+/// précis, et un journal finit collé dans un rapport de bogue.
+fn consigner_l_ouverture(device: DeviceRef, keyboard: &Keyboard, usb: Option<String>, quoi: &str) {
+    let inspection = keyboard.inspection();
+    let serie = serie_connue(Some(inspection), usb);
+    tracing::info!(
+        appareil = %device,
+        serie = journal::empreinte_de(serie.as_deref()),
+        micrologiciel = %inspection
+            .firmware
+            .as_ref()
+            .map_or_else(|e| format!("non lu ({e})"), ToString::to_string),
+        "{quoi}"
+    );
+    for avertissement in inspection.warnings(keyboard.layout()) {
+        tracing::warn!(appareil = %device, "{avertissement}");
+    }
 }
 
 // ---------------------------------------------------------------- adoption
@@ -340,11 +408,22 @@ pub(crate) struct OpenOutcome {
 /// Tous, et non plus un seul : `AppState` porte désormais une table d'appareils
 /// ouverts (issue #26). Le second appareil piloté n'est donc plus laissé fermé
 /// faute de place pour lui.
+///
+/// # La série se vérifie **après** l'ouverture
+///
+/// Le descripteur USB ne porte pas de série sur ce matériel : avant d'ouvrir,
+/// la décision ne peut s'apparier que sur le VID et le PID, et n'importe quel
+/// exemplaire du modèle passe. `serial_of` rend celle que l'appareil a donnée
+/// par le protocole ; si elle désigne un exemplaire que la décision ne couvre
+/// pas, la poignée est **relâchée** et la tentative rend compte de pourquoi.
+/// Sans quoi brancher le clavier d'un collègue — même modèle — le ferait
+/// piloter au nom d'une décision prise pour un autre.
 fn open_adopted<K>(
     layouts: &[&'static Layout],
     settings: &Settings,
     present: impl Fn(&Layout) -> Option<Option<String>>,
     mut open: impl FnMut(&'static Layout) -> Result<K, String>,
+    serial_of: impl Fn(&K) -> Option<String>,
 ) -> (Vec<(&'static Layout, K)>, Vec<OpenOutcome>) {
     let mut opened = Vec::new();
     let mut outcomes = Vec::new();
@@ -359,10 +438,14 @@ fn open_adopted<K>(
             continue;
         }
         let error = match open(layout) {
-            Ok(k) => {
-                opened.push((*layout, k));
-                None
-            }
+            Ok(k) => match autre_exemplaire(settings, layout, serial_of(&k).as_deref()) {
+                None => {
+                    opened.push((*layout, k));
+                    None
+                }
+                // `k` tombe ici, et la poignée se referme avec lui.
+                Some(refus) => Some(refus),
+            },
             Err(e) => Some(e),
         };
         outcomes.push(OpenOutcome {
@@ -374,14 +457,36 @@ fn open_adopted<K>(
     (opened, outcomes)
 }
 
+/// `Some(raison)` si l'exemplaire ouvert n'est pas celui que la décision désigne.
+///
+/// Sans série lue, rien ne se conclut : un appareil qui ne répond pas aux
+/// lectures reste apparié comme avant, sur son VID et son PID. Refuser pour une
+/// question restée sans réponse éteindrait l'éclairage de quelqu'un qui n'a
+/// qu'un exemplaire.
+fn autre_exemplaire(settings: &Settings, layout: &Layout, serie: Option<&str>) -> Option<String> {
+    let serie = serie?;
+    (settings.device_state(layout.vid, layout.pid, Some(serie)) != DeviceState::Adopted).then(
+        || {
+            format!(
+                "l'exemplaire branché (série {}) n'est pas celui qui a été piloté : il reste \
+                 fermé. « Piloter » l'adopte à son tour.",
+                journal::empreinte(serie)
+            )
+        },
+    )
+}
+
 /// Applique les décisions retenues, au démarrage de l'application.
 ///
 /// Ne renvoie rien et ne peut pas échouer : des réglages illisibles ou un HID
 /// absent ne doivent pas empêcher la fenêtre de s'ouvrir — c'est elle qui
 /// permettrait de corriger la situation.
 fn apply_adoptions(app: &AppHandle, state: &AppState) {
-    let settings = match storage::store(app).and_then(|s| s.read_settings()) {
-        Ok(settings) => settings,
+    let (store, settings) = match storage::store(app).and_then(|s| {
+        let settings = s.read_settings()?;
+        Ok((s, settings))
+    }) {
+        Ok(lus) => lus,
         Err(e) => {
             tracing::error!("adoption abandonnée, aucun appareil ouvert : {e}");
             return;
@@ -400,28 +505,49 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         &settings,
         |l| plugged(&api, l),
         |l| Keyboard::open(&api, l).map_err(|e| e.to_string()),
+        |kb| kb.inspection().serial.clone().ok(),
     );
+
+    // Ce que les ouvertures apprennent, à retenir une fois la boucle finie.
+    let mut appris = settings.clone();
 
     // Les poignées d'abord, les échecs ensuite : deux tables, jamais verrouillées
     // ensemble. Rien d'autre n'a encore pu ouvrir quoi que ce soit — l'état vient
     // d'être construit et n'est pas encore confié au gestionnaire.
     for (layout, keyboard) in ouverts {
         let device = DeviceRef::of(layout);
-        // L'empreinte plutôt que la série : elle distingue deux exemplaires du
-        // même modèle sans divulguer lequel. Voir [`journal::empreinte`]. Le
-        // second `plugged` ne réénumère rien — il relit la liste que `api` tient
-        // déjà — et il évite de faire porter la série par [`OpenOutcome`], qui
-        // rend compte d'une tentative et n'a pas à décrire l'appareil.
-        let serie = plugged(&api, layout).flatten();
-        tracing::info!(
-            appareil = %device,
-            serie = journal::empreinte_de(serie.as_deref()),
-            "appareil adopté ouvert"
+        // Le second `plugged` ne réénumère rien — il relit la liste que `api`
+        // tient déjà — et il évite de faire porter la série par [`OpenOutcome`],
+        // qui rend compte d'une tentative et n'a pas à décrire l'appareil.
+        let usb = plugged(&api, layout).flatten();
+        let serie = serie_connue(Some(keyboard.inspection()), usb.clone());
+        consigner_l_ouverture(device, &keyboard, usb, "appareil adopté ouvert");
+        // Une décision prise sans série **se complète** dès qu'on la connaît :
+        // c'est la règle de [`storage::Settings::set_device_state`]. Sans elle,
+        // une adoption antérieure à la lecture par protocole resterait appariée
+        // sur le seul modèle, et le premier exemplaire venu passerait toujours.
+        appris.set_device_state(
+            layout.vid,
+            layout.pid,
+            serie.as_deref(),
+            DeviceState::Adopted,
         );
         // **Avant** de déposer la poignée : la luminosité se réapplique sur le
         // clavier qu'on vient d'ouvrir, et on la tient encore en main.
         reappliquer_la_luminosite(&keyboard, &settings, layout, serie.as_deref());
         state.set_open(device, Some(keyboard));
+    }
+
+    // Seulement si quelque chose a été appris : réécrire à chaque démarrage un
+    // fichier inchangé ne servirait qu'à multiplier les occasions de le
+    // tronquer.
+    if appris != settings {
+        match store.write_settings(&appris) {
+            Ok(()) => tracing::info!("série lue par le protocole, retenue pour l'appariement"),
+            // `warn` : l'appareil est ouvert et fonctionne. On perd seulement la
+            // distinction entre deux exemplaires, jusqu'au démarrage suivant.
+            Err(e) => tracing::warn!("série lue mais non retenue : {e}"),
+        }
     }
 
     let mut failures = state.failures.lock().unwrap();
@@ -486,11 +612,10 @@ fn reappliquer_la_luminosite(
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
     let settings = storage::store(&app)?.read_settings()?;
     let api = hid()?;
-    // Les deux relevés sont faits l'un après l'autre, chacun rendant son verrou
-    // avant le suivant. C'est la règle documentée sur [`AppState`], et elle vient
-    // d'un interblocage réel : cette commande prenait le clavier puis les échecs,
+    // Les relevés sont faits l'un après l'autre, chacun rendant son verrou avant
+    // le suivant. C'est la règle documentée sur [`AppState`], et elle vient d'un
+    // interblocage réel : cette commande prenait le clavier puis les échecs,
     // `ignore_device` l'inverse, et les deux se bloquaient l'une l'autre.
-    let ouverts = state.open_handles();
     let failures = state.failures.lock().unwrap().clone();
 
     Ok(LAYOUTS
@@ -499,15 +624,23 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
             let device = DeviceRef::of(l);
             let branche = plugged(&api, l);
             let present = branche.is_some();
-            let serial = branche.flatten();
+            // Relue sur la poignée, sans échange USB : `None` dit fermé.
+            let inspection = state.inspection(device);
+            let serial = serie_connue(inspection.as_ref(), branche.flatten());
             DeviceInfo {
                 name: l.name.to_string(),
                 vid: l.vid,
                 pid: l.pid,
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
-                open: ouverts.contains(&device),
+                open: inspection.is_some(),
                 error: failures.get(&device).cloned(),
+                surveyed_firmware: l.surveyed_firmware.to_string(),
+                firmware: inspection
+                    .as_ref()
+                    .and_then(|i| i.firmware.as_ref().ok())
+                    .map(ToString::to_string),
+                warnings: inspection.map(|i| i.warnings(l)).unwrap_or_default(),
             }
         })
         .collect())
@@ -515,10 +648,19 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
 
 /// Retient « piloté » pour cet appareil, et l'ouvre s'il est là.
 ///
-/// La décision est écrite **avant** l'ouverture, et elle tient même si
-/// celle-ci échoue : c'est une décision, pas le compte rendu d'une tentative.
-/// Le prochain démarrage la rejouera, ce qui est précisément ce qu'on veut
-/// d'un clavier qu'un concentrateur n'a pas encore fini d'énumérer.
+/// La décision est écrite **quelle que soit l'issue de l'ouverture** : c'est une
+/// décision, pas le compte rendu d'une tentative. Le prochain démarrage la
+/// rejouera, ce qui est précisément ce qu'on veut d'un clavier qu'un
+/// concentrateur n'a pas encore fini d'énumérer.
+///
+/// # L'ouverture précède l'écriture, et c'est pour la série
+///
+/// Le descripteur USB n'en porte aucune : seule l'ouverture la lit, par le
+/// protocole. Écrire la décision d'abord la retiendrait sans série — donc pour
+/// **tout** exemplaire du modèle — et adopter un second clavier identique
+/// retomberait sur l'entrée du premier au lieu d'en créer une. Si l'écriture
+/// échoue ensuite, la poignée tombe avec la fonction : rien n'est ouvert sans
+/// décision pour le justifier.
 ///
 /// Rend le gabarit quand l'appareil a été ouvert, `None` quand il est adopté
 /// mais débranché — ce n'est pas une erreur, il sera ouvert au branchement
@@ -534,24 +676,27 @@ fn adopt_device(
     let layout = find_layout(device)?;
     let api = hid()?;
     let branche = plugged(&api, layout);
-    let present = branche.is_some();
-    let serial = branche.flatten();
+    let ouverture = branche.is_some().then(|| Keyboard::open(&api, layout));
+    let usb = branche.flatten();
+    let serial = serie_connue(
+        ouverture
+            .as_ref()
+            .and_then(|o| o.as_ref().ok())
+            .map(Keyboard::inspection),
+        usb.clone(),
+    );
 
     let store = storage::store(&app)?;
     let mut settings = store.read_settings()?;
     settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Adopted);
     store.write_settings(&settings)?;
 
-    if !present {
+    let Some(ouverture) = ouverture else {
         return Ok(None);
-    }
-    match Keyboard::open(&api, layout) {
+    };
+    match ouverture {
         Ok(kb) => {
-            tracing::info!(
-                appareil = %device,
-                serie = journal::empreinte_de(serial.as_deref()),
-                "appareil piloté"
-            );
+            consigner_l_ouverture(device, &kb, usb, "appareil piloté");
             // Comme au démarrage : ce qu'on avait retenu pour ce clavier reprend
             // effet à l'instant où on l'ouvre, pas au lancement suivant.
             reappliquer_la_luminosite(&kb, &settings, layout, serial.as_deref());
@@ -579,11 +724,18 @@ fn adopt_device(
 /// Ne passe pas par HID : ignorer un appareil doit rester possible quand c'est
 /// justement l'accès HID qui pose problème. La série n'est donc relevée que si
 /// elle se donne — [`storage::DeviceRecord::matches`] retrouve l'entrée sans.
+///
+/// Celle du protocole, quand l'appareil est ouvert, est relue **avant** de le
+/// refermer : c'est la seule qui distingue l'exemplaire, et elle disparaît avec
+/// la poignée.
 #[tauri::command]
 fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<()> {
     let device = DeviceRef { vid, pid };
     let layout = find_layout(device)?;
-    let serial = hid().ok().and_then(|api| plugged(&api, layout)).flatten();
+    let serial = serie_connue(
+        state.inspection(device).as_ref(),
+        hid().ok().and_then(|api| plugged(&api, layout)).flatten(),
+    );
 
     let store = storage::store(&app)?;
     let mut settings = store.read_settings()?;
@@ -656,6 +808,12 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
 
     let api = hid()?;
     let kb = Keyboard::open(&api, layout).map_err(|e| e.to_string())?;
+    consigner_l_ouverture(
+        device,
+        &kb,
+        plugged(&api, layout).flatten(),
+        "appareil ouvert, sans décision",
+    );
     state.set_open(device, Some(kb));
     state.failures.lock().unwrap().remove(&device);
     Ok(LayoutInfo::from(layout))
@@ -740,9 +898,17 @@ fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> C
 /// Ramener le curseur au maximum **retire** l'entrée plutôt que d'écrire 255 :
 /// voir [`storage::Settings::set_brightness`].
 #[tauri::command]
-fn remember_brightness(app: AppHandle, device: DeviceRef, level: u8) -> CmdResult<()> {
+fn remember_brightness(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    level: u8,
+) -> CmdResult<()> {
     let layout = find_layout(device)?;
-    let serial = hid().ok().and_then(|api| plugged(&api, layout)).flatten();
+    let serial = serie_connue(
+        state.inspection(device).as_ref(),
+        hid().ok().and_then(|api| plugged(&api, layout)).flatten(),
+    );
 
     let store = storage::store(&app)?;
     let mut settings = store.read_settings()?;
@@ -979,6 +1145,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x1111,
         interface: 3,
+        surveyed_firmware: candeo_protocol::Firmware { major: 1, minor: 0 },
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -989,6 +1156,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x2222,
         interface: 3,
+        surveyed_firmware: candeo_protocol::Firmware { major: 1, minor: 0 },
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -998,6 +1166,12 @@ mod tests {
     /// Série propre à chaque gabarit, comme une énumération réelle.
     fn branches(l: &Layout) -> Option<Option<String>> {
         Some(Some(format!("S{:04x}", l.pid)))
+    }
+
+    /// Un appareil ouvert qui ne répond pas aux lectures : aucune série par le
+    /// protocole, l'appariement reste celui de l'énumération.
+    fn muet(_: &&'static str) -> Option<String> {
+        None
     }
 
     fn pilotes() -> Settings {
@@ -1026,14 +1200,20 @@ mod tests {
     fn un_appareil_en_echec_n_en_bloque_aucun_autre() {
         let mut tentatives = Vec::new();
 
-        let (opened, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
-            tentatives.push(l.pid);
-            if l.pid == PREMIER.pid {
-                Err("accès refusé par le système".into())
-            } else {
-                Ok(l.name)
-            }
-        });
+        let (opened, comptes) = open_adopted(
+            &[&PREMIER, &SECOND],
+            &pilotes(),
+            branches,
+            |l| {
+                tentatives.push(l.pid);
+                if l.pid == PREMIER.pid {
+                    Err("accès refusé par le système".into())
+                } else {
+                    Ok(l.name)
+                }
+            },
+            muet,
+        );
 
         assert_eq!(
             tentatives,
@@ -1081,6 +1261,7 @@ mod tests {
                 tentatives += 1;
                 Ok(l.name)
             },
+            muet,
         );
 
         assert_eq!(tentatives, 0, "un appareil non piloté a été ouvert");
@@ -1097,6 +1278,7 @@ mod tests {
             &pilotes(),
             |_| None,
             |l| Ok(l.name) as Result<&'static str, String>,
+            muet,
         );
 
         assert!(opened.is_empty());
@@ -1109,15 +1291,124 @@ mod tests {
     #[test]
     fn tous_les_appareils_pilotes_sont_ouverts() {
         let mut tentatives = Vec::new();
-        let (opened, comptes) = open_adopted(&[&PREMIER, &SECOND], &pilotes(), branches, |l| {
-            tentatives.push(l.pid);
-            Ok(l.name)
-        });
+        let (opened, comptes) = open_adopted(
+            &[&PREMIER, &SECOND],
+            &pilotes(),
+            branches,
+            |l| {
+                tentatives.push(l.pid);
+                Ok(l.name)
+            },
+            muet,
+        );
 
         assert_eq!(tentatives, vec![PREMIER.pid, SECOND.pid]);
         assert_eq!(ouverts(&opened), vec!["Premier", "Second"]);
         assert_eq!(comptes.len(), 2);
         assert!(comptes.iter().all(|c| c.error.is_none()));
+    }
+
+    // -------------------------------------------------------- série par protocole
+
+    /// L'énumération du DeathStalker : branché, **sans série**.
+    fn branche_muet(_: &Layout) -> Option<Option<String>> {
+        Some(None)
+    }
+
+    /// Une décision prise pour un exemplaire — ou pour tout le modèle, sans série.
+    fn pilote_pour(serie: Option<&str>) -> Settings {
+        let mut settings = Settings::default();
+        settings.set_device_state(PREMIER.vid, PREMIER.pid, serie, DeviceState::Adopted);
+        settings
+    }
+
+    /// **Ce que la série par protocole change.** Le descripteur USB muet laisse
+    /// passer n'importe quel exemplaire du modèle ; la série lue à l'ouverture
+    /// dit que ce n'est pas le bon, et la poignée est relâchée.
+    #[test]
+    fn un_autre_exemplaire_du_modele_n_est_pas_pilote() {
+        let (opened, comptes) = open_adopted(
+            &[&PREMIER],
+            &pilote_pour(Some("XY01")),
+            branche_muet,
+            |l| Ok(l.name),
+            |_| Some("XY02".to_string()),
+        );
+
+        assert!(opened.is_empty(), "l'exemplaire voisin a été piloté");
+        assert_eq!(comptes.len(), 1);
+        let raison = comptes[0].error.as_deref().expect("aucune raison donnée");
+        assert!(raison.contains("n'est pas celui"), "{raison}");
+        // La raison s'affiche et part au journal : la série n'y figure pas,
+        // son empreinte si.
+        assert!(!raison.contains("XY02"), "la série a fuité : {raison}");
+        assert!(raison.contains(&journal::empreinte("XY02")), "{raison}");
+    }
+
+    #[test]
+    fn l_exemplaire_adopte_est_reconnu_a_sa_serie() {
+        let (opened, comptes) = open_adopted(
+            &[&PREMIER],
+            &pilote_pour(Some("XY01")),
+            branche_muet,
+            |l| Ok(l.name),
+            |_| Some("XY01".to_string()),
+        );
+
+        assert_eq!(ouverts(&opened), vec!["Premier"]);
+        assert!(comptes[0].error.is_none());
+    }
+
+    /// Une adoption antérieure à la lecture par protocole ne porte pas de série :
+    /// elle ne doit pas refuser l'exemplaire qu'on a — elle l'apprendra.
+    #[test]
+    fn une_adoption_sans_serie_accepte_l_exemplaire_branche() {
+        let (opened, _) = open_adopted(
+            &[&PREMIER],
+            &pilote_pour(None),
+            branche_muet,
+            |l| Ok(l.name),
+            |_| Some("XY02".to_string()),
+        );
+        assert_eq!(ouverts(&opened), vec!["Premier"]);
+    }
+
+    /// Une série qu'on n'a pas pu lire ne conclut rien : refuser pour une
+    /// question sans réponse éteindrait l'éclairage de qui n'a qu'un clavier.
+    #[test]
+    fn sans_serie_lue_rien_ne_se_conclut() {
+        let (opened, _) = open_adopted(
+            &[&PREMIER],
+            &pilote_pour(Some("XY01")),
+            branche_muet,
+            |l| Ok(l.name),
+            muet,
+        );
+        assert_eq!(ouverts(&opened), vec!["Premier"]);
+    }
+
+    /// Le protocole l'emporte sur le descripteur, et le descripteur reste le
+    /// repli d'un appareil fermé.
+    #[test]
+    fn la_serie_du_protocole_passe_avant_celle_du_descripteur() {
+        let inspection = Inspection {
+            firmware: Err("non lue".into()),
+            serial: Ok("XY01".into()),
+            checks: Vec::new(),
+        };
+        assert_eq!(
+            serie_connue(Some(&inspection), Some("USB".into())).as_deref(),
+            Some("XY01")
+        );
+        assert_eq!(
+            serie_connue(None, Some("USB".into())).as_deref(),
+            Some("USB")
+        );
+        let muette = Inspection {
+            serial: Err("illisible".into()),
+            ..inspection
+        };
+        assert_eq!(serie_connue(Some(&muette), None), None);
     }
 
     /// La table est indexée sur VID/PID : deux appareils du même fabricant ne

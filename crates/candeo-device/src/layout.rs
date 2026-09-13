@@ -1,5 +1,7 @@
 //! Description physique des périphériques pris en charge.
 
+use candeo_protocol::Firmware;
+
 /// Position sans LED dans la matrice.
 ///
 /// Interne : la sentinelle ne sert qu'à écrire et à lire [`Layout::matrix`], et
@@ -48,6 +50,18 @@ pub struct Layout {
     pub pid: u16,
     /// Interface du composite USB portant l'éclairage.
     pub interface: u8,
+    /// Micrologiciel contre lequel ce gabarit a été relevé.
+    ///
+    /// **Une donnée, pas une phrase dans un `.md`** : c'est ce que l'inspection
+    /// à l'ouverture compare à la version lue, et un écart doit pouvoir s'y dire
+    /// sans que personne ait à retrouver le relevé. Un gabarit contribué sans son
+    /// matériel sous la main (#34) n'aurait sinon aucun moyen de distinguer « le
+    /// code est faux » de « la version a changé ».
+    ///
+    /// Lue par la commande de l'appareil (`0x00`/`0x81`), **jamais** recopiée de
+    /// `release_number` : l'énumération HID y rend le `bcdDevice`, une révision
+    /// matérielle figée qui ressemble à une version et n'en est pas une.
+    pub surveyed_firmware: Firmware,
     pub rows: u8,
     pub cols: u8,
     /// Index de LED par position, ligne par ligne. `u16::MAX` = pas de LED.
@@ -57,6 +71,31 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// Vrai si cette entrée d'énumération HID est **l'interface d'éclairage** de
+    /// ce gabarit.
+    ///
+    /// Une seule règle, pour l'ouverture comme pour la présence : les recopier à
+    /// deux endroits permettrait qu'un appareil soit dit branché sur une entrée
+    /// qu'on n'ouvrirait pas.
+    ///
+    /// # L'entrée `interface -1` est écartée, et c'est ici
+    ///
+    /// L'énumération du DeathStalker porte, sur les mêmes VID et PID, une entrée
+    /// sans numéro d'interface (`-1`), sans nom de produit, et d'une révision
+    /// (`0x0101`) qui n'est pas celle du composite (`0x0200`). **Ce n'est pas le
+    /// clavier** : son parent dans l'arbre des périphériques est un nœud
+    /// `RZVIRTUAL`, créé par le pilote du fabricant (service `RzDev_0292`), et non
+    /// une interface USB — d'où l'absence de numéro. Voir le §1 du relevé. Elle
+    /// n'existe donc que là où ce pilote est installé, et rien ne garantit qu'elle
+    /// y garde cette forme.
+    ///
+    /// Sous Windows, ouvrir la mauvaise entrée donne un handle **valide** sur
+    /// lequel toute écriture se perd. L'exiger égale à [`Self::interface`] suffit
+    /// à l'écarter, quelle qu'en soit la forme demain.
+    pub fn is_lighting_interface(&self, vid: u16, pid: u16, interface: i32) -> bool {
+        vid == self.vid && pid == self.pid && interface == i32::from(self.interface)
+    }
+
     /// Nombre de positions de la matrice — **pas** le nombre de LED physiques.
     ///
     /// C'est cette valeur que doit couvrir une image complète.
@@ -143,6 +182,9 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     vid: 0x1532,
     pid: 0x0292,
     interface: 3,
+    // `01 05`, relu par `0x00`/`0x81` le 12/09/2026 — la version que l'appareil
+    // déclare par ailleurs. Voir le §8 du relevé.
+    surveyed_firmware: Firmware { major: 1, minor: 5 },
     rows: 6,
     cols: 22,
     #[rustfmt::skip]
@@ -224,6 +266,20 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// L'énumération relevée le 12/09/2026, entrée par entrée : seule `MI_03`
+    /// porte l'éclairage. L'entrée `-1`, sur les mêmes VID et PID, ne doit être
+    /// ni ouverte ni comptée comme présente.
+    #[test]
+    fn seule_l_interface_d_eclairage_est_retenue() {
+        let l = &DEATHSTALKER_V2_PRO;
+        let retenues: Vec<i32> = [-1, 0, 1, 2, 3]
+            .into_iter()
+            .filter(|&i| l.is_lighting_interface(0x1532, 0x0292, i))
+            .collect();
+        assert_eq!(retenues, vec![3]);
+        assert!(!l.is_lighting_interface(0x1532, 0x0290, 3), "autre produit");
+    }
 
     #[test]
     fn matrix_dimensions_are_consistent() {

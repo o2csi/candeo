@@ -70,7 +70,10 @@ Liste **tous les gabarits connus**, branchés ou non, et dans quel état.
   present: boolean,
   state: 'detected' | 'adopted' | 'ignored',
   open: boolean,
-  error: string | null
+  error: string | null,
+  surveyedFirmware: string,     // 'v1.5' — donnée du gabarit, connue sans rien ouvrir
+  firmware: string | null,      // lu à l'ouverture ; null si fermé ou non lu
+  warnings: string[]            // vide = rien à signaler, PAS « compatible »
 }
 ```
 
@@ -78,6 +81,47 @@ Liste **tous les gabarits connus**, branchés ou non, et dans quel état.
 un périphérique énuméré. L'interface doit afficher un gabarit absent comme absent,
 pas l'omettre — c'est ce qui permet de dire « branchez votre clavier » plutôt que
 de montrer une liste vide.
+
+Le numéro d'interface est exigé égal à celui du gabarit, ce qui écarte l'entrée
+`interface -1` que porte l'énumération sous Windows sur les mêmes VID et PID :
+une collection HID du nœud virtuel du pilote du fabricant, pas le clavier (§1 du
+relevé).
+
+### Ce que l'appareil dit de lui-même, à l'ouverture
+
+Toute ouverture — adoption au démarrage, adoption à la demande, `connect` —
+**inspecte** l'appareil, une fois. C'est `Keyboard::open` qui le fait, et nulle
+part ailleurs : un chemin d'ouverture qui l'oublierait ne peut pas exister.
+Détail dans [`crates/candeo-device/src/inspection.rs`](../../crates/candeo-device/src/inspection.rs).
+
+| Question | Commande | Ce qu'on en fait |
+|---|---|---|
+| quel micrologiciel ? | `0x00`/`0x81` | `firmware`, comparé à `surveyedFirmware` : **avertit, ne bloque pas** |
+| quel exemplaire ? | `0x00`/`0x82` | appariement de l'adoption — le descripteur USB n'en porte aucun |
+| la luminosité est-elle connue ? | relue, réécrite **à l'identique**, relue | refusée si l'appareil rend `0x05` |
+| l'effet est-il connu ? | idem, seulement si l'effet courant se réécrit à l'identique | idem |
+| la rangée ? | **jamais émise** — aucune rangée écrite n'est invisible | non vérifiée |
+
+**Avertir sans bloquer.** Une version différente de celle du relevé produit un
+avertissement dans `warnings`, affiché sur la ligne de l'appareil et consigné en
+`warn` — jamais un refus. Bloquer rendrait l'application inutile après une mise à
+jour de routine, alors que le protocole n'aura très probablement pas bougé.
+
+**Une commande que l'appareil déclare inconnue (`0x05`) n'est plus envoyée** :
+l'écriture échoue avec un message qui le dit, et cet échec remonte par
+`deviceError` comme n'importe quel refus d'écriture. Sans ça, `hidapi` accepterait
+chaque trame, la boucle se dirait saine, et `reachingKeyboard` resterait vert
+au-dessus d'un clavier qui jette tout.
+
+⚠️ **Ce que ce contrôle ne dit pas.** L'appareil valide le couple classe /
+commande, **jamais la valeur d'un argument** : poser l'effet `0x05`, que ce
+clavier refuse, rend quand même `0x02`. Une commande « connue » est connue, et
+c'est tout. La relecture après réécriture détecte un argument compris
+**autrement** — l'appareil poserait autre chose que ce qu'on a réécrit — mais pas
+une commande ignorée, qui laisse la valeur identique.
+
+Rien de tout cela ne se refait ensuite : relire coûte un aller-retour USB, et la
+boucle de rendu n'en a pas le temps.
 
 `present` dit ce que voit le système, `state` ce que l'utilisateur a décidé :
 **les deux sont indépendants**. Un appareil piloté peut être débranché, un
@@ -106,12 +150,17 @@ place, ou un relevé incertain.
 
 ### `adopt_device(vid, pid) -> LayoutInfo | null`
 
-Retient `adopted` pour cet appareil, puis l'ouvre s'il est branché.
+Retient `adopted` pour cet appareil, et l'ouvre s'il est branché.
 
-La décision est écrite **avant** l'ouverture, et elle tient même si celle-ci
-échoue : c'est une décision, pas le compte rendu d'une tentative. Le prochain
-démarrage la rejouera — ce qui est précisément ce qu'on veut d'un clavier qu'un
-concentrateur n'a pas fini d'énumérer.
+La décision est écrite **quelle que soit l'issue de l'ouverture** : c'est une
+décision, pas le compte rendu d'une tentative. Le prochain démarrage la rejouera —
+ce qui est précisément ce qu'on veut d'un clavier qu'un concentrateur n'a pas fini
+d'énumérer.
+
+L'ouverture passe **avant** l'écriture, pour une seule raison : c'est elle qui lit
+la série par le protocole. Écrite d'abord, la décision serait retenue sans série,
+donc pour tout exemplaire du modèle. Si l'écriture échoue, la poignée est relâchée
+— rien n'est ouvert sans décision pour le justifier.
 
 Rend le gabarit quand l'appareil a été ouvert, `null` quand il est adopté mais
 débranché : ce n'est pas une erreur, il sera ouvert au branchement suivant. Une
@@ -166,6 +215,13 @@ L'application ouvre elle-même **tous** les appareils `adopted` et présents, av
 d'afficher la fenêtre. Chaque tentative est isolée : une ouverture qui échoue
 n'interrompt pas la boucle, laisse son message sur son appareil, et les suivants
 s'ouvrent normalement.
+
+La série lue à l'ouverture est confrontée à la décision. Si elle désigne un autre
+exemplaire que celui qui a été adopté, la poignée est relâchée et la ligne de
+l'appareil dit pourquoi — par l'empreinte de la série, jamais la série. Le bouton
+« Piloter » reste alors proposé : il adopte l'exemplaire branché à son tour. Une
+adoption antérieure, retenue sans série, **l'apprend** au premier démarrage qui la
+lit, et `settings.json` n'est réécrit que dans ce cas.
 
 Des réglages illisibles ou un HID indisponible n'empêchent pas le démarrage — ce
 serait retirer le seul moyen de corriger la situation. Rien n'est ouvert, la
@@ -700,6 +756,11 @@ si quelqu'un a déplacé un curseur.
 liaison qui apparie sur ces champs se rompt à la mise à jour, et l'appareil
 adopté redevient un inconnu du jour au lendemain.
 
+**La série vient du protocole** (`0x00`/`0x82`), lue à l'ouverture : le
+descripteur USB du DeathStalker n'en porte aucune. Un appareil fermé ne s'ouvre pas
+pour qu'on la lui demande — un appareil ignoré doit rester tranquille — et c'est
+alors le descripteur, muet, qui sert de repli.
+
 La série n'est comparée que si **les deux côtés** en portent une, et cet
 arbitrage tient dans les deux sens :
 
@@ -826,8 +887,17 @@ système : le donner à lire ne suffit pas.
 
 Le texte à coller dans un rapport de bogue : version de l'application, système,
 appareils connus — branché, décision retenue, empreinte de série, gabarit — et
-état du moteur appareil par appareil. La version du micrologiciel y est annoncée
-comme non lue tant que #35 n'est pas fait, plutôt que passée sous silence.
+état du moteur appareil par appareil.
+
+Pour chaque appareil, **le micrologiciel lu en face de celui du relevé** — le
+premier champ qu'on demandera devant un comportement inexpliqué — puis le verdict
+de chaque commande et les avertissements. Un appareil fermé se dit « non lu,
+appareil fermé » plutôt que de répéter la version d'une ouverture passée :
+l'exemplaire branché depuis n'est peut-être plus le même. Le diagnostic ne refait
+aucun échange avec l'appareil, il relit ce que l'ouverture a obtenu.
+
+Une commande vérifiée s'y dit « connue », jamais « comprise » ni « compatible » :
+voir plus haut ce que l'octet d'état ne dit pas.
 
 Ne peut pas échouer sur un appareil : ne pas pouvoir énumérer l'USB ou relire les
 réglages est exactement ce qu'un diagnostic doit **dire**, pas ce qui doit

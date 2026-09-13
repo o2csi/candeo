@@ -203,6 +203,16 @@ onMounted(async () => {
             <span class="mono ids">{{
               `${d.vid.toString(16).padStart(4, '0')}:${d.pid.toString(16).padStart(4, '0')}`
             }}</span>
+            <!--
+              La version lue, en face de celle du relevé : c'est la première
+              question devant un clavier qui n'obéit pas. Fermé, on dit qu'elle
+              n'a pas été lue plutôt que de laisser un vide qui se lirait comme
+              « aucune ».
+            -->
+            <span class="mono ids firmware">
+              micrologiciel {{ d.firmware ?? (d.open ? 'non lu' : 'non lu, appareil fermé') }} ·
+              gabarit relevé sur {{ d.surveyedFirmware }}
+            </span>
           </div>
 
           <!--
@@ -218,8 +228,19 @@ onMounted(async () => {
           <!--
             Un appareil jamais vu est listé, pas piloté : c'est un bouton à
             cliquer une fois, pas une case à recocher à chaque lancement.
+
+            Il reste proposé sur un appareil piloté, branché mais **fermé** : la
+            décision peut viser un autre exemplaire du même modèle que celui qui
+            est branché — sa série le dit à l'ouverture — et sans ce bouton le
+            clavier branché ne pourrait plus être adopté qu'en passant par
+            « Ignorer ».
           -->
-          <button v-if="d.state !== 'adopted'" class="solid" :disabled="busy" @click="adopt(d)">
+          <button
+            v-if="d.state !== 'adopted' || (d.present && !d.open)"
+            class="solid"
+            :disabled="busy"
+            @click="adopt(d)"
+          >
             Piloter
           </button>
           <button v-if="d.state !== 'ignored'" class="ghost" :disabled="busy" @click="ignore(d)">
@@ -232,6 +253,13 @@ onMounted(async () => {
           ligne, elle ne laisse pas croire que les autres sont touchés.
         -->
         <p v-if="d.error" class="err">{{ d.error }}</p>
+        <!--
+          Un avertissement, pas une erreur : rien n'est bloqué, l'appareil reste
+          ouvert. Visible sur la ligne plutôt que dans le seul journal —
+          une version différente de celle du relevé est la première piste devant
+          un clavier qui n'obéit pas, et personne n'irait la chercher ailleurs.
+        -->
+        <p v-for="w in d.warnings" :key="w" class="warn" role="status">{{ w }}</p>
       </li>
     </ul>
 
@@ -497,6 +525,11 @@ onMounted(async () => {
 .ids {
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* Sous l'identifiant, sur sa propre ligne : c'est une autre question. */
+.firmware {
+  display: block;
 }
 
 .tag {

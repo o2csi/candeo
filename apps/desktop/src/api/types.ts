@@ -47,6 +47,27 @@ export interface DeviceInfo {
    * fonctionner, et ne leur fait pas porter son message.
    */
   error: string | null
+  /**
+   * Micrologiciel contre lequel le gabarit a été relevé, `v1.5`. Connu sans rien
+   * ouvrir : c'est une donnée du gabarit.
+   */
+  surveyedFirmware: string
+  /**
+   * Micrologiciel **lu** à l'ouverture. `null` quand l'appareil n'est pas ouvert,
+   * ou quand la lecture a échoué — ce que {@link warnings} dit alors.
+   */
+  firmware: string | null
+  /**
+   * Ce que l'inspection à l'ouverture a trouvé qui mérite d'être vu.
+   *
+   * **Vide veut dire « rien à signaler », pas « compatible »** : l'appareil
+   * confirme qu'une commande existe, jamais que ses arguments sont bons. Aucun de
+   * ces avertissements ne bloque quoi que ce soit.
+   *
+   * `readonly` : la liste des appareils est exposée en lecture seule par
+   * `useDevice`, et un appareil se repasse tel quel aux commandes d'adoption.
+   */
+  warnings: readonly string[]
 }
 
 /**

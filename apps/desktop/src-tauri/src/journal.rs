@@ -729,7 +729,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             .as_ref()
             .ok()
             .and_then(|api| crate::plugged(api, layout));
-        let serial = branche.clone().flatten();
+        // Relue sur la poignée : le diagnostic ne refait aucun échange avec
+        // l'appareil, il dit ce que l'ouverture a obtenu.
+        let inspection = state.inspection(device);
+        let serial = crate::serie_connue(inspection.as_ref(), branche.clone().flatten());
         let etat_retenu = settings
             .as_ref()
             .ok()
@@ -772,6 +775,47 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 ),
             );
         }
+
+        // **Le premier champ qu'on demandera** devant un comportement
+        // inexpliqué : la version lue, en face de celle du relevé. Fermé, on dit
+        // qu'elle n'a pas été lue plutôt que de répéter celle d'une ouverture
+        // passée — l'exemplaire branché depuis n'est peut-être plus le même.
+        ligne(
+            &mut out,
+            "    micrologiciel",
+            &format!(
+                "{} · gabarit relevé sur {}",
+                match &inspection {
+                    None => "non lu, appareil fermé".to_string(),
+                    Some(i) => i
+                        .firmware
+                        .as_ref()
+                        .map_or_else(|e| format!("non lu ({e})"), ToString::to_string),
+                },
+                layout.surveyed_firmware
+            ),
+        );
+        if let Some(i) = &inspection {
+            ligne(
+                &mut out,
+                "    commandes",
+                &i.checks
+                    .iter()
+                    .map(|c| format!("{} {}", c.name, verdict(&c.verdict)))
+                    .collect::<Vec<_>>()
+                    .join(" · "),
+            );
+            if let Err(e) = &i.serial {
+                ligne(
+                    &mut out,
+                    "    série par le protocole",
+                    &format!("non lue ({e})"),
+                );
+            }
+            for avertissement in i.warnings(layout) {
+                ligne(&mut out, "    avertissement", &avertissement);
+            }
+        }
     }
     if let Err(e) = &api {
         ligne(&mut out, "  énumération USB", e);
@@ -779,9 +823,6 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     if let Err(e) = &settings {
         ligne(&mut out, "  réglages", e);
     }
-    // Le micrologiciel manque, et c'est su : sa lecture est l'objet de #35. Le
-    // dire ici vaut mieux que de laisser croire qu'il n'y en a pas.
-    ligne(&mut out, "  micrologiciel", "non lu (issue #35)");
 
     out.push_str("\nMoteur\n");
     let rapport = state.engine.report();
@@ -850,6 +891,23 @@ fn decision(state: crate::storage::DeviceState) -> &'static str {
         crate::storage::DeviceState::Detected => "détecté",
         crate::storage::DeviceState::Adopted => "piloté",
         crate::storage::DeviceState::Ignored => "ignoré",
+    }
+}
+
+/// Le verdict d'une commande, dans la langue du rapport de bogue.
+///
+/// « connue » et non « comprise » : l'octet d'état confirme que le couple
+/// classe / commande existe, jamais que ses arguments sont bons. Un diagnostic
+/// qui dirait « compatible » enverrait chercher ailleurs une panne d'argument.
+fn verdict(v: &candeo_device::Verdict) -> String {
+    use candeo_device::Verdict;
+    match v {
+        Verdict::Understood => "connue (0x02), relue à l'identique".to_string(),
+        Verdict::Unsupported => "inconnue (0x05), plus envoyée".to_string(),
+        Verdict::ReadBackDiffers { wrote, read } => {
+            format!("acceptée, mais relue {read} après réécriture de {wrote}")
+        }
+        Verdict::Unverified(raison) => format!("non vérifiée ({raison})"),
     }
 }
 
@@ -1180,6 +1238,22 @@ mod tests {
     fn une_enumeration_muette_se_dit_autrement_qu_une_empreinte() {
         assert_eq!(empreinte_de(None), "aucune");
         assert_eq!(empreinte_de(Some("XY01")), empreinte("XY01"));
+    }
+
+    // -------------------------------------------------------- micrologiciel
+
+    /// L'octet d'état ne valide aucun argument : le diagnostic ne doit jamais
+    /// laisser lire « compatible » ni « compris » là où l'appareil a seulement
+    /// dit qu'il connaissait la commande.
+    #[test]
+    fn le_diagnostic_ne_survend_pas_une_commande_connue() {
+        use candeo_device::Verdict;
+        let texte = verdict(&Verdict::Understood);
+        assert!(texte.contains("connue"), "{texte}");
+        for mot in ["compatible", "compris"] {
+            assert!(!texte.contains(mot), "« {mot} » dans « {texte} »");
+        }
+        assert!(verdict(&Verdict::Unsupported).contains("plus envoyée"));
     }
 
     // -------------------------------------------------------- sérialisation

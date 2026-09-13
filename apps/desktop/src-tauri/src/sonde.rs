@@ -452,6 +452,10 @@ fn sonde_cadence_soutenable() {
 }
 
 /// Ce que l'énumération HID donne **sans protocole**, sur chaque interface.
+///
+/// N'ouvre rien : c'est une lecture de la liste que tient le système. Le chemin
+/// est imprimé pour l'entrée `interface -1` du §10 — c'est lui qui dit par quel
+/// bus, donc par quel pilote, elle arrive.
 #[test]
 #[ignore]
 fn sonde_descripteur_usb() {
@@ -462,12 +466,54 @@ fn sonde_descripteur_usb() {
     {
         let r = d.release_number();
         println!(
-            "interface {:>2} | release_number = 0x{r:04x} (soit {}.{:02}) | série {:?} | produit {:?}",
+            "interface {:>2} | release_number = 0x{r:04x} (soit {}.{:02}) | série {:?} | produit {:?} | page 0x{:04x}/0x{:04x}\n             chemin {}",
             d.interface_number(),
             r >> 8,
             r & 0xff,
             d.serial_number().unwrap_or("—"),
             d.product_string().unwrap_or("—"),
+            d.usage_page(),
+            d.usage(),
+            d.path().to_string_lossy(),
         );
+    }
+}
+
+/// **L'inspection de production**, telle que l'application la fait à chaque
+/// ouverture — et non une réécriture à la main de ce qu'elle est censée faire.
+///
+/// C'est la sonde à rejouer avant de croire l'inspection sur un autre
+/// micrologiciel : elle émet exactement ce que `Keyboard::open` émet, luminosité
+/// et effet **réécrits à l'identique**. Si le clavier change d'aspect pendant
+/// qu'elle tourne, l'hypothèse qui autorise l'inspection à émettre est fausse —
+/// et c'est ici qu'on veut l'apprendre, pas chez un utilisateur.
+///
+/// ⚠️ **Application fermée.** Une boucle de rendu qui écrit sur la même interface
+/// entrelacerait ses commandes aux nôtres : l'écho les écarte, mais les
+/// verdicts deviendraient « non vérifiée ».
+#[test]
+#[ignore]
+fn sonde_inspection_a_l_ouverture() {
+    let api = hidapi::HidApi::new().expect("HID");
+    let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+    let kb = candeo_device::Keyboard::open(&api, layout).expect("ouverture");
+    let i = kb.inspection();
+
+    println!(
+        "\nmicrologiciel : {:?} (relevé sur {})",
+        i.firmware.as_ref().map(ToString::to_string),
+        layout.surveyed_firmware
+    );
+    // L'empreinte, pas la série : la sortie de cette sonde finit collée dans une
+    // issue aussi souvent qu'un journal.
+    println!(
+        "série : {}",
+        crate::journal::empreinte_de(i.serial.as_deref().ok())
+    );
+    for c in &i.checks {
+        println!("{:<10} {} → {:?}", c.name, c.command, c.verdict);
+    }
+    for a in i.warnings(layout) {
+        println!("AVERTISSEMENT : {a}");
     }
 }

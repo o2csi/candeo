@@ -524,6 +524,14 @@ protocole n'aura très probablement pas bougé. L'avertissement transforme une
 panne muette en soupçon énoncé — et c'est tout ce qu'on peut honnêtement en
 faire.
 
+> **Déjà en place pour le gabarit existant**, sans attendre ce SDK :
+> `Layout::surveyed_firmware` porte la version comme **deux nombres**
+> (`Firmware { major: 1, minor: 5 }`) et non comme la chaîne `"1.05"` écrite
+> ci-dessus — le relevé écrit tantôt « v1.5 » tantôt « 1.05 » pour les mêmes
+> octets, et comparer des chaînes ferait d'une différence de plume une différence
+> de version. L'inspection à l'ouverture est dans
+> [`inspection.rs`](../../crates/candeo-device/src/inspection.rs).
+
 ---
 
 ## 6. Le « mode pilote » : l'étape à ne pas recopier
