@@ -40,9 +40,9 @@ pub struct Builtin {
 ///
 /// Five, and the rule has not moved: they are there to be read, and two
 /// variants of the same motion would teach nothing more. The two waves are not
-/// one — they measure **two different spaces**, one the physical distance
-/// between keycaps, the other the number of matrix cells. The difference only
-/// shows side by side, and they follow each other here so that it shows.
+/// one — they measure **two different spaces**: one the physical distance
+/// between keycaps, drawing circles from the center; the other the number of
+/// steps through the matrix, crossing it in diagonals from a corner.
 pub static ALL: [Builtin; 5] = [
     Builtin {
         id: "onde-radiale",
@@ -58,7 +58,8 @@ pub static ALL: [Builtin; 5] = [
         id: "onde-matricielle",
         js: include_str!("onde-matricielle.js"),
         name: "Onde matricielle",
-        description: "Une onde de teinte se propage de proche en proche dans la matrice",
+        description:
+            "Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale",
         params: r#"{
             "speed": { "kind": "number", "label": "Vitesse", "min": 0, "max": 400, "default": 120 },
             "scale": { "kind": "number", "label": "Échelle", "min": 1, "max": 60, "default": 18 }

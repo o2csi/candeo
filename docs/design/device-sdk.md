@@ -173,7 +173,7 @@ everywhere and declared nowhere**. The three shipped effects read `key.row`:
 
 ```js
 const k = Math.max(0, 1 - Math.abs(key.row - head) / trail)   // balayage.js
-const d = Math.hypot(key.col - cx, key.row - cy)              // onde-matricielle.js
+const steps = key.col + key.row                               // onde-matricielle.js
 ```
 
 On a device without a grid, `key.row` would be `undefined`, the subtraction
