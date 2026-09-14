@@ -10,6 +10,7 @@
     "build": "pnpm --filter @candeo/desktop build",
     "tauri": "pnpm --filter @candeo/desktop tauri",
     "test:rust": "cargo test --workspace",
+    "test:web": "pnpm --filter @candeo/desktop test",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "fmt:rust": "cargo fmt --all",
     "check": "pnpm lint:rust && pnpm test:rust"

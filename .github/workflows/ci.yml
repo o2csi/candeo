@@ -236,6 +236,9 @@ jobs:
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @candeo/desktop exec vue-tsc --noEmit
+      # Types cannot see a value routed to the wrong place (#67). Node only, no
+      # browser: a few seconds on top of the job.
+      - run: pnpm --filter @candeo/desktop test
 
   # Seul job qui construit réellement l'application. `fmt`, `clippy`, les tests
   # et `vue-tsc` ne compilent jamais `candeo-desktop` : une rupture de la
