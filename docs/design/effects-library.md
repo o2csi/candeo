@@ -27,9 +27,9 @@ the file.
 
 ```text
 app_data_dir()/effects/
-  Onde radiale.ts
-  Respiration.ts
-  Mon effet.ts
+  Radial wave.ts
+  Breathing.ts
+  My effect.ts
 ```
 
 - The name shown everywhere is the file name without `.ts`. Sources no longer
@@ -89,7 +89,7 @@ runs, tray-only use included.
 1. **Rust lists the folder**: for each `.ts`, its name, the SHA-256 of its bytes,
    and whether the cache holds a result for that hash.
 2. **The webview compiles what is stale**, with `transpileModule`, at startup
-   and on **Rafraîchir** in the gallery. The compiler is loaded only when at
+   and on **Refresh** in the gallery. The compiler is loaded only when at
    least one file is stale.
 3. **Rust receives the JavaScript**, loads it once in QuickJS with the time
    budget swatch sampling already uses, reads the manifest the module declares
@@ -102,7 +102,7 @@ runs, tray-only use included.
 The effects folder holds only the files people write. The engine and the tray
 run an effect only when its cache matches the file's current hash, so they
 never run code that differs from the file on disk. A file dropped in while
-candeo runs appears after Rafraîchir; watching the folder can come later.
+candeo runs appears after Refresh; watching the folder can come later.
 
 What goes away: the manifest reader on the syntax tree (`editor/effect.ts`), the
 `source.ts` / `effect.js` / `manifest.json` / `swatch.json` directory per
@@ -114,7 +114,10 @@ checked by CI).
 The sources move to `packages/effects/<Name>.ts`, type-checked by `vue-tsc`, and
 are embedded in the binary. At startup they are copied into the effects folder
 **once**, and `settings.json` records what was copied:
-`shippedEffects: { "Onde radiale": "<sha-256>" }`.
+`shippedEffects: { "Radial wave": "<sha-256>" }`.
+
+Shipped effects are named in English: a name is a file name and is not
+translated, and English is the reference language of the interface.
 
 | State at startup | Action |
 |---|---|
@@ -125,20 +128,20 @@ are embedded in the binary. At startup they are copied into the effects folder
 | Recorded, file missing (deleted or renamed) | leave it; never copied again |
 
 A deleted shipped effect comes back by downloading its file from the repository
-into the folder. The gallery's **Intégrés** section lists the files whose name
+into the folder. The gallery's **Built-in** section lists the files whose name
 is recorded as shipped, modified or not; a renamed one becomes the user's.
 
 ## 5. Library actions
 
-- **Rafraîchir**, and **Ouvrir le dossier**, in the effects column.
+- **Refresh**, and **Open folder**, in the effects column.
 - **Rename** from the editor header: renames the file, moves its settings and
   its draft. The name is edited there only; sources have no `name`.
-- **Duplicate**: a copy named `<name> (copie)`, `(copie 2)`…
+- **Duplicate**: a copy named `<name> (copy)`, `(copy 2)`…
 - **Delete**: stops the loops running it, removes the file and its cache,
   forgets its settings.
 - **Missing effect**: when `activeEffects` or `effectParams` name an effect the
-  folder no longer holds, the gallery says so once — « Onde radiale » n'est
-  plus dans le dossier — with **Oublier ses réglages**. Nothing is purged
+  folder no longer holds, the gallery says so once — "Radial wave" is no
+  longer in the folder — with **Forget its settings**. Nothing is purged
   automatically: putting the file back under that name restores everything.
 
 ## 6. Migration from the directory layout
@@ -151,8 +154,9 @@ One pass at the first launch of the new version, idempotent, recorded as
    ` (2)` on collision). The directory is removed once the file is written.
 2. `activeEffects` and `effectParams` are rewritten from old ids to names:
    installed effects through step 1, shipped effects through a table
-   (`onde-radiale` → `Onde radiale`, `onde-matricielle` → `Onde diagonale`,
-   `respiration`, `balayage`, `degrade-fixe` → `Dégradé fixe`).
+   (`onde-radiale` → `Radial wave`, `onde-matricielle` → `Diagonal wave`,
+   `respiration` → `Breathing`, `balayage` → `Sweep`, `degrade-fixe` →
+   `Fixed gradient`).
 3. Shipped effects are then copied as in §4.
 4. Drafts stored under `candeo:brouillon:<id>` are renamed when the editor
    opens, from the same table.
@@ -166,7 +170,7 @@ memory-only swatches, the Rust manifest copies and their test, copy-on-open in
 the editor, `derive_id`, per-effect directories.
 
 Stays: one engine, one API, the swatch sampled by running the effect, per-device
-settings, preview versus Appliquer.
+settings, preview versus Apply.
 
 ## 8. Out of scope
 
@@ -178,9 +182,9 @@ settings, preview versus Appliquer.
 
 ## Order of work
 
-1. File-named effects, the compile pass and cache, Rafraîchir, the migration,
+1. File-named effects, the compile pass and cache, Refresh, the migration,
    settings keyed by name.
 2. Shipped effects as `packages/effects/*.ts`, seeding; removal of the built-in
    special cases.
-3. Rename, Duplicate, Ouvrir le dossier, the missing-effect notice.
+3. Rename, Duplicate, Open folder, the missing-effect notice.
 4. Localized `description` and `label` (with #73).
