@@ -65,6 +65,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::journal::LogLevel;
+use crate::language::LanguageSetting;
 use crate::runtime::swatch::{self, Swatch};
 use crate::shipped::Shipped;
 use crate::{AppState, CmdResult, DeviceRef};
@@ -380,6 +381,9 @@ pub struct Preferences {
     /// the notice the interface shows about it. See [`crate::journal`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
+    /// Interface language. `system`, the default, is not written.
+    #[serde(skip_serializing_if = "LanguageSetting::is_system")]
+    pub language: LanguageSetting,
 }
 
 /// Persistent settings.
@@ -2993,6 +2997,7 @@ mod tests {
             version: SETTINGS_VERSION,
             preferences: Preferences {
                 log_level: Some(LogLevel::Debug),
+                language: LanguageSetting::Fr,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3160,6 +3165,7 @@ mod tests {
         let settings = Settings {
             preferences: Preferences {
                 log_level: Some(LogLevel::Trace),
+                ..Preferences::default()
             },
             ..Settings::default()
         };
@@ -3170,6 +3176,27 @@ mod tests {
         assert_eq!(
             store.read_settings().unwrap().preferences.log_level,
             Some(LogLevel::Trace)
+        );
+    }
+
+    /// The language follows the system until someone chooses, and only a choice
+    /// is written.
+    #[test]
+    fn the_language_is_written_only_when_chosen() {
+        let (tmp, store) = temp_store();
+        let file = tmp.path().join("config").join("settings.json");
+        store.write_settings(&Settings::default()).unwrap();
+        assert!(!fs::read_to_string(&file).unwrap().contains("language"));
+
+        let mut settings = store.read_settings().unwrap();
+        settings.preferences.language = LanguageSetting::En;
+        store.write_settings(&settings).unwrap();
+        assert!(fs::read_to_string(&file)
+            .unwrap()
+            .contains(r#""language": "en""#));
+        assert_eq!(
+            store.read_settings().unwrap().preferences.language,
+            LanguageSetting::En
         );
     }
 
@@ -3736,6 +3763,7 @@ mod tests {
         // exactly what it watches for.
         let preferences = Preferences {
             log_level: Some(LogLevel::Debug),
+            language: LanguageSetting::En,
         };
         mirror("Preferences", &preferences);
         mirror(

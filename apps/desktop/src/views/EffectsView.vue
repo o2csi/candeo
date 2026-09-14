@@ -83,7 +83,7 @@ import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
-import { DEVICE_STATUS_LABELS, deviceStatus } from '../composables/deviceStatus'
+import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -1032,8 +1032,8 @@ onBeforeUnmount(() => {
             class="entry"
             type="button"
             :aria-pressed="deviceKey === key(d)"
-            :aria-label="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
-            :title="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
+            :aria-label="`${d.name} · ${statusLabel(deviceStatus(d))}`"
+            :title="`${d.name} · ${statusLabel(deviceStatus(d))}`"
             @click="choose(d)"
           >
             <!--

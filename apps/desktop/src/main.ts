@@ -11,8 +11,10 @@ import '@fontsource-variable/jetbrains-mono'
 import './styles/tokens.css'
 import './styles/base.css'
 
+import { getLanguage } from './api/candeo'
 import { erreur, message } from './api/journal'
 import App from './App.vue'
+import { i18n, showIn } from './i18n'
 import { router } from './router'
 
 const app = createApp(App)
@@ -37,4 +39,9 @@ app.config.errorHandler = (e, _instance, info) => {
   erreur('vue', `${info} : ${message(e)}`, e)
 }
 
-app.use(router).mount('#app')
+// The language first, so that the window does not show English for a moment
+// before switching. If Rust cannot answer, English: the window must still open.
+getLanguage()
+  .then((status) => showIn(status.language))
+  .catch((e: unknown) => erreur('i18n', `interface language not read: ${message(e)}`, e))
+  .finally(() => app.use(i18n).use(router).mount('#app'))

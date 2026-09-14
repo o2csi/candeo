@@ -9,12 +9,12 @@
 import { computed } from 'vue'
 
 import type { DeviceInfo } from '../api/types'
-import { DEVICE_STATUS_LABELS, deviceStatus } from '../composables/deviceStatus'
+import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 
 const props = defineProps<{ device: Pick<DeviceInfo, 'name' | 'open' | 'present'> }>()
 
 const status = computed(() => deviceStatus(props.device))
-const label = computed(() => `${props.device.name} · ${DEVICE_STATUS_LABELS[status.value]}`)
+const label = computed(() => `${props.device.name} · ${statusLabel(status.value)}`)
 </script>
 
 <template>

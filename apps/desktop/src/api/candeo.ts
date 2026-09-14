@@ -399,6 +399,31 @@ export interface ActiveEffectRecord {
 export interface Preferences {
   /** Le niveau du journal, quand quelqu'un l'a changé. Absent = le défaut. */
   logLevel?: LogLevel
+  /** The interface language someone chose. Absent = the system's. */
+  language?: LanguageSetting
+}
+
+/** What someone chose for the interface language. */
+export type LanguageSetting = 'system' | 'en' | 'fr'
+
+/** A language the interface is written in. */
+export type Language = 'en' | 'fr'
+
+/** The setting, the language it resolves to, and the system's. */
+export interface LanguageStatus {
+  setting: LanguageSetting
+  language: Language
+  system: Language
+}
+
+/** The interface language; the system's when the settings cannot be read. */
+export function getLanguage(): Promise<LanguageStatus> {
+  return invoke('get_language')
+}
+
+/** Changes the interface language and saves it. */
+export function setLanguage(setting: LanguageSetting): Promise<LanguageStatus> {
+  return invoke('set_language', { setting })
 }
 
 /**

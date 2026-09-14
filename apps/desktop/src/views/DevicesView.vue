@@ -6,22 +6,10 @@
 
 import { onMounted } from 'vue'
 
-import type { DeviceState } from '../api/types'
 import { useDevice } from '../composables/useDevice'
+import { t } from '../i18n'
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
-
-/**
- * Les trois états, dans la langue de l'interface.
- *
- * Table plutôt que suite de ternaires : l'ajout d'un quatrième état ne doit pas
- * pouvoir être oublié ici, le compilateur le réclame.
- */
-const LIBELLES: Record<DeviceState, string> = {
-  adopted: 'Piloté',
-  detected: 'Détecté',
-  ignored: 'Ignoré',
-}
 
 onMounted(refresh)
 </script>
@@ -29,8 +17,8 @@ onMounted(refresh)
 <template>
   <section class="page">
     <header class="head">
-      <h1>Périphériques</h1>
-      <button class="ghost" :disabled="busy" @click="refresh">Rechercher</button>
+      <h1>{{ t('devices.title') }}</h1>
+      <button class="ghost" :disabled="busy" @click="refresh">{{ t('devices.search') }}</button>
     </header>
 
     <!--
@@ -58,8 +46,14 @@ onMounted(refresh)
               « aucune ».
             -->
             <span class="mono ids detail">
-              micrologiciel {{ d.firmware ?? (d.open ? 'non lu' : 'non lu, appareil fermé') }} ·
-              gabarit relevé sur {{ d.surveyedFirmware }}
+              {{
+                t('devices.firmware', {
+                  version:
+                    d.firmware ??
+                    (d.open ? t('devices.firmwareNotRead') : t('devices.firmwareNotReadClosed')),
+                  surveyed: d.surveyedFirmware,
+                })
+              }}
             </span>
             <!--
               The layout is read from an open device, and a layout is a model's:
@@ -68,8 +62,14 @@ onMounted(refresh)
               cells, not the 106 lit keys.
             -->
             <span v-if="d.open && layout?.name === d.name" class="mono ids detail">
-              matrice {{ layout.rows }} × {{ layout.cols }} · image de {{ layout.frameLen }} couleurs ·
-              {{ layout.keys.length }} touches éclairées
+              {{
+                t('devices.matrix', {
+                  rows: layout.rows,
+                  cols: layout.cols,
+                  frameLen: layout.frameLen,
+                  keys: layout.keys.length,
+                })
+              }}
             </span>
           </div>
 
@@ -79,9 +79,9 @@ onMounted(refresh)
             en une seule rendrait « piloté mais débranché » indicible.
           -->
           <span class="tag" :class="d.present ? 'ok' : 'absent'">
-            {{ d.present ? 'Branché' : 'Débranché' }}
+            {{ d.present ? t('devices.plugged') : t('devices.unplugged') }}
           </span>
-          <span class="tag" :class="d.state">{{ LIBELLES[d.state] }}</span>
+          <span class="tag" :class="d.state">{{ t(`devices.state.${d.state}`) }}</span>
 
           <!--
             Un appareil jamais vu est listé, pas piloté : c'est un bouton à
@@ -99,10 +99,10 @@ onMounted(refresh)
             :disabled="busy"
             @click="adopt(d)"
           >
-            Piloter
+            {{ t('devices.control') }}
           </button>
           <button v-if="d.state !== 'ignored'" class="ghost" :disabled="busy" @click="ignore(d)">
-            Ignorer
+            {{ t('devices.ignore') }}
           </button>
         </div>
 
@@ -121,11 +121,8 @@ onMounted(refresh)
       </li>
     </ul>
 
-    <p v-if="!devices.length" class="empty">Aucun gabarit connu.</p>
-    <p v-else class="note">
-      Un appareil jamais vu est listé mais non piloté — la décision se prend une fois, puis se
-      retient.
-    </p>
+    <p v-if="!devices.length" class="empty">{{ t('devices.none') }}</p>
+    <p v-else class="note">{{ t('devices.neverSeen') }}</p>
   </section>
 </template>
 

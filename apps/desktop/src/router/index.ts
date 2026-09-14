@@ -18,19 +18,16 @@ export const router = createRouter({
       path: '/',
       name: 'effects',
       component: () => import('../views/EffectsView.vue'),
-      meta: { title: 'Effets' },
     },
     {
       path: '/devices',
       name: 'devices',
       component: () => import('../views/DevicesView.vue'),
-      meta: { title: 'Périphériques' },
     },
     {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),
-      meta: { title: 'Réglages' },
     },
     {
       // L'éditeur est un **mode** : il remplace le contenu de la fenêtre.
@@ -38,7 +35,7 @@ export const router = createRouter({
       path: '/editor/:id?',
       name: 'editor',
       component: () => import('../views/EditorView.vue'),
-      meta: { title: 'Éditeur', full: true },
+      meta: { full: true },
     },
   ],
 })

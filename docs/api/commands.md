@@ -660,7 +660,8 @@ finished by the next startup without duplicating an effect.
 ```ts
 {
   preferences: {
-    logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace'
+    logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
+    language?: 'en' | 'fr'        // absent : la langue du système
   },
   devices: {
     vid: number,
@@ -966,6 +967,28 @@ announce it.
 
 `reset_settings()` also brings the level back to the default, and immediately: it has
 just been erased from the file, leaving it applied would make the screen lie.
+
+## Interface language
+
+### `get_language() -> LanguageStatus` · `set_language(setting) -> LanguageStatus`
+
+```ts
+{
+  setting: 'system' | 'en' | 'fr',   // ce qui a été choisi
+  language: 'en' | 'fr',             // ce que l'interface affiche
+  system: 'en' | 'fr'                // la langue du système, pour le choix « Système »
+}
+```
+
+`system`, the default, is not written to `settings.json`. It resolves in Rust, so
+that the window and the tray agree: the display language on Windows
+(`GetUserDefaultUILanguage`, not the regional format — someone reading Windows in
+English with French dates expects English), `LC_ALL`, `LC_MESSAGES` or `LANG`
+elsewhere, and English for any language the interface is not written in.
+
+`get_language` never fails: with unreadable settings it gives the system's
+language, since the window must still be able to say what went wrong. The window
+reads it before mounting, so that it does not show English for a moment.
 
 ### `open_log_dir()`
 

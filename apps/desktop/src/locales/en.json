@@ -1,0 +1,84 @@
+{
+  "app": {
+    "title": "candeo - {summary}",
+    "tabs": {
+      "effects": "Effects",
+      "devices": "Devices",
+      "settings": "Settings"
+    },
+    "closeHides": "Closing hides to the notification area",
+    "closeHidesDetail": "Closing the window does not stop candeo: the effect keeps running on the keyboard, and the notification area icon keeps control of it. To quit, right-click that icon, then “Quit candeo”."
+  },
+  "devices": {
+    "title": "Devices",
+    "search": "Search",
+    "status": {
+      "controlled": "controlled",
+      "notOpen": "not open",
+      "unplugged": "unplugged"
+    },
+    "summary": {
+      "controlled": "no device controlled | 1 device controlled | {n} devices controlled",
+      "unreachable": "{summary} · {n} unreachable"
+    },
+    "state": {
+      "adopted": "Controlled",
+      "detected": "Detected",
+      "ignored": "Ignored"
+    },
+    "plugged": "Plugged in",
+    "unplugged": "Unplugged",
+    "firmware": "firmware {version} · layout surveyed on {surveyed}",
+    "firmwareNotRead": "not read",
+    "firmwareNotReadClosed": "not read, device closed",
+    "matrix": "matrix {rows} × {cols} · frame of {frameLen} colors · {keys} lit keys",
+    "control": "Control",
+    "ignore": "Ignore",
+    "none": "No known layout.",
+    "neverSeen": "A device never seen before is listed but not controlled: the decision is made once, then remembered."
+  },
+  "settings": {
+    "title": "Settings",
+    "language": {
+      "title": "Language",
+      "label": "Interface language",
+      "system": "System ({language})",
+      "names": {
+        "en": "English",
+        "fr": "Français"
+      }
+    },
+    "log": {
+      "title": "Log",
+      "level": "Level",
+      "levels": {
+        "error": "Errors only",
+        "warn": "Warnings",
+        "info": "Lifecycle (default)",
+        "debug": "Detailed, per frame",
+        "trace": "Everything, per frame"
+      },
+      "verbose": "Detailed level on: the log grows fast and stays on after a restart.",
+      "forcedByEnv": "CANDEO_LOG imposes the {level} level for this run. The setting above applies at the next launch without that variable.",
+      "requested": "requested",
+      "openFolder": "Open the log folder",
+      "copyDiagnostic": "Copy the diagnostic",
+      "noFolder": "No file: the log could not open its folder.",
+      "copied": "Copied to the clipboard.",
+      "copyRefused": "The system refused to copy: the text is below, to select."
+    },
+    "config": {
+      "title": "Configuration",
+      "reset": "Reset the configuration to default",
+      "confirmTitle": "Start again from the default configuration?",
+      "detected": "Every device goes back to detected: none is opened at startup any more.",
+      "stopped": "Running effects stop and the backlight turns off, rather than staying frozen on the last frame.",
+      "forgetDevices": "Each device's applied effect and brightness are forgotten: everything starts again at full brightness, with no effect.",
+      "forgetParams": "The settings kept for each effect, on each device, are forgotten.",
+      "effectsKept": "Your effects are not touched.",
+      "effectsKeptDetail": "Deleting them is another action, one effect at a time, from the library.",
+      "confirm": "Reset to default",
+      "cancel": "Cancel"
+    }
+  }
+}

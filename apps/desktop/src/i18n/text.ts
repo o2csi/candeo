@@ -8,18 +8,15 @@
 
 import type { Text } from '@candeo/effects-api'
 
-/**
- * The interface's language.
- *
- * French, like every string of the interface today. The i18n catalogs (#73)
- * replace this with the language setting.
- */
-export function interfaceLanguage(): string {
-  return 'fr'
-}
+import { currentLanguage } from '.'
 
-/** The text in `language`, then English, then the first entry, else empty. */
-export function localized(text: Text | undefined, language = interfaceLanguage()): string {
+/**
+ * The text in `language`, then English, then the first entry, else empty.
+ *
+ * Reading the current language inside a computed makes it follow a language
+ * change.
+ */
+export function localized(text: Text | undefined, language: string = currentLanguage()): string {
   if (text === undefined) return ''
   if (typeof text === 'string') return text
   return text[language] ?? text.en ?? Object.values(text)[0] ?? ''

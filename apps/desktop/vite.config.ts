@@ -8,6 +8,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [vue()],
 
+  // vue-i18n's bundler build reads these flags: the Composition API only, no
+  // devtools hook in production.
+  define: {
+    __VUE_I18N_FULL_INSTALL__: true,
+    __VUE_I18N_LEGACY_API__: false,
+    __INTLIFY_PROD_DEVTOOLS__: false,
+  },
+
   build: {
     // Monaco embarque le compilateur TypeScript : son ouvrier pese pres de
     // 7 Mo, et le compilateur charge a la validation 3,5 Mo de plus. Le seuil
