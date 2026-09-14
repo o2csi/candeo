@@ -141,6 +141,16 @@ and the next would erase the previous one.
 | `detected` | listed, but **not** opened |
 | `ignored` | left alone, and it stays that way |
 
+### Plugged in, unplugged
+
+candeo listens to the system instead of enumerating on a timer (#81, `src-tauri/src/hotplug.rs`): HID interface notifications on Windows (`CM_Register_Notification`), kernel uevents for `hidraw` nodes on Linux. A burst of notifications is collapsed (700 ms of quiet), then what is plugged in is compared with what is open:
+
+- a device that left is **closed**, and its open failure forgotten. A loop running on it keeps running, writing nowhere;
+- an `adopted` device that came back is **opened** as at startup — serial checked, brightness reapplied — and its applied effect resumes (`set_resume_effects`). A loop still running finds the handle filled again and carries on;
+- the window and the tray are told through `candeo://etat-change`.
+
+Without notifications — refused by the system — nothing changes: a replugged device is reconnected from **Devices**.
+
 **The default is `detected`.** A device never seen before is listed, not controlled:
 writing to a USB device one understands poorly is not harmless, and at the
 scale of a growing catalog — keyboards, mice, memory, fans —
@@ -730,8 +740,8 @@ never touches it. Deleting an effect purges its entry everywhere — see
 
 ### `set_resume_effects(on)`
 
-Whether a device that opens starts its applied effect again: at startup and on
-adoption. On by default; only `false` is written. Rust resumes the effect itself,
+Whether a device that opens starts its applied effect again: at startup, on
+adoption, and when it is plugged back in. On by default; only `false` is written. Rust resumes the effect itself,
 with the settings saved for it on that device, so it works with the window
 hidden. Nothing starts when the effect already runs there. An effect that cannot
 start keeps its `activeEffects` entry and is logged; one edited outside candeo
