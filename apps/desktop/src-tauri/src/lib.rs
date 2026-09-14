@@ -505,17 +505,26 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
     }
 }
 
+/// What [`apply_adoptions`] did.
+#[derive(Default)]
+struct Adoptions {
+    opened: Vec<DeviceRef>,
+    /// An adopted device is plugged in but did not open, for a reason that may
+    /// pass: not ready yet, not permitted yet. Another unit of the model is not
+    /// one.
+    retry: bool,
+}
+
 /// Applies the stored decisions: at application startup, and when a device is
 /// plugged in (#81). Devices in `already_open` are left alone.
 ///
-/// Returns the devices it opened, and cannot fail: unreadable settings or a
-/// missing HID must not stop the window from opening — it is what would let the
-/// situation be fixed.
+/// Cannot fail: unreadable settings or a missing HID must not stop the window
+/// from opening — it is what would let the situation be fixed.
 fn apply_adoptions(
     app: &AppHandle,
     state: &AppState,
     already_open: &HashSet<DeviceRef>,
-) -> Vec<DeviceRef> {
+) -> Adoptions {
     let (store, settings) = match storage::store(app).and_then(|s| {
         let settings = s.read_settings()?;
         Ok((s, settings))
@@ -523,14 +532,14 @@ fn apply_adoptions(
         Ok(loaded) => loaded,
         Err(e) => {
             tracing::error!("adoption abandoned, no device opened: {e}");
-            return Vec::new();
+            return Adoptions::default();
         }
     };
     let api = match hid() {
         Ok(api) => api,
         Err(e) => {
             tracing::error!("adoption abandoned, no device opened: {e}");
-            return Vec::new();
+            return Adoptions::default();
         }
     };
 
@@ -549,12 +558,12 @@ fn apply_adoptions(
 
     // What the openings learn, to be stored once the loop is done.
     let mut learned = settings.clone();
-    let mut opened = Vec::new();
+    let mut done = Adoptions::default();
 
     // Handles first, failures next: two tables, never locked together.
     for (layout, keyboard) in newly_opened {
         let device = DeviceRef::of(layout);
-        opened.push(device);
+        done.opened.push(device);
         // The second `plugged` enumerates nothing again — it reads back the
         // list `api` already holds — and it avoids making [`OpenOutcome`]
         // carry the serial, which reports an attempt and has no business
@@ -597,6 +606,7 @@ fn apply_adoptions(
                 // `error` and not `warn`: an adopted device that does not open
                 // means the user's lighting will not come on.
                 tracing::error!(device = %outcome.device, "adopted device not opened: {e}");
+                done.retry |= e.code != "wrongUnit";
                 failures.insert(outcome.device, e);
             }
             None => {
@@ -604,7 +614,7 @@ fn apply_adoptions(
             }
         }
     }
-    opened
+    done
 }
 
 /// Brings the open devices in line with what is plugged in (#81): a device that
@@ -615,13 +625,16 @@ fn apply_adoptions(
 /// A loop still running on a device that left keeps running, writing nowhere:
 /// the handle it shares is filled again on replug, so the effect comes back
 /// without restarting.
-pub(crate) fn reconcile_devices(app: &AppHandle) {
+///
+/// Returns true when an adopted device is plugged in but did not open for a
+/// reason that may pass: [`hotplug`] tries again.
+pub(crate) fn reconcile_devices(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
     let api = match hid() {
         Ok(api) => api,
         Err(e) => {
             tracing::warn!("devices not reconciled: {e}");
-            return;
+            return false;
         }
     };
     let open = state.open_devices();
@@ -636,14 +649,16 @@ pub(crate) fn reconcile_devices(app: &AppHandle) {
         }
     }
 
-    let reopened = apply_adoptions(app, &state, &state.open_devices());
-    for device in &reopened {
+    let adoptions = apply_adoptions(app, &state, &state.open_devices());
+    for device in &adoptions.opened {
         runtime::resume_applied(app, *device);
     }
-    if changed || !reopened.is_empty() {
+    // A failed open changes what Devices shows too.
+    if changed || !adoptions.opened.is_empty() || adoptions.retry {
         tray::refresh(app);
         tray::notify_state_changed(app);
     }
+    adoptions.retry
 }
 
 /// Puts back on the keyboard the brightness stored for it.
