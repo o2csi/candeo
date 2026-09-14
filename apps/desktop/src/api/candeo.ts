@@ -182,6 +182,8 @@ export interface EffectManifest {
   description?: Text
   params?: Record<string, ParamSpec>
   apiVersion: number
+  /** Declares `inputs: ['keys']`: key presses are read while it runs. */
+  readsKeys?: boolean
 }
 
 /**

@@ -229,6 +229,8 @@ interface Choice {
   error: string | null
   /** A built-in whose file was edited outside the application. */
   modified: boolean
+  /** Key presses are read while it runs: said on screen (`docs/design/key-input.md` §3). */
+  readsKeys: boolean
 }
 
 const library = ref<EffectEntry[]>([])
@@ -251,6 +253,7 @@ function fromEntry(e: EffectEntry): Choice {
     state: e.state,
     error: e.error ?? null,
     modified: e.modified,
+    readsKeys: e.readsKeys ?? false,
   }
 }
 
@@ -266,6 +269,7 @@ function fromHardware(e: HardwareEffect): Choice {
     state: 'ready',
     error: null,
     modified: false,
+    readsKeys: false,
   }
 }
 
@@ -1276,6 +1280,7 @@ onBeforeUnmount(() => {
           <span class="badge" :class="selectedEffect.nature">
             {{ NATURES[selectedEffect.nature] }}{{ selectedEffect.modified ? ' · modifié' : '' }}
           </span>
+          <span v-if="selectedEffect.readsKeys" class="badge keys">réagit aux frappes</span>
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>
@@ -1934,6 +1939,12 @@ onBeforeUnmount(() => {
 .badge.hardware {
   background: color-mix(in srgb, var(--ok) 14%, transparent);
   color: var(--ok);
+}
+
+/* Not a warning: a fact about what the effect reads, said where it is chosen. */
+.badge.keys {
+  border: 1px solid var(--line-strong);
+  background: none;
 }
 
 .desc {

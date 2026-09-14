@@ -165,7 +165,27 @@ export interface EffectContext<P = undefined> {
    * déclaration fausse.
    */
   readonly params: ParamsOf<P>
+  /**
+   * The keys pressed recently on this layout, oldest first. Always empty unless
+   * the effect declares `inputs: ['keys']`.
+   *
+   * A press is a key going down: holding a key does not repeat it, and releases
+   * are not reported. Only presses younger than 10 seconds, at most the last 32.
+   * On a device, only that keyboard's presses; in the preview, any keyboard's.
+   */
+  readonly presses: readonly Press[]
 }
+
+/** A key going down. See {@link EffectContext.presses}. */
+export interface Press {
+  /** The key, as found in `layout.keys` by scancode. */
+  readonly key: Key
+  /** When it went down, on the clock of {@link EffectContext.time}. */
+  readonly at: number
+}
+
+/** What an effect reads besides time and its parameters. */
+export type Input = 'keys'
 
 /** Un effet rend une image à chaque appel. */
 export type Effect = (ctx: EffectContext) => void
@@ -249,6 +269,12 @@ export interface EffectModule<P = undefined> {
    * keeps the effect right the day a second kind arrives.
    */
   readonly kinds?: readonly DeviceKind[] | 'all'
+  /**
+   * What the effect reads besides time and its parameters. `['keys']` gives it
+   * {@link EffectContext.presses}; key presses are read only while such an
+   * effect runs, and the gallery says so (`docs/design/key-input.md`).
+   */
+  readonly inputs?: readonly Input[]
   readonly params?: P
   /** `ctx.params` est typé d'après `params` ci-dessus. */
   readonly render: (ctx: EffectContext<P>) => void

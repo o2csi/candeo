@@ -244,12 +244,17 @@ export default defineEffect({
 
 The effects shipped with the application — Radial wave, Diagonal wave,
 Breathing, Sweep, Fixed gradient, Color wheel, Noise map, Rain, Starry night,
-Bubbles, Lightning, Crossing beams, Swirl circles — are written against this same
-API, in
+Bubbles, Lightning, Crossing beams, Swirl circles, Ripples — are written against
+this same API, in
 [`packages/effects/`](packages/effects/). They are copied into your effects folder
-at first launch, and from then on they are your files: open, change, rename or
-delete them like any other. A shipped effect you deleted comes back by saving its
-file from this repository into the folder.
+at first launch and kept up to date. The application does not change them:
+Duplicate one to make it yours, and Restore brings back one changed or removed in
+the folder.
+
+An effect can react to the keys you press: Ripples spreads a ring from each one.
+Key presses are read only while such an effect runs, as key positions, never as
+characters, and are neither logged nor kept beyond a few seconds
+([`docs/design/key-input.md`](docs/design/key-input.md)). Windows only for now.
 
 ---
 

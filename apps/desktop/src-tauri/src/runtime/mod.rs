@@ -84,7 +84,10 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::journal;
 
+pub mod presses;
 pub mod swatch;
+
+use presses::Presses;
 
 /// The module the host provides, and that the editor describes through its
 /// `.d.ts`.
@@ -458,6 +461,8 @@ pub struct Engine {
     preview: Arc<DeviceLoop>,
     /// The layout the preview borrows, written and cleared with the loop.
     preview_layout: Mutex<Option<DeviceRef>>,
+    /// Key presses, read only while a loop runs an effect declaring them.
+    presses: Arc<Presses>,
 }
 
 /// The loop of **one** device.
@@ -535,6 +540,7 @@ impl DeviceLoop {
     }
 
     /// Starts an effect on this target. Replaces the one that was running.
+    #[allow(clippy::too_many_arguments)]
     fn start(
         &self,
         target: Target,
@@ -543,6 +549,7 @@ impl DeviceLoop {
         params: String,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
+        presses: Arc<Presses>,
     ) -> Result<(), String> {
         // Held from start to finish: this lock is what forbids two loops from
         // overlapping on this device. It is taken only here and in
@@ -568,7 +575,18 @@ impl DeviceLoop {
         let thread_effect_id = effect_id.clone();
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
-            .spawn(move || render_loop(target, thread_effect_id, s, js, layout, out, ready_tx))
+            .spawn(move || {
+                render_loop(
+                    target,
+                    thread_effect_id,
+                    s,
+                    js,
+                    layout,
+                    out,
+                    presses,
+                    ready_tx,
+                )
+            })
             .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
 
         // Wait for the load verdict: a syntax error must surface to the call,
@@ -758,6 +776,7 @@ impl Engine {
             params,
             layout,
             Box::new(NoOutput),
+            Arc::clone(&self.presses),
         )
     }
 
@@ -871,8 +890,15 @@ impl Engine {
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
-        self.device_loop(device)
-            .start(Target::Device(device), effect_id, js, params, layout, out)
+        self.device_loop(device).start(
+            Target::Device(device),
+            effect_id,
+            js,
+            params,
+            layout,
+            out,
+            Arc::clone(&self.presses),
+        )
     }
 }
 
@@ -883,6 +909,7 @@ impl Drop for Engine {
 }
 
 /// Prepares the QuickJS context, then runs until stopped.
+#[allow(clippy::too_many_arguments)]
 fn render_loop(
     target: Target,
     effect_id: String,
@@ -890,6 +917,7 @@ fn render_loop(
     js: String,
     layout: &'static Layout,
     out: Box<dyn DeviceOut>,
+    presses: Arc<Presses>,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
     // **The span, and it is the reason `tracing` was chosen.** There is one
@@ -937,22 +965,45 @@ fn render_loop(
         }
     };
 
-    let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
+    // Presses are read only for an effect that declares them, and for as long as
+    // this loop runs it: the guard ends with the thread
+    // (`docs/design/key-input.md` §3). A device's loop reads its own keyboard; the
+    // preview draws a layout, not a device, and reads them all.
+    //
+    // `started` first: a press that arrives once the guard exists is never older
+    // than the effect's clock.
     let started = Instant::now();
+    let reads_keys = ctx
+        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_keys"))
+        .unwrap_or(false);
+    let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
+    let keyboard = match target {
+        Target::Device(d) => Some((d.vid, d.pid)),
+        Target::Preview(_) => None,
+    };
+
+    let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
     let mut deadline = Instant::now();
     let mut frame_index: u32 = 0;
     let mut consecutive_errors: u32 = 0;
 
     while !shared.stop.load(Ordering::Relaxed) {
         let params = shared.params.lock().unwrap().clone();
-        let time = started.elapsed().as_secs_f64();
+        let now = Instant::now();
+        let time = now.duration_since(started).as_secs_f64();
+        let pressed = match &keys {
+            Some((reading, positions)) => {
+                positions.to_json(&reading.since(started, now, keyboard), now, time)
+            }
+            None => String::new(),
+        };
 
         // The deadline is renewed before **every** frame: that is the whole
         // point of the shared cell. The handler, for its part, was set once and
         // for all on the `Runtime`.
         budget.grant(FRAME_BUDGET);
 
-        match render_once(&ctx, time, frame_index, &params, frame_len) {
+        match render_with_presses(&ctx, time, frame_index, &params, &pressed, frame_len) {
             Ok(bytes) => {
                 consecutive_errors = 0;
                 // The effect recovered: clear the error, otherwise the
@@ -1174,11 +1225,24 @@ fn prepare_with_layout(
     Ok((rt, ctx))
 }
 
+/// One frame with no key presses: swatches, tests, and effects that read no keys.
 fn render_once(
     ctx: &Context,
     time: f64,
     frame_index: u32,
     params: &str,
+    frame_len: usize,
+) -> Result<Vec<u8>, String> {
+    render_with_presses(ctx, time, frame_index, params, "", frame_len)
+}
+
+/// One frame, with `presses` as `presses::to_json` writes them (empty: none).
+fn render_with_presses(
+    ctx: &Context,
+    time: f64,
+    frame_index: u32,
+    params: &str,
+    presses: &str,
     frame_len: usize,
 ) -> Result<Vec<u8>, String> {
     ctx.with(|ctx| {
@@ -1188,7 +1252,7 @@ fn render_once(
             .map_err(|_| "la fonction de rendu a disparu du contexte".to_string())?;
 
         let out: Vec<u8> = render
-            .call((time, frame_index, params))
+            .call((time, frame_index, params, presses))
             .catch(&ctx)
             .map_err(|e| format!("{e}"))?;
 
@@ -1337,27 +1401,21 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
 /// them will fail saying so — see `bounds` and `center` in `api.js`.
 fn layout_json(l: &'static Layout) -> String {
     let mut keys = String::new();
-    for row in 0..l.rows {
-        for col in 0..l.cols {
-            let Some(index) = l.at(row, col) else {
-                continue;
-            };
-            let Some(k) = l.key(index) else { continue };
-            if !keys.is_empty() {
-                keys.push(',');
-            }
-            let mut fields = format!(r#""index":{index},"row":{row},"col":{col}"#);
-            if k.scancode != candeo_device::NO_SCANCODE {
-                fields.push_str(&format!(r#","scancode":{}"#, k.scancode));
-            }
-            if let Some(label) = crate::keys::label(k.scancode) {
-                fields.push_str(&format!(r#","label":{}"#, json_string(&label)));
-            }
-            keys.push_str(&format!(
-                r#"{{{fields},"x":{},"y":{},"w":{},"h":{}}}"#,
-                k.x, k.y, k.w, k.h
-            ));
+    for (row, col, k) in keys_in_order(l) {
+        if !keys.is_empty() {
+            keys.push(',');
         }
+        let mut fields = format!(r#""index":{},"row":{row},"col":{col}"#, k.index);
+        if k.scancode != candeo_device::NO_SCANCODE {
+            fields.push_str(&format!(r#","scancode":{}"#, k.scancode));
+        }
+        if let Some(label) = crate::keys::label(k.scancode) {
+            fields.push_str(&format!(r#","label":{}"#, json_string(&label)));
+        }
+        keys.push_str(&format!(
+            r#"{{{fields},"x":{},"y":{},"w":{},"h":{}}}"#,
+            k.x, k.y, k.w, k.h
+        ));
     }
     format!(
         r#"{{"name":{},"rows":{},"cols":{},"keys":[{keys}]}}"#,
@@ -1365,6 +1423,16 @@ fn layout_json(l: &'static Layout) -> String {
         l.rows,
         l.cols
     )
+}
+
+/// A layout's keys, row by row: the order of `layout.keys` for effects. The
+/// positions presses are given as ([`presses::positions`]) depend on it.
+fn keys_in_order(
+    l: &'static Layout,
+) -> impl Iterator<Item = (u8, u8, &'static candeo_device::Key)> {
+    (0..l.rows)
+        .flat_map(move |row| (0..l.cols).map(move |col| (row, col)))
+        .filter_map(move |(row, col)| Some((row, col, l.key(l.at(row, col)?)?)))
 }
 
 fn json_string(s: &str) -> String {
@@ -1659,10 +1727,12 @@ mod tests {
         transient_failures: AtomicU32,
         /// Set when the loop dropped the device, as the real handle does.
         closed: AtomicBool,
+        /// The last frame written.
+        last: Mutex<Vec<Rgb>>,
     }
 
     impl DeviceOut for Arc<Output> {
-        fn present(&self, _colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
+        fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
             if self.closed.load(Ordering::Relaxed) {
                 return None;
             }
@@ -1676,6 +1746,7 @@ mod tests {
                 }
                 return Some(Err("écriture refusée par l'appareil".into()));
             }
+            *self.last.lock().unwrap() = colors.to_vec();
             self.written.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
         }
@@ -2096,6 +2167,120 @@ mod tests {
         assert!(engine.device_status().is_empty());
 
         engine.stop_preview();
+    }
+
+    // ------------------------------------------------------------ key presses
+
+    /// Lights every key pressed, white.
+    const READS_KEYS: &str = r#"
+        export default {
+          inputs: ['keys'],
+          render({ presses, frame }) {
+            for (const { key } of presses) frame.set(key, { r: 255, g: 255, b: 255 })
+          },
+        }
+    "#;
+
+    /// An engine whose presses come from the test, not from the keyboard.
+    fn engine_with(presses: &Arc<Presses>) -> Engine {
+        let mut engine = Engine::default();
+        engine.presses = Arc::clone(presses);
+        engine
+    }
+
+    fn lit(output: &Output, index: u16) -> bool {
+        output
+            .last
+            .lock()
+            .unwrap()
+            .get(usize::from(index))
+            .is_some_and(|c| c.r == 255)
+    }
+
+    /// A press lights its key on the keyboard it was typed on, and on no other:
+    /// 0x11 is LED 46, 0x1E is LED 67.
+    #[test]
+    fn a_device_sees_the_presses_of_its_own_keyboard() {
+        let presses = Presses::manual();
+        let engine = engine_with(&presses);
+        let output = Arc::new(Output::default());
+        start_js(&engine, FIRST, READS_KEYS, Arc::clone(&output)).expect("start");
+        wait_for("the loop never read presses", || presses.readers() == 1);
+
+        presses.push(presses::Press {
+            at: Instant::now(),
+            scancode: 0x11,
+            device: Some((FIRST.vid, FIRST.pid)),
+        });
+        presses.push(presses::Press {
+            at: Instant::now(),
+            scancode: 0x1E,
+            device: Some((SECOND.vid, SECOND.pid)),
+        });
+
+        wait_for("the pressed key never lit", || lit(&output, 46));
+        assert!(
+            !lit(&output, 67),
+            "a press from another keyboard lit this one"
+        );
+        engine.stop(FIRST);
+    }
+
+    /// Ripples draws its ring from the pressed key: at the instant of the press,
+    /// the key itself takes the ring color; at rest, the background.
+    #[test]
+    fn ripples_starts_its_ring_on_the_pressed_key() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Ripples"), layout()).expect("load");
+        let len = layout().led_count();
+        let rest = render_once(&ctx, 1.0, 0, "{}", len).expect("render");
+
+        let now = Instant::now();
+        let press = presses::Press {
+            at: now,
+            scancode: 0x11,
+            device: None,
+        };
+        let pressed = presses::positions(layout()).to_json(&[press], now, 1.0);
+        let lit = render_with_presses(&ctx, 1.0, 1, "{}", &pressed, len).expect("render");
+
+        let led = 46 * 3;
+        assert_eq!(&rest[led..led + 3], &[6, 12, 28], "background at rest");
+        assert_eq!(
+            &lit[led..led + 3],
+            &[64, 200, 255],
+            "ring color on the pressed key"
+        );
+        assert_eq!(&lit[0..3], &[6, 12, 28], "Escape, far away, untouched yet");
+    }
+
+    /// Presses are read only while a loop runs an effect declaring them, the
+    /// preview included, and no longer once the last one stops.
+    #[test]
+    fn presses_are_read_only_while_an_effect_declares_them() {
+        let presses = Presses::manual();
+        let engine = engine_with(&presses);
+
+        start_js(&engine, FIRST, EFFECT, Arc::new(Output::default())).expect("start");
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(presses.readers(), 0, "an effect that reads no keys");
+
+        start_js(&engine, SECOND, READS_KEYS, Arc::new(Output::default())).expect("start");
+        engine
+            .start_preview(
+                FIRST,
+                "keys".into(),
+                READS_KEYS.into(),
+                "{}".into(),
+                layout(),
+            )
+            .expect("preview start");
+        wait_for("both loops read presses", || presses.readers() == 2);
+
+        engine.stop(SECOND);
+        assert_eq!(presses.readers(), 1);
+        engine.stop_preview();
+        assert_eq!(presses.readers(), 0);
+        engine.stop(FIRST);
     }
 
     /// END TO END — writes to the REAL keyboard. `#[ignore]` by default.
