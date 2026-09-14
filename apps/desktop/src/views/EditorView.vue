@@ -517,13 +517,19 @@ onBeforeUnmount(() => {
 
       <!-- Stops what the device runs, whichever effect it is: offered only for this one. -->
       <button class="ghost" :disabled="busy || !runsHere" @click="halt">Arrêter</button>
+      <!--
+        The device goes in the tooltip and the accessible name, not the label: a
+        product name is long enough to wrap the header onto a second row.
+      -->
       <button
         v-if="deviceName"
         class="ghost"
         :disabled="busy || loading || applied"
+        :title="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
+        :aria-label="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
         @click="applyToDevice"
       >
-        {{ applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}` }}
+        {{ applied ? 'Appliqué' : 'Appliquer' }}
       </button>
       <button class="solid" :disabled="busy || loading" @click="save">
         {{ busy ? 'Un instant…' : 'Enregistrer' }}
