@@ -32,8 +32,9 @@
 //! - **effect** — read back through `0x0f`/`0x82`, rewritten as is **only** if it is
 //!   one whose read-back returns every argument. `Static` and `Breathing` carry a
 //!   color whose position in the read-back is not established: rewriting them could
-//!   turn them off, so we refrain and say so. At worst, an effect animated by the
-//!   firmware restarts from the beginning of its cycle;
+//!   turn them off, so we refrain and say so. Rewriting a running Spectrum Cycle or
+//!   Wave shows no visible restart: watched on the keyboard, firmware v1.5, the
+//!   first with #35, the Wave on 14/09/2026 (#74);
 //! - **row** — **never sent.** No color read-back exists, so no written row is
 //!   invisible.
 //!

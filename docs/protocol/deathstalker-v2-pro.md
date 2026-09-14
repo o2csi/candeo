@@ -536,6 +536,7 @@ hex dump, and the byte positions give the component order without inferring it.
 | 2026-09-12 | **Throughput measured**: 13.1 ms per full update, ceiling ~76 fps, no refused write. The bottleneck is the bus, not the computation — the engine frame rate goes from 60 to **30 fps** |
 | 2026-09-13 | **The `interface -1` entry explained** by the device tree: virtual HID collection under `RZVIRTUAL`, `RzDev_0292` service of the manufacturer's driver — not the keyboard |
 | 2026-09-14 | **Response checksums are correct**: 8 of 8 responses to an open's inspection (§8) |
+| 2026-09-14 | **Rewriting a running Wave identically shows no visible restart**, watched on the keyboard while the device was reopened (Ignore, then Control); the effect read back identical |
 
 ## 12. Captures
 
