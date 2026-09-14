@@ -75,8 +75,10 @@ import {
 } from '../api/candeo'
 import type { DeviceRef } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
+import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
+import { DEVICE_STATUS_LABELS, deviceStatus } from '../composables/deviceStatus'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -893,8 +895,8 @@ onBeforeUnmount(() => {
             class="entry"
             type="button"
             :aria-pressed="deviceKey === key(d)"
-            :aria-label="d.name"
-            :title="d.name"
+            :aria-label="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
+            :title="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
             @click="choose(d)"
           >
             <!--
@@ -904,20 +906,27 @@ onBeforeUnmount(() => {
               est un clavier ; le jour où le Rust déclarera un type, il viendra de
               là plutôt que d'être deviné sur le nom.
             -->
-            <svg
-              class="glyph"
-              viewBox="0 0 24 16"
-              width="18"
-              height="12"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-            >
-              <rect x="1" y="2" width="22" height="12" rx="2" />
-              <path d="M6 11h12" stroke-linecap="round" />
-              <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
-            </svg>
+            <!--
+              The state rides on the pictogram rather than in the text: it stays
+              visible when the column is collapsed to icons, and it says which
+              device dropped without a line of its own.
+            -->
+            <span class="glyph">
+              <svg
+                viewBox="0 0 24 16"
+                width="18"
+                height="12"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              >
+                <rect x="1" y="2" width="22" height="12" rx="2" />
+                <path d="M6 11h12" stroke-linecap="round" />
+                <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
+              </svg>
+              <DeviceStatusDot class="state-badge" :device="d" aria-hidden="true" />
+            </span>
 
             <span class="entry-text">
               <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
@@ -939,8 +948,6 @@ onBeforeUnmount(() => {
           <div v-if="deviceKey === key(d)" class="lum">
             <label class="lum-head" :for="`lum-${key(d)}`">
               <span class="lum-label">Luminosité</span>
-              <!-- A disabled slider that does not say why reads as broken. -->
-              <span v-if="!d.open" class="lum-state">non ouvert</span>
               <span class="lum-value">{{ brightnessPercent }} %</span>
             </label>
             <input
@@ -1338,8 +1345,18 @@ onBeforeUnmount(() => {
 }
 
 .glyph {
+  position: relative;
+  display: inline-flex;
   flex: none;
   color: var(--text-muted);
+}
+
+/* On the pictogram's lower right corner. Not `.badge`, which is the kind label
+   of the effect panel. */
+.state-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
 }
 
 .entry[aria-pressed="true"] .glyph {
@@ -1393,10 +1410,6 @@ onBeforeUnmount(() => {
 
 .lum-label {
   flex: 1;
-}
-
-.lum-state {
-  color: var(--warn);
 }
 
 /* Le chiffre en clair : un curseur sans valeur ne se repose pas au même endroit

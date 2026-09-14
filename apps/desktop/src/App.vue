@@ -1,16 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import * as api from './api/candeo'
 import { alerte, message } from './api/journal'
-import DevicePill from './components/DevicePill.vue'
+import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
 
 const route = useRoute()
-const { error, restore } = useDevice()
+const { devices, error, restore } = useDevice()
 const { reload } = useSettings()
+
+/**
+ * The controlled-device count lives in the window title, not in the window:
+ * it is read at a glance in the title bar and the taskbar, and each device card
+ * already says its own state. Here rather than in a view, since this component
+ * lives as long as the webview.
+ */
+watch(
+  () => controlledSummary(devices.value),
+  (summary) => {
+    getCurrentWindow()
+      .setTitle(`candeo - ${summary}`)
+      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e)}`, e))
+  },
+  { immediate: true },
+)
 
 /** L'éditeur occupe toute la fenêtre : c'est un mode, pas un onglet. */
 const full = computed(() => route.meta.full === true)
@@ -74,8 +91,6 @@ onMounted(() => {
         « Fenêtre et sortie » des périphériques le porte en entier.
       -->
       <span class="repli" :title="REPLI_DETAIL">{{ REPLI }}</span>
-
-      <DevicePill />
     </nav>
 
     <main class="body">

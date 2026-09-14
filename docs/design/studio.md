@@ -488,14 +488,22 @@ produce several per second. The window therefore waits for the selection to sett
 last selection wait and losing it, and the window would then have had to reconcile what
 it believed it had asked for with what is running.
 
-### The badge states the status, not the identity
+### Each device states its own status
 
-"2 appareils pilotés" (2 devices controlled), "aucun appareil piloté" (no device controlled). The name is in the column;
-repeating it would be a duplicate, and it would become wrong with a second device. It
-remains necessary, and that is why it is a component and not a piece of the
-bar: from the editor, where this column does not exist, it is the only place
-that signals a loss. A device adopted but unplugged is counted there **and** said to be
-unreachable — merging the two would make "controlled but absent" inexpressible.
+A dot on each device's pictogram gives its state: filled when controlled and
+open, a ring when not open, the warning colour when unplugged. The state is also
+in the tooltip and the accessible name, so colour is never its only carrier. A
+summary badge in the navigation bar could not say which of two keyboards
+dropped; the dot can, and it stays visible when the column is collapsed to
+icons.
+
+The editor has no devices column: it shows the target device's dot next to
+Apply, the only place there that signals a loss.
+
+The count moves to the window title — "candeo - 2 devices controlled", with how
+many are unreachable when some are. A device adopted but unplugged is counted
+**and** said to be unreachable: merging the two would make "controlled but
+absent" inexpressible.
 
 ### Two deliberate departures from the mockup
 
