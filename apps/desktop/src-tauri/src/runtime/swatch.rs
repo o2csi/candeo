@@ -72,7 +72,7 @@ const INSTANTS: [f64; SAMPLES] = [0.0, 0.37, 1.13, 2.61];
 /// opposite of what we want from a swatch, which is only a nicety. A few
 /// milliseconds are enough in practice; two seconds is two orders of magnitude
 /// above that.
-const BUDGET: Duration = Duration::from_secs(2);
+pub(crate) const BUDGET: Duration = Duration::from_secs(2);
 
 /// The swatch of an effect: a few `#rrggbb` colors.
 ///

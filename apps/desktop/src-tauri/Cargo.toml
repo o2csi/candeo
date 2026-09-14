@@ -55,6 +55,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # Rotation quotidienne et nombre de fichiers plafonné : une application
 # d'éclairage tourne des jours.
 tracing-appender = "0.2"
+# Content hash of an effect's source, pairing it with its compiled cache.
+# Already in the tree through Tauri.
+sha2 = "0.10"
 
 [dev-dependencies]
 # Le stockage se teste dans un dossier temporaire, jamais dans celui de
