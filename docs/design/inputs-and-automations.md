@@ -52,15 +52,16 @@ The local wall-clock time, read once per frame. `time` stays the seconds since
 the effect started; `clock` is what a clock face needs. Nothing to capture and
 nothing private, so no guard: every effect declaring `clock` gets it.
 
-**Two ways to show the hour, and they are different features:**
+**Showing the hour** takes two pieces:
 
-- **Continuous**: an effect that draws the time all along — the current hour and
-  minutes lit on the number row, a binary clock on the function keys. It is an
-  ordinary effect with `inputs: ['clock']`, applied like any other. A shipped
+- **The effect** draws the time — the current hour and minutes lit on the number
+  row, a binary clock on the function keys. It is an ordinary effect with
+  `inputs: ['clock']`: applied by hand, it shows the time all along. A shipped
   *Clock* effect comes with this part.
-- **Periodic**: every minute, quarter or hour, show the time for a few seconds,
-  then go back to what was running. That is not an effect but an **automation**
-  (§3) whose trigger is the schedule and whose action is the *Clock* effect.
+- **When and for how long** is an **automation** (§3): *every 3600 seconds, for
+  10 seconds* shows the clock on the hour and gives the keyboard back; *every
+  second, for 1 second* never gives it back, which is the continuous display
+  again, on top of whatever is applied.
 
 Later, if asked: sunrise and sunset, which need a location.
 
@@ -155,33 +156,47 @@ chose, with its settings.
 
 A rule is one sentence someone can read back:
 
-> **When** *every hour, on the hour* · **on** *DeathStalker V2 Pro* · **show**
-> *Clock* · **for** *10 seconds*
+> **Every** *3600 seconds* · **on** *DeathStalker V2 Pro* · **show** *Clock* ·
+> **for** *10 seconds*
 
 ```json
 "rules": [{
   "id": "…", "name": "Hourly clock", "enabled": true,
   "devices": [{ "vid": 5426, "pid": 658 }],
-  "when": { "kind": "schedule", "every": "hour", "at": 0 },
+  "when": { "kind": "schedule", "every": 3600, "aligned": true },
   "show": { "effect": "Clock", "params": {} },
   "for": { "seconds": 10 }
 }]
 ```
 
-- **Triggers, in the order they would come**:
+- **The schedule**: one trigger, in seconds, with a few options:
+
+  | Option | Meaning | Default |
+  |---|---|---|
+  | `every` | seconds between two occurrences, 1 or more; the interface offers 1 s, 1 min, 15 min, 1 h | — |
+  | `for` | seconds each occurrence lasts | 10 |
+  | `aligned` | occurrences fall on the clock (on the minute, on the hour) rather than counted from when the rule was enabled | on when `every` divides a day |
+  | `between` | only between two times, `22:00`–`07:00`; outside them the rule sleeps | always |
+
+  - **When `for` reaches `every`**, the next occurrence starts before the current
+    one ends: the interruption simply continues. The effect is not restarted, so
+    *every 1 s for 1 s* is a steady display, not a flicker.
+  - **`between` covers time windows**: *every 1 s for 1 s between 22:00 and
+    07:00, show Off* turns the keyboard off at night. No separate trigger is
+    needed.
+
+- **Other triggers, with their own pull requests**:
 
   | Trigger | Examples |
   |---|---|
-  | `schedule` | every minute, quarter or hour; at a given time |
-  | `window` | between two times: 22:00 to 07:00 |
   | `signal` | `doorbell` becomes `ring`; `ci` equals `failed` while it does |
   | `idle` | no key pressed for 10 minutes (reuses key capture) |
   | `app` | an application in the foreground (later) |
 
-- **Duration**:
-  - `for: { seconds }` ends the interruption after a time (a chime, a flash);
-  - `while` lasts as long as the trigger holds (a time window, a signal that
-    keeps its value, idleness).
+- **Duration for these triggers**:
+  - `for: { seconds }` ends the interruption after a time (a flash);
+  - `while` lasts as long as the trigger holds (a signal that keeps its value,
+    idleness).
 - **Action**: any effect of the library or a hardware effect, including *Off*,
   with its own settings. A rule does not borrow the device's saved settings for
   that effect: the hourly clock and the clock applied by hand need not look the
@@ -223,13 +238,14 @@ engine:
 ### 3.5 Interface
 
 - **An Automations tab** in the rail, between Effects and Devices:
-  - Each rule is a sentence of chips — *When* / *on* / *show* / *for* — each
-    opening a small picker. The effect picker is the gallery's list; its
+  - Each rule is a sentence of chips — *Every* / *on* / *show* / *for*, and
+    *between* when set — each opening a small picker; the durations take presets
+    and any number of seconds. The effect picker is the gallery's list; its
     settings form is the gallery's.
   - A switch per rule, the order changed by dragging, and a **Try** button that
     triggers a rule once, now.
-  - Empty state: three examples to start from (hourly clock, night off, doorbell
-    flash), each creating a disabled rule to adjust.
+  - Empty state: examples to start from (hourly clock, night off, and a doorbell
+    flash once signals exist), each creating a disabled rule to adjust.
 - **The device card** in the gallery shows an interruption where it shows the
   running effect: "Clock — for 7 s, then Ripples", with **Resume**.
 - **The tray**: the device submenu names the interruption the same way, and a
@@ -242,14 +258,15 @@ engine:
 Each step is one pull request, with its issue:
 
 1. **Resume the applied effect** when a device opens — at startup, on adoption,
-   on replug (#81) — behind a Settings option, on by default.
-2. **Clock input** and the shipped *Clock* effect: the continuous display.
-3. **Automations with `schedule` and `window` triggers**: the resolver, the
-   scheduler, `rules` in `settings.json`, the Automations tab, interruptions on the
-   device card and in the tray. The periodic clock comes with it.
-4. **Sound input** and two shipped effects.
+   on replug (#81) — behind a Settings option, on by default (#102).
+2. **Clock input** and the shipped *Clock* effect (#105).
+3. **Automations with the `schedule` trigger**: the resolver, the scheduler,
+   `rules` in `settings.json`, the Automations tab, interruptions on the device
+   card and in the tray. The periodic clock and the night window come with it
+   (#106).
+4. **Sound input** and two shipped effects (#107).
 5. **External signals**: the local API, the command line, `signal` triggers,
-   the Home Assistant example.
+   the Home Assistant example (#108).
 6. **`idle` trigger**, then system metrics, if asked.
 
 ## 5. Out of scope
