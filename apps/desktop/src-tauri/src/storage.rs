@@ -99,8 +99,9 @@ const RESERVED_NAMES: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct Manifest {
     pub name: String,
-    #[serde(default)]
-    pub description: String,
+    /// A string, or a map of languages: see [`text_or_empty`].
+    #[serde(default = "empty_text")]
+    pub description: serde_json::Value,
     /// Declared parameters, as the interface will present them.
     ///
     /// Kept as raw JSON: their shape is that of `ParamSpec` on the TypeScript
@@ -902,8 +903,8 @@ struct CacheRecord {
     /// from the file's describes another version, and is ignored.
     hash: String,
     js: String,
-    #[serde(default)]
-    description: String,
+    #[serde(default = "empty_text")]
+    description: serde_json::Value,
     #[serde(default)]
     params: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
@@ -1461,7 +1462,7 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
             EffectState::Stale,
             None,
             Swatch::new(),
-            String::new(),
+            empty_text(),
             serde_json::Map::new(),
             EFFECTS_API_VERSION,
         ),
@@ -1469,7 +1470,7 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
             EffectState::Broken,
             r.error,
             Swatch::new(),
-            String::new(),
+            empty_text(),
             serde_json::Map::new(),
             EFFECTS_API_VERSION,
         ),
@@ -1524,7 +1525,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
         Err(error) => CacheRecord {
             hash: hash.to_owned(),
             js: js.to_owned(),
-            description: String::new(),
+            description: empty_text(),
             params: serde_json::Map::new(),
             api_version: EFFECTS_API_VERSION,
             swatch: Swatch::new(),
@@ -1533,20 +1534,38 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
     }
 }
 
+/// Text shown to the user, when an effect declares none.
+fn empty_text() -> serde_json::Value {
+    serde_json::Value::String(String::new())
+}
+
+/// Text an effect declares for the interface: a string, or a map from language
+/// codes to strings — `{ en: 'Speed', fr: 'Vitesse' }` — kept as is for the
+/// window, which picks the language. Anything else is dropped, not refused: a
+/// description is no reason to keep an effect from loading.
+fn text_or_empty(value: Option<&serde_json::Value>) -> serde_json::Value {
+    match value {
+        Some(text @ serde_json::Value::String(_)) => text.clone(),
+        Some(serde_json::Value::Object(map))
+            if !map.is_empty() && map.values().all(serde_json::Value::is_string) =>
+        {
+            serde_json::Value::Object(map.clone())
+        }
+        _ => empty_text(),
+    }
+}
+
 /// The fields of a declared manifest the library keeps, and the API version check.
-///
-/// A `description` that is not a string is dropped, not refused: localized maps
-/// come with a later version, and an effect written for it must still load here.
 fn declared_fields(
     raw: &str,
-) -> CmdResult<(String, serde_json::Map<String, serde_json::Value>, u32)> {
+) -> CmdResult<(
+    serde_json::Value,
+    serde_json::Map<String, serde_json::Value>,
+    u32,
+)> {
     let value: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| format!("manifeste illisible : {e}"))?;
-    let description = value
-        .get("description")
-        .and_then(|d| d.as_str())
-        .unwrap_or_default()
-        .to_owned();
+    let description = text_or_empty(value.get("description"));
     let params = value
         .get("params")
         .and_then(|p| p.as_object())
@@ -1934,7 +1953,7 @@ mod tests {
         let entry = store.cache_effect("Onde circulaire", &hash, &js).unwrap();
         assert_eq!(entry.state, EffectState::Ready);
         assert_eq!(entry.manifest.name, "Onde circulaire");
-        assert_eq!(entry.manifest.description, "Uni");
+        assert_eq!(entry.manifest.description, serde_json::json!("Uni"));
         assert!(entry.manifest.params.contains_key("speed"));
         assert_eq!(entry.manifest.api_version, EFFECTS_API_VERSION);
         assert_eq!(entry.swatch, vec!["#00ff00"; 4]);
@@ -2025,6 +2044,39 @@ mod tests {
         assert_eq!(entry.state, EffectState::Broken);
         let error = entry.error.unwrap();
         assert!(error.contains("API d'effets"), "message: {error}");
+    }
+
+    /// A description in several languages is kept for the window; one that is
+    /// not text is dropped without keeping the effect from loading.
+    #[test]
+    fn a_localized_description_is_kept_and_anything_else_dropped() {
+        let (_tmp, store) = temp_store();
+        let localized = create_and_cache(
+            &store,
+            "Bilingue",
+            "export default { description: { en: 'A wave', fr: 'Une onde' }, render() {} }",
+        );
+        assert_eq!(localized.state, EffectState::Ready);
+        assert_eq!(
+            localized.manifest.description,
+            serde_json::json!({ "en": "A wave", "fr": "Une onde" })
+        );
+
+        for (name, js) in [
+            ("Nombre", "export default { description: 42, render() {} }"),
+            (
+                "Carte mixte",
+                "export default { description: { en: 1 }, render() {} }",
+            ),
+            (
+                "Carte vide",
+                "export default { description: {}, render() {} }",
+            ),
+        ] {
+            let entry = create_and_cache(&store, name, js);
+            assert_eq!(entry.state, EffectState::Ready, "{name}");
+            assert_eq!(entry.manifest.description, serde_json::json!(""), "{name}");
+        }
     }
 
     /// Creating never overwrites, saving again never creates: neither gesture can
@@ -3235,7 +3287,7 @@ mod tests {
     fn declared_manifest() -> Manifest {
         Manifest {
             name: "Balayage".into(),
-            description: String::new(),
+            description: empty_text(),
             params: serde_json::json!({
                 "speed":  { "kind": "number",  "label": "Vitesse", "default": 120 },
                 "bounce": { "kind": "boolean", "label": "Rebond",  "default": false },

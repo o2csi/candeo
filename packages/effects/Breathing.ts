@@ -9,11 +9,14 @@ import { defineEffect, rgb } from '@candeo/effects-api'
 const DEFAULT_COLOR = { r: 255, g: 96, b: 0 }
 
 export default defineEffect({
-  description: "Tout le clavier respire, d'une seule couleur",
+  description: {
+    en: 'The whole keyboard breathes, in a single color',
+    fr: "Tout le clavier respire, d'une seule couleur",
+  },
   kinds: ['keyboard'],
   params: {
-    color: { kind: 'color', label: 'Couleur', default: DEFAULT_COLOR },
-    period: { kind: 'number', label: 'Période (s)', min: 1, max: 20, step: 0.5, default: 5 },
+    color: { kind: 'color', label: { en: 'Color', fr: 'Couleur' }, default: DEFAULT_COLOR },
+    period: { kind: 'number', label: { en: 'Period (s)', fr: 'Période (s)' }, min: 1, max: 20, step: 0.5, default: 5 },
   },
   render({ layout, time, frame, params }) {
     const color = params.color ?? DEFAULT_COLOR

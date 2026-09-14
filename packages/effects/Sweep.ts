@@ -15,13 +15,16 @@ import { defineEffect, rgb } from '@candeo/effects-api'
 const DEFAULT_COLOR = { r: 0, g: 180, b: 255 }
 
 export default defineEffect({
-  description: 'Une rangée éclairée descend le clavier en laissant une traînée',
+  description: {
+    en: 'A lit row moves down the keyboard, leaving a trail',
+    fr: 'Une rangée éclairée descend le clavier en laissant une traînée',
+  },
   kinds: ['keyboard'],
   params: {
-    color: { kind: 'color', label: 'Couleur', default: DEFAULT_COLOR },
-    speed: { kind: 'number', label: 'Rangées par seconde', min: 0.5, max: 12, step: 0.5, default: 3 },
-    trail: { kind: 'number', label: 'Traînée (rangées)', min: 0.5, max: 6, step: 0.5, default: 2 },
-    bounce: { kind: 'boolean', label: 'Rebond', default: false },
+    color: { kind: 'color', label: { en: 'Color', fr: 'Couleur' }, default: DEFAULT_COLOR },
+    speed: { kind: 'number', label: { en: 'Rows per second', fr: 'Rangées par seconde' }, min: 0.5, max: 12, step: 0.5, default: 3 },
+    trail: { kind: 'number', label: { en: 'Trail (rows)', fr: 'Traînée (rangées)' }, min: 0.5, max: 6, step: 0.5, default: 2 },
+    bounce: { kind: 'boolean', label: { en: 'Bounce', fr: 'Rebond' }, default: false },
   },
   render({ layout, time, frame, params }) {
     const color = params.color ?? DEFAULT_COLOR
