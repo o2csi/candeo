@@ -382,7 +382,7 @@ is known, it is a keyboard; the day the Rust side declares a type, it will come 
 there.
 
 The **brightness** of the selected device lives in its card, under the name
-and the state line: "Luminosité", the level in percent, and the slider. That is
+and the state line: a Brightness label, the level in percent, and the slider. That is
 where it belongs: the protocol makes it a device command (`0x0f`/`0x04`),
 separate from the running effect, and `set_brightness` has taken a `DeviceRef` since
 day one. It existed, it was persisted, and it was displayed
@@ -394,14 +394,13 @@ write brightness but not read it back.
 Only the selected card carries a slider. The card is therefore a container
 holding a selection button with the slider below it, not a button: a control
 nested in a button is invalid markup, and dragging would re-select the device.
-When the device is not open, the slider is disabled and the card says
-"non ouvert" (not open). In the collapsed column the card shrinks to its icon
+When the device is not open, the slider is disabled and the card shows the
+*not open* state. In the collapsed column the card shrinks to its icon
 and the slider goes with the rest.
 
 ### The effects column
 
-Three sections, in this order: **hardware** ("matériel"), **built-in**
-("intégrés"), **yours** ("à vous"). Hardware comes first: it costs no processor
+Three sections, in this order: **Hardware**, **Built-in**, **Yours**. Hardware comes first: it costs no processor
 time and survives everything, which often makes it the right choice (§1). The
 order is for display only: on opening, the selection still falls on the first
 built-in effect, since a hardware effect would give the simulator nothing to
@@ -411,7 +410,7 @@ Each section header is a button that folds its section. Sections are expanded
 by default, and the choice is remembered per viewer in the webview storage;
 where storage is refused, they open expanded and still fold for the session.
 **Folding hides entries, never the selection**: the settings panel keeps the
-effect even when its section is folded. "Nouvel effet" (New effect) sits
+effect even when its section is folded. **New effect** sits
 outside the sections and stays visible. In the collapsed column a header
 shrinks to a rule and its chevron, so a folded section can still be reopened.
 
