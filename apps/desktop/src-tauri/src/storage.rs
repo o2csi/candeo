@@ -390,6 +390,10 @@ pub struct Preferences {
     /// written only when turned off. See [`crate::runtime::resume_applied`].
     #[serde(skip_serializing_if = "is_true")]
     pub resume_effects: bool,
+    /// Log files kept, one per day; `0` keeps them all. Written only when it differs
+    /// from [`crate::journal::DEFAULT_FILES_KEPT`].
+    #[serde(skip_serializing_if = "is_default_files_kept")]
+    pub log_files_kept: u32,
 }
 
 impl Default for Preferences {
@@ -398,12 +402,17 @@ impl Default for Preferences {
             log_level: None,
             language: LanguageSetting::default(),
             resume_effects: true,
+            log_files_kept: crate::journal::DEFAULT_FILES_KEPT,
         }
     }
 }
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_default_files_kept(value: &u32) -> bool {
+    *value == crate::journal::DEFAULT_FILES_KEPT
 }
 
 /// Persistent settings.
@@ -3055,6 +3064,7 @@ mod tests {
                 log_level: Some(LogLevel::Debug),
                 language: LanguageSetting::Fr,
                 resume_effects: false,
+                log_files_kept: 30,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3841,6 +3851,7 @@ mod tests {
             log_level: Some(LogLevel::Debug),
             language: LanguageSetting::En,
             resume_effects: false,
+            log_files_kept: 0,
         };
         mirror("Preferences", &preferences);
         mirror(
