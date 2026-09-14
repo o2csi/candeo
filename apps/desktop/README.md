@@ -19,6 +19,7 @@ pnpm dev             # fenêtre en développement, rechargement à chaud
 pnpm build           # vue-tsc puis vite build
 pnpm tauri build     # application empaquetée
 pnpm check           # clippy et tests Rust
+pnpm test:web        # front-end tests (Vitest)
 ```
 
 ## Where to read next

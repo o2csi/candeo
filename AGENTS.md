@@ -18,7 +18,12 @@ cargo fmt --all -- --check
 pnpm lint:rust        # cargo clippy --workspace --all-targets -- -D warnings
 pnpm test:rust        # cargo test --workspace
 pnpm --filter @candeo/desktop exec vue-tsc --noEmit
+pnpm test:web         # vitest run, in apps/desktop
 ```
+
+Front-end tests sit next to the module they cover (`useSettings.test.ts`), run
+in Node without a DOM, and mock `api/candeo.ts` rather than Tauri itself.
+Composables with lifecycle hooks run through `src/test/withSetup.ts`.
 
 Run the app with `pnpm tauri dev`. Test a change in the running app, not only
 through the test suite, before opening a pull request.
