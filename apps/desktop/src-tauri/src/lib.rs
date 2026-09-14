@@ -231,7 +231,7 @@ impl From<EffectDto> for Effect {
 /// > for as long as it takes to read or put an `Arc` in it, never for an HID
 /// > write, a loop start or a wait for completion.
 ///
-/// This is what [`AppState::handle`] and [`AppState::open_handles`] do: they
+/// This is what [`AppState::handle`] and [`AppState::open_devices`] do: they
 /// clone under the table lock and release it before querying anything. If two
 /// locks became unavoidable, the order is that of the declaration below —
 /// `devices`, then `engine`, then `failures`, then a device's handle, then a
@@ -297,7 +297,7 @@ impl AppState {
     /// Two steps, and never both locks together: copy the handles under the
     /// table lock, release it, then query them. Querying them in place would
     /// block the whole table during a loop's HID write.
-    fn open_handles(&self) -> HashSet<DeviceRef> {
+    pub(crate) fn open_devices(&self) -> HashSet<DeviceRef> {
         let handles: Vec<(DeviceRef, runtime::Handle)> = self
             .devices
             .lock()
@@ -783,6 +783,7 @@ fn adopt_device(
             // choice made in place of the others.
             state.set_open(device, Some(kb));
             state.failures.lock().unwrap().remove(&device);
+            runtime::resume_applied(&app, device);
             Ok(Some(LayoutInfo::from(layout)))
         }
         Err(e) => {
@@ -861,7 +862,7 @@ fn ignore_device(app: AppHandle, state: State<'_, AppState>, vid: u16, pid: u16)
 pub(crate) fn release_devices(state: &AppState) {
     state.engine.stop_all();
 
-    for device in state.open_handles() {
+    for device in state.open_devices() {
         let _ = with_keyboard(state, device, |kb| {
             kb.set_effect(Effect::Off).map_err(Failure::from)
         });
@@ -1102,6 +1103,13 @@ pub fn run() {
             apply_adoptions(app.handle(), &state);
             app.manage(state);
 
+            // After `manage`, since starting goes through the command path, which
+            // reads the state from the manager; before the tray, so its first menu
+            // ticks the effects running.
+            for device in app.state::<AppState>().open_devices() {
+                runtime::resume_applied(app.handle(), device);
+            }
+
             // **After `manage`**, and the order is binding: the menu is built
             // on the engine's real state, which it fetches through the manager.
             // After adoption too, so that the first menu shows the devices
@@ -1181,6 +1189,7 @@ pub fn run() {
             storage::forget_effect_settings,
             storage::get_settings,
             storage::set_settings,
+            storage::set_resume_effects,
             storage::reset_settings,
             storage::remember_effect_params,
             journal::get_journal,
@@ -1527,7 +1536,7 @@ mod tests {
         let second = DeviceRef::of(&SECOND);
 
         assert_ne!(first, second);
-        assert!(state.open_handles().is_empty());
+        assert!(state.open_devices().is_empty());
 
         // Without hardware we cannot put a `Keyboard` in: we check what depends
         // only on the table — a device's handle is indeed its own, and

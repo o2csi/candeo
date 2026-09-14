@@ -14,10 +14,12 @@ import {
   diagnostic,
   getJournal,
   getLanguage,
+  getSettings,
   openLogDir,
   resetSettings,
   setLanguage,
   setLogLevel,
+  setResumeEffects,
   type JournalStatus,
   type LanguageSetting,
   type LanguageStatus,
@@ -53,6 +55,32 @@ async function chooseLanguage(event: Event): Promise<void> {
   } catch (e) {
     languageProblem.value = message(e)
     await readLanguage()
+  }
+}
+
+// ---------------------------------------------------------------- startup
+
+/** Whether a device that opens starts its applied effect again; `null` until read. */
+const resume = ref<boolean | null>(null)
+const startupProblem = ref<string | null>(null)
+
+async function readResume(): Promise<void> {
+  try {
+    resume.value = (await getSettings()).preferences.resumeEffects ?? true
+  } catch (e) {
+    startupProblem.value = message(e)
+  }
+}
+
+async function chooseResume(event: Event): Promise<void> {
+  startupProblem.value = null
+  const on = (event.target as HTMLInputElement).checked
+  try {
+    await setResumeEffects(on)
+    resume.value = on
+  } catch (e) {
+    startupProblem.value = message(e)
+    await readResume()
   }
 }
 
@@ -156,12 +184,14 @@ async function reset(): Promise<void> {
     await refresh()
     await readJournal()
     await readLanguage()
+    await readResume()
     if (language.value) showIn(language.value.language)
   }
 }
 
 onMounted(() => {
   void readLanguage()
+  void readResume()
   void readJournal()
 })
 </script>
@@ -192,6 +222,18 @@ onMounted(() => {
           </option>
         </select>
       </div>
+    </section>
+
+    <section v-if="resume !== null" class="block" aria-labelledby="startup-title">
+      <h2 id="startup-title">{{ t('settings.startup.title') }}</h2>
+
+      <p v-if="startupProblem" class="err" role="alert">{{ startupProblem }}</p>
+
+      <label class="level">
+        <input type="checkbox" :checked="resume" @change="chooseResume" />
+        {{ t('settings.startup.resume') }}
+      </label>
+      <p class="note">{{ t('settings.startup.resumeDetail') }}</p>
     </section>
 
     <section v-if="journal" class="block" aria-labelledby="journal-title">
