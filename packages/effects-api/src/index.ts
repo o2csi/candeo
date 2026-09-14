@@ -199,6 +199,9 @@ export type ParamSpec =
   | { kind: 'boolean'; label: string; default: boolean }
   | { kind: 'choice'; label: string; options: readonly string[]; default: string }
 
+/** A kind of device an effect can target. The list grows with the devices. */
+export type DeviceKind = 'keyboard'
+
 export interface EffectModule<P = undefined> {
   /**
    * @deprecated The file name is the effect's name: this property is ignored.
@@ -211,6 +214,12 @@ export interface EffectModule<P = undefined> {
    * version than it knows.
    */
   readonly apiVersion?: number
+  /**
+   * The kinds of device this effect is meant for. Only keyboards exist today, so
+   * an effect that says nothing is read as `['keyboard']`; saying it is what
+   * keeps the effect right the day a second kind arrives.
+   */
+  readonly kinds?: readonly DeviceKind[] | 'all'
   readonly description?: string
   readonly params?: P
   /** `ctx.params` est typé d'après `params` ci-dessus. */

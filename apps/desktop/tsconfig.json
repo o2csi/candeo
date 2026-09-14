@@ -18,7 +18,13 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    /* The shipped effects import the API by its package name, as every effect
+       does; `packages/effects` has no dependencies of its own to resolve it. */
+    "paths": {
+      "@candeo/effects-api": ["../../packages/effects-api/src/index.ts"]
+    }
   },
   /* `example.ts` de `@candeo/effects-api` est désigné comme l'effet de
      référence — le premier fichier qu'on montre à qui veut en écrire un — et
@@ -36,7 +42,8 @@
     "src/**/*.d.ts",
     "src/**/*.tsx",
     "src/**/*.vue",
-    "../../packages/effects-api/src/**/*.ts"
+    "../../packages/effects-api/src/**/*.ts",
+    "../../packages/effects/*.ts"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

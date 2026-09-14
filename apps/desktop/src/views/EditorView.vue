@@ -120,24 +120,11 @@ function message(e: unknown): string {
 // ---------------------------------------------------------------- ouverture
 
 /**
- * Un effet **intégré** s'ouvre comme une copie.
- *
- * Son identifiant est réservé : l'installer sous le même nom est refusé, et le
- * moteur chargerait de toute façon le code livré. Sans cette duplication, on
- * modifiait un effet pendant de longues minutes pour se heurter au refus à la
- * validation — le mur arrivait après le travail.
- *
- * Le nom est donc changé **dans la source**, à l'ouverture. Pas de « enregistrer
- * sous » : une question posée au moment où l'on veut juste essayer, et à
- * laquelle on répond une fois pour toutes. Ici la décision est déjà prise quand
- * on arrive, et elle est lisible dans le code. Qui vient seulement lire ne
- * valide pas, et rien ne s'est produit.
+ * Opens the effect in place, shipped ones included: they are files like any
+ * other, and the source is the user's to change.
  */
-const derivedFrom = ref<string | null>(null)
-
 async function open(): Promise<void> {
   loading.value = true
-  derivedFrom.value = null
   name.value = id.value ?? ''
   await migrateDrafts(legacyEffectIds)
   const draft = readDraft(id.value)
@@ -147,11 +134,6 @@ async function open(): Promise<void> {
     if (id.value !== null) {
       const entry = (await listEffects()).find((e) => e.id === id.value)
       savedSpecs.value = entry?.params ?? {}
-      if (entry?.kind === 'builtin') {
-        derivedFrom.value = entry.name
-        // A copy gets a name of its own, created at its first save.
-        name.value = `${entry.name} (copie)`
-      }
     }
 
     saved.value = disk
@@ -187,12 +169,12 @@ function discard(): void {
  */
 const name = ref('')
 
-/** True while the effect has no file yet: a new effect, or a built-in's copy. */
-const creating = computed(() => id.value === null || derivedFrom.value !== null)
+/** True while the effect has no file yet. */
+const creating = computed(() => id.value === null)
 
 /**
  * Renames an existing effect's file, with its settings and its draft. A new
- * effect or a copy only keeps the name for its first save.
+ * effect only keeps the name for its first save.
  */
 async function rename(): Promise<void> {
   const wanted = name.value.trim()
@@ -289,13 +271,11 @@ const unsaved = computed(() => creating.value || source.value !== saved.value)
 /**
  * This effect is the one the current device runs.
  *
- * "Arrêter" stops whatever the device runs, so it is offered only then. The
- * copy of a built-in is not the built-in, even though it still carries its id.
+ * "Arrêter" stops whatever the device runs, so it is offered only then.
  */
 const runsHere = computed(
   () =>
     id.value !== null &&
-    derivedFrom.value === null &&
     status.value?.running === true &&
     status.value.effectId === id.value,
 )
@@ -400,8 +380,6 @@ async function install(): Promise<string> {
   clearDraft(id.value)
   restored.value = false
   saved.value = text
-  // The effect now exists in its own right: it is no longer a built-in's copy.
-  derivedFrom.value = null
   // Carrying the name in the route is what makes reopening this screen read this
   // effect back, and what the preview follows.
   if (id.value !== target) await router.replace({ name: 'editor', params: { id: target } })
@@ -535,9 +513,7 @@ onBeforeUnmount(() => {
         />
       </label>
 
-      <p v-if="creating" class="what">
-        {{ derivedFrom ? `copie de ${derivedFrom}` : 'nouvel effet' }}
-      </p>
+      <p v-if="creating" class="what">nouvel effet</p>
 
       <span class="spacer" />
 
@@ -572,15 +548,6 @@ onBeforeUnmount(() => {
       <div class="pane code-pane">
         <p v-if="runsHere && status?.deviceError" class="notice warn" role="alert">
           Écriture vers le clavier impossible : {{ status.deviceError }}
-        </p>
-
-        <!--
-          Dit d'emblée ce qui vient de se passer. L'identifiant d'un effet
-          intégré est réservé : sans cette copie, on découvrirait le refus à la
-          validation, c'est-à-dire après le travail.
-        -->
-        <p v-if="derivedFrom" class="notice" role="status">
-          Copie de « {{ derivedFrom }} » — l'original reste intact.
         </p>
 
         <p v-if="restored" class="notice" role="status">
