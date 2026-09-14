@@ -4,6 +4,11 @@ This document describes what happens between the moment you type TypeScript and
 the moment a key lights up. The **interface** decisions are in
 [`studio.md`](studio.md); these concern execution.
 
+> **Storage has changed since.** §2 and §3 describe the first layout, one
+> directory per effect written through `install_effect`. Effects are now `.ts`
+> files named after the effect, compiled into a cache: see
+> [`effects-library.md`](effects-library.md). The engine part is unchanged.
+
 ---
 
 ## 1. Overview

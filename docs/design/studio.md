@@ -139,8 +139,8 @@ download at use time.
 
 ### An effect being written is not lost
 
-Until it is saved, an effect exists nowhere: `install_effect` is
-the only path to disk, and it requires code that compiles. Yet you leave
+Until it is saved, an effect exists nowhere: saving is the only path to its
+file, and it requires code that compiles. Yet you leave
 the editor long before getting there. The editor therefore saves continuously to the
 web view's local storage, under one key per effect, and restores on opening.
 
@@ -172,7 +172,7 @@ editor followed opposite rules for the same gesture.
 
 The simulator shows the device's frames when the device runs **exactly the
 saved version**, and the preview otherwise — one composable, shared with the
-gallery, decides it. Both loops load `effect.js` from disk, so unsaved code is
+gallery, decides it. Both loops load the JavaScript compiled from the saved file, so unsaved code is
 never on screen. The engine reports which effect a device runs, not which
 version of it: the editor remembers the text it applied, otherwise saving an
 applied effect would keep showing the device's stale frames instead of the new
@@ -328,15 +328,15 @@ No new dependency on the Rust side apart from `rquickjs`, none on the front end 
 
 ### What the implementation clarified
 
-- **The manifest is read, not executed.** `name`, `description` and `params` are
-  extracted from the syntax tree, with the compiler already loaded. Obtaining them
-  by evaluating the module would amount to running effect code in the window,
-  which §3 rules out. The explicit trade-off: these three fields must
-  be **literals**, and a computed name is refused with a message that says
-  so.
+- **The manifest is read by the engine, not by the window.** `description` and
+  `params` were first extracted from the syntax tree, which required literals.
+  They are now read by Rust, which runs the module once when its compiled
+  JavaScript is recorded: the window still runs no effect code, and defaults can
+  be computed ([`effects-library.md`](effects-library.md) §3). The name is the
+  file name.
 - **Saving restarts the preview explicitly.** Nothing the preview depends on
   changes when an effect is saved again — same id, same device —, only the
-  `effect.js` on disk does. Without an explicit restart, the simulator would
+  JavaScript compiled from its file does. Without an explicit restart, the simulator would
   keep running the previous code.
 - **The frame channel only exists during an effect, and it targets a loop.** It
   is placed in the state of the running loop — **a device's**, or the

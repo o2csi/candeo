@@ -337,54 +337,41 @@ which thus avoid resending all 132 positions.
 
 ## Effect library
 
-The locations and the format are fixed in
-[`../design/effects-runtime.md`](../design/effects-runtime.md) §2 and §3. No
-path is hard-coded: `app_data_dir()` holds the content, `app_config_dir()`
-the configuration — identical on Windows, distinct on Linux.
+The model is fixed in
+[`../design/effects-library.md`](../design/effects-library.md). No path is
+hard-coded: `app_data_dir()` holds the content, `app_cache_dir()` what can be
+rebuilt, `app_config_dir()` the configuration.
 
 ```
-app_data_dir()/effects/<id>/     source.ts · effect.js · manifest.json · swatch.json
+app_data_dir()/effects/<name>.ts      one file per effect, named after it
+app_cache_dir()/effects/<name>.json   JavaScript, manifest and swatch compiled from one version of that file
 app_config_dir()/settings.json
 ```
 
-### `install_effect(source_ts, js, manifest) -> string`
+**An effect is a file, and its name is the file name.** Adding an effect is saving
+a `.ts` file in the folder; its name is the key of everything that refers to it —
+`settings.json`, the engine, the tray menu. Names follow the Windows rules on
+every system: no `< > : " / \ | ? *` or control characters, no leading or
+trailing space or dot, not a reserved device name (`CON`, `NUL`, `COM1`…), at most
+64 characters. Two names that differ only by case are one effect. A name equal to
+a built-in's id, whatever its case, is refused when saving and skipped when
+listing.
 
-Writes the three files, samples the color swatch into a fourth, and
-returns the `id` that was chosen.
-
-```ts
-manifest: {
-  name: string,
-  description?: string,
-  params?: Record<string, ParamSpec>,   // tel que déclaré côté TypeScript
-  apiVersion: number                   // version de l'API d'effets à l'écriture
-}
-```
-
-The parameters are stored **as is**: their shape is that of `ParamSpec`
-in `@candeo/effects-api`, it evolves with the editor, and the Rust side does not
-interpret them. Retyping them in Rust would create a second source of truth.
-
-`apiVersion` is mandatory. An effect written for a version this
-application does not know is refused at install time, with a message that
-says so — rather than failing later at the first frame.
-
-The front end sends the JavaScript already transpiled by Monaco, **and** the
-TypeScript source: without it the effect could no longer be edited, without the `.js` it
-could no longer start without opening the window.
-
-**The `id` is derived from the name, never taken as is.** Only `a-z`, `0-9` and the
-hyphen remain; everything else becomes a hyphen. It is an allowlist, so
-`..`, path separators and Windows reserved names (`CON`, `NUL`,
-`COM1`…) cannot come out of it. Two effects with the same name get the same
-`id`: saving again from the editor **updates** instead of duplicating.
+**Rust cannot strip TypeScript types, the window can.** Listing reports each
+file with the hash of its bytes and whether the cache holds a result for that
+hash; the window compiles what is `stale` — at startup and on Refresh — and hands
+the JavaScript back through `cache_effect`. The engine and the tray only run
+JavaScript compiled from a file's **current** bytes.
 
 ### `list_effects() -> EffectEntry[]`
 
 ```ts
 {
-  id: string,
+  id: string,                     // l'identifiant d'un intégré, ou le nom du fichier
   kind: 'builtin' | 'user',
+  state: 'ready' | 'stale' | 'broken',
+  error?: string,                 // pourquoi un effet `broken` ne se charge pas
+  hash?: string,                  // SHA-256 du fichier, absent pour un intégré
   swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
   description: string,
@@ -393,42 +380,67 @@ hyphen remain; everything else becomes a hyphen. It is an allowlist, so
 }
 ```
 
-Built-in **and** installed effects, in a single list: built-in ones are
-compiled into the binary and have no folder, `kind` tells them apart. They
-come first, the installed ones after, sorted by `id`.
+Built-in **and** file effects, in a single list: built-in ones are compiled into
+the binary and have no file, `kind` tells them apart. They come first, the files
+after, sorted by name regardless of case.
 
-The swatch travels with the entry, not behind a second call: otherwise a
-library of twenty effects would need twenty round trips to show
-twenty thumbnails.
+| `state` | Meaning |
+|---|---|
+| `ready` | compiled for the file's current bytes: it can be previewed, applied, offered in the tray |
+| `stale` | never compiled, or changed since: only `name` and `hash` are meaningful until the window compiles it |
+| `broken` | compiled for the current bytes, and the module does not load: `error` says why. Not retried until the file changes |
 
-A folder whose manifest is unreadable is ignored, not propagated as an error:
-a library of twenty effects must not vanish because of a single one.
-The order is stable — the file system guarantees none.
+Listing reads and hashes files, and **runs nothing**. A file that cannot be read,
+or whose name the application would refuse, is skipped rather than failing the
+whole list. The swatch travels with the entry, not behind a second call.
+
+### `save_effect_source(name, source, create) -> string`
+
+Writes `effects/<name>.ts` and returns the SHA-256 of what was written. `create`
+names the gesture, so that neither can do the other's job by accident: creating
+refuses a name an effect already has, in any case; saving again refuses a name no
+effect has. The file is written through a temporary file and a rename, so that a
+Refresh never compiles half a file.
+
+### `cache_effect(name, hash, js) -> EffectEntry`
+
+Records the JavaScript the window compiled from the version of the file that has
+`hash`, and returns the entry. Refused when the file no longer has that hash: it
+changed while the window compiled, and recording would pair this code with
+another version of the source.
+
+Rust loads the module **once**, under the time budget swatch sampling uses, and
+reads what it declares: `description`, `params`, `apiVersion`. The parameters are
+stored **as is**: their shape is that of `ParamSpec` in `@candeo/effects-api`, and
+the Rust side does not interpret them. `apiVersion` is 1 when the module declares
+none; an effect written for a version this application does not know is
+recorded `broken`, with a message that says so — rather than failing at the first
+frame. A module that does not load at all is recorded `broken` with its error.
 
 ### The color swatch
 
-Each entry carries a few colors that help find an effect without
-running it. **They are obtained by running the effect**, never declared in the
-manifest nor drawn by hand.
+Each entry carries a few colors that help find an effect without running it.
+**They are obtained by running the effect**, never declared in the manifest nor
+drawn by hand.
 
 Two reasons, and the second weighs more than the first. The author has nothing to
 provide: you write your effect, it has its swatch — no field, no advanced mode.
-And above all, **the swatch cannot lie**. Declared, it would drift from the
-first change to the code, and an effect that turned blue would keep its red
-thumbnail.
+And above all, **the swatch cannot lie**. Declared, it would drift from the first
+change to the code, and an effect that turned blue would keep its red thumbnail.
 
 #### How it is sampled
 
 Four frames are rendered by the engine, without touching the hardware, at four
 instants: 0 s, 0.37 s, 1.13 s and 2.61 s. The effect runs with the **default
-values its module declares** — the ones the gallery would launch it with,
-and not an empty object, which would give black for any effect that falls back on nothing.
-The layout is the **default** one, never the plugged-in keyboard's: a swatch
-that depended on the hardware present at install time would be comparable neither from one
+values its module declares** — the ones the gallery would launch it with, and not
+an empty object, which would give black for any effect that falls back on
+nothing. The layout is the **default** one, never the plugged-in keyboard's: a
+swatch that depended on the hardware present would be comparable neither from one
 effect to another, nor from one machine to another.
 
 From each frame **one** color is taken: the average of a diagonal band of the
-keyboard, the band moving forward from one frame to the next. Three choices, three reasons:
+keyboard, the band moving forward from one frame to the next. Three choices, three
+reasons:
 
 | Choice | Why not otherwise |
 |---|---|
@@ -436,132 +448,116 @@ keyboard, the band moving forward from one frame to the next. Three choices, thr
 | a **diagonal** band | a horizontal gradient varies only by column, a vertical sweep only by row: slicing along either would make the other perfectly uniform |
 | a **band**, not a key | an effect can leave almost the whole keyboard off — `balayage` is exactly that — and an isolated key would land on black by chance |
 
-The result: a uniform effect returns its color four times, a gradient returns
-four staggered colors, a mostly dark effect returns a dark
-swatch. A spatial effect and a uniform effect cannot look alike.
+The result: a uniform effect returns its color four times, a gradient returns four
+staggered colors, a mostly dark effect returns a dark swatch. A spatial effect and
+a uniform effect cannot look alike.
 
-> **This document no longer lists the swatches of the shipped effects.** It used to carry a
-> table of hexadecimal values, which **nothing checked against the result**: the
-> day "Onde radiale" (Radial wave) moved from grid distance to physical
-> distance, its four colors became wrong without any test, any
-> build or any review flagging it.
->
-> A swatch **is sampled by running the effect** — that is the whole point of the mechanism
-> described here. Copying it into a page means creating a second source of
-> truth that can only drift. The library displays them; that is where
-> to look at them.
+> **This document does not list the swatches of the shipped effects.** It used to
+> carry a table of hexadecimal values, which **nothing checked against the
+> result**: the day "Onde radiale" (Radial wave) moved from grid distance to
+> physical distance, its four colors became wrong without any test, any build or
+> any review flagging it. A swatch is sampled by running the effect; the library
+> displays them, and that is where to look at them.
 
 #### When it is computed, and where it is stored
 
-**Once at install time**, in `effects/<id>/swatch.json`, next to the
-manifest — never when the list is displayed, which remains a disk read:
-sampling there would make opening the gallery depend on the behavior of
-every installed effect, for thumbnails that do not change. Saving
-an effect again goes through `install_effect`, and therefore recomputes it.
+**Once per version of a file**, by `cache_effect`, in the cache record next to the
+JavaScript — never when the list is displayed, which remains a disk read.
 
-**Built-in** effects have no folder: their swatch lives **in memory**,
-computed at the first read of the library and kept for the lifetime of the
-process. It is a property of the binary, not of the user's library:
-writing it to the data folder would create a cache to invalidate
-at every application update — a version to compare, a file to
-rewrite, and an opportunity to show the previous version's swatch — for
-a handful of effects whose sampling costs a few milliseconds.
-Writing it by hand in the Rust code is ruled out by the very principle of the swatch.
-
-⚠️ The cost, however, **grows with the number of shipped effects**: each one instantiates its
-engine at the first listing. It is negligible today and will not remain so
-indefinitely — do not put a figure here, the number has already lied once.
-
-An effect installed by an earlier version therefore has no swatch until it
-is saved again. That is the price of this rule, and it is paid with a neutral
-dot, not with an error.
+**Built-in** effects have no file: their swatch lives **in memory**, computed at
+the first read of the library and kept for the lifetime of the process. It is a
+property of the binary, not of the user's library.
 
 #### What can go wrong
 
-This is user code: it can throw, fail to load, or loop forever.
-A swatch that cannot be computed **never prevents installation** —
-`swatch` is then an empty array and the UI shows a neutral dot.
-Sampling is time-bounded, otherwise a `while (true)`
-would prevent an effect from ever installing. And a previous swatch is
-**erased** rather than kept: showing the colors of a version that no longer
-exists would be worse than showing none.
+This is user code: it can throw, fail to load, or loop forever. Sampling is
+time-bounded, otherwise a `while (true)` would block `cache_effect`. An effect
+that loads but throws while rendering is `ready` with an empty `swatch`, and the
+interface shows a neutral dot. An effect that renders black everywhere is not a
+failure: its swatch is black, and that is the truth about what it does.
 
-An effect that renders black everywhere, on the other hand, is not a failure: its swatch is black,
-and that is the truth about what it does.
-
-#### What the format does not freeze
-
-`swatch` is a **list**, not a quadruple, and nothing in storage fixes
-its length. The day the gallery wants animated thumbnails, it will be enough not
-to stop at four frames: neither the file nor the exposed type has to change.
+`swatch` is a **list**, not a quadruple, and nothing in storage fixes its length.
 
 ### The built-in effects
 
-Four are shipped, written in **JavaScript against the same API** as the user's
-effects and loaded by the same engine. A built-in effect written in native Rust
-would be faster and would prove nothing: the first example one opens
-must be exactly what one can write oneself. They live in
-[`apps/desktop/src-tauri/src/builtins/`](../../apps/desktop/src-tauri/src/builtins/).
+Five are shipped, written in **JavaScript against the same API** as the user's
+effects and loaded by the same engine. They live in
+[`apps/desktop/src-tauri/src/builtins/`](../../apps/desktop/src-tauri/src/builtins/)
+and keep their ids until they become files themselves
+([`effects-library.md`](../design/effects-library.md) §4).
 
 | `id` | Name | What sets it apart |
 |---|---|---|
-| `onde-radiale` | "Onde radiale" (Radial wave) | moving hue, propagated from the center |
+| `onde-radiale` | "Onde radiale" (Radial wave) | moving hue, in circles at the physical distance of the keys |
+| `onde-matricielle` | "Onde diagonale" (Diagonal wave) | moving hue, in diagonals from a corner of the matrix |
 | `respiration` | "Respiration" (Breathing) | a single color, no variation in space |
 | `balayage` | "Balayage" (Sweep) | one lit row, the rest off |
 | `degrade-fixe` | "Dégradé fixe" (Fixed gradient) | two colors, motionless — its `render` ignores `time` |
 
-**A built-in identifier is reserved.** `install_effect` refuses a name that
-derives to one of them, and says so. And if a folder bearing such an `id`
-appears anyway — manual copy, inherited library —, the built-in one is what
-is read and displayed: an entry marked `builtin` runs the shipped code, and
-nothing else. The usurping folder is not listed (the list is keyed by
-`id`, it cannot show two) but can still be deleted.
+### `rename_effect(from, to)`
+
+Renames the file and its cache, then moves every reference: the settings on all
+devices, and the loops running the effect, preview included. A running effect
+**keeps running**: the loops keep the code they loaded, only the id they report
+changes. Refused when `to` is not a valid name or is already an effect's name —
+except the same effect under another case.
+
+Renaming the file outside the application makes a new effect: the old name's
+settings stay in `settings.json`, unused, and come back if the file gets its name
+back.
 
 ### `delete_effect(id)`
 
-Deletes the folder. An `id` outside the allowlist is refused before any
-disk access. A built-in effect has no folder and cannot be deleted; the
-disk is checked first, which allows removing a folder that would usurp a
-built-in identifier.
+Deletes the file and its cache. A name that is not valid is refused before any
+disk access. A built-in effect has no file and cannot be deleted.
 
 Also takes away everything `settings.json` remembered about it: the **settings**, on
 all devices, and its **application** (`activeEffects`). Forgetting comes after
-deletion: if deletion fails, the effect is still there and its settings
-must be too.
+deletion: if deletion fails, the effect is still there and its settings must be
+too.
 
-Purging `activeEffects` settles the trap raised by issue #48: without it,
-deleting the applied effect would leave a **dangling identifier**, which the restore at
-startup would try to launch. Two answers were possible — purge on
-deletion, or fall back silently at startup. The first one is chosen:
-the invariant "the file never contains an identifier the library does not
-know" can be checked without running anything, whereas a silence at launch is
-exactly the kind of failure that costs a debugging session. The fallback remains necessary as a
-**second** barrier — an effect folder removed by hand does not go through here —
-but it is no longer the only one.
+Purging `activeEffects` settles the trap raised by issue #48: without it, deleting
+the applied effect would leave a **dangling identifier**. The invariant "the file
+never contains an identifier the library does not know" can be checked without
+running anything; the startup fallback remains necessary as a **second** barrier —
+a file removed by hand does not go through here.
 
 **Three steps, and the order is part of the contract:**
 
-1. **the refusal**, first of all — a built-in effect or an identifier that designates
+1. **the refusal**, first of all — a built-in effect or a name that designates
    nothing gets a no without anything having been stopped or erased;
-2. **stopping the loops** running this effect, on **all** devices
-   and in the preview, before erasing. The engine loads `effect.js` once at
-   start and keeps it in memory: a loop left alive would carry on without
-   the slightest visible error, on a folder that no longer exists, and the device would
-   remain controlled — or the screen animated — by an effect missing from the library;
+2. **stopping the loops** running this effect, on **all** devices and in the
+   preview, before erasing. The engine keeps the JavaScript it loaded at start: a
+   loop left alive would carry on without the slightest visible error, on a file
+   that no longer exists;
 3. **erasing**, then forgetting the settings.
 
 Stopping is done **on the Rust side**, not in the window: it is the only place that
-guarantees it whoever the caller is. The device's `engine_status()` line
-remains, but it stops naming the effect — the identifier no longer designates anything.
-
-The UI does not offer the action on a built-in effect, rather than
-offering it and letting it fail.
+guarantees it whoever the caller is.
 
 ### `read_effect_source(id) -> string`
 
-The source, to reopen it in the editor. A built-in effect returns its JavaScript,
-which **is** its source: there is no `.ts` to transpile. That is the intended use —
-start from an effect that works, modify it, save it under another name.
+The source, to open it in the editor. A built-in effect returns its JavaScript,
+which **is** its source. That is the intended use — start from an effect that
+works, modify it, save it under another name.
+
+### `legacy_effect_ids() -> Record<string, string>`
+
+The effect ids of the directory layout and the names they became, when **this
+run** migrated some — empty on every later run. Only for the editor's drafts,
+stored under the effect id in the web view's storage, which the migration cannot
+reach.
+
+### Migration from the directory layout
+
+At startup, before anything reads the library or the settings, each
+`effects/<id>/` holding a `source.ts` becomes `effects/<name>.ts`, `<name>` being
+its manifest's name made valid (forbidden characters replaced by `-`, ` (2)` on a
+collision). `activeEffects` and `effectParams` are rewritten from the old ids to
+the names, and `settings.json` records `version: 1` so that this happens once;
+built-in ids are untouched. Settings are rewritten **before** files are moved, and
+a directory is removed only once its file is written: an interrupted run is
+finished by the next startup without duplicating an effect.
 
 ---
 
@@ -929,8 +925,9 @@ devices, and that is what keeps a failing device from affecting any other.
 
 ### `start_effect(device, id, params)`
 
-Loads the effect's JavaScript — a built-in's, otherwise
-`effects/<id>/effect.js` — and starts the loop **of this device**. The engine makes
+Loads the effect's JavaScript — a built-in's, otherwise the one compiled from
+the file's current bytes, refused while the file is `stale` or `broken` — and
+starts the loop **of this device**. The engine makes
 no difference between the two: a shipped effect is a module loaded
 exactly like the one you just wrote.
 

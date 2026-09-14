@@ -67,10 +67,10 @@ import {
   engineStatus,
   getDefaultLayout,
   getLayout,
-  listEffects,
   startEffect,
   stopEffect,
   type EffectEntry,
+  type EffectState,
   type EngineReport,
 } from '../api/candeo'
 import type { DeviceRef } from '../api/types'
@@ -82,6 +82,7 @@ import { DEVICE_STATUS_LABELS, deviceStatus } from '../composables/deviceStatus'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
+import { refreshLibrary } from '../editor/library'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
@@ -212,6 +213,13 @@ interface Choice {
   params: Record<string, ParamSpec>
   /** Renseigné pour la seule nature qui ne passe pas par le moteur. */
   hardware: HardwareEffect | null
+  /**
+   * Whether the effect can run. Only a file can be anything but `ready`: one not
+   * compiled yet, or one that does not load.
+   */
+  state: EffectState
+  /** Why a `broken` effect does not load. */
+  error: string | null
 }
 
 const library = ref<EffectEntry[]>([])
@@ -229,6 +237,8 @@ function fromEntry(e: EffectEntry): Choice {
     swatch: e.swatch,
     params: e.params ?? {},
     hardware: null,
+    state: e.state,
+    error: e.error ?? null,
   }
 }
 
@@ -241,6 +251,8 @@ function fromHardware(e: HardwareEffect): Choice {
     swatch: [],
     params: {},
     hardware: e,
+    state: 'ready',
+    error: null,
   }
 }
 
@@ -479,7 +491,8 @@ const { frame } = useSimulatorFeed({
   // previewing it would mean inventing them.
   previewed: () => {
     const c = selectedEffect.value
-    return c && !c.hardware ? c.id : null
+    // Nor an effect that cannot run: its JavaScript is not there, or does not load.
+    return c && !c.hardware && c.state === 'ready' ? c.id : null
   },
   params: () => paramValues.value,
   onError: (e) => {
@@ -612,6 +625,22 @@ async function halt(): Promise<void> {
 const removable = computed(() => selectedEffect.value?.nature === 'user')
 
 /**
+ * Reads the effects folder again, compiling what changed: effects saved there
+ * from outside the application appear, edited ones are recompiled.
+ */
+async function refreshEffects(): Promise<void> {
+  listError.value = null
+  working.value = true
+  try {
+    library.value = await refreshLibrary()
+  } catch (e) {
+    listError.value = message(e)
+  } finally {
+    working.value = false
+  }
+}
+
+/**
  * L'effet dont la suppression attend confirmation, **par son identifiant**.
  *
  * Un identifiant et non un booléen : la question ne fige pas l'écran, on peut
@@ -662,7 +691,7 @@ async function removeEffect(): Promise<void> {
     // La sélection retombe sur le premier de la liste : l'effet qu'elle désignait
     // n'existe plus.
     if (chosenEffect.value === id) chosenEffect.value = null
-    library.value = await listEffects()
+    library.value = await refreshLibrary()
   } catch (e) {
     problem.value = message(e)
   } finally {
@@ -835,7 +864,7 @@ onMounted(async () => {
   // Une seule alerte : la bibliothèque est lue d'un coup, elle échoue d'un coup.
   // Les effets matériels, eux, sont écrits ici : la colonne n'est jamais vide.
   try {
-    library.value = await listEffects()
+    library.value = await refreshLibrary()
   } catch (e) {
     listError.value = message(e)
   }
@@ -1047,13 +1076,25 @@ onBeforeUnmount(() => {
               <EffectSwatch class="mark" :colors="c.swatch" />
               <span class="fx-name">{{ c.name }}</span>
               <span v-if="activeId === c.id" class="fx-state">appliqué</span>
+              <span v-else-if="c.state === 'broken'" class="fx-state broken">erreur</span>
+              <span v-else-if="c.state === 'stale'" class="fx-state stale">à compiler</span>
             </button>
           </div>
         </template>
 
-        <button class="new" type="button" @click="router.push('/editor')">
+        <button class="new" type="button" @click="router.push({ name: 'editor' })">
           <span class="plus" aria-hidden="true">＋</span>
           <span>Nouvel effet</span>
+        </button>
+        <button
+          class="new"
+          type="button"
+          :disabled="working"
+          title="Relire le dossier des effets"
+          @click="refreshEffects"
+        >
+          <span class="plus" aria-hidden="true">↻</span>
+          <span>Actualiser</span>
         </button>
       </div>
     </section>
@@ -1100,6 +1141,9 @@ onBeforeUnmount(() => {
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>
+        <p v-if="selectedEffect.state === 'broken'" class="failure" role="alert">
+          {{ selectedEffect.error }}
+        </p>
         <p class="cost">{{ COSTS[selectedEffect.nature] }}</p>
 
         <div class="preview">
@@ -1135,7 +1179,7 @@ onBeforeUnmount(() => {
         <footer class="actions">
           <button
             class="solid"
-            :disabled="!selectedDevice || working || applied"
+            :disabled="!selectedDevice || working || applied || selectedEffect.state !== 'ready'"
             @click="applyEffect"
           >
             {{ applied ? 'Appliqué' : 'Appliquer' }}
@@ -1154,7 +1198,7 @@ onBeforeUnmount(() => {
           <button
             class="ghost"
             :disabled="selectedEffect.hardware !== null"
-            @click="router.push(`/editor/${selectedEffect.id}`)"
+            @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
           >
             Modifier
           </button>
@@ -1479,6 +1523,14 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
 }
 
+.fx-state.broken {
+  color: var(--bad);
+}
+
+.fx-state.stale {
+  color: var(--text-faint);
+}
+
 /* Le repère est décoratif — il porte déjà `aria-hidden`. Le rendre transparent
    au pointeur laisse l'infobulle du bouton passer : une fois la colonne
    repliée, c'est le seul endroit où le nom de l'effet se lit encore. */
@@ -1496,9 +1548,13 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.new:hover {
+.new:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.new + .new {
+  margin-top: var(--gap-2);
 }
 
 .plus {

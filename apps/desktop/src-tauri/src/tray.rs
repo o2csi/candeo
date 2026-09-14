@@ -65,7 +65,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 use candeo_device::{Inspection, Layout};
 
 use crate::runtime::DeviceEngineStatus;
-use crate::storage::{self, DeviceState, EffectEntry};
+use crate::storage::{self, DeviceState, EffectEntry, EffectState};
 use crate::{journal, single_instance, AppState, CmdResult, DeviceRef};
 
 /// The icon's id, used to find it again and give it a new menu.
@@ -154,9 +154,9 @@ const ETEINDRE: &str = "eteindre";
 
 /// The separator between the fields of an identifier.
 ///
-/// `:` can stay unescaped: an effect identifier goes through
-/// [`storage::validate_id`], which accepts only `a-z`, `0-9` and the hyphen — so
-/// it can never contain one. The test
+/// `:` can stay unescaped: an effect identifier is a built-in id or an effect
+/// name, and [`storage::validate_name`] refuses `:` in names, as Windows does in
+/// file names — so it can never contain one. The test
 /// `the_effect_alphabet_excludes_the_separator` holds that dependency; without
 /// it, widening the identifier alphabet one day would silently break the menu.
 const SEP: char = ':';
@@ -458,7 +458,9 @@ fn device_submenu(
         items.push(Box::new(inert_item(app, reason)?));
         items.push(Box::new(separator_item(app)?));
     }
-    for entry in library {
+    // Only what can start: a file not compiled yet, or that does not load, would
+    // be a menu item whose click fails with a message the tray cannot show.
+    for entry in library.iter().filter(|e| e.state == EffectState::Ready) {
         items.push(Box::new(check_item(
             app,
             &Action::Start {
@@ -915,14 +917,14 @@ mod tests {
     /// none — without anything saying so.
     #[test]
     fn the_effect_alphabet_excludes_the_separator() {
-        assert!(storage::validate_id(&format!("a{SEP}b")).is_err());
+        assert!(storage::validate_name(&format!("a{SEP}b")).is_err());
 
-        let effet = "a".repeat(64);
+        let effet = format!("Onde (copie) é{}", "a".repeat(50));
         let action = Action::Start {
             device: DEVICE,
             effet: effet.clone(),
         };
-        storage::validate_id(&effet).expect("identifier refused");
+        storage::validate_name(&effet).expect("name refused");
         assert_eq!(Action::from_id(&action.to_id()), Some(action));
     }
 

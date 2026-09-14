@@ -60,3 +60,33 @@ export function clearDraft(id: string | null): void {
     // Voir `writeDraft`.
   }
 }
+
+/**
+ * Moves a draft to another effect id, when the effect is renamed.
+ *
+ * A draft already stored under `to` is newer than the one being moved: it stays,
+ * and the moved one is left where it was rather than lost.
+ */
+export function moveDraft(from: string, to: string): void {
+  const draft = readDraft(from)
+  if (draft === null || readDraft(to) !== null) return
+  writeDraft(to, draft)
+  if (readDraft(to) === draft) clearDraft(from)
+}
+
+let migration: Promise<void> | null = null
+
+/**
+ * Moves drafts saved under an effect id of the directory layout to the name that
+ * effect became. Once per window load, and again after a failure.
+ */
+export function migrateDrafts(renames: () => Promise<Record<string, string>>): Promise<void> {
+  migration ??= renames()
+    .then((table) => {
+      for (const [from, to] of Object.entries(table)) moveDraft(from, to)
+    })
+    .catch(() => {
+      migration = null
+    })
+  return migration
+}

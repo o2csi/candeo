@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn builtin_ids_are_valid_ids() {
         for b in &ALL {
-            crate::storage::validate_id(b.id).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
+            crate::storage::validate_name(b.id).unwrap_or_else(|e| panic!("\"{}\": {e}", b.id));
         }
     }
 

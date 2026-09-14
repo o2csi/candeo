@@ -11,17 +11,24 @@
  * The gallery's rule (§8), for the same reason: writing an effect must neither
  * take over the lighting in use nor require owning a keyboard.
  *
- * - "Enregistrer" chains the error check, `transpileModule()` and
- *   `install_effect`, then restarts the effect in the **preview loop**, on the
- *   current device's layout. Not a byte reaches a keyboard.
+ * - "Enregistrer" chains the error check, `save_effect_source` (the file named
+ *   after the effect), `transpileModule()` and `cache_effect`, then restarts the
+ *   effect in the **preview loop**, on the current device's layout. Not a byte
+ *   reaches a keyboard.
  * - "Appliquer sur …" starts it on the current device for real, saving first
  *   when the code differs from the saved version, with the parameters the
  *   gallery would use.
  *
  * The save steps fail differently, and each says why: the language service
- * rejects code that does not compile, the manifest reader rejects a computed
- * name, and Rust rejects an effect written for an API version it does not
- * know. Those messages are written to be read, and shown as they are.
+ * rejects code that does not compile, Rust rejects a name that cannot be a file
+ * name, and a module that does not load is saved but reported with its error.
+ * Those messages are written to be read, and shown as they are.
+ *
+ * ## The name is the file name
+ *
+ * It is edited in the header, never in the code. For an effect that exists,
+ * changing it renames the file and moves its settings and draft; for a new
+ * effect or a copy, it is the name the first save creates.
  *
  * ## What the simulator shows
  *
@@ -47,11 +54,14 @@ import { useRoute, useRouter } from 'vue-router'
 import type { ParamSpec } from '@candeo/effects-api'
 
 import {
+  cacheEffect,
   engineStatus,
   getDefaultLayout,
-  installEffect,
+  legacyEffectIds,
   listEffects,
   readEffectSource,
+  renameEffect,
+  saveEffectSource,
   startEffect,
   stopEffect,
   type EngineReport,
@@ -62,8 +72,8 @@ import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { useSettings } from '../composables/useSettings'
-import { clearDraft, readDraft, writeDraft } from '../editor/draft'
-import { compile, nameInSource, renameInSource } from '../editor/effect'
+import { clearDraft, migrateDrafts, moveDraft, readDraft, writeDraft } from '../editor/draft'
+import { transpile } from '../editor/effect'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
 import type { LayoutView } from '../keyboard/layout'
@@ -128,16 +138,19 @@ const derivedFrom = ref<string | null>(null)
 async function open(): Promise<void> {
   loading.value = true
   derivedFrom.value = null
+  name.value = id.value ?? ''
+  await migrateDrafts(legacyEffectIds)
   const draft = readDraft(id.value)
   try {
-    let disk = id.value === null ? NEW_EFFECT : await readEffectSource(id.value)
+    const disk = id.value === null ? NEW_EFFECT : await readEffectSource(id.value)
 
     if (id.value !== null) {
       const entry = (await listEffects()).find((e) => e.id === id.value)
       savedSpecs.value = entry?.params ?? {}
       if (entry?.kind === 'builtin') {
         derivedFrom.value = entry.name
-        disk = await renameInSource(disk, `${entry.name} (copie)`)
+        // A copy gets a name of its own, created at its first save.
+        name.value = `${entry.name} (copie)`
       }
     }
 
@@ -153,7 +166,6 @@ async function open(): Promise<void> {
     restored.value = draft !== null
   } finally {
     loading.value = false
-    await refreshName()
   }
 }
 
@@ -167,27 +179,45 @@ function discard(): void {
 // ---------------------------------------------------------------- nom
 
 /**
- * Le nom, modifiable sans toucher au code.
+ * The effect's name, which is its file name.
  *
- * **La source reste la vérité** : le champ l'affiche et la réécrit, il ne
- * double pas la donnée. C'est ce qui évite qu'un nom changé dans le code et un
- * nom changé dans le champ finissent par se contredire — et c'est aussi le
- * premier pas vers les métadonnées en formulaire.
- *
- * La réécriture a lieu à la validation du champ, pas à chaque touche : remplacer
- * le contenu de Monaco pendant la frappe déplacerait le curseur.
+ * Edited here and nowhere else: sources no longer declare it. Committed when the
+ * field is validated, not on every keystroke, since for an existing effect it
+ * renames a file.
  */
 const name = ref('')
 
-async function refreshName(): Promise<void> {
-  const found = await nameInSource(source.value)
-  if (found !== null) name.value = found
-}
+/** True while the effect has no file yet: a new effect, or a built-in's copy. */
+const creating = computed(() => id.value === null || derivedFrom.value !== null)
 
+/**
+ * Renames an existing effect's file, with its settings and its draft. A new
+ * effect or a copy only keeps the name for its first save.
+ */
 async function rename(): Promise<void> {
   const wanted = name.value.trim()
-  if (wanted === '' || wanted === (await nameInSource(source.value))) return
-  source.value = await renameInSource(source.value, wanted)
+  const current = id.value
+  if (creating.value || current === null) {
+    name.value = wanted
+    return
+  }
+  if (wanted === current) return
+  if (wanted === '') {
+    name.value = current
+    return
+  }
+  await act(async () => {
+    try {
+      await renameEffect(current, wanted)
+    } catch (e) {
+      name.value = current
+      throw e
+    }
+    moveDraft(current, wanted)
+    await router.replace({ name: 'editor', params: { id: wanted } })
+    // The settings moved on disk: the gallery reads them back rather than guess.
+    await reloadSettings()
+  })
 }
 
 // ---------------------------------------------------------------- brouillon
@@ -208,8 +238,6 @@ watch(source, (value) => {
   draftTimer = window.setTimeout(() => {
     if (value === saved.value) clearDraft(id.value)
     else writeDraft(id.value, value)
-    // Le nom a pu changer dans le code : le champ suit.
-    void refreshName()
   }, DRAFT_DELAY)
 })
 
@@ -256,9 +284,7 @@ async function refreshStatus(): Promise<void> {
  * new effect and the copy of a built-in have nothing installed under their own
  * id yet, even when their text still matches what was opened.
  */
-const unsaved = computed(
-  () => id.value === null || derivedFrom.value !== null || source.value !== saved.value,
-)
+const unsaved = computed(() => creating.value || source.value !== saved.value)
 
 /**
  * This effect is the one the current device runs.
@@ -346,18 +372,22 @@ const simNote = computed(() => {
 // ---------------------------------------------------------------- actions
 
 /**
- * Checks, transpiles and installs the source, and returns the id Rust gave it.
+ * Checks the source, writes its file, compiles it and records the result, and
+ * returns the effect's name.
  *
- * Three refusals are possible, in this order, and none runs anything: the
- * language service rejects code that does not compile, the manifest reader
- * rejects a computed name or parameter, and `install_effect` rejects an
- * `apiVersion` this app does not know.
+ * Refusals come in this order: the language service rejects code that does not
+ * compile, Rust rejects a name that cannot be a file name or that is taken. A
+ * module that does not load is **saved anyway** and reported with its error: the
+ * file is the author's work, and it can only be fixed once it exists.
  *
- * The text is read once, up front: what is typed while the install is in
- * flight was not installed and must not be marked as saved.
+ * The text is read once, up front: what is typed while saving was not saved and
+ * must not be marked as such.
  */
 async function install(): Promise<string> {
   const text = source.value
+  const target = name.value.trim()
+  if (target === '') throw new Error("donnez un nom à l'effet avant de l'enregistrer")
+
   const found = await errors()
   if (found.length > 0) {
     const first = found[0]
@@ -366,19 +396,22 @@ async function install(): Promise<string> {
     )
   }
 
-  const { js, manifest } = await compile(text)
-  const installedId = await installEffect(text, js, manifest)
+  const hash = await saveEffectSource(target, text, creating.value)
   clearDraft(id.value)
   restored.value = false
   saved.value = text
-  savedSpecs.value = manifest.params ?? {}
   // The effect now exists in its own right: it is no longer a built-in's copy.
   derivedFrom.value = null
+  // Carrying the name in the route is what makes reopening this screen read this
+  // effect back, and what the preview follows.
+  if (id.value !== target) await router.replace({ name: 'editor', params: { id: target } })
 
-  // Rust derives the id from the name. Carrying it in the route is what makes
-  // reopening this screen read this effect back.
-  if (id.value !== installedId) await router.replace(`/editor/${installedId}`)
-  return installedId
+  const entry = await cacheEffect(target, hash, await transpile(text))
+  savedSpecs.value = entry.params ?? {}
+  if (entry.state === 'broken') {
+    throw new Error(entry.error ?? "l'effet est enregistré, mais il ne se charge pas")
+  }
+  return target
 }
 
 /** Runs one action, shows what stopped it, and re-reads the engine either way. */
@@ -489,24 +522,21 @@ onBeforeUnmount(() => {
     <header class="head">
       <button class="ghost" @click="router.push('/')">Retour</button>
 
-      <!--
-        Le nom se change ici, sans toucher au code — mais la source reste la
-        vérité : ce champ la réécrit, il ne double pas la donnée.
-      -->
+      <!-- The name is the file name: renaming here renames the file. -->
       <label class="name">
         <span class="sr-only">Nom de l'effet</span>
         <input
           v-model="name"
           type="text"
-          :disabled="loading"
+          :disabled="loading || busy"
           placeholder="Nom de l'effet"
           @change="rename"
           @keyup.enter="rename"
         />
       </label>
 
-      <p class="what">
-        {{ derivedFrom ? `copie de ${derivedFrom}` : (id ?? 'nouvel effet') }}
+      <p v-if="creating" class="what">
+        {{ derivedFrom ? `copie de ${derivedFrom}` : 'nouvel effet' }}
       </p>
 
       <span class="spacer" />
@@ -550,8 +580,7 @@ onBeforeUnmount(() => {
           validation, c'est-à-dire après le travail.
         -->
         <p v-if="derivedFrom" class="notice" role="status">
-          Copie de « {{ derivedFrom }} » — l'original reste intact. Le nom a été changé dans le
-          code ; modifiez-le à votre guise.
+          Copie de « {{ derivedFrom }} » — l'original reste intact.
         </p>
 
         <p v-if="restored" class="notice" role="status">

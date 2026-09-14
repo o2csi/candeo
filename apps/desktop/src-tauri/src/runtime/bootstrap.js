@@ -23,7 +23,7 @@ const effect = module.default
 if (typeof effect?.render !== 'function') {
   throw new TypeError(
     "l'effet doit avoir un export par défaut portant une fonction `render` — " +
-      'par exemple : export default { name: "Mon effet", render(ctx) { … } }',
+      'par exemple : export default defineEffect({ render(ctx) { … } })',
   )
 }
 
@@ -33,6 +33,9 @@ if (typeof effect?.render !== 'function') {
 // les deux disent la même chose.
 globalThis.__candeo_manifest = JSON.stringify({
   name: effect.name ?? '',
+  // The version of the effects API the module says it was written against;
+  // `null` when it says nothing, which the library reads as the first one.
+  apiVersion: effect.apiVersion ?? null,
   description: effect.description ?? '',
   params: effect.params ?? {},
 })

@@ -4,7 +4,7 @@
 //! `candeo-protocol` and `candeo-device` thus stay free of any serde or Tauri
 //! dependency, and so reusable and testable outside the application.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use candeo_device::{Inspection, Keyboard, Layout, DEATHSTALKER_V2_PRO};
@@ -470,6 +470,27 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
             )
         },
     )
+}
+
+/// Moves effects from the directory layout to named files, at startup. See
+/// [`storage::Store::migrate_directories`].
+///
+/// A failure is logged and the startup goes on: the effects it did not reach are
+/// only missing from the library until the next launch, and the window is what
+/// lets someone look.
+fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
+    match storage::store(app).and_then(|store| store.migrate_directories()) {
+        Ok(renames) => {
+            if !renames.is_empty() {
+                tracing::info!(effects = renames.len(), "effects moved to named files");
+            }
+            renames
+        }
+        Err(e) => {
+            tracing::warn!("effects not moved to named files: {e}");
+            BTreeMap::new()
+        }
+    }
 }
 
 /// Applies the stored decisions, at application startup.
@@ -1014,6 +1035,12 @@ pub fn run() {
             journal::init(app.handle());
             journal::reload_level_setting(app.handle());
 
+            // Before anything reads an effect from the library or from
+            // `settings.json`: the tray lists them, and the window reads both.
+            app.manage(storage::MigratedEffects(Mutex::new(migrate_effects(
+                app.handle(),
+            ))));
+
             let state = AppState::default();
             // Before `manage`: the state is afterwards only reachable through
             // the manager, and adoption needs nothing but the state.
@@ -1085,10 +1112,13 @@ pub fn run() {
             runtime::subscribe_preview_frames,
             runtime::unsubscribe_preview_frames,
             runtime::engine_status,
-            storage::install_effect,
             storage::list_effects,
+            storage::save_effect_source,
+            storage::cache_effect,
+            storage::rename_effect,
             storage::delete_effect,
             storage::read_effect_source,
+            storage::legacy_effect_ids,
             storage::get_settings,
             storage::set_settings,
             storage::reset_settings,

@@ -819,6 +819,27 @@ impl Engine {
         stopped
     }
 
+    /// Renames this effect wherever it runs, preview included.
+    ///
+    /// The loops keep the JavaScript they loaded at start: only the id they
+    /// report changes. That is what lets renaming an effect leave the lighting as
+    /// it is, while every status line names the effect the way the library does.
+    pub fn rename_everywhere(&self, from: &str, to: &str) {
+        let loops = self
+            .all()
+            .into_iter()
+            .map(|(_, l)| l)
+            .chain(std::iter::once(Arc::clone(&self.preview)));
+        for l in loops {
+            if let Some(s) = l.current() {
+                let mut id = s.effect_id.lock().unwrap();
+                if id.as_deref() == Some(from) {
+                    *id = Some(to.to_owned());
+                }
+            }
+        }
+    }
+
     pub fn set_params(&self, device: DeviceRef, params: String) {
         if let Some(s) = self.shared(device) {
             *s.params.lock().unwrap() = params;
@@ -1025,6 +1046,18 @@ impl Budget {
             _ => false,
         }
     }
+}
+
+/// Loads an effect once and returns the manifest its module declares, as JSON.
+///
+/// Bounded like swatch sampling: this is effect code being run so the library
+/// can list it, and a module that loops at the top level must fail here with an
+/// error, not freeze the command that records it.
+pub(crate) fn declared_manifest(js: &str) -> Result<String, String> {
+    let deadline = Instant::now() + swatch::BUDGET;
+    let (_rt, ctx) = prepare_bounded(js, crate::default_layout(), Some(deadline))?;
+    ctx.with(|ctx| ctx.globals().get::<_, String>("__candeo_manifest"))
+        .map_err(|e| format!("manifeste illisible : {e}"))
 }
 
 /// JavaScript context ready to render, **with no time limit**.
@@ -2565,6 +2598,7 @@ mod tests {
 
             let announced = serde_json::json!({
                 "name": b.name,
+                "apiVersion": null,
                 "description": b.description,
                 "params": serde_json::from_str::<serde_json::Value>(b.params).expect("params JSON"),
             });
