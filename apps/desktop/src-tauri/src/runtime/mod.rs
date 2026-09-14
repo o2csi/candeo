@@ -1347,8 +1347,9 @@ fn layout_json(l: &'static Layout) -> String {
                 keys.push(',');
             }
             keys.push_str(&format!(
-                r#"{{"index":{index},"row":{row},"col":{col},"label":{},"x":{},"y":{},"w":{},"h":{}}}"#,
+                r#"{{"index":{index},"row":{row},"col":{col},"label":{},"code":{},"x":{},"y":{},"w":{},"h":{}}}"#,
                 json_string(k.name),
+                json_string(k.code),
                 k.x,
                 k.y,
                 k.w,
@@ -2259,6 +2260,19 @@ mod tests {
             keys.iter().all(|k| k["w"].as_f64().unwrap_or(0.0) > 0.0),
             "a key without a width cannot be told apart from a key without geometry"
         );
+    }
+
+    /// An effect finds a key by its position, whatever the legend: on this
+    /// AZERTY keyboard, `KeyW` is the key engraved Z.
+    #[test]
+    fn the_layout_given_to_the_effect_names_positions() {
+        let json: serde_json::Value =
+            serde_json::from_str(&layout_json(layout())).expect("layout JSON");
+        let keys = json["keys"].as_array().expect("keys");
+
+        let w = keys.iter().find(|k| k["code"] == "KeyW").expect("KeyW");
+        assert_eq!(w["label"], "Z");
+        assert_eq!((w["row"].as_u64(), w["col"].as_u64()), (Some(2), Some(2)));
     }
 
     /// A layout whose arrangement nobody has drawn.

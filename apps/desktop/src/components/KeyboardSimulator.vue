@@ -1,38 +1,41 @@
 <script setup lang="ts">
 /**
- * Simulateur de clavier — afficheur pur.
+ * Keyboard simulator: a pure display.
  *
- * **Entrée** : un gabarit et une image de `frameLen` couleurs. **Sortie** :
- * rien. Il ne calcule aucune couleur, il montre celles qu'on lui donne. C'est
- * ce qui garantit que l'aperçu **est** la production : le simulateur
- * n'interprète pas le code d'un effet, il affiche le résultat du moteur, la
- * même image que celle qui part vers le clavier (`docs/design/studio.md` §3).
+ * **In**: a layout and a frame of `frameLen` colors. **Out**: nothing. It
+ * computes no color, it shows the ones it is given. That is what makes the
+ * preview **be** production: the simulator does not interpret an effect's code,
+ * it shows the engine's result, the same frame that goes to the keyboard
+ * (`docs/design/studio.md` §3).
  *
- * ## SVG, et pas une grille CSS ni un canevas
+ * ## SVG, not a CSS grid or a canvas
  *
- * **Pas une grille CSS** : la disposition ISO n'est pas une grille. Les largeurs
- * valent 1, 1,25, 1,5, 1,75, 2, 2,75 ou 6,25 u, les blocs sont décalés de
- * quarts d'unité (pavé de navigation à 15,25 u, pavé numérique à 18,5 u), deux
- * touches débordent sur deux rangées et l'Entrée en L est faite de deux
- * rectangles de largeurs différentes. Exprimer cela en CSS demanderait une
- * grille au quart d'unité — 90 colonnes sur 26 rangées — dont chaque case
- * n'existerait que pour servir de dénominateur. Le rectangle est la donnée :
- * autant le dessiner.
+ * **Not a CSS grid**: the ISO arrangement is not a grid. Widths are 1, 1.25,
+ * 1.5, 1.75, 2, 2.75 or 6.25 u, blocks are offset by quarter units (navigation
+ * cluster at 15.25 u, keypad at 18.5 u), two keys span two rows and the L-shaped
+ * Enter is two rectangles of different widths. A quarter-unit grid of 90 columns
+ * by 26 rows would exist only as a denominator. The rectangle is the data: draw
+ * it.
  *
- * **Pas un canevas** : la charge invoquée pour le justifier n'existe pas. 106
- * rectangles à 30 Hz, c'est 106 écritures d'attribut `fill` par trame — le
- * `<text>` ne change que de couleur, et sa taille qu'au redimensionnement. Le
- * canevas coûterait en échange le redessin intégral du texte à chaque trame, la
- * gestion manuelle du rapport de pixels, et la perte de tout ce que le DOM donne
- * ici gratuitement : texte réellement mis en page par le moteur, mise à
- * l'échelle exacte par `viewBox`, et un libellé accessible.
+ * **Not a canvas**: the load that would justify one does not exist. 106
+ * rectangles at 30 Hz are 106 `fill` attribute writes per frame. A canvas would
+ * cost manual pixel-ratio handling, and lose the exact scaling `viewBox` gives
+ * and the accessible label.
  *
- * Le `viewBox` fait tout le travail d'adaptation : le dessin est décrit une fois
- * en unités de pas de clavier, `preserveAspectRatio` interdit la déformation, et
- * l'élément prend la largeur qu'on lui laisse.
+ * The `viewBox` does all the fitting: the drawing is described once in keyboard
+ * pitch units, `preserveAspectRatio` prevents distortion, and the element takes
+ * the width it is given.
+ *
+ * ## No legends
+ *
+ * Keys are drawn without their legend. Legends change with the layout variant —
+ * the ones in the layout are this keyboard's AZERTY — and none fits a keycap at
+ * the size the gallery gives the preview: shrinking them until they were dropped
+ * left some keys labelled and others blank. What an effect works with is the
+ * arrangement, and that is what is drawn.
  */
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, watch } from 'vue'
 
 import { erreur } from '../api/journal'
 import type { Rgb } from '../api/types'
@@ -56,51 +59,10 @@ const props = defineProps<{
 const GAP = 0.04
 /** Arrondi d'un capuchon, en unités de pas. */
 const RADIUS = 0.1
-/** Marge intérieure avant le libellé. */
-const INSET = 0.08
-/** Hauteur de libellé au repos, en unités de pas. */
-const LABEL_U = 0.32
-/**
- * Largeur moyenne d'un glyphe, en cadratins, pour la police d'interface.
- * Approximation assumée : mesurer 106 chaînes à chaque redimensionnement
- * coûterait autant de retours de mise en page pour ajuster un demi-pixel.
- */
-const GLYPH_EM = 0.55
-/** En deçà, un libellé n'est plus lisible : on le retire plutôt que de l'empiler. */
-const LABEL_FLOOR_PX = 7.5
 
 const BLACK: Rgb = [0, 0, 0]
 
 const size = computed(() => extent(props.layout.keys))
-
-/**
- * Pixels par unité de pas, mesurés sur le rendu.
- *
- * Nécessaire parce que le SVG se met à l'échelle : une taille de police en
- * unités de pas reste proportionnellement identique à toute taille, alors que
- * la lisibilité, elle, se juge en pixels. C'est la seule grandeur du composant
- * qui ne vienne pas du gabarit.
- */
-const box = ref({ w: 0, h: 0 })
-const draw = ref<SVGSVGElement | null>(null)
-let watcher: ResizeObserver | null = null
-
-// `min` des deux rapports : c'est exactement ce que calcule
-// `preserveAspectRatio="meet"`. Dérivé plutôt qu'affecté dans l'observateur,
-// pour rester juste si c'est le **gabarit** qui change sans redimensionnement.
-const pxPerU = computed(() => Math.min(box.value.w / size.value.w, box.value.h / size.value.h))
-
-onMounted(() => {
-  watcher = new ResizeObserver(([entry]) => {
-    box.value = { w: entry.contentRect.width, h: entry.contentRect.height }
-  })
-  if (draw.value) watcher.observe(draw.value)
-})
-
-onBeforeUnmount(() => {
-  watcher?.disconnect()
-  watcher = null
-})
 
 function byte(v: number): number {
   return v < 0 ? 0 : v > 255 ? 255 : v | 0
@@ -118,52 +80,13 @@ function css(c: Rgb): string {
   return `#${((1 << 24) | (byte(c[0]) << 16) | (byte(c[1]) << 8) | byte(c[2])).toString(16).slice(1)}`
 }
 
-/** Composante sRVB linéarisée, pour le calcul de luminance. */
-function linear(v: number): number {
-  const s = byte(v) / 255
-  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
-}
-
-/**
- * Encre du libellé : noir ou blanc, celui des deux qui contraste le mieux.
- *
- * Calculé, pas deviné — une touche peut être blanche comme noire, et la couleur
- * change trente fois par seconde. On compare les deux rapports de contraste
- * WCAG : `(L + 0,05) / 0,05` sur noir contre `1,05 / (L + 0,05)` sur blanc,
- * égalité en `L ≈ 0,179`. Ni l'un ni l'autre ne peut venir des jetons : un
- * jeton suit le thème, alors que le fond à contraster est une couleur émise.
- */
-function ink(c: Rgb): string {
-  const l = 0.2126 * linear(c[0]) + 0.7152 * linear(c[1]) + 0.0722 * linear(c[2])
-  return (l + 0.05) * (l + 0.05) >= 0.05 * 1.05 ? '#000' : '#fff'
-}
-
-/**
- * Taille du libellé, ou 0 pour ne pas l'afficher.
- *
- * Rétrécir puis renoncer, plutôt que déborder ou tronquer : un nom qui dépasse
- * de son capuchon salit tout le dessin, et un nom coupé se lit de travers. En
- * panneau étroit, les noms longs s'effacent d'eux-mêmes et les lettres restent.
- */
-function label(name: string, w: number): number {
-  if (!name) return 0
-  const room = w - 2 * GAP - 2 * INSET
-  const u = Math.min(LABEL_U, room / (GLYPH_EM * name.length))
-  return u * pxPerU.value >= LABEL_FLOOR_PX ? u : 0
-}
-
 interface Cap {
   index: number
-  name: string
   x: number
   y: number
   w: number
   h: number
-  cx: number
-  cy: number
   fill: string
-  ink: string
-  font: number
 }
 
 /**
@@ -174,22 +97,14 @@ interface Cap {
  * deux est le piège de ce matériel (`docs/api/commands.md`, « Gabarit »).
  */
 const caps = computed<Cap[]>(() =>
-  props.layout.keys.map((k) => {
-    const c = props.frame[k.index] ?? BLACK
-    return {
-      index: k.index,
-      name: k.name,
-      x: k.x + GAP,
-      y: k.y + GAP,
-      w: Math.max(0, k.w - 2 * GAP),
-      h: Math.max(0, k.h - 2 * GAP),
-      cx: k.x + k.w / 2,
-      cy: k.y + k.h / 2,
-      fill: css(c),
-      ink: ink(c),
-      font: label(k.name, k.w),
-    }
-  }),
+  props.layout.keys.map((k) => ({
+    index: k.index,
+    x: k.x + GAP,
+    y: k.y + GAP,
+    w: Math.max(0, k.w - 2 * GAP),
+    h: Math.max(0, k.h - 2 * GAP),
+    fill: css(props.frame[k.index] ?? BLACK),
+  })),
 )
 
 /**
@@ -227,32 +142,22 @@ if (import.meta.env.DEV) {
 <template>
   <div class="board">
     <svg
-      ref="draw"
       class="draw"
       :viewBox="`0 0 ${size.w} ${size.h}`"
       preserveAspectRatio="xMidYMid meet"
       role="img"
       :aria-label="`Aperçu de ${layout.name} : ${layout.keys.length} touches éclairées`"
     >
-      <g v-for="cap in caps" :key="cap.index">
-        <rect
-          :x="cap.x"
-          :y="cap.y"
-          :width="cap.w"
-          :height="cap.h"
-          :rx="RADIUS"
-          :fill="cap.fill"
-        />
-        <text
-          v-if="cap.font"
-          :x="cap.cx"
-          :y="cap.cy"
-          :font-size="cap.font"
-          :fill="cap.ink"
-          text-anchor="middle"
-          dominant-baseline="central"
-        >{{ cap.name }}</text>
-      </g>
+      <rect
+        v-for="cap in caps"
+        :key="cap.index"
+        :x="cap.x"
+        :y="cap.y"
+        :width="cap.w"
+        :height="cap.h"
+        :rx="RADIUS"
+        :fill="cap.fill"
+      />
     </svg>
   </div>
 </template>

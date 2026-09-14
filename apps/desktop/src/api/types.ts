@@ -84,6 +84,11 @@ export interface KeyInfo {
   col: number
   /** Nom gravé, variante French (ISO). */
   name: string
+  /**
+   * The key's position, as `KeyboardEvent.code` names it: `KeyQ` is the key left
+   * of `KeyW`, whatever its legend.
+   */
+  code: string
   /** En unités de pas de clavier : 1 u = une touche alphabétique. */
   x: number
   y: number

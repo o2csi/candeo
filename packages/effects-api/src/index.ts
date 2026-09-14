@@ -58,6 +58,17 @@ export interface Key {
   /** Nom lisible, quand le périphérique le fournit. */
   readonly label?: string
   /**
+   * The key's position, as the web's `KeyboardEvent.code` names it: `KeyQ` is the
+   * key left of `KeyW` whatever its legend — A on an AZERTY keyboard. Find a key
+   * by its code, never by its label, which changes with the layout variant:
+   * `layout.keys.filter((k) => ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(k.code))`
+   * lights ZQSD here and WASD on a QWERTY keyboard. The ISO Enter carries two
+   * LEDs, both `Enter`.
+   *
+   * Absent when the layout does not name its positions.
+   */
+  readonly code?: string
+  /**
    * Bord gauche du capuchon, en **unités de pas de clavier** : 1 u = la largeur
    * d'une touche alphabétique. L'origine est en haut à gauche, `y` croît vers le
    * bas, et la touche occupe `[x, x + w[ × [y, y + h[`.
