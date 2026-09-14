@@ -412,7 +412,6 @@ arrives, its cell turns ✅ **without the effect being reopened**.
 
 ```ts
 export default defineEffect({
-  name: 'Balayage',
   kinds: ['keyboard'],
   requires: { matrix: { rowsMin: 3 } },
   render({ layout, time, frame, params }) { … },
@@ -740,9 +739,9 @@ Described, not written: the implementation is the body of [#34].
   gains a zone role. The shipped effects gain one line each. Its `Key`
   already carries the rectangle, optional, since [#60]: that is the "effect
   side" half of `geometry`, and it did not wait for the rest.
-- **The manifest read from the syntax tree** ([`effects-runtime.md`](effects-runtime.md))
-  must read these two fields the way it already reads `name` and `params`: literals,
-  refused at validation rather than discovered at the first frame.
+- **The manifest**, read by running the module ([`effects-library.md`](effects-library.md) §3),
+  must carry these two fields the way it carries `params`, and refuse a malformed
+  one with a sentence rather than discover it at the first frame.
 - **The simulator** must know how to draw something other than an ISO keyboard: a
   grid of squares without geometry, named dots for zones.
 

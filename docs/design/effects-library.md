@@ -1,6 +1,6 @@
 # The effects library — effects are files
 
-Status: **proposed**. Replaces the uid-based version accepted in #83, which was
+Status: **implemented**. Replaces the uid-based version accepted in #83, which was
 set aside during implementation review for a simpler model. Covers the shipped
 effects and the identity and format of #44.
 
@@ -73,7 +73,8 @@ export default defineEffect({
   declare it now. Only keyboards exist today, so a missing `kinds` is read as
   `['keyboard']`; the obligation and the gallery filter come with the second
   kind.
-- `author` and `version` stay as in #44 §2, optional.
+- `author` and `version`, proposed in #44 §1 as optional, are not implemented
+  yet: see #44.
 - `name` in an existing source is **ignored**. `EffectModule` keeps it as a
   deprecated optional property, so an old source still type-checks and the
   editor strikes it through instead of refusing to save.
@@ -210,6 +211,28 @@ not delete, rename or overwrite (§4).
 
 Stays: one engine, one API, the swatch sampled by running the effect, per-device
 settings, preview versus Apply.
+
+## Trust: the folder is the boundary
+
+Any `.ts` file in the effects folder runs: its module body and a few frames when
+it is compiled, then every frame while it is applied or previewed. There is no
+import step that asks first, and none is needed while the folder is the only
+way in: whoever can write there can already run code as the user.
+
+What an effect can reach is bounded by the engine, not by trust:
+
+- **QuickJS, no host API**: no file, network, process or clock beyond `time`;
+  only the layout, its parameters, and the inputs it declares.
+- **Limits** on computing time per frame and at load, and on memory (#49).
+- **Frames only go out**: the host clamps colors and ignores writes outside the
+  frame.
+- **Key presses** reach only an effect declaring `inputs: ['keys']`, and the
+  error text of such an effect stays out of the log and the copied diagnostic,
+  since it could carry them (`key-input.md` §3).
+
+A shared catalog — effects fetched rather than dropped in by hand — would move
+the boundary, and is the moment to reconsider the engine (`boa_engine`) and an
+import step that shows what an effect declares before it first runs.
 
 ## 8. Out of scope
 
