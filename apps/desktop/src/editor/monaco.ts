@@ -202,7 +202,7 @@ export interface EffectError {
  */
 export async function errors(): Promise<EffectError[]> {
   const uri = EFFECT_URI.toString()
-  const worker = await (await getTypeScriptWorker())(EFFECT_URI)
+  const worker = await (await typescriptWorker())(EFFECT_URI)
   const [syntactic, semantic] = await Promise.all([
     worker.getSyntacticDiagnostics(uri),
     worker.getSemanticDiagnostics(uri),
@@ -214,6 +214,25 @@ export async function errors(): Promise<EffectError[]> {
     message:
       typeof d.messageText === 'string' ? d.messageText : d.messageText.messageText,
   }))
+}
+
+/**
+ * The TypeScript worker factory, once Monaco has registered it.
+ *
+ * Monaco sets the TypeScript mode up lazily, after a TypeScript model exists,
+ * and asking earlier throws "TypeScript not registered!". A save clicked right
+ * after the editor opens must wait for it, not fail.
+ */
+async function typescriptWorker(): Promise<Awaited<ReturnType<typeof getTypeScriptWorker>>> {
+  const deadline = Date.now() + 5000
+  for (;;) {
+    try {
+      return await getTypeScriptWorker()
+    } catch (e) {
+      if (Date.now() >= deadline) throw e
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    }
+  }
 }
 
 export { monaco }
