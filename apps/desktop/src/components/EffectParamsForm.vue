@@ -37,6 +37,7 @@ import { computed, useId } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { EffectParams } from '../api/candeo'
 import { sameValue } from '../composables/useSettings'
+import { localized } from '../i18n/text'
 
 const props = defineProps<{
   /** Les paramètres déclarés par l'effet. Vide est un cas normal. */
@@ -128,7 +129,7 @@ type Field =
 
 const fields = computed<Field[]>(() =>
   Object.entries(props.specs).map(([id, spec]): Field => {
-    const head = { id, label: spec.label }
+    const head = { id, label: localized(spec.label) }
     const v = props.values[id] ?? spec.default
 
     switch (spec.kind) {

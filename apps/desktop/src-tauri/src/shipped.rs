@@ -103,13 +103,26 @@ mod tests {
                 "\"{}\" declares no parameters",
                 s.name
             );
-            assert!(
-                declared["description"]
-                    .as_str()
-                    .is_some_and(|d| !d.is_empty()),
-                "\"{}\" has no description",
-                s.name
-            );
+            // Shipped effects describe themselves in every language the
+            // interface speaks, English first.
+            for language in ["en", "fr"] {
+                assert!(
+                    declared["description"][language]
+                        .as_str()
+                        .is_some_and(|d| !d.is_empty()),
+                    "\"{}\" has no {language} description",
+                    s.name
+                );
+                for (id, spec) in declared["params"].as_object().unwrap() {
+                    assert!(
+                        spec["label"][language]
+                            .as_str()
+                            .is_some_and(|l| !l.is_empty()),
+                        "\"{}\": parameter \"{id}\" has no {language} label",
+                        s.name
+                    );
+                }
+            }
         }
     }
 }

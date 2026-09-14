@@ -17,14 +17,17 @@ const DEFAULT_FROM = { r: 255, g: 0, b: 128 }
 const DEFAULT_TO = { r: 0, g: 128, b: 255 }
 
 export default defineEffect({
-  description: 'Un dégradé entre deux couleurs, immobile',
+  description: {
+    en: 'A motionless gradient between two colors',
+    fr: 'Un dégradé entre deux couleurs, immobile',
+  },
   kinds: ['keyboard'],
   params: {
-    from: { kind: 'color', label: 'Couleur de départ', default: DEFAULT_FROM },
-    to: { kind: 'color', label: "Couleur d'arrivée", default: DEFAULT_TO },
+    from: { kind: 'color', label: { en: 'Start color', fr: 'Couleur de départ' }, default: DEFAULT_FROM },
+    to: { kind: 'color', label: { en: 'End color', fr: "Couleur d'arrivée" }, default: DEFAULT_TO },
     axis: {
       kind: 'choice',
-      label: 'Sens',
+      label: { en: 'Direction', fr: 'Sens' },
       options: ['horizontal', 'vertical'],
       default: 'horizontal',
     },

@@ -12,11 +12,14 @@
 import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
-  description: 'Une onde de teinte se propage en cercles, à la distance physique des touches',
+  description: {
+    en: 'A hue wave spreads in circles, at the physical distance of the keys',
+    fr: 'Une onde de teinte se propage en cercles, à la distance physique des touches',
+  },
   kinds: ['keyboard'],
   params: {
-    speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
-    scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },
+    speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
+    scale: { kind: 'number', label: { en: 'Scale', fr: 'Échelle' }, min: 1, max: 60, default: 18 },
   },
   render({ layout, time, frame, params }) {
     const speed = Number(params.speed ?? 120)

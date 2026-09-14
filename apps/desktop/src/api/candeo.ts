@@ -8,7 +8,7 @@
 
 import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { ParamSpec, ParamValue } from '@candeo/effects-api'
+import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
 import type { DeviceInfo, DeviceRef, DeviceState, Effect, LayoutInfo, Rgb } from './types'
 
@@ -178,7 +178,8 @@ export const EFFECTS_API_VERSION = 1
  */
 export interface EffectManifest {
   name: string
-  description?: string
+  /** A string or a map of languages: see `localized` in `i18n/text.ts`. */
+  description?: Text
   params?: Record<string, ParamSpec>
   apiVersion: number
 }
