@@ -18,7 +18,6 @@ each frame:
 
 ```ts
 export default defineEffect({
-  apiVersion: 2,
   inputs: ['keys'],
   render({ layout, time, presses, frame }) {
     for (const { key, at } of presses) {
@@ -45,10 +44,10 @@ between frames: a skipped frame, the preview and the device show the same thing.
 The swatch is sampled with no presses, so a key-reactive effect should draw
 something at rest — Ripples has a dim background color.
 
-**API version 2.** Older versions of candeo ignore `inputs` and pass no
-`presses`, so an effect reading them would fail on its first frame. Declaring
-`apiVersion: 2` makes those versions refuse it cleanly instead, with a message
-saying so (`cache_effect` in `docs/api/commands.md`). `EFFECTS_API_VERSION` becomes 2; version 1 effects run unchanged.
+**The API version stays 1.** Nothing is released yet, so no effect written for
+a published version can meet a candeo without `presses`. The version check
+(`cache_effect` in `docs/api/commands.md`) is for changes made after the first
+release.
 
 ## 2. Capture on Windows
 
@@ -87,7 +86,7 @@ declaring keys simply receives no presses there.
 
 ## 4. Engine
 
-- `runtime::keys` owns the capture thread and a ring of presses (instant,
+- `runtime::presses` owns the capture thread and a ring of presses (instant,
   scancode, VID/PID or none). Loops that need keys hold a guard; the first guard
   registers, the last one dropped unregisters.
 - Each frame, a loop running a key-reactive effect takes the presses newer than
@@ -121,8 +120,8 @@ engine's frames, nothing else.
 
 ## Order of work
 
-1. API version 2, `inputs`, `presses` in the bootstrap and the TypeScript API.
-2. `runtime::keys`: Raw Input capture, the ring, guards, the device filter;
+1. `inputs` and `presses` in the bootstrap and the TypeScript API.
+2. `runtime::presses`: Raw Input capture, the ring, guards, the device filter;
    engine tests with injected presses.
 3. Ripples, and the gallery mark.
 4. In the app: typing in another application lights ripples on the keyboard and

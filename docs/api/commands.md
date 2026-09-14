@@ -398,7 +398,8 @@ JavaScript compiled from a file's **current** bytes.
   name: string,
   description: string | Record<string, string>,   // une chaîne, ou une par langue
   params: Record<string, ParamSpec>,
-  apiVersion: number
+  apiVersion: number,
+  readsKeys: boolean              // déclare `inputs: ['keys']`
 }
 ```
 
@@ -505,7 +506,7 @@ failure: its swatch is black, and that is the truth about what it does.
 
 ### The shipped effects
 
-Thirteen are shipped, written in **TypeScript against the same API** as the user's
+Fourteen are shipped, written in **TypeScript against the same API** as the user's
 effects, in [`packages/effects/`](../../packages/effects/), and embedded in the
 binary. At startup each one is copied into the effects folder **once**, and
 `settings.json` records it under `shippedEffects`: the hash of the copied version,
@@ -541,11 +542,13 @@ user's; what was done there is repaired on request, never at startup — see
 | Lightning | — | flashes striking along the keyboard over a dark sky |
 | Crossing beams | — | a vertical and a horizontal beam sweeping across each other |
 | Swirl circles | — | two glowing circles orbiting the center |
+| Ripples | — | a ring spreading from every key pressed; reads key presses |
 
-The last eight were written for candeo after effects of the OpenRGB Effects
-Plugin, from what they show, not from its code. None of them keeps state between
-frames: what a key shows depends on the instant only, drawn from deterministic
-hashes where it looks random.
+Color wheel to Swirl circles were written for candeo after effects of the OpenRGB
+Effects Plugin, from what they show, not from its code. None of the shipped
+effects keeps state between frames: what a key shows depends on the instant, and
+for Ripples on the presses the engine gives with it (`docs/design/key-input.md`),
+drawn from deterministic hashes where it looks random.
 
 The former ids are those of the version that compiled them into the binary: the
 migration below moves the settings that still use them.

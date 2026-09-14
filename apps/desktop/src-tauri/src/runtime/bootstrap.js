@@ -38,7 +38,16 @@ globalThis.__candeo_manifest = JSON.stringify({
   apiVersion: effect.apiVersion ?? null,
   description: effect.description ?? '',
   params: effect.params ?? {},
+  inputs: Array.isArray(effect.inputs) ? effect.inputs : [],
 })
+
+// Read by the render loop once loaded: only an effect that declares keys gets
+// presses, and makes the engine read them (`docs/design/key-input.md` §3).
+globalThis.__candeo_reads_keys = Array.isArray(effect.inputs) && effect.inputs.includes('keys')
+
+// Frozen and shared: an effect that declares no keys receives this one list on
+// every frame, with nothing to allocate or to modify.
+const NO_PRESSES = Object.freeze([])
 
 // Tampon réutilisé d'une image à l'autre : l'allouer 30 fois par seconde
 // ferait travailler le ramasse-miettes pour rien. La cadence a baissé, pas
@@ -78,7 +87,17 @@ const frame = {
   },
 }
 
-globalThis.__candeo_render = (time, frameIndex, paramsJson) => {
+// `pressesJson` is `[{ "k": <position in layout.keys>, "at": <seconds> }]`, or
+// empty when the effect reads no keys. Positions, so that the effect receives the
+// layout's own `Key` objects rather than copies.
+function presses(pressesJson) {
+  if (!pressesJson) return NO_PRESSES
+  return JSON.parse(pressesJson)
+    .map((p) => ({ key: layout.keys[p.k], at: p.at }))
+    .filter((p) => p.key !== undefined)
+}
+
+globalThis.__candeo_render = (time, frameIndex, paramsJson, pressesJson) => {
   // Chaque image repart du noir : une image est complète par définition, et un
   // effet qui n'écrit qu'une partie du clavier ne doit pas hériter en silence
   // de ce qu'il y avait avant.
@@ -90,6 +109,7 @@ globalThis.__candeo_render = (time, frameIndex, paramsJson) => {
     frameIndex,
     frame,
     params: JSON.parse(paramsJson),
+    presses: presses(pressesJson),
   })
 
   return buf

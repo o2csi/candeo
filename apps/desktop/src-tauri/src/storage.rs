@@ -113,6 +113,10 @@ pub struct Manifest {
     pub params: serde_json::Map<String, serde_json::Value>,
     /// Version of the effects API the effect was written against.
     pub api_version: u32,
+    /// The effect declares `inputs: ['keys']`: key presses are read while it
+    /// runs, which the gallery shows.
+    #[serde(default)]
+    pub reads_keys: bool,
 }
 
 /// Kind of effect: written by the user, or compiled into the binary.
@@ -915,6 +919,8 @@ struct CacheRecord {
     #[serde(default)]
     api_version: u32,
     #[serde(default)]
+    reads_keys: bool,
+    #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1571,30 +1577,24 @@ fn mark_shipped(mut entry: EffectEntry, shipped: &BTreeMap<String, Option<String
 
 /// The library entry of a file, from what its cache holds for its current hash.
 fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> EffectEntry {
-    let (state, error, swatch, description, params, api_version) = match record {
-        None => (
-            EffectState::Stale,
-            None,
-            Swatch::new(),
-            empty_text(),
-            serde_json::Map::new(),
-            EFFECTS_API_VERSION,
-        ),
+    let (state, error, swatch, declared) = match record {
+        None => (EffectState::Stale, None, Swatch::new(), Declared::nothing()),
         Some(r) if r.error.is_some() => (
             EffectState::Broken,
             r.error,
             Swatch::new(),
-            empty_text(),
-            serde_json::Map::new(),
-            EFFECTS_API_VERSION,
+            Declared::nothing(),
         ),
         Some(r) => (
             EffectState::Ready,
             None,
             r.swatch,
-            r.description,
-            r.params,
-            r.api_version,
+            Declared {
+                description: r.description,
+                params: r.params,
+                api_version: r.api_version,
+                reads_keys: r.reads_keys,
+            },
         ),
     };
     EffectEntry {
@@ -1607,9 +1607,10 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
         swatch,
         manifest: Manifest {
             name,
-            description,
-            params,
-            api_version,
+            description: declared.description,
+            params: declared.params,
+            api_version: declared.api_version,
+            reads_keys: declared.reads_keys,
         },
     }
 }
@@ -1625,12 +1626,13 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
 fn compile_record(hash: &str, js: &str) -> CacheRecord {
     let declared = crate::runtime::declared_manifest(js).and_then(|raw| declared_fields(&raw));
     match declared {
-        Ok((description, params, api_version)) => CacheRecord {
+        Ok(declared) => CacheRecord {
             hash: hash.to_owned(),
             js: js.to_owned(),
-            description,
-            params,
-            api_version,
+            description: declared.description,
+            params: declared.params,
+            api_version: declared.api_version,
+            reads_keys: declared.reads_keys,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -1643,6 +1645,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             description: empty_text(),
             params: serde_json::Map::new(),
             api_version: EFFECTS_API_VERSION,
+            reads_keys: false,
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -1670,14 +1673,28 @@ fn text_or_empty(value: Option<&serde_json::Value>) -> serde_json::Value {
     }
 }
 
+/// What a module declares that the library keeps.
+struct Declared {
+    description: serde_json::Value,
+    params: serde_json::Map<String, serde_json::Value>,
+    api_version: u32,
+    reads_keys: bool,
+}
+
+impl Declared {
+    /// For an effect not compiled, or that does not load.
+    fn nothing() -> Self {
+        Self {
+            description: empty_text(),
+            params: serde_json::Map::new(),
+            api_version: EFFECTS_API_VERSION,
+            reads_keys: false,
+        }
+    }
+}
+
 /// The fields of a declared manifest the library keeps, and the API version check.
-fn declared_fields(
-    raw: &str,
-) -> CmdResult<(
-    serde_json::Value,
-    serde_json::Map<String, serde_json::Value>,
-    u32,
-)> {
+fn declared_fields(raw: &str) -> CmdResult<Declared> {
     let value: serde_json::Value =
         serde_json::from_str(raw).map_err(|e| format!("manifeste illisible : {e}"))?;
     let description = text_or_empty(value.get("description"));
@@ -1695,7 +1712,16 @@ fn declared_fields(
             "effet écrit pour la version {api_version} de l'API d'effets ; cette version de candeo ne connaît que la {EFFECTS_API_VERSION}"
         ));
     }
-    Ok((description, params, api_version))
+    let reads_keys = value
+        .get("inputs")
+        .and_then(|i| i.as_array())
+        .is_some_and(|inputs| inputs.iter().any(|i| i == "keys"));
+    Ok(Declared {
+        description,
+        params,
+        api_version,
+        reads_keys,
+    })
 }
 
 fn create_dir(path: &Path) -> CmdResult<()> {
@@ -2055,6 +2081,25 @@ mod tests {
     fn create_and_cache(store: &Store, name: &str, js: &str) -> EffectEntry {
         let hash = store.save_effect_source(name, js, true).unwrap();
         store.cache_effect(name, &hash, js).unwrap()
+    }
+
+    /// What the gallery marks: an effect declaring keys, and only that one.
+    #[test]
+    fn the_library_knows_which_effects_read_keys() {
+        let (_tmp, store) = temp_store();
+        let keys = "export default { inputs: ['keys'], render() {} }";
+
+        assert!(
+            create_and_cache(&store, "Frappes", keys)
+                .manifest
+                .reads_keys
+        );
+        assert!(user_effect(&store, "Frappes").manifest.reads_keys);
+        assert!(
+            !create_and_cache(&store, "Uni", &solid_effect("00ff00"))
+                .manifest
+                .reads_keys
+        );
     }
 
     // ------------------------------------------------------------ files
@@ -3570,6 +3615,7 @@ mod tests {
             .unwrap()
             .clone(),
             api_version: EFFECTS_API_VERSION,
+            reads_keys: false,
         }
     }
 

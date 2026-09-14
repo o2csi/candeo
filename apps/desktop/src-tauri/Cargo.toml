@@ -59,10 +59,16 @@ tracing-appender = "0.2"
 # Already in the tree through Tauri.
 sha2 = "0.10"
 
-# Key names in the active keyboard layout (`GetKeyNameTextW`) — see `src/keys.rs`.
-# Already in the tree through Tauri.
+# Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`) and
+# key presses through Raw Input (`src/runtime/presses.rs`). Already in the tree
+# through Tauri.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_Input",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 # Le stockage se teste dans un dossier temporaire, jamais dans celui de
