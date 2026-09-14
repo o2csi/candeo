@@ -477,7 +477,7 @@ failure: its swatch is black, and that is the truth about what it does.
 
 ### The shipped effects
 
-Five are shipped, written in **TypeScript against the same API** as the user's
+Thirteen are shipped, written in **TypeScript against the same API** as the user's
 effects, in [`packages/effects/`](../../packages/effects/), and embedded in the
 binary. At startup each one is copied into the effects folder **once**, and
 `settings.json` records it under `shippedEffects`: the hash of the copied version,
@@ -502,6 +502,19 @@ its file from the repository into the folder.
 | Breathing | `respiration` | a single color, no variation in space |
 | Sweep | `balayage` | one lit row, the rest off |
 | Fixed gradient | `degrade-fixe` | two colors, motionless — its `render` ignores `time` |
+| Color wheel | — | every hue by angle around the center, turning |
+| Noise map | — | two colors drifting in patches, value noise through time |
+| Rain | — | drops falling down each column at its own pace |
+| Starry night | — | keys twinkling over a dark sky |
+| Bubbles | — | rings growing from random points and fading |
+| Lightning | — | flashes striking along the keyboard over a dark sky |
+| Crossing beams | — | a vertical and a horizontal beam sweeping across each other |
+| Swirl circles | — | two glowing circles orbiting the center |
+
+The last eight were written for candeo after effects of the OpenRGB Effects
+Plugin, from what they show, not from its code. None of them keeps state between
+frames: what a key shows depends on the instant only, drawn from deterministic
+hashes where it looks random.
 
 The former ids are those of the version that compiled them into the binary: the
 migration below moves the settings that still use them.
