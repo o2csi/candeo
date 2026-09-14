@@ -22,7 +22,7 @@ someone who just wants to change color.
 | Kind | Origin | Cost | Survives closing |
 |---|---|---|---|
 | **Built-in** | Rust, shipped with the app | host loop | no |
-| **Yours** | written in the editor, validated | host loop | yes, via the service |
+| **Yours** | written in the editor, saved | host loop | yes, via the service |
 | **Hardware** | keyboard firmware | **none** | **yes, always** |
 
 The distinction is not cosmetic. A hardware effect (`Spectrum Cycle`, `Wave`)
@@ -132,14 +132,14 @@ desktop application.
 | after | 14.5 MB | 89.7 kB |
 
 Most of the weight is the TypeScript worker (6.9 MB) and the compiler loaded
-at validation (3.5 MB). But **the entry chunk does not move**: the editor
+at save (3.5 MB). But **the entry chunk does not move**: the editor
 sits behind a lazy-loaded route, the gallery pays nothing. It is the
 only one of the two figures that matters — the app is packaged, there is no
 download at use time.
 
 ### An effect being written is not lost
 
-Until it is validated, an effect exists nowhere: `install_effect` is
+Until it is saved, an effect exists nowhere: `install_effect` is
 the only path to disk, and it requires code that compiles. Yet you leave
 the editor long before getting there. The editor therefore saves continuously to the
 web view's local storage, under one key per effect, and restores on opening.
@@ -152,17 +152,38 @@ the editor would announce a restore that restores nothing.
 
 The durable copy, for its part, remains the `source.ts` written at install.
 
-### The simulator is permanent
+### The simulator is permanent, and saving previews
 
-A toggle, "envoyer au clavier" (send to keyboard), separates the preview from the real write. Iterating
-on an effect must not require looking at the real keyboard, or owning one.
+Iterating on an effect must not require looking at the real keyboard, or
+owning one, and it must not take over the lighting in use. The editor therefore
+follows the gallery's rule (§8):
+
+- **Save** installs the effect, then restarts it in the **preview loop**, which
+  writes to no keyboard.
+- **Apply on *device*** starts it on the current device for real, saving first
+  when the code differs from the saved version. Its parameters follow the
+  gallery's Apply: the manifest defaults, overridden by what is remembered for
+  that device.
+
+This replaces a Validate and start button next to a Send to keyboard toggle,
+checked by default: every
+validation replaced what the keyboard was running, and the gallery and the
+editor followed opposite rules for the same gesture.
+
+The simulator shows the device's frames when the device runs **exactly the
+saved version**, and the preview otherwise — one composable, shared with the
+gallery, decides it. Both loops load `effect.js` from disk, so unsaved code is
+never on screen. The engine reports which effect a device runs, not which
+version of it: the editor remembers the text it applied, otherwise saving an
+applied effect would keep showing the device's stale frames instead of the new
+code.
 
 The simulator renders the **physical drawing** of the keys (see §4), not
 the logical grid: a spatial effect cannot be judged on a regular grid.
 
 But the simulator **computes** nothing: it receives frames already produced by
-the runtime engine, exactly the ones going to the keyboard. That is the whole
-point of §3.
+the runtime engine — the preview loop's, or exactly the ones going to the
+keyboard. That is the whole point of §3.
 
 ---
 
@@ -292,7 +313,7 @@ as absent, not omit it.
 - [x] Device selection screen
 - [x] Monaco editor + declaration of `@candeo/effects-api`
 - [x] Simulator — full-size ISO drawing, fed by the engine's frames
-- [x] Validation: `ts.transpileModule()` → `install_effect` command
+- [x] Saving: `ts.transpileModule()` → `install_effect` command
 - [x] `rquickjs` engine on the Rust side: render thread independent of the window,
       internal module `@candeo/effects-api`, frame channel
 - [x] Main screen — three columns, starting an effect from the list,
@@ -313,17 +334,19 @@ No new dependency on the Rust side apart from `rquickjs`, none on the front end 
   which §3 rules out. The explicit trade-off: these three fields must
   be **literals**, and a computed name is refused with a message that says
   so.
-- **The toggle is reapplied at every start.** `start_effect` starts from a
-  fresh state, whose keyboard output is enabled; without this, "do not send"
-  would be forgotten at the next start.
-- **The frame channel only exists during an effect, and it targets a device.** It
-  is placed in the state of the running loop **of that device**, and each
-  `start_effect` creates a new one: the editor resubscribes after each start,
-  not once and for all at opening. Switching device closes the
-  previous channel — the engine would not replace it, and both streams would feed
-  the same simulator.
-- **Leaving the editor does not stop the effect.** The released channel cuts the frame
-  stream; the loop keeps feeding the keyboard, window closed included —
+- **Saving restarts the preview explicitly.** Nothing the preview depends on
+  changes when an effect is saved again — same id, same device —, only the
+  `effect.js` on disk does. Without an explicit restart, the simulator would
+  keep running the previous code.
+- **The frame channel only exists during an effect, and it targets a loop.** It
+  is placed in the state of the running loop — **a device's**, or the
+  preview's — and each `start_effect` or `start_preview` creates a new one: the
+  simulator resubscribes after each start, not once and for all at opening.
+  Switching source closes the previous channel — the engine would not replace
+  it, and both streams would feed the same simulator.
+- **Leaving the editor stops the preview, not the applied effect.** Nobody is
+  left to watch the preview. The released channel cuts the frame stream; the
+  device loop keeps feeding the keyboard, window closed included —
   the close button hides the app to the system tray, it does not quit it. Quitting it is "Quitter candeo" (Quit candeo) in the icon menu, and it is the
   only action that stops effects.
 
