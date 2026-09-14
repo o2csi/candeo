@@ -2115,7 +2115,7 @@ mod tests {
         };
         let handle: Handle = Arc::new(Mutex::new(Some(kb)));
         let engine = Engine::default();
-        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let js = crate::shipped::source("Radial wave");
 
         engine
             .start(
@@ -2275,7 +2275,7 @@ mod tests {
     /// understand why. The effect must fail by naming what is missing.
     #[test]
     fn the_radial_wave_refuses_a_layout_without_geometry() {
-        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let js = crate::shipped::source("Radial wave");
         let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
         let err = render_once(&ctx, 0.0, 0, "{}", 2).unwrap_err();
@@ -2291,9 +2291,7 @@ mod tests {
     /// drawn keeps an effect.
     #[test]
     fn the_diagonal_wave_runs_without_geometry() {
-        let js = crate::builtins::find("onde-matricielle")
-            .expect("built-in")
-            .js;
+        let js = crate::shipped::source("Diagonal wave");
         let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
         let bytes = render_once(&ctx, 0.0, 0, "{}", 2).expect("render");
@@ -2530,10 +2528,10 @@ mod tests {
         );
     }
 
-    // ------------------------------------------------------------ built-ins
+    // ------------------------------------------------------------ shipped effects
     //
     // Shipped effects go through the same engine as the user's, hence through
-    // the same tests. A broken built-in effect must not be discovered at run
+    // the same tests. A broken shipped effect must not be discovered at run
     // time, by whoever opens it first.
 
     /// Sampling times. Several, and not only zero: a division by a cycle's
@@ -2542,15 +2540,16 @@ mod tests {
     const SAMPLE_TIMES: [f64; 4] = [0.0, 0.4, 1.3, 2.7];
 
     #[test]
-    fn every_built_in_effect_renders_a_full_frame() {
-        for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+    fn every_shipped_effect_renders_a_full_frame() {
+        for b in &crate::shipped::ALL {
+            let (_rt, ctx) =
+                prepare(b.source, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.name));
 
             for (i, time) in SAMPLE_TIMES.iter().enumerate() {
                 let bytes = render_once(&ctx, *time, i as u32, "{}", layout().led_count())
-                    .unwrap_or_else(|e| panic!("{} at t={time}: {e}", b.id));
+                    .unwrap_or_else(|e| panic!("{} at t={time}: {e}", b.name));
 
-                assert_eq!(bytes.len(), 132 * 3, "{} at t={time}", b.id);
+                assert_eq!(bytes.len(), 132 * 3, "{} at t={time}", b.name);
                 // (0, 1) is a hole in the matrix. An effect that reaches it
                 // does not iterate over `layout.keys`: it works on the 132
                 // cells instead of the 106 lit positions.
@@ -2558,7 +2557,7 @@ mod tests {
                     &bytes[3..6],
                     &[0, 0, 0],
                     "{} writes to a position without an LED",
-                    b.id
+                    b.name
                 );
             }
         }
@@ -2567,42 +2566,17 @@ mod tests {
     /// A shipped effect must be visible from its first frame: a black frame at
     /// start looks like an effect that did not start.
     #[test]
-    fn every_built_in_effect_lights_something_from_the_first_frame() {
-        for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
+    fn every_shipped_effect_lights_something_from_the_first_frame() {
+        for b in &crate::shipped::ALL {
+            let (_rt, ctx) =
+                prepare(b.source, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.name));
             let bytes = render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
 
             assert!(
                 bytes.iter().any(|&c| c != 0),
                 "{} renders an entirely black frame",
-                b.id
+                b.name
             );
-        }
-    }
-
-    /// The manifest announced in Rust and the one the module declares describe
-    /// the same effect. Without this test, the gallery could promise a
-    /// parameter that the code does not read — a setting with no effect, that
-    /// nothing reports.
-    #[test]
-    fn built_in_manifests_match_their_modules() {
-        for b in &crate::builtins::ALL {
-            let (_rt, ctx) = prepare(b.js, layout()).unwrap_or_else(|e| panic!("{}: {e}", b.id));
-
-            let raw: String = ctx.with(|ctx| {
-                ctx.globals()
-                    .get("__candeo_manifest")
-                    .expect("declared manifest")
-            });
-            let declared: serde_json::Value = serde_json::from_str(&raw).expect("manifest JSON");
-
-            let announced = serde_json::json!({
-                "name": b.name,
-                "apiVersion": null,
-                "description": b.description,
-                "params": serde_json::from_str::<serde_json::Value>(b.params).expect("params JSON"),
-            });
-            assert_eq!(declared, announced, "{}", b.id);
         }
     }
 
@@ -2618,11 +2592,9 @@ mod tests {
     }
 
     /// The first frame of a shipped effect, on the default layout.
-    fn first_frame(id: &str) -> Vec<u8> {
-        let js = crate::builtins::find(id)
-            .unwrap_or_else(|| panic!("{id} is not shipped"))
-            .js;
-        let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("{id}: {e}"));
+    fn first_frame(name: &str) -> Vec<u8> {
+        let js = crate::shipped::source(name);
+        let (_rt, ctx) = prepare(js, layout()).unwrap_or_else(|e| panic!("{name}: {e}"));
         render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render")
     }
 
@@ -2633,7 +2605,7 @@ mod tests {
     /// definition of "radial", checked rather than announced.
     #[test]
     fn the_radial_wave_measures_physical_distance() {
-        let radial = first_frame("onde-radiale");
+        let radial = first_frame("Radial wave");
         assert_eq!(
             color_at(&radial, 75),
             color_at(&radial, 77),
@@ -2646,7 +2618,7 @@ mod tests {
     /// does not fall on the grid: the radial wave tells them apart.
     #[test]
     fn the_radial_wave_follows_the_staggered_rows() {
-        let radial = first_frame("onde-radiale");
+        let radial = first_frame("Radial wave");
         assert_ne!(
             color_at(&radial, 75),
             color_at(&radial, 78),
@@ -2664,7 +2636,7 @@ mod tests {
     /// from the center, no longer do.
     #[test]
     fn the_diagonal_wave_starts_from_the_corner() {
-        let diagonal = first_frame("onde-matricielle");
+        let diagonal = first_frame("Diagonal wave");
         let l = layout();
         let keys: Vec<(u16, u8, u8)> = (0..l.rows)
             .flat_map(|row| (0..l.cols).map(move |col| (row, col)))
@@ -2697,9 +2669,7 @@ mod tests {
     /// the color "K" (row 3, column 8) had a second earlier.
     #[test]
     fn the_diagonal_wave_moves_away_from_the_corner() {
-        let js = crate::builtins::find("onde-matricielle")
-            .expect("built-in")
-            .js;
+        let js = crate::shipped::source("Diagonal wave");
         let (_rt, ctx) = prepare(js, layout()).expect("load");
         let params = r#"{"speed":18,"scale":18}"#;
         let len = layout().led_count();
@@ -2722,7 +2692,7 @@ mod tests {
     /// so.
     #[test]
     fn the_radial_wave_places_the_space_bar_at_the_middle_of_its_keycap() {
-        let radial = first_frame("onde-radiale");
+        let radial = first_frame("Radial wave");
 
         // Distances to the center of the drawing (11.25; 3.25): "Espace" (Space)
         // at 5.17 u, "B" at 4.83 u — a 0.34 u gap, hence neighboring hues.

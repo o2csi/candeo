@@ -14,9 +14,9 @@ use tauri::{AppHandle, Manager, State};
 
 use storage::{DeviceState, Settings};
 
-mod builtins;
 mod journal;
 mod runtime;
+mod shipped;
 mod single_instance;
 /// Hardware probes, all `#[ignore]` — see the module.
 #[cfg(test)]
@@ -472,22 +472,29 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
     )
 }
 
-/// Moves effects from the directory layout to named files, at startup. See
-/// [`storage::Store::migrate_directories`].
+/// Brings the effect library up to date at startup — see
+/// [`storage::Store::migrate`] — and copies the shipped effects.
 ///
 /// A failure is logged and the startup goes on: the effects it did not reach are
 /// only missing from the library until the next launch, and the window is what
 /// lets someone look.
 fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
-    match storage::store(app).and_then(|store| store.migrate_directories()) {
-        Ok(renames) => {
+    match storage::store(app).and_then(|store| store.migrate(&shipped::ALL)) {
+        Ok((renames, seeding)) => {
             if !renames.is_empty() {
-                tracing::info!(effects = renames.len(), "effects moved to named files");
+                tracing::info!(effects = renames.len(), "effect references moved to names");
+            }
+            if seeding != storage::Seeding::default() {
+                tracing::info!(
+                    copied = seeding.copied,
+                    updated = seeding.updated,
+                    "shipped effects copied"
+                );
             }
             renames
         }
         Err(e) => {
-            tracing::warn!("effects not moved to named files: {e}");
+            tracing::warn!("effects not migrated: {e}");
             BTreeMap::new()
         }
     }
