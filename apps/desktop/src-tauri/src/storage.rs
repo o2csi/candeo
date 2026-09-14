@@ -1289,7 +1289,7 @@ impl Store {
     pub fn migrate_former_ids(&self, shipped: &[Shipped]) -> CmdResult<BTreeMap<String, String>> {
         let renames: BTreeMap<String, String> = shipped
             .iter()
-            .map(|s| (s.former_id.to_owned(), s.name.to_owned()))
+            .filter_map(|s| Some((s.former_id?.to_owned(), s.name.to_owned())))
             .collect();
         let mut settings = self.read_settings()?;
         if settings.version >= 2 {
@@ -2465,7 +2465,7 @@ mod tests {
     fn shipped_v1() -> [Shipped; 1] {
         [Shipped {
             name: "Livré",
-            former_id: "livre",
+            former_id: Some("livre"),
             source: "export default { render() {} } // v1",
         }]
     }
@@ -2473,7 +2473,7 @@ mod tests {
     fn shipped_v2() -> [Shipped; 1] {
         [Shipped {
             name: "Livré",
-            former_id: "livre",
+            former_id: Some("livre"),
             source: "export default { render() {} } // v2",
         }]
     }
@@ -2526,7 +2526,7 @@ mod tests {
         let seeding = store
             .seed_shipped(&[Shipped {
                 name: "Livré",
-                former_id: "livre",
+                former_id: Some("livre"),
                 source: "export default { render() {} } // v3",
             }])
             .unwrap();

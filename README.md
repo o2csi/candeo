@@ -242,8 +242,10 @@ export default defineEffect({
 })
 ```
 
-The five effects shipped with the application — Radial wave, Diagonal wave,
-Breathing, Sweep, Fixed gradient — are written against this same API, in
+The effects shipped with the application — Radial wave, Diagonal wave,
+Breathing, Sweep, Fixed gradient, Color wheel, Noise map, Rain, Starry night,
+Bubbles, Lightning, Crossing beams, Swirl circles — are written against this same
+API, in
 [`packages/effects/`](packages/effects/). They are copied into your effects folder
 at first launch, and from then on they are your files: open, change, rename or
 delete them like any other. A shipped effect you deleted comes back by saving its
