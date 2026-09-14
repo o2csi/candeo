@@ -132,6 +132,8 @@ pub struct KeyInfo {
     pub col: u8,
     /// Engraved name, French (ISO) variant.
     pub name: &'static str,
+    /// Position code, as `KeyboardEvent.code` names it. See `candeo_device::Key`.
+    pub code: &'static str,
     pub x: f32,
     pub y: f32,
     pub w: f32,
@@ -167,6 +169,7 @@ impl From<&'static Layout> for LayoutInfo {
                     row,
                     col,
                     name: k.name,
+                    code: k.code,
                     x: k.x,
                     y: k.y,
                     w: k.w,

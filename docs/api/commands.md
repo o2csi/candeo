@@ -246,6 +246,7 @@ Fails if this device is not open.
     index: number,       // rang dans une image
     row: number, col: number,   // position dans la matrice logique
     name: string,        // « Échap », « Maj gauche », « Pavé + »…
+    code: string,        // "Escape", "ShiftLeft", "NumpadAdd"…
     x: number, y: number, w: number, h: number   // rectangle physique
   }[]                    // 106 entrées
 }
@@ -262,6 +263,19 @@ Fails if this device is not open.
 >
 > Confusing the two is the trap of this hardware. See
 > [`../protocol/deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §6.
+
+### Legends and positions
+
+`name` is the legend engraved on this keyboard's French (ISO) variant. `code` is
+the key's **position**, named as the web's `KeyboardEvent.code` names it: `KeyQ`
+is the key left of `KeyW`, engraved A here and Q on a QWERTY keyboard. A key is
+found by its code, never by its legend, which changes with the layout variant.
+The two arms of the ISO Enter are both `Enter`; every other code names one key.
+Like the geometry, codes follow from the position and are written in the layout,
+not read from the device.
+
+The simulator draws neither: legends do not fit a keycap at preview size, and
+only the arrangement matters to an effect.
 
 ### The geometry is not read from the device
 

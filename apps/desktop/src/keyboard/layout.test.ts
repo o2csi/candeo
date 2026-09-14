@@ -4,7 +4,18 @@ import type { KeyInfo, Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from './layout'
 
 function key(index: number, x: number, part: Partial<KeyInfo> = {}): KeyInfo {
-  return { index, row: 0, col: index, name: `K${index}`, x, y: 0, w: 1, h: 1, ...part }
+  return {
+    index,
+    row: 0,
+    col: index,
+    name: `K${index}`,
+    code: `Key${index}`,
+    x,
+    y: 0,
+    w: 1,
+    h: 1,
+    ...part,
+  }
 }
 
 const black = (n: number): Rgb[] => Array.from({ length: n }, () => [0, 0, 0])
