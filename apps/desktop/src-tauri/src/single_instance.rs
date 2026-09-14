@@ -101,7 +101,7 @@ pub(crate) fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         .show()
         .and_then(|()| window.unminimize())
         .and_then(|()| window.set_focus())
-        .map_err(|e| format!("fenêtre « {MAIN_WINDOW} » non ramenée au premier plan : {e}"))
+        .map_err(|e| format!("window “{MAIN_WINDOW}” not brought to the foreground: {e}"))
 }
 
 /// Reopens the main window **from its declaration**.
@@ -135,11 +135,11 @@ fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
         // one to open when someone launches candeo again.
         .find(|w| w.label == MAIN_WINDOW)
         .cloned()
-        .ok_or_else(|| format!("aucune fenêtre « {MAIN_WINDOW} » déclarée dans tauri.conf.json"))?;
+        .ok_or_else(|| format!("no “{MAIN_WINDOW}” window declared in tauri.conf.json"))?;
 
     WebviewWindowBuilder::from_config(app, &config)
         .and_then(|builder| builder.build())
-        .map_err(|e| format!("réouverture de la fenêtre « {MAIN_WINDOW} » impossible : {e}"))
+        .map_err(|e| format!("window “{MAIN_WINDOW}” not reopened: {e}"))
 }
 
 // ---------------------------------------------------------------- tests

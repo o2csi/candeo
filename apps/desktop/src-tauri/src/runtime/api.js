@@ -62,10 +62,10 @@ export function mix(a, b, t) {
 // c'est le silence qu'on refuse ici.
 
 function sansRectangle(key) {
-  const quoi = key?.label === undefined ? `la position ${key?.index}` : `« ${key.label} »`
+  const which = key?.label === undefined ? `position ${key?.index}` : `“${key.label}”`
   return (
-    `${quoi} n'a pas de rectangle : ce gabarit n'a pas de géométrie relevée, ` +
-    "et un effet qui mesure des distances physiques n'a rien à y mesurer."
+    `${which} has no rectangle: this layout has no surveyed geometry, ` +
+    'and an effect that measures physical distances has nothing to measure on it.'
   )
 }
 

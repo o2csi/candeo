@@ -187,7 +187,7 @@ const fn kh(index: u16, scancode: u16, x: f32, y: f32, w: f32, h: f32) -> Key {
 /// 22.5 u wide and 6.5 u high: main block from 0 to 15 u, navigation cluster from
 /// 15.25 to 18.25 u, numeric keypad from 18.5 to 22.5 u.
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
-    name: "Razer DeathStalker V2 Pro (filaire)",
+    name: "Razer DeathStalker V2 Pro",
     vid: 0x1532,
     pid: 0x0292,
     interface: 3,

@@ -8,6 +8,7 @@
 import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceRef, Effect } from '../api/types'
 
 export interface HardwareEffect {
@@ -59,10 +60,6 @@ const error = ref<string | null>(null)
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 export function useEffects() {
   /**
    * Pose un effet matériel **sur un appareil**.

@@ -6,6 +6,7 @@
 
 import { onMounted } from 'vue'
 
+import { message } from '../api/journal'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
@@ -110,7 +111,7 @@ onMounted(refresh)
           L'erreur appartient à l'appareil qui l'a produite : affichée sur sa
           ligne, elle ne laisse pas croire que les autres sont touchés.
         -->
-        <p v-if="d.error" class="err">{{ d.error }}</p>
+        <p v-if="d.error" class="err">{{ message(d.error) }}</p>
         <!--
           Un avertissement, pas une erreur : rien n'est bloqué, l'appareil reste
           ouvert. Visible sur la ligne plutôt que dans le seul journal —

@@ -117,7 +117,7 @@ async function copyDiagnostic(): Promise<void> {
       copied.value = t('settings.log.copied')
     } catch (e) {
       copied.value = t('settings.log.copyRefused')
-      erreur('diagnostic', `clipboard unavailable: ${message(e)}`, e)
+      erreur('diagnostic', `clipboard unavailable: ${message(e, 'en')}`, e)
     }
   } catch (e) {
     journalProblem.value = message(e)

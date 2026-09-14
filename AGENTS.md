@@ -45,11 +45,8 @@ mix both languages inside a new function or type.
 
 ## Internationalisation
 
-Introduced by #73, screen by screen. The shell, Devices and Settings go through
-the catalogs; the gallery, the editor, the tray and command errors still hold
-inline French strings until their turn. New interface text goes to the catalogs
-wherever the screen already uses them; elsewhere, list it in the pull request, in
-English.
+Introduced by #73. Every screen, the tray and command errors go through the
+catalogs; new interface text goes there too.
 
 - **Catalogs:** `apps/desktop/src/locales/en.json` is the reference, `fr.json`
   a complete translation. Missing keys fall back to English.
@@ -59,11 +56,15 @@ English.
 - **Front end:** `vue-i18n`, used through `t` from `src/i18n`, whose keys are
   typed from `en.json`: an unknown key fails `vue-tsc` (vue-i18n's own `t`
   accepts any string). No raw text in templates.
-- **Command errors** cross the IPC boundary as a code with parameters, not as a
-  sentence: the front end translates them. The Rust side logs its own English
-  message.
-- **Text rendered by Rust** (the tray menu) uses the same JSON catalogs, embedded
-  with `include_str!` and read through a `t(lang, key, params)` lookup.
+- **Command errors** cross the IPC boundary as a `Failure` (`src-tauri/src/failure.rs`):
+  a code under `errors.` with parameters, which `message()` in `api/journal.ts`
+  translates. Its `Display` is the English text, for the log. An error nobody
+  can act on is `Failure::unexpected` with an English detail.
+- **Text rendered by Rust** (the tray menu, device warnings, copy names) uses the
+  same JSON catalogs, embedded with `include_str!` and read through
+  `i18n::t(language, key, params)`.
+- **English only:** logs, the copied diagnostic, and what an effect's author
+  reads: load and render errors, like TypeScript's diagnostics.
 - **Language setting:** `language` in `settings.json`, `"system"` by default,
   or `"en"` / `"fr"`, resolved in Rust (`src-tauri/src/language.rs`): the
   display language on Windows (`GetUserDefaultUILanguage`), `LC_ALL`,
@@ -73,8 +74,8 @@ English.
   `description` and parameter `label`s accept a string or a map of languages
   (`docs/design/effects-library.md` §2); they do not go through the catalogs.
 - **Guards:** `vue-tsc` checks `fr.json` against the shape of `en.json`, a test
-  checks that they have the same keys, and one will check that every key used
-  from Rust exists.
+  checks that they have the same keys, and a Rust test reads the sources for
+  every key and `Failure` code used from Rust.
 
 ## Interface text
 

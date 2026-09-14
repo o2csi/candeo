@@ -64,9 +64,10 @@ export default defineEffect({
 })
 ```
 
-- **Text fields** — `description` and parameter `label` — accept a string or a
-  map of languages. The display picks the current language, then English, then
-  the first entry. The name is not translated: it is a file name.
+- **Text fields** — `description`, parameter `label`, and a `choice` option's
+  `label` (`{ value, label }`, or a plain string shown as it is) — accept a
+  string or a map of languages. The display picks the current language, then
+  English, then the first entry. The name is not translated: it is a file name.
 - **`kinds`** declares the device kinds the effect is meant for, as decided in
   #44 §5 and `device-sdk.md` §2 (`['keyboard']`, `'all'`…). Shipped effects
   declare it now. Only keyboards exist today, so a missing `kinds` is read as

@@ -22,8 +22,8 @@ const effect = module.default
 
 if (typeof effect?.render !== 'function') {
   throw new TypeError(
-    "l'effet doit avoir un export par défaut portant une fonction `render` — " +
-      'par exemple : export default defineEffect({ render(ctx) { … } })',
+    'the effect must have a default export with a `render` function, ' +
+      'for example: export default defineEffect({ render(ctx) { … } })',
   )
 }
 

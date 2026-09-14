@@ -126,7 +126,7 @@ type Field =
   | (Common & { kind: 'number'; value: number; min: number; max: number; step: number })
   | (Common & { kind: 'color'; hex: string })
   | (Common & { kind: 'boolean'; on: boolean })
-  | (Common & { kind: 'choice'; value: string; options: readonly string[] })
+  | (Common & { kind: 'choice'; value: string; options: { value: string; label: string }[] })
 
 const fields = computed<Field[]>(() =>
   Object.entries(props.specs).map(([id, spec]): Field => {
@@ -158,7 +158,11 @@ const fields = computed<Field[]>(() =>
       }
       case 'choice': {
         const value = typeof v === 'string' ? v : spec.default
-        return { ...head, kind: 'choice', value, options: spec.options, shown: value }
+        const options = spec.options.map((o) =>
+          typeof o === 'string' ? { value: o, label: o } : { value: o.value, label: localized(o.label) },
+        )
+        const shown = options.find((o) => o.value === value)?.label ?? value
+        return { ...head, kind: 'choice', value, options, shown }
       }
     }
   }),
@@ -323,7 +327,7 @@ function onChoice(id: string, e: Event) {
             :value="f.value"
             @change="onChoice(f.id, $event)"
           >
-            <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+            <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
 

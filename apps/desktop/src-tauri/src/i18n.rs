@@ -75,14 +75,36 @@ mod tests {
     /// sources themselves, so that no list has to be kept in step.
     #[test]
     fn every_key_used_from_rust_exists() {
-        let sources = [include_str!("tray.rs")];
-        let mut keys = Vec::new();
+        let sources = [
+            include_str!("failure.rs"),
+            include_str!("journal.rs"),
+            include_str!("lib.rs"),
+            include_str!("runtime/mod.rs"),
+            include_str!("storage.rs"),
+            include_str!("tray.rs"),
+        ];
+        let quoted = |source: &str, i: usize| {
+            let start = i + source[i..].find('"').unwrap() + 1;
+            source[start..start + source[start..].find('"').unwrap()].to_owned()
+        };
+        let mut keys = vec!["errors.unexpected".to_owned()];
         for source in sources {
-            for (i, _) in source.match_indices("\"tray.") {
-                keys.push(&source[i + 1..i + 1 + source[i + 1..].find('"').unwrap()]);
+            for prefix in ["\"tray.", "\"devices.warnings.", "\"effects.copy"] {
+                keys.extend(source.match_indices(prefix).map(|(i, _)| quoted(source, i)));
             }
+            keys.extend(
+                source
+                    .match_indices("Failure::new(\"")
+                    .map(|(i, _)| format!("errors.{}", quoted(source, i))),
+            );
         }
-        assert!(!keys.is_empty());
+        assert!(keys.len() > 20, "{keys:?}");
+        // A key built with `format!` names a family, not a key.
+        let keys: Vec<&str> = keys
+            .iter()
+            .map(String::as_str)
+            .filter(|k| !k.contains('{'))
+            .collect();
         for key in keys {
             assert!(exists(Language::En, key), "{key} missing from en.json");
             assert!(exists(Language::Fr, key), "{key} missing from fr.json");

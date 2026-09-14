@@ -52,7 +52,8 @@ export function currentLanguage(): Language {
   return i18n.global.locale.value
 }
 
-/** Shows the interface in this language. */
+/** Shows the interface in this language, and says so to the page: screen readers and spelling follow `lang`. */
 export function showIn(language: Language): void {
   i18n.global.locale.value = language
+  if (typeof document !== 'undefined') document.documentElement.lang = language
 }

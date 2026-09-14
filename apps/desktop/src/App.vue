@@ -27,7 +27,7 @@ watch(
   (summary) => {
     getCurrentWindow()
       .setTitle(t('app.title', { summary }))
-      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e)}`, e))
+      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e, 'en')}`, e))
   },
   { immediate: true },
 )
@@ -41,7 +41,7 @@ onMounted(() => {
   // Effects dropped in the folder are compiled now, not when the gallery opens:
   // the tray only offers what is compiled, and it may be all someone uses.
   refreshLibrary().catch((e: unknown) =>
-    alerte('App', `library not compiled: ${message(e)}`, e),
+    alerte('App', `library not compiled: ${message(e, 'en')}`, e),
   )
 
   // L'état peut changer **sans la fenêtre** : l'icône de zone de notification
@@ -63,7 +63,7 @@ onMounted(() => {
       // jusqu'à ce qu'on la rouvre. Rien à montrer à l'écran — l'utilisateur ne
       // peut rien en faire —, mais un journal qui l'explique évite de chercher
       // une panne d'écriture là où il n'y a qu'un écouteur manquant.
-      alerte('App', `no resynchronisation after changes made outside the window: ${message(e)}`, e)
+      alerte('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
     })
 })
 </script>

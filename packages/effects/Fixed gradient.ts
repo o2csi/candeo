@@ -28,7 +28,10 @@ export default defineEffect({
     axis: {
       kind: 'choice',
       label: { en: 'Direction', fr: 'Sens' },
-      options: ['horizontal', 'vertical'],
+      options: [
+        { value: 'horizontal', label: { en: 'Horizontal', fr: 'Horizontal' } },
+        { value: 'vertical', label: { en: 'Vertical', fr: 'Vertical' } },
+      ],
       default: 'horizontal',
     },
   },

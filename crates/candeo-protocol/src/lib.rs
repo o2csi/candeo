@@ -286,13 +286,13 @@ impl Status {
 impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Empty => f.write_str("0x00 (aucune)"),
-            Self::Busy => f.write_str("0x01 (occupé)"),
-            Self::Understood => f.write_str("0x02 (compris)"),
-            Self::Failed => f.write_str("0x03 (échec)"),
-            Self::TimedOut => f.write_str("0x04 (expiré)"),
-            Self::Unsupported => f.write_str("0x05 (non pris en charge)"),
-            Self::Other(b) => write!(f, "{b:#04x} (inconnu)"),
+            Self::Empty => f.write_str("0x00 (none)"),
+            Self::Busy => f.write_str("0x01 (busy)"),
+            Self::Understood => f.write_str("0x02 (understood)"),
+            Self::Failed => f.write_str("0x03 (failed)"),
+            Self::TimedOut => f.write_str("0x04 (timed out)"),
+            Self::Unsupported => f.write_str("0x05 (unsupported)"),
+            Self::Other(b) => write!(f, "{b:#04x} (unknown)"),
         }
     }
 }

@@ -169,6 +169,15 @@ mod tests {
                         "\"{}\": parameter \"{id}\" has no {language} label",
                         s.name
                     );
+                    for option in spec["options"].as_array().into_iter().flatten() {
+                        assert!(
+                            option["label"][language]
+                                .as_str()
+                                .is_some_and(|l| !l.is_empty()),
+                            "\"{}\": an option of \"{id}\" has no {language} label",
+                            s.name
+                        );
+                    }
                 }
             }
         }

@@ -7,13 +7,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Inspection, Keyboard, Layout, DEATHSTALKER_V2_PRO};
+use candeo_device::{Inspection, Keyboard, Layout, Warning, DEATHSTALKER_V2_PRO};
 use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
+use failure::Failure;
 use storage::{DeviceState, Settings};
 
+mod failure;
 mod i18n;
 mod journal;
 mod keys;
@@ -95,7 +97,7 @@ pub struct DeviceInfo {
     ///
     /// Each carries its own: an opening that fails must neither stop the others
     /// from working, nor make them carry its message.
-    pub error: Option<String>,
+    pub error: Option<Failure>,
     /// Firmware the layout was surveyed against, `v1.5`.
     ///
     /// Known without opening anything: it is layout data. Showing it even with
@@ -112,7 +114,7 @@ pub struct DeviceInfo {
     ///
     /// **Empty means "nothing to report", not "compatible".** The device status
     /// byte confirms that a command exists, never that its arguments are right.
-    /// None of these warnings blocks anything.
+    /// None of these warnings blocks anything. In the interface language.
     pub warnings: Vec<String>,
 }
 
@@ -252,7 +254,7 @@ pub struct AppState {
     /// A table rather than a single field: that is what keeps a failing device
     /// from dragging down any other. A global message would force choosing
     /// which one to show, and the next one would erase the previous one.
-    pub(crate) failures: Mutex<HashMap<DeviceRef, String>>,
+    pub(crate) failures: Mutex<HashMap<DeviceRef, Failure>>,
 }
 
 impl AppState {
@@ -320,12 +322,12 @@ pub(crate) fn default_layout() -> &'static Layout {
     LAYOUTS[0]
 }
 
-/// Errors go up to the front end as a string: the interface shows them as
-/// they are, so they must stay readable.
-type CmdResult<T> = Result<T, String>;
+/// Errors go up to the front end as a code, which it translates: see
+/// [`Failure`].
+type CmdResult<T> = Result<T, Failure>;
 
 pub(crate) fn hid() -> CmdResult<hidapi::HidApi> {
-    hidapi::HidApi::new().map_err(|e| format!("initialisation HID impossible : {e}"))
+    hidapi::HidApi::new().map_err(|e| Failure::unexpected(format!("HID not initialised: {e}")))
 }
 
 fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
@@ -333,7 +335,7 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
         .iter()
         .copied()
         .find(|l| DeviceRef::of(l) == device)
-        .ok_or_else(|| format!("aucun gabarit connu pour {device}"))
+        .ok_or_else(|| Failure::new("noLayout").with("device", device))
 }
 
 /// Serial number of the plugged-in unit — if one is plugged in.
@@ -400,7 +402,7 @@ fn log_opening(device: DeviceRef, keyboard: &Keyboard, usb: Option<String>, what
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct OpenOutcome {
     pub device: DeviceRef,
-    pub error: Option<String>,
+    pub error: Option<Failure>,
 }
 
 /// Opens **all** controlled and present devices, one by one.
@@ -427,7 +429,7 @@ fn open_adopted<K>(
     layouts: &[&'static Layout],
     settings: &Settings,
     present: impl Fn(&Layout) -> Option<Option<String>>,
-    mut open: impl FnMut(&'static Layout) -> Result<K, String>,
+    mut open: impl FnMut(&'static Layout) -> Result<K, Failure>,
     serial_of: impl Fn(&K) -> Option<String>,
 ) -> (Vec<(&'static Layout, K)>, Vec<OpenOutcome>) {
     let mut opened = Vec::new();
@@ -468,17 +470,10 @@ fn open_adopted<K>(
 /// reads stays matched as before, on its VID and PID. Refusing over a question
 /// left unanswered would turn off the lighting of someone who has only one
 /// unit.
-fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Option<String> {
+fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Option<Failure> {
     let serial = serial?;
-    (settings.device_state(layout.vid, layout.pid, Some(serial)) != DeviceState::Adopted).then(
-        || {
-            format!(
-                "l'exemplaire branché (série {}) n'est pas celui qui a été piloté : il reste \
-                 fermé. « Piloter » l'adopte à son tour.",
-                journal::fingerprint(serial)
-            )
-        },
-    )
+    (settings.device_state(layout.vid, layout.pid, Some(serial)) != DeviceState::Adopted)
+        .then(|| Failure::new("wrongUnit").with("fingerprint", journal::fingerprint(serial)))
 }
 
 /// Brings the effect library up to date at startup — see
@@ -537,7 +532,7 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         LAYOUTS,
         &settings,
         |l| plugged(&api, l),
-        |l| Keyboard::open(&api, l).map_err(|e| e.to_string()),
+        |l| Keyboard::open(&api, l).map_err(Failure::from),
         |kb| kb.inspection().serial.clone().ok(),
     );
 
@@ -639,6 +634,47 @@ fn reapply_brightness(
     }
 }
 
+/// An inspection warning in the interface language: the device crate knows no
+/// catalog.
+fn warning_text(language: language::Language, warning: &Warning) -> String {
+    let command = |name: &str| i18n::text(language, &format!("devices.warnings.commands.{name}"));
+    let (key, params) = match warning {
+        Warning::FirmwareDiffers { read, surveyed } => (
+            "devices.warnings.firmwareDiffers",
+            BTreeMap::from([
+                ("read", read.to_string()),
+                ("surveyed", surveyed.to_string()),
+            ]),
+        ),
+        Warning::FirmwareNotRead { reason, surveyed } => (
+            "devices.warnings.firmwareNotRead",
+            BTreeMap::from([
+                ("reason", reason.clone()),
+                ("surveyed", surveyed.to_string()),
+            ]),
+        ),
+        Warning::Unsupported { name, command: id } => (
+            "devices.warnings.unsupported",
+            BTreeMap::from([("name", command(name)), ("command", id.to_string())]),
+        ),
+        Warning::ReadBackDiffers {
+            name,
+            command: id,
+            wrote,
+            read,
+        } => (
+            "devices.warnings.readBackDiffers",
+            BTreeMap::from([
+                ("name", command(name)),
+                ("command", id.to_string()),
+                ("wrote", wrote.clone()),
+                ("read", read.clone()),
+            ]),
+        ),
+    };
+    i18n::t(language, key, &params)
+}
+
 // ---------------------------------------------------------------- commands
 
 /// Lists the known layouts: plugged in or not, and above all **in which state**.
@@ -646,6 +682,7 @@ fn reapply_brightness(
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
     let settings = storage::store(&app)?.read_settings()?;
     let api = hid()?;
+    let language = language::current(&app);
     // The readings are taken one after another, each releasing its lock before
     // the next. That is the rule documented on [`AppState`], and it comes from a
     // real deadlock: this command took the keyboard then the failures,
@@ -675,7 +712,14 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                     .as_ref()
                     .and_then(|i| i.firmware.as_ref().ok())
                     .map(ToString::to_string),
-                warnings: inspection.map(|i| i.warnings(l)).unwrap_or_default(),
+                warnings: inspection
+                    .map(|i| {
+                        i.warnings(l)
+                            .iter()
+                            .map(|w| warning_text(language, w))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             }
         })
         .collect())
@@ -742,14 +786,14 @@ fn adopt_device(
             Ok(Some(LayoutInfo::from(layout)))
         }
         Err(e) => {
-            let message = e.to_string();
-            tracing::error!(device = %device, "device not opened: {message}");
+            let failure = Failure::from(e);
+            tracing::error!(device = %device, "device not opened: {failure}");
             state
                 .failures
                 .lock()
                 .unwrap()
-                .insert(device, message.clone());
-            Err(message)
+                .insert(device, failure.clone());
+            Err(failure)
         }
     }
 }
@@ -819,7 +863,7 @@ pub(crate) fn release_devices(state: &AppState) {
 
     for device in state.open_handles() {
         let _ = with_keyboard(state, device, |kb| {
-            kb.set_effect(Effect::Off).map_err(|e| e.to_string())
+            kb.set_effect(Effect::Off).map_err(Failure::from)
         });
         state.set_open(device, None);
     }
@@ -844,7 +888,7 @@ fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutIn
     let layout = find_layout(device)?;
 
     let api = hid()?;
-    let kb = Keyboard::open(&api, layout).map_err(|e| e.to_string())?;
+    let kb = Keyboard::open(&api, layout)?;
     log_opening(
         device,
         &kb,
@@ -891,13 +935,10 @@ fn with_keyboard<T>(
     device: DeviceRef,
     f: impl FnOnce(&Keyboard) -> CmdResult<T>,
 ) -> CmdResult<T> {
-    let handle = state
-        .opened(device)
-        .ok_or_else(|| format!("aucun appareil ouvert pour {device}"))?;
+    let not_open = || Failure::new("deviceNotOpen").with("device", device);
+    let handle = state.opened(device).ok_or_else(not_open)?;
     let guard = handle.lock().unwrap();
-    let kb = guard
-        .as_ref()
-        .ok_or_else(|| format!("aucun appareil ouvert pour {device}"))?;
+    let kb = guard.as_ref().ok_or_else(not_open)?;
     f(kb)
 }
 
@@ -916,9 +957,7 @@ fn get_layout(state: State<'_, AppState>, device: DeviceRef) -> CmdResult<Layout
 /// second, and a single disk write, when it stops.
 #[tauri::command]
 fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> CmdResult<()> {
-    with_keyboard(&state, device, |kb| {
-        kb.set_brightness(level).map_err(|e| e.to_string())
-    })
+    with_keyboard(&state, device, |kb| Ok(kb.set_brightness(level)?))
 }
 
 /// Stores this device's brightness, without touching the keyboard.
@@ -960,9 +999,7 @@ fn remember_brightness(
 
 #[tauri::command]
 fn set_effect(state: State<'_, AppState>, device: DeviceRef, effect: EffectDto) -> CmdResult<()> {
-    with_keyboard(&state, device, |kb| {
-        kb.set_effect(effect.into()).map_err(|e| e.to_string())
-    })
+    with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect.into())?))
 }
 
 /// Pushes a complete frame.
@@ -988,17 +1025,17 @@ fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> Cmd
     with_keyboard(&state, device, |kb| {
         let expected = kb.layout().led_count();
         if frame.len() != expected * 3 {
-            return Err(format!(
-                "image de {} octets, {} attendus ({expected} cases × 3)",
+            return Err(Failure::unexpected(format!(
+                "frame of {} bytes, {} expected ({expected} cells × 3)",
                 frame.len(),
                 expected * 3
-            ));
+            )));
         }
         let colors: Vec<Rgb> = frame
             .chunks_exact(3)
             .map(|c| Rgb::new(c[0], c[1], c[2]))
             .collect();
-        kb.present(&colors).map_err(|e| e.to_string())
+        Ok(kb.present(&colors)?)
     })
 }
 
@@ -1020,13 +1057,15 @@ fn write_row(
 ) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
         if colors.len() % 3 != 0 || colors.is_empty() {
-            return Err("les couleurs doivent former des triplets RGB non vides".into());
+            return Err(Failure::unexpected(
+                "colors must be a non-empty list of RGB triplets",
+            ));
         }
         let c: Vec<Rgb> = colors
             .chunks_exact(3)
             .map(|x| Rgb::new(x[0], x[1], x[2]))
             .collect();
-        kb.write_row(row, col_start, &c).map_err(|e| e.to_string())
+        Ok(kb.write_row(row, col_start, &c)?)
     })
 }
 
@@ -1188,6 +1227,21 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_device_warning_is_said_in_the_interface_language() {
+        let warning = Warning::Unsupported {
+            name: "effect",
+            command: candeo_protocol::SET_EFFECT,
+        };
+        let fr = warning_text(language::Language::Fr, &warning);
+        assert!(
+            fr.starts_with("Ce micrologiciel") && fr.contains("« effet »"),
+            "{fr}"
+        );
+        let en = warning_text(language::Language::En, &warning);
+        assert!(en.contains("“effect”"), "{en}");
+    }
+
     /// Two made-up layouts: the only real layout is unique, and the invariant
     /// to check — one device drags down no other — only makes sense from two
     /// onwards. They only serve to be identified, hence the minimal matrix.
@@ -1258,7 +1312,7 @@ mod tests {
             |l| {
                 attempts.push(l.pid);
                 if l.pid == FIRST.pid {
-                    Err("accès refusé par le système".into())
+                    Err(Failure::new("deviceAccess").with("detail", "access denied"))
                 } else {
                     Ok(l.name)
                 }
@@ -1278,7 +1332,7 @@ mod tests {
             outcomes[0],
             OpenOutcome {
                 device: DeviceRef::of(&FIRST),
-                error: Some("accès refusé par le système".into()),
+                error: Some(Failure::new("deviceAccess").with("detail", "access denied")),
             }
         );
         assert_eq!(
@@ -1328,7 +1382,7 @@ mod tests {
             &[&FIRST, &SECOND],
             &both_controlled(),
             |_| None,
-            |l| Ok(l.name) as Result<&'static str, String>,
+            |l| Ok(l.name) as Result<&'static str, Failure>,
             silent,
         );
 
@@ -1388,12 +1442,13 @@ mod tests {
 
         assert!(opened.is_empty(), "the neighboring unit was controlled");
         assert_eq!(outcomes.len(), 1);
-        let reason = outcomes[0].error.as_deref().expect("no reason given");
-        assert!(reason.contains("n'est pas celui"), "{reason}");
+        let reason = outcomes[0].error.as_ref().expect("no reason given");
+        assert_eq!(reason.code, "wrongUnit");
         // The reason is shown and goes to the log: the serial is not in it, its
         // fingerprint is.
-        assert!(!reason.contains("XY02"), "the serial leaked: {reason}");
-        assert!(reason.contains(&journal::fingerprint("XY02")), "{reason}");
+        let text = reason.to_string();
+        assert!(!text.contains("XY02"), "the serial leaked: {text}");
+        assert!(text.contains(&journal::fingerprint("XY02")), "{text}");
     }
 
     #[test]

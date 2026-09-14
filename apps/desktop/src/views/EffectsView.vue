@@ -78,6 +78,7 @@ import {
   type EffectState,
   type EngineReport,
 } from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
@@ -133,10 +134,6 @@ const {
 } = useSettings()
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 // ---------------------------------------------------------------- appareils
 
 /**
@@ -1066,7 +1063,7 @@ onBeforeUnmount(() => {
           <div v-if="deviceKey === key(d)" class="lum">
             <label class="lum-head" :for="`lum-${key(d)}`">
               <span class="lum-label">{{ t('effects.brightness') }}</span>
-              <span class="lum-value">{{ brightnessPercent }} %</span>
+              <span class="lum-value">{{ t('effects.percent', { n: brightnessPercent }) }}</span>
             </label>
             <input
               :id="`lum-${key(d)}`"
@@ -1222,7 +1219,7 @@ onBeforeUnmount(() => {
         {{ t('effects.effectError', { error: status.error }) }}
       </p>
       <p v-if="status?.deviceError" class="notice warn" role="alert">
-        {{ t('effects.deviceError', { error: status.deviceError }) }}
+        {{ message(status.deviceError) }}
       </p>
       <!--
         L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le

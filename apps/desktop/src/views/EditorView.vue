@@ -74,7 +74,7 @@ import {
   stopEffect,
   type EngineReport,
 } from '../api/candeo'
-import { erreur } from '../api/journal'
+import { erreur, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
@@ -126,10 +126,6 @@ const savedSpecs = ref<Record<string, ParamSpec>>({})
 const builtin = ref(false)
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 // ---------------------------------------------------------------- ouverture
 
 /** Opens the effect in place; a built-in opens read-only. */
@@ -586,7 +582,7 @@ onBeforeUnmount(() => {
     <div class="split">
       <div class="pane code-pane">
         <p v-if="runsHere && status?.deviceError" class="notice warn" role="alert">
-          {{ t('editor.keyboardError', { error: status.deviceError }) }}
+          {{ message(status.deviceError) }}
         </p>
 
         <p v-if="restored" class="notice" role="status">
@@ -606,7 +602,7 @@ onBeforeUnmount(() => {
           {{ t('editor.effectError', { error: effectError }) }}
         </p>
         <p v-else class="hint">
-          {{ t('editor.hintEngine') }} <code>console</code> {{ t('editor.hintConsole') }}
+          {{ t('editor.hint') }}
         </p>
       </div>
 

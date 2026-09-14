@@ -10,7 +10,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
-import type { DeviceInfo, DeviceRef, DeviceState, Effect, LayoutInfo, Rgb } from './types'
+import type { DeviceInfo, DeviceRef, DeviceState, Effect, Failure, LayoutInfo, Rgb } from './types'
 
 /** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -535,7 +535,7 @@ export interface EngineStatus {
    * Les deux sont distincts parce qu'ils n'ont ni la même cause ni le même
    * remède : un effet impeccable peut n'atteindre aucune LED.
    */
-  deviceError: string | null
+  deviceError: Failure | null
   /**
    * Vrai si les images parviennent effectivement à un clavier.
    *

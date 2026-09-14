@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
+import { message } from '../api/journal'
 import en from '../locales/en.json'
 import fr from '../locales/fr.json'
 import { showIn } from '.'
 import { localized } from './text'
+
+describe('message', () => {
+  it('says a failure from Rust in the interface language, and in English for the log', () => {
+    const failure = { code: 'effectNotFound', params: { name: 'Rain' } }
+    showIn('fr')
+    expect(message(failure)).toBe('Aucun effet nommé « Rain ».')
+    expect(message(failure, 'en')).toBe('No effect is named “Rain”.')
+    showIn('en')
+    expect(message(new Error('boom'))).toBe('boom')
+  })
+})
 
 describe('localized', () => {
   it('takes a plain string as it is', () => {

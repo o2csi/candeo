@@ -53,6 +53,7 @@ import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
 import type { EffectParams } from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 
 /**
@@ -140,10 +141,6 @@ const deviceKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
 const key = (d: DeviceRef, effect: string) => `${deviceKey(d)}/${effect}`
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 // ---------------------------------------------------------------- valeurs
 
 /** Vrai si cette valeur est une couleur, au sens de `ParamSpec`. */
@@ -170,7 +167,7 @@ function fits(spec: ParamSpec, v: ParamValue): boolean {
     case 'boolean':
       return typeof v === 'boolean'
     case 'choice':
-      return typeof v === 'string' && spec.options.includes(v)
+      return typeof v === 'string' && spec.options.some((o) => (typeof o === 'string' ? o : o.value) === v)
   }
 }
 
