@@ -66,31 +66,25 @@ export function layoutProblems(layout: LayoutView, frame: readonly Rgb[]): strin
   const problems: string[] = []
 
   if (frame.length !== layout.frameLen) {
-    problems.push(
-      `image de ${frame.length} couleurs pour un gabarit qui en attend ${layout.frameLen}`,
-    )
+    problems.push(`frame of ${frame.length} colors for a layout expecting ${layout.frameLen}`)
   }
 
-  const seen = new Map<number, string>()
+  const seen = new Set<number>()
   for (const k of layout.keys) {
     if (!Number.isInteger(k.index) || k.index < 0 || k.index >= layout.frameLen) {
-      problems.push(`« ${k.name} » porte l'index ${k.index}, hors de l'image`)
+      problems.push(`key ${k.index} is outside the frame`)
     } else if (frame[k.index] === undefined) {
-      problems.push(`« ${k.name} » (index ${k.index}) est sans couleur`)
+      problems.push(`key ${k.index} has no color`)
     }
 
-    const other = seen.get(k.index)
-    if (other !== undefined) {
-      problems.push(`index ${k.index} partagé par « ${other} » et « ${k.name} »`)
-    } else {
-      seen.set(k.index, k.name)
-    }
+    if (seen.has(k.index)) problems.push(`index ${k.index} is used by two keys`)
+    seen.add(k.index)
 
     if (!(k.w > 0) || !(k.h > 0)) {
-      problems.push(`« ${k.name} » (index ${k.index}) est sans surface`)
+      problems.push(`key ${k.index} has no area`)
     }
     if (k.x < 0 || k.y < 0) {
-      problems.push(`« ${k.name} » (index ${k.index}) sort du dessin par le haut ou la gauche`)
+      problems.push(`key ${k.index} leaves the drawing at the top or left`)
     }
   }
 
@@ -106,7 +100,7 @@ export function layoutProblems(layout: LayoutView, frame: readonly Rgb[]): strin
       const disjoint =
         a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
       if (!disjoint) {
-        problems.push(`« ${a.name} » (${a.index}) et « ${b.name} » (${b.index}) se chevauchent`)
+        problems.push(`keys ${a.index} and ${b.index} overlap`)
       }
     }
   }

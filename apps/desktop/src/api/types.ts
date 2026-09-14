@@ -82,13 +82,13 @@ export interface KeyInfo {
   index: number
   row: number
   col: number
-  /** Nom gravé, variante French (ISO). */
-  name: string
   /**
-   * The key's position, as `KeyboardEvent.code` names it: `KeyQ` is the key left
-   * of `KeyW`, whatever its legend.
+   * What the keyboard sends for this key, in PS/2 set 1 (`0xE0..` for an extended
+   * key). It names the physical key whatever its legend. Absent for Fn.
    */
-  code: string
+  scancode?: number
+  /** The key's name in the system's keyboard layout, when the system gives one. */
+  label?: string
   /** En unités de pas de clavier : 1 u = une touche alphabétique. */
   x: number
   y: number

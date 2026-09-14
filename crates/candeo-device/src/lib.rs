@@ -9,7 +9,7 @@ pub mod inspection;
 pub mod layout;
 
 pub use inspection::{Check, Inspection, Verdict};
-pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO};
+pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO, NO_SCANCODE};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

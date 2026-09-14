@@ -4,18 +4,7 @@ import type { KeyInfo, Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from './layout'
 
 function key(index: number, x: number, part: Partial<KeyInfo> = {}): KeyInfo {
-  return {
-    index,
-    row: 0,
-    col: index,
-    name: `K${index}`,
-    code: `Key${index}`,
-    x,
-    y: 0,
-    w: 1,
-    h: 1,
-    ...part,
-  }
+  return { index, row: 0, col: index, x, y: 0, w: 1, h: 1, ...part }
 }
 
 const black = (n: number): Rgb[] => Array.from({ length: n }, () => [0, 0, 0])
@@ -41,7 +30,7 @@ describe('layoutProblems', () => {
 
   it('reports a frame that does not cover the whole matrix', () => {
     expect(layoutProblems(view([key(0, 0)]), black(2))).toEqual([
-      'image de 2 couleurs pour un gabarit qui en attend 3',
+      'frame of 2 colors for a layout expecting 3',
     ])
   })
 
@@ -52,10 +41,10 @@ describe('layoutProblems', () => {
     )
 
     expect(problems).toEqual([
-      'index 0 partagé par « K0 » et « K0 »',
-      '« K7 » porte l\'index 7, hors de l\'image',
-      '« K1 » (index 1) est sans surface',
-      '« K2 » (index 2) sort du dessin par le haut ou la gauche',
+      'index 0 is used by two keys',
+      'key 7 is outside the frame',
+      'key 1 has no area',
+      'key 2 leaves the drawing at the top or left',
     ])
   })
 
@@ -64,6 +53,6 @@ describe('layoutProblems', () => {
     const overlapping = view([key(0, 0), key(1, 0.5)])
 
     expect(layoutProblems(touching, black(3))).toEqual([])
-    expect(layoutProblems(overlapping, black(3))).toEqual(['« K0 » (0) et « K1 » (1) se chevauchent'])
+    expect(layoutProblems(overlapping, black(3))).toEqual(['keys 0 and 1 overlap'])
   })
 })

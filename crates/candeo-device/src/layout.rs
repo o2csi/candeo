@@ -11,8 +11,14 @@ use candeo_protocol::Firmware;
 /// value `u16::MAX` is written in the field's documentation for whoever would.
 pub(crate) const EMPTY: u16 = u16::MAX;
 
-/// A key: its LED, its printed legend, its position code, and its physical
-/// rectangle.
+/// [`Key::scancode`] of a key that sends nothing: no make code is 0.
+pub const NO_SCANCODE: u16 = 0;
+
+/// A key: its LED, its scancode, and its physical rectangle.
+///
+/// No legend: what is engraved depends on the layout variant, and the operating
+/// system names a scancode in the layout it uses (see `keys::label` in the desktop
+/// application).
 ///
 /// Coordinates are in **keyboard pitch units**: 1 u = the width of an alphanumeric
 /// key. The origin is at the top left, `y` grows downwards. A key covers
@@ -26,19 +32,20 @@ pub(crate) const EMPTY: u16 = u16::MAX;
 /// convention, not of a survey: a drawing mistake is only caught by looking at the
 /// simulator.
 ///
-/// Only [`Key::index`] and [`Key::name`] come from the hardware survey, described in
-/// `docs/protocol/deathstalker-v2-pro.md` §6. [`Key::code`] follows from the
+/// Only [`Key::index`] comes from the hardware survey, described in
+/// `docs/protocol/deathstalker-v2-pro.md` §6. [`Key::scancode`] follows from the
 /// position, as the rectangle does.
 pub struct Key {
     /// LED index, as it appears in [`Layout::matrix`].
     pub index: u16,
-    /// Readable name, in the French (ISO) variant the keyboard declares.
-    pub name: &'static str,
-    /// The key's position, named as `KeyboardEvent.code` names it (W3C UI Events):
-    /// `KeyQ` is the key left of `KeyW` whatever its legend, `A` on this AZERTY
-    /// keyboard. What an effect uses to find a key, since legends change with the
-    /// layout variant and positions do not. Both arms of the ISO Enter are `Enter`.
-    pub code: &'static str,
+    /// What the keyboard sends for this key, in PS/2 set 1 as Windows reports it:
+    /// the make code, `0xE0` in the high byte for an extended key (`0xE01D`, right
+    /// Ctrl), `0xE11D` for Pause. It names the physical key whatever its legend —
+    /// `0x11` is engraved Z on this AZERTY keyboard and W on a QWERTY one — and it is
+    /// how a key press finds its LED. Both arms of the ISO Enter are `0x1C`.
+    ///
+    /// [`NO_SCANCODE`] for Fn, which the firmware handles without sending anything.
+    pub scancode: u16,
     /// Left edge, in keyboard pitch units.
     pub x: f32,
     /// Top edge.
@@ -132,11 +139,10 @@ impl Layout {
 }
 
 /// Standard key, 1 u × 1 u.
-const fn k(index: u16, name: &'static str, code: &'static str, x: f32, y: f32) -> Key {
+const fn k(index: u16, scancode: u16, x: f32, y: f32) -> Key {
     Key {
         index,
-        name,
-        code,
+        scancode,
         x,
         y,
         w: 1.0,
@@ -145,11 +151,10 @@ const fn k(index: u16, name: &'static str, code: &'static str, x: f32, y: f32) -
 }
 
 /// Wide key, one row high.
-const fn kw(index: u16, name: &'static str, code: &'static str, x: f32, y: f32, w: f32) -> Key {
+const fn kw(index: u16, scancode: u16, x: f32, y: f32, w: f32) -> Key {
     Key {
         index,
-        name,
-        code,
+        scancode,
         x,
         y,
         w,
@@ -158,19 +163,10 @@ const fn kw(index: u16, name: &'static str, code: &'static str, x: f32, y: f32, 
 }
 
 /// Key spanning two rows — the numeric keypad `+` and Enter.
-const fn kh(
-    index: u16,
-    name: &'static str,
-    code: &'static str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-) -> Key {
+const fn kh(index: u16, scancode: u16, x: f32, y: f32, w: f32, h: f32) -> Key {
     Key {
         index,
-        name,
-        code,
+        scancode,
         x,
         y,
         w,
@@ -212,67 +208,72 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     ],
     #[rustfmt::skip]
     keys: &[
-        // Row 0 — function keys. Three blocks of four, then the print trio. (16)
-        k(  0, "Échap", "Escape",       0.0,  0.0),
-        k(  2, "F1", "F1",          2.0,  0.0), k(  3, "F2", "F2",     3.0,  0.0), k(  4, "F3", "F3",     4.0,  0.0), k(  5, "F4", "F4",  5.0,  0.0),
-        k(  6, "F5", "F5",          6.5,  0.0), k(  7, "F6", "F6",     7.5,  0.0), k(  8, "F7", "F7",     8.5,  0.0), k(  9, "F8", "F8",  9.5,  0.0),
-        k( 10, "F9", "F9",         11.0,  0.0), k( 11, "F10", "F10",   12.0,  0.0), k( 12, "F11", "F11",   13.0,  0.0), k( 13, "F12", "F12", 14.0,  0.0),
-        k( 14, "ImprÉcran", "PrintScreen",  15.25, 0.0), k( 15, "ArrêtDéfil", "ScrollLock", 16.25, 0.0), k( 16, "Pause", "Pause", 17.25, 0.0),
+        // Row 0 — Esc, F1–F12 in three blocks of four, Print Screen, Scroll Lock, Pause. (16)
+        k(  0, 0x01,    0.0,  0.0),
+        k(  2, 0x3B,    2.0,  0.0), k(  3, 0x3C,  3.0, 0.0), k(  4, 0x3D,  4.0, 0.0), k(  5, 0x3E,  5.0, 0.0),
+        k(  6, 0x3F,    6.5,  0.0), k(  7, 0x40,  7.5, 0.0), k(  8, 0x41,  8.5, 0.0), k(  9, 0x42,  9.5, 0.0),
+        k( 10, 0x43,   11.0,  0.0), k( 11, 0x44, 12.0, 0.0), k( 12, 0x57, 13.0, 0.0), k( 13, 0x58, 14.0, 0.0),
+        k( 14, 0xE037, 15.25, 0.0), k( 15, 0x46, 16.25, 0.0), k( 16, 0xE11D, 17.25, 0.0),
 
-        // Row 1 — AZERTY digits, 2 u Backspace, navigation, top of the keypad. (21)
-        k( 22, "²", "Backquote",           0.0,  1.5), k( 23, "&", "Digit1",      1.0,  1.5), k( 24, "é", "Digit2",      2.0,  1.5),
-        k( 25, "\"", "Digit3",          3.0,  1.5), k( 26, "'", "Digit4",      4.0,  1.5), k( 27, "(", "Digit5",      5.0,  1.5),
-        k( 28, "-", "Digit6",           6.0,  1.5), k( 29, "è", "Digit7",      7.0,  1.5), k( 30, "_", "Digit8",      8.0,  1.5),
-        k( 31, "ç", "Digit9",           9.0,  1.5), k( 32, "à", "Digit0",     10.0,  1.5), k( 33, ")", "Minus",     11.0,  1.5),
-        k( 34, "=", "Equal",          12.0,  1.5), kw(35, "Retour arrière", "Backspace", 13.0, 1.5, 2.0),
-        k( 36, "Inser", "Insert",      15.25, 1.5), k( 37, "Origine", "Home", 16.25, 1.5), k( 38, "PgPréc", "PageUp", 17.25, 1.5),
-        k( 39, "VerrNum", "NumLock",    18.5,  1.5), k( 40, "Pavé /", "NumpadDivide", 19.5,  1.5), k( 41, "Pavé *", "NumpadMultiply", 20.5,  1.5),
-        k( 42, "Pavé −", "NumpadSubtract",     21.5,  1.5),
+        // Row 1 — the key left of 1, 1–0, the two after, 2 u Backspace; Insert,
+        // Home, Page Up; Num Lock, keypad / * −. (21)
+        k( 22, 0x29,    0.0,  1.5), k( 23, 0x02,  1.0, 1.5), k( 24, 0x03,  2.0, 1.5),
+        k( 25, 0x04,    3.0,  1.5), k( 26, 0x05,  4.0, 1.5), k( 27, 0x06,  5.0, 1.5),
+        k( 28, 0x07,    6.0,  1.5), k( 29, 0x08,  7.0, 1.5), k( 30, 0x09,  8.0, 1.5),
+        k( 31, 0x0A,    9.0,  1.5), k( 32, 0x0B, 10.0, 1.5), k( 33, 0x0C, 11.0, 1.5),
+        k( 34, 0x0D,   12.0,  1.5), kw(35, 0x0E, 13.0, 1.5, 2.0),
+        k( 36, 0xE052, 15.25, 1.5), k( 37, 0xE047, 16.25, 1.5), k( 38, 0xE049, 17.25, 1.5),
+        k( 39, 0x45,   18.5,  1.5), k( 40, 0xE035, 19.5, 1.5), k( 41, 0x37, 20.5, 1.5),
+        k( 42, 0x4A,   21.5,  1.5),
 
-        // Row 2 — 1.5 u Tab, top row, TOP of the L-shaped Enter, navigation, keypad. (21)
-        kw(44, "Tab", "Tab",         0.0,  2.5, 1.5),
-        k( 45, "A", "KeyQ",           1.5,  2.5), k( 46, "Z", "KeyW",      2.5,  2.5), k( 47, "E", "KeyE",      3.5,  2.5),
-        k( 48, "R", "KeyR",           4.5,  2.5), k( 49, "T", "KeyT",      5.5,  2.5), k( 50, "Y", "KeyY",      6.5,  2.5),
-        k( 51, "U", "KeyU",           7.5,  2.5), k( 52, "I", "KeyI",      8.5,  2.5), k( 53, "O", "KeyO",      9.5,  2.5),
-        k( 54, "P", "KeyP",          10.5,  2.5), k( 55, "^", "BracketLeft",     11.5,  2.5), k( 56, "$", "BracketRight",     12.5,  2.5),
-        kw(57, "Entrée", "Enter",     13.5,  2.5, 1.5),
-        k( 58, "Suppr", "Delete",      15.25, 2.5), k( 59, "Fin", "End",   16.25, 2.5), k( 60, "PgSuiv", "PageDown", 17.25, 2.5),
-        k( 61, "Pavé 7", "Numpad7",     18.5,  2.5), k( 62, "Pavé 8", "Numpad8", 19.5, 2.5), k( 63, "Pavé 9", "Numpad9", 20.5,  2.5),
-        kh(64, "Pavé +", "NumpadAdd",     21.5,  2.5, 1.0, 2.0),
+        // Row 2 — 1.5 u Tab, the twelve keys of the top row, TOP of the L-shaped
+        // Enter; Delete, End, Page Down; keypad 7 8 9 +. (21)
+        kw(44, 0x0F,    0.0,  2.5, 1.5),
+        k( 45, 0x10,    1.5,  2.5), k( 46, 0x11,  2.5, 2.5), k( 47, 0x12,  3.5, 2.5),
+        k( 48, 0x13,    4.5,  2.5), k( 49, 0x14,  5.5, 2.5), k( 50, 0x15,  6.5, 2.5),
+        k( 51, 0x16,    7.5,  2.5), k( 52, 0x17,  8.5, 2.5), k( 53, 0x18,  9.5, 2.5),
+        k( 54, 0x19,   10.5,  2.5), k( 55, 0x1A, 11.5, 2.5), k( 56, 0x1B, 12.5, 2.5),
+        kw(57, 0x1C,   13.5,  2.5, 1.5),
+        k( 58, 0xE053, 15.25, 2.5), k( 59, 0xE04F, 16.25, 2.5), k( 60, 0xE051, 17.25, 2.5),
+        k( 61, 0x47,   18.5,  2.5), k( 62, 0x48, 19.5, 2.5), k( 63, 0x49, 20.5, 2.5),
+        kh(64, 0x4E,   21.5,  2.5, 1.0, 2.0),
 
-        // Row 3 — 1.75 u Caps Lock, home row, BOTTOM of the L-shaped Enter, keypad. (17)
-        kw(66, "VerrMaj", "CapsLock",     0.0,  3.5, 1.75),
-        k( 67, "Q", "KeyA",           1.75, 3.5), k( 68, "S", "KeyS",      2.75, 3.5), k( 69, "D", "KeyD",      3.75, 3.5),
-        k( 70, "F", "KeyF",           4.75, 3.5), k( 71, "G", "KeyG",      5.75, 3.5), k( 72, "H", "KeyH",      6.75, 3.5),
-        k( 73, "J", "KeyJ",           7.75, 3.5), k( 74, "K", "KeyK",      8.75, 3.5), k( 75, "L", "KeyL",      9.75, 3.5),
-        k( 76, "M", "Semicolon",          10.75, 3.5), k( 77, "ù", "Quote",     11.75, 3.5), k( 78, "*", "Backslash",     12.75, 3.5),
-        kw(79, "Entrée", "Enter",     13.75, 3.5, 1.25),
-        k( 83, "Pavé 4", "Numpad4",     18.5,  3.5), k( 84, "Pavé 5", "Numpad5", 19.5, 3.5), k( 85, "Pavé 6", "Numpad6", 20.5,  3.5),
+        // Row 3 — 1.75 u Caps Lock, the twelve keys of the home row, BOTTOM of the
+        // L-shaped Enter; keypad 4 5 6. (17)
+        kw(66, 0x3A,    0.0,  3.5, 1.75),
+        k( 67, 0x1E,    1.75, 3.5), k( 68, 0x1F,  2.75, 3.5), k( 69, 0x20,  3.75, 3.5),
+        k( 70, 0x21,    4.75, 3.5), k( 71, 0x22,  5.75, 3.5), k( 72, 0x23,  6.75, 3.5),
+        k( 73, 0x24,    7.75, 3.5), k( 74, 0x25,  8.75, 3.5), k( 75, 0x26,  9.75, 3.5),
+        k( 76, 0x27,   10.75, 3.5), k( 77, 0x28, 11.75, 3.5), k( 78, 0x2B, 12.75, 3.5),
+        kw(79, 0x1C,   13.75, 3.5, 1.25),
+        k( 83, 0x4B,   18.5,  3.5), k( 84, 0x4C, 19.5, 3.5), k( 85, 0x4D, 20.5, 3.5),
 
-        // Row 4 — short left Shift (1.25 u) + ISO key, bottom row, ↑, keypad. (18)
-        kw(88, "Maj gauche", "ShiftLeft",  0.0,  4.5, 1.25),
-        k( 89, "<", "IntlBackslash",           1.25, 4.5),
-        k( 90, "W", "KeyZ",           2.25, 4.5), k( 91, "X", "KeyX",      3.25, 4.5), k( 92, "C", "KeyC",      4.25, 4.5),
-        k( 93, "V", "KeyV",           5.25, 4.5), k( 94, "B", "KeyB",      6.25, 4.5), k( 95, "N", "KeyN",      7.25, 4.5),
-        k( 96, ",", "KeyM",           8.25, 4.5), k( 97, ";", "Comma",      9.25, 4.5), k( 98, ":", "Period",     10.25, 4.5),
-        k( 99, "!", "Slash",          11.25, 4.5),
-        kw(101, "Maj droite", "ShiftRight", 12.25, 4.5, 2.75),
-        k(103, "↑", "ArrowUp",          16.25, 4.5),
-        k(105, "Pavé 1", "Numpad1",     18.5,  4.5), k(106, "Pavé 2", "Numpad2", 19.5, 4.5), k(107, "Pavé 3", "Numpad3", 20.5,  4.5),
-        kh(108, "Pavé Entrée", "NumpadEnter", 21.5, 4.5, 1.0, 2.0),
+        // Row 4 — 1.25 u left Shift, the ISO key, the ten keys of the bottom row,
+        // right Shift; ↑; keypad 1 2 3 Enter. (18)
+        kw(88, 0x2A,    0.0,  4.5, 1.25),
+        k( 89, 0x56,    1.25, 4.5),
+        k( 90, 0x2C,    2.25, 4.5), k( 91, 0x2D,  3.25, 4.5), k( 92, 0x2E,  4.25, 4.5),
+        k( 93, 0x2F,    5.25, 4.5), k( 94, 0x30,  6.25, 4.5), k( 95, 0x31,  7.25, 4.5),
+        k( 96, 0x32,    8.25, 4.5), k( 97, 0x33,  9.25, 4.5), k( 98, 0x34, 10.25, 4.5),
+        k( 99, 0x35,   11.25, 4.5),
+        kw(101, 0x36,  12.25, 4.5, 2.75),
+        k(103, 0xE048, 16.25, 4.5),
+        k(105, 0x4F,   18.5,  4.5), k(106, 0x50, 19.5, 4.5), k(107, 0x51, 20.5, 4.5),
+        kh(108, 0xE01C, 21.5, 4.5, 1.0, 2.0),
 
-        // Row 5 — 1.25 u modifiers, 6.25 u Space, inverted-T arrows. (13)
-        kw(110, "Ctrl gauche", "ControlLeft", 0.0,  5.5, 1.25),
-        kw(111, "Win", "MetaLeft",         1.25, 5.5, 1.25),
-        kw(112, "Alt", "AltLeft",         2.5,  5.5, 1.25),
-        kw(116, "Espace", "Space",      3.75, 5.5, 6.25),
-        kw(120, "AltGr", "AltRight",      10.0,  5.5, 1.25),
-        kw(121, "Fn", "Fn",         11.25, 5.5, 1.25),
-        kw(122, "Menu", "ContextMenu",       12.5,  5.5, 1.25),
-        kw(123, "Ctrl droit", "ControlRight", 13.75, 5.5, 1.25),
-        k(124, "←", "ArrowLeft",           15.25, 5.5), k(125, "↓", "ArrowDown", 16.25, 5.5), k(126, "→", "ArrowRight", 17.25, 5.5),
-        kw(128, "Pavé 0", "Numpad0",     18.5,  5.5, 2.0),
-        k(129, "Pavé .", "NumpadDecimal",      20.5,  5.5),
+        // Row 5 — left Ctrl, Windows, Alt, 6.25 u Space, AltGr, Fn, Menu, right
+        // Ctrl; ← ↓ →; keypad 0 and decimal point. (13)
+        kw(110, 0x1D,   0.0,  5.5, 1.25),
+        kw(111, 0xE05B, 1.25, 5.5, 1.25),
+        kw(112, 0x38,   2.5,  5.5, 1.25),
+        kw(116, 0x39,   3.75, 5.5, 6.25),
+        kw(120, 0xE038, 10.0, 5.5, 1.25),
+        kw(121, NO_SCANCODE, 11.25, 5.5, 1.25),
+        kw(122, 0xE05D, 12.5, 5.5, 1.25),
+        kw(123, 0xE01D, 13.75, 5.5, 1.25),
+        k(124, 0xE04B, 15.25, 5.5), k(125, 0xE050, 16.25, 5.5), k(126, 0xE04D, 17.25, 5.5),
+        kw(128, 0x52,  18.5,  5.5, 2.0),
+        k(129, 0x53,   20.5,  5.5),
     ],
 };
 
@@ -280,23 +281,23 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
 mod tests {
     use super::*;
 
-    /// A code designates one position, so that an effect finding `KeyW` lights one
-    /// key. The two LEDs of the ISO Enter are the one exception, and a real one:
-    /// one key, two arms.
+    /// A scancode designates one key, so that a key press lights one LED. The two
+    /// LEDs of the ISO Enter are the one exception, and a real one: one key, two
+    /// arms. Fn is the only key that sends nothing.
     #[test]
-    fn codes_name_each_position_once_except_the_enter_arms() {
-        let mut seen = std::collections::BTreeMap::<&str, Vec<u16>>::new();
+    fn scancodes_name_each_key_once_except_the_enter_arms() {
+        let mut seen = std::collections::BTreeMap::<u16, Vec<u16>>::new();
         for key in DEATHSTALKER_V2_PRO.keys {
-            assert!(
-                !key.code.is_empty() && key.code.chars().all(|c| c.is_ascii_alphanumeric()),
-                "index {}: code {:?}",
-                key.index,
-                key.code
-            );
-            seen.entry(key.code).or_default().push(key.index);
+            seen.entry(key.scancode).or_default().push(key.index);
         }
         let shared: Vec<_> = seen.iter().filter(|(_, i)| i.len() > 1).collect();
-        assert_eq!(shared, [(&"Enter", &vec![57, 79])]);
+        assert_eq!(shared, [(&0x1C, &vec![57, 79])]);
+        assert_eq!(seen.get(&NO_SCANCODE), Some(&vec![121]), "Fn only");
+        assert!(
+            seen.keys()
+                .all(|&s| matches!(s >> 8, 0x00 | 0xE0) || s == 0xE11D),
+            "a make code, extended or not, or Pause"
+        );
     }
 
     /// The enumeration surveyed on 12/09/2026, entry by entry: only `MI_03` carries
@@ -374,8 +375,8 @@ mod tests {
 
     /// The key table and the matrix describe the same keyboard.
     ///
-    /// Both ways: every lit position has a name and a geometry, and no key
-    /// describes a position that does not exist.
+    /// Both ways: every lit position has a geometry, and no key describes a
+    /// position that does not exist.
     #[test]
     fn every_lit_position_has_a_key() {
         let l = &DEATHSTALKER_V2_PRO;
@@ -388,7 +389,6 @@ mod tests {
                 let key = l
                     .key(index)
                     .unwrap_or_else(|| panic!("index {index} at ({row}, {col}) has no key"));
-                assert!(!key.name.is_empty(), "index {index} has no name");
                 assert!(key.w > 0.0 && key.h > 0.0, "index {index} has no area");
             }
         }
@@ -396,8 +396,7 @@ mod tests {
         for key in l.keys {
             assert!(
                 l.matrix.contains(&key.index),
-                "\"{}\" (index {}) missing from the matrix",
-                key.name,
+                "index {} missing from the matrix",
                 key.index
             );
         }
@@ -416,11 +415,7 @@ mod tests {
             for b in &keys[i + 1..] {
                 let disjoint =
                     a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
-                assert!(
-                    disjoint,
-                    "\"{}\" ({}) and \"{}\" ({}) overlap",
-                    a.name, a.index, b.name, b.index
-                );
+                assert!(disjoint, "indices {} and {} overlap", a.index, b.index);
             }
         }
     }
@@ -437,8 +432,8 @@ mod tests {
         let upper = l.key(57).expect("Enter, row 2");
         let lower = l.key(79).expect("Enter, row 3");
 
-        assert_eq!(upper.name, "Entrée");
-        assert_eq!(lower.name, "Entrée");
+        assert_eq!(upper.scancode, 0x1C);
+        assert_eq!(lower.scancode, 0x1C);
         assert_eq!(l.at(2, 13), Some(57));
         assert_eq!(l.at(3, 13), Some(79));
 
@@ -460,9 +455,9 @@ mod tests {
         assert_eq!(l.at(5, 6), Some(116));
 
         let space = l.key(116).expect("space bar");
-        assert_eq!(space.name, "Espace");
+        assert_eq!(space.scancode, 0x39);
         assert_eq!(space.w, 6.25);
-        assert_eq!(l.keys.iter().filter(|k| k.name == "Espace").count(), 1);
+        assert_eq!(l.keys.iter().filter(|k| k.scancode == 0x39).count(), 1);
     }
 
     /// The drawing fits within the footprint of a full-size ISO keyboard.

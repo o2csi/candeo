@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use storage::{DeviceState, Settings};
 
 mod journal;
+mod keys;
 mod runtime;
 mod shipped;
 mod single_instance;
@@ -130,10 +131,13 @@ pub struct KeyInfo {
     pub index: u16,
     pub row: u8,
     pub col: u8,
-    /// Engraved name, French (ISO) variant.
-    pub name: &'static str,
-    /// Position code, as `KeyboardEvent.code` names it. See `candeo_device::Key`.
-    pub code: &'static str,
+    /// What the keyboard sends for this key; absent for Fn. See
+    /// `candeo_device::Key::scancode`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scancode: Option<u16>,
+    /// The key's name in the system's keyboard layout. See [`keys::label`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub x: f32,
     pub y: f32,
     pub w: f32,
@@ -168,8 +172,8 @@ impl From<&'static Layout> for LayoutInfo {
                     index,
                     row,
                     col,
-                    name: k.name,
-                    code: k.code,
+                    scancode: (k.scancode != candeo_device::NO_SCANCODE).then_some(k.scancode),
+                    label: keys::label(k.scancode),
                     x: k.x,
                     y: k.y,
                     w: k.w,

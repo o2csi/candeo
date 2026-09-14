@@ -637,7 +637,7 @@ lights up.
 | the bytes are understood | `Ok`, device frozen |
 | the frame covers the whole matrix | the last rows stay frozen — the 132 / 106 trap |
 | the geometry looks like the device | a wrong simulator, that only the eye can disprove |
-| the codes match the key positions | an effect that lights the wrong key |
+| the scancodes match the key positions | an effect that lights the wrong key |
 | the frame rate holds | frames silently dropped |
 | no command breaks something else | the driver mode of §6 |
 
