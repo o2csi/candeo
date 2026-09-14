@@ -55,19 +55,22 @@ export interface Key {
   readonly index: number
   readonly row: number
   readonly col: number
-  /** Nom lisible, quand le périphérique le fournit. */
+  /**
+   * The key's name in the keyboard layout the system uses — "Z" or "ECHAP" on a
+   * French Windows. For display: it changes with the layout, so find keys by
+   * {@link scancode}. Absent when the system gives no name.
+   */
   readonly label?: string
   /**
-   * The key's position, as the web's `KeyboardEvent.code` names it: `KeyQ` is the
-   * key left of `KeyW` whatever its legend — A on an AZERTY keyboard. Find a key
-   * by its code, never by its label, which changes with the layout variant:
-   * `layout.keys.filter((k) => ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(k.code))`
-   * lights ZQSD here and WASD on a QWERTY keyboard. The ISO Enter carries two
-   * LEDs, both `Enter`.
+   * What the keyboard sends for this key, in PS/2 set 1: the make code, `0xE0` in
+   * the high byte for an extended key (`0xE01D`, right Ctrl). It names the
+   * physical key whatever its legend: the keys under the left hand of a gamer are
+   * `[0x11, 0x1E, 0x1F, 0x20]`, engraved ZQSD on AZERTY and WASD on QWERTY. Both
+   * LEDs of the ISO Enter are `0x1C`.
    *
-   * Absent when the layout does not name its positions.
+   * Absent for a key that sends nothing (Fn), and when the layout does not say.
    */
-  readonly code?: string
+  readonly scancode?: number
   /**
    * Bord gauche du capuchon, en **unités de pas de clavier** : 1 u = la largeur
    * d'une touche alphabétique. L'origine est en haut à gauche, `y` croît vers le

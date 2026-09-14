@@ -130,7 +130,7 @@ if (import.meta.env.DEV) {
         // images. Le compte reste en tête — c'est ce qu'on cherche d'abord.
         erreur(
           'simulateur',
-          `${problems.length} incohérence(s) gabarit ↔ image : ${problems.join(' · ')}`,
+          `layout and frame disagree (${problems.length}): ${problems.join(' · ')}`,
         )
       }
     },

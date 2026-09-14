@@ -1346,14 +1346,16 @@ fn layout_json(l: &'static Layout) -> String {
             if !keys.is_empty() {
                 keys.push(',');
             }
+            let mut fields = format!(r#""index":{index},"row":{row},"col":{col}"#);
+            if k.scancode != candeo_device::NO_SCANCODE {
+                fields.push_str(&format!(r#","scancode":{}"#, k.scancode));
+            }
+            if let Some(label) = crate::keys::label(k.scancode) {
+                fields.push_str(&format!(r#","label":{}"#, json_string(&label)));
+            }
             keys.push_str(&format!(
-                r#"{{"index":{index},"row":{row},"col":{col},"label":{},"code":{},"x":{},"y":{},"w":{},"h":{}}}"#,
-                json_string(k.name),
-                json_string(k.code),
-                k.x,
-                k.y,
-                k.w,
-                k.h
+                r#"{{{fields},"x":{},"y":{},"w":{},"h":{}}}"#,
+                k.x, k.y, k.w, k.h
             ));
         }
     }
@@ -2248,7 +2250,7 @@ mod tests {
 
         let space = keys
             .iter()
-            .find(|k| k["label"] == "Espace")
+            .find(|k| k["scancode"] == 0x39)
             .expect("the space bar");
         assert_eq!(space["col"], 6, "a single matrix cell");
         assert_eq!(space["w"], 6.25, "and 6.25 u of keycap");
@@ -2262,17 +2264,19 @@ mod tests {
         );
     }
 
-    /// An effect finds a key by its position, whatever the legend: on this
-    /// AZERTY keyboard, `KeyW` is the key engraved Z.
+    /// An effect finds a key by its scancode, whatever the legend: 0x11 is the key
+    /// right of the one right of Tab's, engraved Z on this AZERTY keyboard. Fn
+    /// sends nothing, and carries no scancode rather than a false one.
     #[test]
-    fn the_layout_given_to_the_effect_names_positions() {
+    fn the_layout_given_to_the_effect_carries_scancodes() {
         let json: serde_json::Value =
             serde_json::from_str(&layout_json(layout())).expect("layout JSON");
         let keys = json["keys"].as_array().expect("keys");
 
-        let w = keys.iter().find(|k| k["code"] == "KeyW").expect("KeyW");
-        assert_eq!(w["label"], "Z");
-        assert_eq!((w["row"].as_u64(), w["col"].as_u64()), (Some(2), Some(2)));
+        let z = keys.iter().find(|k| k["scancode"] == 0x11).expect("0x11");
+        assert_eq!((z["row"].as_u64(), z["col"].as_u64()), (Some(2), Some(2)));
+        let fn_key = keys.iter().find(|k| k["index"] == 121).expect("Fn");
+        assert!(fn_key.get("scancode").is_none() && fn_key.get("label").is_none());
     }
 
     /// A layout whose arrangement nobody has drawn.

@@ -245,8 +245,8 @@ Fails if this device is not open.
   keys: {
     index: number,       // rang dans une image
     row: number, col: number,   // position dans la matrice logique
-    name: string,        // « Échap », « Maj gauche », « Pavé + »…
-    code: string,        // "Escape", "ShiftLeft", "NumpadAdd"…
+    scancode?: number,   // 0x01, 0x2A, 0x4E… — absent pour Fn
+    label?: string,      // « ECHAP », « MAJ », « + (PAVE NUM.) »… — nommé par le système
     x: number, y: number, w: number, h: number   // rectangle physique
   }[]                    // 106 entrées
 }
@@ -264,18 +264,27 @@ Fails if this device is not open.
 > Confusing the two is the trap of this hardware. See
 > [`../protocol/deathstalker-v2-pro.md`](../protocol/deathstalker-v2-pro.md) §6.
 
-### Legends and positions
+### Scancodes and labels
 
-`name` is the legend engraved on this keyboard's French (ISO) variant. `code` is
-the key's **position**, named as the web's `KeyboardEvent.code` names it: `KeyQ`
-is the key left of `KeyW`, engraved A here and Q on a QWERTY keyboard. A key is
-found by its code, never by its legend, which changes with the layout variant.
-The two arms of the ISO Enter are both `Enter`; every other code names one key.
-Like the geometry, codes follow from the position and are written in the layout,
-not read from the device.
+`scancode` is what the keyboard sends for the key, in PS/2 set 1 as Windows
+reports it: the make code, with `0xE0` in the high byte for an extended key
+(`0xE01D`, right Ctrl) and `0xE11D` for Pause. It names the physical key
+whatever its legend — `0x11` is engraved Z here and W on a QWERTY keyboard — so a
+key is found by its scancode, and a key press finds its LED the same way. The two
+arms of the ISO Enter are both `0x1C`; every other scancode names one key. Fn
+sends nothing and has none. Like the geometry, scancodes follow from the position
+and are written in the layout, not read from the device.
 
-The simulator draws neither: legends do not fit a keycap at preview size, and
-only the arrangement matters to an effect.
+`label` is **not written anywhere**: the application asks the system for the
+key's name in the keyboard layout it uses (`GetKeyNameTextW` on Windows), so a
+QWERTY system says "W" where a French one says "Z". That call reads the layout
+without touching its state; `ToUnicodeEx` would consume a pending dead key and
+break accents typed in other applications. `GetKeyNameTextW` swaps Pause and Num
+Lock against what the keyboard sends, and `keys.rs` swaps them back. There is no
+label on other systems yet.
+
+The simulator draws no label: none fits a keycap at preview size, and only the
+arrangement matters to an effect.
 
 ### The geometry is not read from the device
 
