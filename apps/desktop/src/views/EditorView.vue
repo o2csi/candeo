@@ -58,7 +58,7 @@ import {
 } from '../api/candeo'
 import { erreur } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
-import DevicePill from '../components/DevicePill.vue'
+import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { useSettings } from '../composables/useSettings'
@@ -231,12 +231,15 @@ const deviceKey = computed(() =>
   current.value ? `${current.value.vid}:${current.value.pid}` : null,
 )
 
-/** The product name, as the gallery's devices column shows it. */
-const deviceName = computed(() => {
+/** The target device as listed, for its product name and its state. */
+const targetDevice = computed(() => {
   const device = current.value
   if (!device) return null
-  return devices.value.find((d) => d.vid === device.vid && d.pid === device.pid)?.name ?? null
+  return devices.value.find((d) => d.vid === device.vid && d.pid === device.pid) ?? null
 })
+
+/** The product name, as the gallery's devices column shows it. */
+const deviceName = computed(() => targetDevice.value?.name ?? null)
 
 async function refreshStatus(): Promise<void> {
   try {
@@ -509,11 +512,10 @@ onBeforeUnmount(() => {
       <span class="spacer" />
 
       <!--
-        L'éditeur n'a pas de colonne des appareils : la pastille est ici le seul
-        endroit qui signale une perte. Même composant que dans la barre de
-        navigation — un seul libellé, pas deux à tenir d'accord.
+        The editor has no devices column: the target device's dot is the only
+        place here that shows it dropped. Same component as the gallery's cards.
       -->
-      <DevicePill />
+      <DeviceStatusDot v-if="targetDevice" :device="targetDevice" />
 
       <!-- Stops what the device runs, whichever effect it is: offered only for this one. -->
       <button class="ghost" :disabled="busy || !runsHere" @click="halt">Arrêter</button>
