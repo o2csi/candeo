@@ -200,7 +200,17 @@ export type ParamSpec =
   | { kind: 'choice'; label: string; options: readonly string[]; default: string }
 
 export interface EffectModule<P = undefined> {
-  readonly name: string
+  /**
+   * @deprecated The file name is the effect's name: this property is ignored.
+   * Kept so that effects written before still type-check.
+   */
+  readonly name?: string
+  /**
+   * The version of the effects API this effect was written against. Absent
+   * means the first one; candeo refuses to load an effect written for a newer
+   * version than it knows.
+   */
+  readonly apiVersion?: number
   readonly description?: string
   readonly params?: P
   /** `ctx.params` est typé d'après `params` ci-dessus. */

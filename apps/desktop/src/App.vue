@@ -8,6 +8,7 @@ import { alerte, message } from './api/journal'
 import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
+import { refreshLibrary } from './editor/library'
 
 const route = useRoute()
 const { devices, error, restore } = useDevice()
@@ -48,6 +49,11 @@ const REPLI_DETAIL =
 
 onMounted(() => {
   void restore()
+  // Effects dropped in the folder are compiled now, not when the gallery opens:
+  // the tray only offers what is compiled, and it may be all someone uses.
+  refreshLibrary().catch((e: unknown) =>
+    alerte('App', `library not compiled: ${message(e)}`, e),
+  )
 
   // L'état peut changer **sans la fenêtre** : l'icône de zone de notification
   // lance, arrête et éteint sans elle. Et la fenêtre lui survit maintenant

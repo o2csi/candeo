@@ -15,7 +15,6 @@
 import { defineEffect, hsv } from './index'
 
 export default defineEffect({
-  name: 'Onde',
   description: 'Une onde de teinte se propage depuis le centre de la matrice',
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },

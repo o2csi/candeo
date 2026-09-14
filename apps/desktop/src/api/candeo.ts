@@ -169,11 +169,12 @@ export function writeRow(
 export const EFFECTS_API_VERSION = 1
 
 /**
- * Ce qui est écrit dans `manifest.json`, à côté de l'effet.
+ * What an effect declares, as the library lists it: its name is the file name,
+ * the rest is what the module exports, read by Rust when it is compiled.
  *
- * `params` garde la forme de `ParamSpec` telle que déclarée en TypeScript : le
- * Rust ne les interprète pas, les retyper là-bas créerait une seconde source de
- * vérité.
+ * `params` keeps the shape of `ParamSpec` as declared in TypeScript: the Rust
+ * side does not interpret them, and typing them there would create a second
+ * source of truth.
  */
 export interface EffectManifest {
   name: string
@@ -183,21 +184,41 @@ export interface EffectManifest {
 }
 
 /**
- * Écrit `source.ts`, `effect.js` et `manifest.json`, et rend l'`id` retenu.
+ * Writes an effect's source to `<name>.ts` and returns its SHA-256, to hand back
+ * to {@link cacheEffect} with the JavaScript compiled from it.
  *
- * Les deux sources partent ensemble : sans le `.ts` l'effet ne serait plus
- * modifiable, sans le `.js` il ne pourrait plus démarrer sans ouvrir la fenêtre
- * — le transpileur vit ici, dans l'éditeur.
- *
- * L'`id` est **dérivé du nom** par le Rust, jamais repris tel quel. Deux
- * enregistrements sous le même nom mettent donc à jour le même effet.
+ * `create` says which gesture this is: creating never overwrites an effect of
+ * that name, in any case, and saving again never creates one.
  */
-export function installEffect(
-  sourceTs: string,
-  js: string,
-  manifest: EffectManifest,
-): Promise<string> {
-  return invoke('install_effect', { sourceTs, js, manifest })
+export function saveEffectSource(name: string, source: string, create: boolean): Promise<string> {
+  return invoke('save_effect_source', { name, source, create })
+}
+
+/**
+ * Records the JavaScript compiled from the version of the file that has `hash`.
+ *
+ * Rust runs the module once to read what it declares and samples its swatch.
+ * A module that does not load comes back `broken`, with its error; a file that
+ * changed since `hash` is refused.
+ */
+export function cacheEffect(name: string, hash: string, js: string): Promise<EffectEntry> {
+  return invoke('cache_effect', { name, hash, js })
+}
+
+/**
+ * Renames an effect's file, and moves its settings. A running effect keeps
+ * running under its new name.
+ */
+export function renameEffect(from: string, to: string): Promise<void> {
+  return invoke('rename_effect', { from, to })
+}
+
+/**
+ * Effect ids from the directory layout and the names they became, when this run
+ * of the application migrated some. Only for renaming the editor's drafts.
+ */
+export function legacyEffectIds(): Promise<Record<string, string>> {
+  return invoke('legacy_effect_ids')
 }
 
 /** La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur. */
@@ -226,14 +247,29 @@ export function deleteEffect(id: string): Promise<void> {
 }
 
 /**
- * Un effet de la bibliothèque : son manifeste, plus ce qui n'en fait pas partie.
+ * Whether an effect can run, as far as its cache says.
  *
- * Les intégrés sont compilés dans le binaire et n'ont pas de dossier ; `kind`
- * les distingue, pour que l'interface n'ait qu'une liste à afficher.
+ * - `ready`: compiled for the file's current bytes;
+ * - `stale`: never compiled, or changed since — see `refreshLibrary`;
+ * - `broken`: compiled, and it does not load — `error` says why.
+ */
+export type EffectState = 'ready' | 'stale' | 'broken'
+
+/**
+ * A library effect: its manifest, plus what is not part of it.
+ *
+ * Built-ins are compiled into the binary and have no file; `kind` tells them
+ * apart, so the interface has a single list to show.
  */
 export interface EffectEntry extends EffectManifest {
+  /** The built-in's id, or the effect's name, which is its file name. */
   id: string
   kind: 'builtin' | 'user'
+  state: EffectState
+  /** Why a `broken` effect does not load. */
+  error?: string
+  /** SHA-256 of the source file, for {@link cacheEffect}. Absent for built-ins. */
+  hash?: string
   /**
    * Repère de couleurs, **prélevé en exécutant l'effet** — jamais déclaré.
    *
@@ -251,7 +287,7 @@ export interface EffectEntry extends EffectManifest {
   swatch: string[]
 }
 
-/** Effets intégrés **et** installés, dans une seule liste, d'ordre stable. */
+/** Built-in effects and the files, in one list, in a stable order. */
 export function listEffects(): Promise<EffectEntry[]> {
   return invoke('list_effects')
 }
@@ -355,6 +391,8 @@ export interface EffectParamsRecord {
  * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
  */
 export interface Settings {
+  /** Shape of the file: 1 since user effects are referenced by name. */
+  version: number
   preferences: Preferences
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]
