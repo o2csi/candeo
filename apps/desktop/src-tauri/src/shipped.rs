@@ -15,16 +15,18 @@
 //! The Rust tests run these sources as they are, without a TypeScript compiler:
 //! they check the geometry of the waves and the swatches on real effects. So
 //! they declare no types — `defineEffect` already infers the parameters of
-//! `render` — and [`tests::every_shipped_source_runs_as_it_is`] fails the day
-//! one of them would need stripping.
+//! `render`, and a helper function gives its parameters default values
+//! (`hash(n = 0)`), from which TypeScript infers them under `strict` — and
+//! [`tests::every_shipped_source_runs_as_it_is`] fails the day one of them would
+//! need stripping.
 
 /// An effect shipped with the application.
 pub struct Shipped {
     /// Its name, and so its file name.
     pub name: &'static str,
     /// The id it had when effects were compiled into the binary, still found in
-    /// settings written by earlier versions.
-    pub former_id: &'static str,
+    /// settings written by earlier versions. `None` for effects shipped since.
+    pub former_id: Option<&'static str>,
     pub source: &'static str,
 }
 
@@ -32,31 +34,71 @@ pub struct Shipped {
 ///
 /// Named in English: a name is a file name and is not translated, and English
 /// is the reference language of the interface.
-pub static ALL: [Shipped; 5] = [
+pub static ALL: [Shipped; 13] = [
     Shipped {
         name: "Radial wave",
-        former_id: "onde-radiale",
+        former_id: Some("onde-radiale"),
         source: include_str!("../../../../packages/effects/Radial wave.ts"),
     },
     Shipped {
         name: "Diagonal wave",
-        former_id: "onde-matricielle",
+        former_id: Some("onde-matricielle"),
         source: include_str!("../../../../packages/effects/Diagonal wave.ts"),
     },
     Shipped {
         name: "Breathing",
-        former_id: "respiration",
+        former_id: Some("respiration"),
         source: include_str!("../../../../packages/effects/Breathing.ts"),
     },
     Shipped {
         name: "Sweep",
-        former_id: "balayage",
+        former_id: Some("balayage"),
         source: include_str!("../../../../packages/effects/Sweep.ts"),
     },
     Shipped {
         name: "Fixed gradient",
-        former_id: "degrade-fixe",
+        former_id: Some("degrade-fixe"),
         source: include_str!("../../../../packages/effects/Fixed gradient.ts"),
+    },
+    Shipped {
+        name: "Color wheel",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Color wheel.ts"),
+    },
+    Shipped {
+        name: "Noise map",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Noise map.ts"),
+    },
+    Shipped {
+        name: "Rain",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Rain.ts"),
+    },
+    Shipped {
+        name: "Starry night",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Starry night.ts"),
+    },
+    Shipped {
+        name: "Bubbles",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Bubbles.ts"),
+    },
+    Shipped {
+        name: "Lightning",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Lightning.ts"),
+    },
+    Shipped {
+        name: "Crossing beams",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Crossing beams.ts"),
+    },
+    Shipped {
+        name: "Swirl circles",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Swirl circles.ts"),
     },
 ];
 
@@ -79,7 +121,8 @@ mod tests {
             crate::storage::validate_name(s.name).unwrap_or_else(|e| panic!("\"{}\": {e}", s.name));
             assert!(
                 ALL[i + 1..].iter().all(|o| {
-                    o.name.to_lowercase() != s.name.to_lowercase() && o.former_id != s.former_id
+                    o.name.to_lowercase() != s.name.to_lowercase()
+                        && (o.former_id.is_none() || o.former_id != s.former_id)
                 }),
                 "\"{}\" is shipped twice",
                 s.name
