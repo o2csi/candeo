@@ -977,87 +977,83 @@ onBeforeUnmount(() => {
       </div>
 
       <div id="col-devices" class="col-body">
-        <button
+        <!--
+          The card is a plain container, not the button: the brightness slider
+          lives in it, and an interactive control nested in a button is invalid
+          markup that would also re-select the device on every drag.
+        -->
+        <div
           v-for="d in piloted"
           :key="`${d.vid}:${d.pid}`"
-          class="entry"
-          type="button"
-          :aria-pressed="deviceKey === `${d.vid}:${d.pid}`"
-          :aria-label="d.name"
-          :title="d.name"
-          @click="choose(d)"
+          class="card"
+          :class="{ selected: deviceKey === key(d) }"
         >
-          <!--
-            Un pictogramme de type, pas un logo de fabricant : ce sont des
-            marques protégées, elles ne distinguent pas un clavier d'une souris,
-            et le nom du produit porte déjà l'information. Le seul gabarit connu
-            est un clavier ; le jour où le Rust déclarera un type, il viendra de
-            là plutôt que d'être deviné sur le nom.
-          -->
-          <svg
-            class="glyph"
-            viewBox="0 0 24 16"
-            width="18"
-            height="12"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
+          <button
+            class="entry"
+            type="button"
+            :aria-pressed="deviceKey === key(d)"
+            :aria-label="d.name"
+            :title="d.name"
+            @click="choose(d)"
           >
-            <rect x="1" y="2" width="22" height="12" rx="2" />
-            <path d="M6 11h12" stroke-linecap="round" />
-            <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
-          </svg>
+            <!--
+              Un pictogramme de type, pas un logo de fabricant : ce sont des
+              marques protégées, elles ne distinguent pas un clavier d'une souris,
+              et le nom du produit porte déjà l'information. Le seul gabarit connu
+              est un clavier ; le jour où le Rust déclarera un type, il viendra de
+              là plutôt que d'être deviné sur le nom.
+            -->
+            <svg
+              class="glyph"
+              viewBox="0 0 24 16"
+              width="18"
+              height="12"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
+              <rect x="1" y="2" width="22" height="12" rx="2" />
+              <path d="M6 11h12" stroke-linecap="round" />
+              <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
+            </svg>
 
-          <span class="entry-text">
-            <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
-                 distingue deux claviers de la même marque. Il passe à la ligne
-                 plutôt que d'être tronqué. -->
-            <span class="dev-name">{{ d.name }}</span>
-            <span class="dev-fx">{{ deviceLine(d) }}</span>
-          </span>
-        </button>
+            <span class="entry-text">
+              <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
+                   distingue deux claviers de la même marque. Il passe à la ligne
+                   plutôt que d'être tronqué. -->
+              <span class="dev-name">{{ d.name }}</span>
+              <span class="dev-fx">{{ deviceLine(d) }}</span>
+            </span>
+          </button>
 
-        <!--
-          La luminosité de l'appareil **sélectionné**, ici et pas ailleurs :
-          c'est une propriété de l'appareil, pas un réglage d'effet. Elle
-          n'apparaît que pour celui qu'on regarde — une par ligne alourdirait la
-          colonne pour un réglage qu'on pose une fois.
-
-          Aucune règle à écrire pour la colonne repliée : le bloc n'est ni
-          `.entry`, ni `.group`, ni `.new`, donc le masquage universel plus bas
-          l'emporte sans qu'on ait à le nommer.
-        -->
-        <div v-if="selectedDevice" class="lum">
-          <label class="lum-head" :for="`lum-${deviceKey}`">
-            <span>Luminosité</span>
-            <span class="lum-value">{{ brightnessPercent }} %</span>
-          </label>
-          <input
-            :id="`lum-${deviceKey}`"
-            type="range"
-            min="0"
-            :max="BRIGHTNESS_MAX"
-            step="1"
-            :value="brightness"
-            :disabled="!selectedDevice.open"
-            @input="onBrightness($event, false)"
-            @change="onBrightness($event, true)"
-          />
           <!--
-            Deux phrases différentes, parce que ce sont deux situations
-            différentes : le niveau se retient toujours, mais il n'atteint le
-            clavier que s'il est ouvert. Le taire ferait glisser un curseur sans
-            effet visible, et c'est exactement le genre de silence qui coûte une
-            session.
+            Brightness is a device property, not an effect setting, so it sits
+            in the device card. Only the selected card carries it: one slider
+            per row would weigh down the column for a setting set once.
+
+            Collapsed column: the card rules below restore the button alone, so
+            the slider is hidden without having to be named.
           -->
-          <p class="lum-note">
-            {{
-              selectedDevice.open
-                ? 'Retenue pour cet appareil, et réappliquée au branchement.'
-                : "Appareil non ouvert : le niveau est retenu et s'appliquera au branchement."
-            }}
-          </p>
+          <div v-if="deviceKey === key(d)" class="lum">
+            <label class="lum-head" :for="`lum-${key(d)}`">
+              <span class="lum-label">Luminosité</span>
+              <!-- A disabled slider that does not say why reads as broken. -->
+              <span v-if="!d.open" class="lum-state">non ouvert</span>
+              <span class="lum-value">{{ brightnessPercent }} %</span>
+            </label>
+            <input
+              :id="`lum-${key(d)}`"
+              type="range"
+              min="0"
+              :max="BRIGHTNESS_MAX"
+              step="1"
+              :value="brightness"
+              :disabled="!d.open"
+              @input="onBrightness($event, false)"
+              @change="onBrightness($event, true)"
+            />
+          </div>
         </div>
 
         <p v-if="!piloted.length" class="none">
@@ -1422,9 +1418,20 @@ onBeforeUnmount(() => {
   background: var(--raised-2);
 }
 
+/*
+ * A device is framed by its card, not its button: the card also holds the
+ * brightness slider, and framing the button alone would leave the slider
+ * outside the selection it belongs to.
+ */
+.card {
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+}
+
 /* Doublé de la marque « actif » pour les effets, et de la position dans la
    liste pour les appareils : la bordure ambrée ne porte rien seule. */
-.entry[aria-pressed="true"] {
+.effects .entry[aria-pressed="true"],
+.card.selected {
   background: var(--raised-2);
   border-color: var(--accent);
 }
@@ -1463,25 +1470,32 @@ onBeforeUnmount(() => {
 }
 
 /*
- * La luminosité de l'appareil sélectionné. Séparée des entrées par un filet :
- * c'est un réglage, pas une ligne de liste, et rien ne doit laisser croire qu'on
- * peut cliquer dessus pour changer d'appareil.
+ * Aligned with the device name, not the card edge, so the slider reads as part
+ * of that device. The left offset adds up the button's border, padding, glyph
+ * width and gap.
  */
 .lum {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: var(--gap-3);
-  padding: var(--gap-2);
-  border-top: 1px solid var(--line);
+  gap: 2px;
+  padding: 0 var(--gap-2) 6px calc(1px + var(--gap-2) + 18px + var(--gap-2));
 }
 
 .lum-head {
   display: flex;
-  justify-content: space-between;
-  gap: var(--gap-2);
+  flex-wrap: wrap;
+  gap: 0 var(--gap-2);
+  align-items: baseline;
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.lum-label {
+  flex: 1;
+}
+
+.lum-state {
+  color: var(--warn);
 }
 
 /* Le chiffre en clair : un curseur sans valeur ne se repose pas au même endroit
@@ -1499,11 +1513,6 @@ onBeforeUnmount(() => {
 .lum input:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.lum-note {
-  color: var(--text-faint);
-  font-size: 11px;
 }
 
 .group {
@@ -1618,14 +1627,24 @@ onBeforeUnmount(() => {
     padding-inline: var(--gap-1);
   }
 
-  /* Premier niveau : le corps ne montre que des entrées, un filet de groupe et
-     le bouton d'ajout. Tout le reste — messages, aides, ce qu'on ajoutera —
-     disparaît sans avoir à être nommé. */
+  /* First level: the body shows only device cards, section headers with their
+     entries, and the add button. Everything else — messages, hints, whatever
+     gets added — disappears without having to be named. */
   .col.shut .col-body > * {
     display: none;
   }
 
-  .col.shut .col-body > .entry {
+  .col.shut .col-body > .card {
+    display: block;
+  }
+
+  /* Inside a card only the selection button survives: the brightness slider
+     has no room in 40 px and goes with the rest. */
+  .col.shut .card > * {
+    display: none;
+  }
+
+  .col.shut .card > .entry {
     display: flex;
   }
 

@@ -381,14 +381,22 @@ type pictogram is enough — and it is not guessed from the name: only one layou
 is known, it is a keyboard; the day the Rust side declares a type, it will come from
 there.
 
-It also carries the **brightness** of the selected device. That is where it
-belongs: the protocol makes it a device command (`0x0f`/`0x04`),
+The **brightness** of the selected device lives in its card, under the name
+and the state line: "Luminosité", the level in percent, and the slider. That is
+where it belongs: the protocol makes it a device command (`0x0f`/`0x04`),
 separate from the running effect, and `set_brightness` has taken a `DeviceRef` since
 day one. It existed, it was persisted, and it was displayed
 nowhere — it was not a display bug, it was an interface that had
 never been written. Remembered per device, and **reapplied on plug-in**: a
 level that is not reapplied is useless, and the surveyed protocol can
 write brightness but not read it back.
+
+Only the selected card carries a slider. The card is therefore a container
+holding a selection button with the slider below it, not a button: a control
+nested in a button is invalid markup, and dragging would re-select the device.
+When the device is not open, the slider is disabled and the card says
+"non ouvert" (not open). In the collapsed column the card shrinks to its icon
+and the slider goes with the rest.
 
 ### The effects column
 
