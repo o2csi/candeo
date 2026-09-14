@@ -18,6 +18,7 @@ import {
   openLogDir,
   resetSettings,
   setLanguage,
+  setLogFilesKept,
   setLogLevel,
   setResumeEffects,
   type JournalStatus,
@@ -117,6 +118,22 @@ async function chooseLevel(event: Event): Promise<void> {
   } catch (e) {
     journalProblem.value = message(e)
     // The menu now shows a level that was not kept.
+    await readJournal()
+  }
+}
+
+/** How many daily files to keep; `0` keeps them all. Rust deletes the extra ones at once. */
+async function chooseFilesKept(event: Event): Promise<void> {
+  journalProblem.value = null
+  const keep = Math.trunc(Number((event.target as HTMLInputElement).value))
+  if (!Number.isFinite(keep) || keep < 0) {
+    await readJournal()
+    return
+  }
+  try {
+    journal.value = await setLogFilesKept(keep)
+  } catch (e) {
+    journalProblem.value = message(e)
     await readJournal()
   }
 }
@@ -255,6 +272,20 @@ onMounted(() => {
         </select>
       </div>
 
+      <div class="level">
+        <label for="log-files">{{ t('settings.log.filesKept') }}</label>
+        <input
+          id="log-files"
+          class="count"
+          type="number"
+          min="0"
+          max="3650"
+          :value="journal.filesKept"
+          @change="chooseFilesKept"
+        />
+        <span class="note">{{ t('settings.log.filesKeptDetail') }}</span>
+      </div>
+
       <!--
         A high level carries per-frame records and survives restarts: left on
         and forgotten, it fills the disk, since rotation caps the number of files,
@@ -351,13 +382,18 @@ onMounted(() => {
   gap: var(--gap-2);
 }
 
-.level select {
+.level select,
+.level .count {
   padding: 5px var(--gap-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background: var(--raised);
   color: var(--text);
   font-size: 13px;
+}
+
+.level .count {
+  width: 6em;
 }
 
 .actions,

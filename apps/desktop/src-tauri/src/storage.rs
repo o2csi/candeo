@@ -390,6 +390,10 @@ pub struct Preferences {
     /// written only when turned off. See [`crate::runtime::resume_applied`].
     #[serde(skip_serializing_if = "is_true")]
     pub resume_effects: bool,
+    /// Log files kept, one per day; `0` keeps them all. Written only when it differs
+    /// from [`crate::journal::DEFAULT_FILES_KEPT`].
+    #[serde(skip_serializing_if = "is_default_files_kept")]
+    pub log_files_kept: u32,
 }
 
 impl Default for Preferences {
@@ -398,12 +402,17 @@ impl Default for Preferences {
             log_level: None,
             language: LanguageSetting::default(),
             resume_effects: true,
+            log_files_kept: crate::journal::DEFAULT_FILES_KEPT,
         }
     }
 }
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_default_files_kept(value: &u32) -> bool {
+    *value == crate::journal::DEFAULT_FILES_KEPT
 }
 
 /// Persistent settings.
@@ -1721,9 +1730,14 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
         .and_then(|p| p.as_object())
         .cloned()
         .unwrap_or_default();
-    let api_version = match value.get("apiVersion").and_then(|v| v.as_u64()) {
-        None => EFFECTS_API_VERSION,
-        Some(v) => u32::try_from(v).unwrap_or(u32::MAX),
+    // A version that is not a whole number is refused, not read as 1: `'2'` or
+    // `2.5` would otherwise pass for an effect of this API (#44).
+    let api_version = match value.get("apiVersion") {
+        None | Some(serde_json::Value::Null) => EFFECTS_API_VERSION,
+        Some(v) => v
+            .as_u64()
+            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+            .ok_or_else(|| format!("apiVersion must be a whole number, not {v}"))?,
     };
     if api_version == 0 || api_version > EFFECTS_API_VERSION {
         return Err(format!(
@@ -2256,6 +2270,18 @@ mod tests {
         assert_eq!(entry.state, EffectState::Broken);
         let error = entry.error.unwrap();
         assert!(error.contains("effects API"), "message: {error}");
+    }
+
+    #[test]
+    fn an_api_version_that_is_not_a_whole_number_is_broken() {
+        let (_tmp, store) = temp_store();
+        for (name, version) in [("Chaine", "'1'"), ("Decimale", "1.5")] {
+            let js = format!("export default {{ apiVersion: {version}, render() {{}} }}");
+            let entry = create_and_cache(&store, name, &js);
+            assert_eq!(entry.state, EffectState::Broken, "{version}");
+            let error = entry.error.unwrap();
+            assert!(error.contains("whole number"), "{version}: {error}");
+        }
     }
 
     /// A description in several languages is kept for the window; one that is
@@ -3038,6 +3064,7 @@ mod tests {
                 log_level: Some(LogLevel::Debug),
                 language: LanguageSetting::Fr,
                 resume_effects: false,
+                log_files_kept: 30,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3824,6 +3851,7 @@ mod tests {
             log_level: Some(LogLevel::Debug),
             language: LanguageSetting::En,
             resume_effects: false,
+            log_files_kept: 0,
         };
         mirror("Preferences", &preferences);
         mirror(

@@ -42,6 +42,7 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -67,17 +68,19 @@ const DEFAULT_LEVEL: LogLevel = LogLevel::Info;
 const FILE_PREFIX: &str = "candeo";
 const FILE_SUFFIX: &str = "log";
 
-/// Number of files kept, daily rotation included: one week.
-///
-/// A lighting app runs for days, and without a cap the directory would only
-/// grow. A week covers "it started on Monday", the useful reach of a bug report,
-/// without keeping a history nobody will read again.
+/// Files kept by default, one per day: a week, which covers "it started on
+/// Monday", the useful reach of a bug report. Someone can keep more, or all of
+/// them with `0`: `preferences.logFilesKept`, as OpenRGB's `file_count_limit`.
 ///
 /// ⚠️ **The cap is on the number of files, not their size.** A high level carries
 /// per-frame records: the current day can grow a lot before rotation cuts it.
 /// What bounds the size is the level, hence [`JournalStatus::verbose`], and the
 /// notice the interface shows about it.
-const MAX_FILES: usize = 7;
+pub const DEFAULT_FILES_KEPT: u32 = 7;
+
+/// The cap in force, set from the settings. `0` until they are read, so that
+/// nothing is deleted on a default someone did not choose.
+static FILES_KEPT: AtomicU32 = AtomicU32::new(0);
 
 /// Target of records coming from the window.
 ///
@@ -367,15 +370,105 @@ fn without_home(path: &Path, home: Option<&Path>) -> String {
 /// **Through `app_log_dir()`, never a hard-coded path**: on Windows data and
 /// configuration share a location, on Linux they do not, and logs are neither
 /// one nor the other.
-fn open_log_file(
-    app: &AppHandle,
-) -> Result<(PathBuf, tracing_appender::rolling::RollingFileAppender), String> {
+fn open_log_file(app: &AppHandle) -> Result<(PathBuf, Pruning), String> {
     let dir = app
         .path()
         .app_log_dir()
         .map_err(|e| format!("no log folder: {e}"))?;
-    let appender = rolling_appender_in(&dir)?;
+    let appender = Pruning {
+        appender: rolling_appender_in(&dir)?,
+        dir: dir.clone(),
+        day: AtomicU64::new(today()),
+    };
     Ok((dir, appender))
+}
+
+/// The rolling file, cut down to [`FILES_KEPT`] when a new day's file starts.
+///
+/// `tracing-appender` takes its cap when the file is opened, and the file is
+/// opened before the settings are read: a cap someone sets has to be applied here.
+struct Pruning {
+    appender: tracing_appender::rolling::RollingFileAppender,
+    dir: PathBuf,
+    /// Day of the last write, counted as the daily rotation counts it (UTC).
+    day: AtomicU64,
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Pruning {
+    type Writer =
+        <tracing_appender::rolling::RollingFileAppender as tracing_subscriber::fmt::MakeWriter<
+            'a,
+        >>::Writer;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        // The writer first: a new day's file is created there, and counts among
+        // those kept.
+        let writer = self.appender.make_writer();
+        let now = today();
+        if self.day.swap(now, Ordering::Relaxed) != now {
+            // Nothing is logged from here: this runs inside a write.
+            let _ = prune(&self.dir, FILES_KEPT.load(Ordering::Relaxed));
+        }
+        writer
+    }
+}
+
+/// Days since the epoch, in UTC like the daily rotation.
+fn today() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 86_400)
+}
+
+/// Deletes the log files beyond the `keep` most recent; `0` keeps them all.
+fn prune(dir: &Path, keep: u32) -> std::io::Result<()> {
+    let names = std::fs::read_dir(dir)?
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned());
+    for name in files_beyond(names, keep) {
+        std::fs::remove_file(dir.join(name))?;
+    }
+    Ok(())
+}
+
+/// The daily log files beyond the `keep` most recent, `candeo.YYYY-MM-DD.log`
+/// sorting by date. Anything else in the folder is not ours to delete.
+fn files_beyond(names: impl IntoIterator<Item = String>, keep: u32) -> Vec<String> {
+    if keep == 0 {
+        return Vec::new();
+    }
+    let prefix = format!("{FILE_PREFIX}.");
+    let suffix = format!(".{FILE_SUFFIX}");
+    let mut logs: Vec<String> = names
+        .into_iter()
+        .filter(|n| {
+            n.strip_prefix(&prefix)
+                .and_then(|rest| rest.strip_suffix(&suffix))
+                .is_some_and(|date| {
+                    date.len() == 10
+                        && date.chars().enumerate().all(|(i, c)| {
+                            if i == 4 || i == 7 {
+                                c == '-'
+                            } else {
+                                c.is_ascii_digit()
+                            }
+                        })
+                })
+        })
+        .collect();
+    logs.sort_unstable_by(|a, b| b.cmp(a));
+    logs.split_off((keep as usize).min(logs.len()))
+}
+
+/// Sets the number of files kept, and deletes those beyond it now.
+fn apply_files_kept(keep: u32) {
+    FILES_KEPT.store(keep, Ordering::Relaxed);
+    let Some(dir) = COLLECTOR.get().and_then(|c| c.dir.as_ref()) else {
+        return;
+    };
+    if let Err(e) = prune(dir, keep) {
+        tracing::warn!("old log files not deleted: {e}");
+    }
 }
 
 /// The rolling file of a given directory.
@@ -394,7 +487,6 @@ fn rolling_appender_in(
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix(FILE_PREFIX)
         .filename_suffix(FILE_SUFFIX)
-        .max_log_files(MAX_FILES)
         .build(dir)
         .map_err(|e| format!("log not opened in {}: {e}", dir.display()))
 }
@@ -410,14 +502,16 @@ fn rolling_appender_in(
 /// startup, otherwise the saved setting would override what was just requested on
 /// the command line.
 pub fn reload_level_setting(app: &AppHandle) {
-    if COLLECTOR.get().is_some_and(|c| c.forced) {
-        return;
-    }
     match crate::storage::store(app).and_then(|s| s.read_settings()) {
         // The log is already in place: it is precisely for this message that it
-        // had to start before the store.
-        Err(e) => tracing::error!("log level not read back, the default applies: {e}"),
+        // had to start before the store. Old files are left alone: nobody chose
+        // how many to keep.
+        Err(e) => tracing::error!("log settings not read back, the defaults apply: {e}"),
         Ok(settings) => {
+            apply_files_kept(settings.preferences.log_files_kept);
+            if COLLECTOR.get().is_some_and(|c| c.forced) {
+                return;
+            }
             if let Some(level) = settings.preferences.log_level {
                 apply_level(level);
             }
@@ -431,6 +525,7 @@ pub fn reload_level_setting(app: &AppHandle) {
 /// file, and a screen still showing "détaillé" (verbose) would be lying. No effect
 /// when [`VARIABLE`] decided: priority is not suspended for a reset.
 pub(crate) fn reset_level_to_default() {
+    apply_files_kept(DEFAULT_FILES_KEPT);
     if COLLECTOR.get().is_some_and(|c| c.forced) {
         return;
     }
@@ -577,13 +672,16 @@ pub struct JournalStatus {
     /// the only way to answer correctly when the directive comes from the
     /// environment and sums up to no level.
     pub verbose: bool,
+    /// Log files kept, one per day; `0` keeps them all.
+    pub files_kept: u32,
 }
 
-fn journal_status(setting: Option<LogLevel>) -> JournalStatus {
+fn journal_status(setting: Option<LogLevel>, files_kept: u32) -> JournalStatus {
     let collector = COLLECTOR.get();
     JournalStatus {
         level: active_level(),
         setting,
+        files_kept,
         forced_by_env: collector.is_some_and(|c| c.forced),
         dir: collector
             .and_then(|c| c.dir.as_ref())
@@ -602,12 +700,25 @@ fn active_level() -> Option<LogLevel> {
 /// The log status: applied level, saved level, directory.
 #[tauri::command]
 pub fn get_journal(app: AppHandle) -> CmdResult<JournalStatus> {
+    let preferences = crate::storage::store(&app)?.read_settings()?.preferences;
     Ok(journal_status(
-        crate::storage::store(&app)?
-            .read_settings()?
-            .preferences
-            .log_level,
+        preferences.log_level,
+        preferences.log_files_kept,
     ))
+}
+
+/// Changes how many log files are kept, saves it, and deletes those beyond it
+/// now rather than at the next day's file.
+#[tauri::command]
+pub fn set_log_files_kept(app: AppHandle, keep: u32) -> CmdResult<JournalStatus> {
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.preferences.log_files_kept != keep {
+        settings.preferences.log_files_kept = keep;
+        store.write_settings(&settings)?;
+    }
+    apply_files_kept(keep);
+    Ok(journal_status(settings.preferences.log_level, keep))
 }
 
 /// Changes the level **without restarting**, and saves it.
@@ -637,7 +748,10 @@ pub fn set_log_level(app: AppHandle, level: LogLevel) -> CmdResult<JournalStatus
     if !COLLECTOR.get().is_some_and(|c| c.forced) {
         apply_level(level);
     }
-    Ok(journal_status(settings.preferences.log_level))
+    Ok(journal_status(
+        settings.preferences.log_level,
+        settings.preferences.log_files_kept,
+    ))
 }
 
 /// Opens the log directory in the system file manager.
@@ -773,7 +887,11 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let settings = crate::storage::store(&app).and_then(|s| s.read_settings());
     let api = crate::hid();
 
-    let log = journal_status(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
+    let preferences = settings.as_ref().ok().map(|s| &s.preferences);
+    let log = journal_status(
+        preferences.and_then(|p| p.log_level),
+        preferences.map_or(DEFAULT_FILES_KEPT, |p| p.log_files_kept),
+    );
     let log_dir = COLLECTOR
         .get()
         .and_then(|c| c.dir.as_deref())
@@ -782,12 +900,16 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         &mut out,
         "log",
         &format!(
-            "level {} ({}){}",
+            "level {} ({}), {} kept{}",
             // The applied level, not the saved one: it is what explains what the
             // file contains, or does not.
             log.level
                 .map_or_else(|| "directive".to_string(), |l| l.to_string()),
             log_dir.as_deref().unwrap_or("no file"),
+            match log.files_kept {
+                0 => "all files".to_string(),
+                n => format!("{n} files"),
+            },
             if log.forced_by_env {
                 format!(", forced by {VARIABLE}")
             } else {
@@ -928,9 +1050,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 s.status.effect_id.as_deref().unwrap_or("none"),
                 if s.status.to_keyboard { "on" } else { "off" },
                 s.status.reaching_keyboard,
-                s.status
-                    .error
-                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
+                s.status.error.map_or(String::new(), |e| format!(
+                    " · effect error: {}",
+                    crate::runtime::loggable(&e, s.status.reads_keys)
+                )),
                 s.status
                     .device_error
                     .map_or(String::new(), |e| format!(" · write error: {e}")),
@@ -952,8 +1075,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 if p.running { "running" } else { "stopped" },
                 p.effect_id.as_deref().unwrap_or("none"),
                 p.layout_of,
-                p.error
-                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
+                p.error.map_or(String::new(), |e| format!(
+                    " · effect error: {}",
+                    crate::runtime::loggable(&e, p.reads_keys)
+                )),
             ),
         },
     );
@@ -1133,6 +1258,31 @@ mod tests {
     }
 
     // -------------------------------------------------------- file
+
+    /// Only the daily files beyond the most recent ones go, and `0` keeps them all;
+    /// anything else in the folder is left alone.
+    #[test]
+    fn only_the_oldest_daily_files_beyond_the_limit_are_deleted() {
+        let names = || {
+            [
+                "candeo.2026-09-12.log",
+                "candeo.2026-09-14.log",
+                "candeo.2026-09-13.log",
+                "candeo.2026-09-11.log",
+                "notes.txt",
+                "candeo.log",
+                "candeo.2026-9-1.log",
+            ]
+            .map(String::from)
+        };
+        assert_eq!(
+            files_beyond(names(), 2),
+            ["candeo.2026-09-12.log", "candeo.2026-09-11.log"]
+        );
+        assert!(files_beyond(names(), 4).is_empty());
+        assert!(files_beyond(names(), 10).is_empty());
+        assert!(files_beyond(names(), 0).is_empty());
+    }
 
     /// The rolling file opens, gets written, and has the expected name.
     ///
