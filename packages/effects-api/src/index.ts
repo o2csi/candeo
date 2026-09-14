@@ -14,7 +14,7 @@
  * import { hsv } from '@candeo/effects-api'
  *
  * export default {
- *   name: 'Mon effet',
+ *   description: 'Mon effet',
  *   render({ layout, time, frame }) { … },
  * } satisfies EffectModule
  * ```
@@ -226,7 +226,7 @@ export interface EffectModule<P = undefined> {
  *
  * ```ts
  * export default defineEffect({
- *   name: 'Mon effet',
+ *   description: 'Mon effet',
  *   render({ layout, time, frame }) { … },   // typés, sans annotation
  * })
  * ```
