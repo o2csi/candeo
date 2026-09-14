@@ -147,6 +147,17 @@
     "compileErrors": "{n} error in the effect — line {line}: {message} | {n} errors in the effect — line {line}: {message}",
     "savedButBroken": "The effect is saved, but it does not load"
   },
+  "tray": {
+    "noDevice": "No device controlled",
+    "devicesUnavailable": "Devices unavailable",
+    "openWindow": "Open window",
+    "quit": "Quit candeo",
+    "sendToKeyboard": "Send to keyboard",
+    "turnOff": "Turn off",
+    "notOpenTitle": "{name} — not open",
+    "notOpenReason": "Plugged in but not open — see the window",
+    "unpluggedTitle": "{name} — unplugged"
+  },
   "devices": {
     "title": "Devices",
     "search": "Search",

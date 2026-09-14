@@ -147,6 +147,17 @@
     "compileErrors": "{n} erreur dans l'effet — ligne {line} : {message} | {n} erreurs dans l'effet — ligne {line} : {message}",
     "savedButBroken": "L'effet est enregistré, mais il ne se charge pas"
   },
+  "tray": {
+    "noDevice": "Aucun appareil piloté",
+    "devicesUnavailable": "Appareils indisponibles",
+    "openWindow": "Ouvrir la fenêtre",
+    "quit": "Quitter candeo",
+    "sendToKeyboard": "Envoyer au clavier",
+    "turnOff": "Éteindre",
+    "notOpenTitle": "{name} — non ouvert",
+    "notOpenReason": "Branché mais non ouvert — voir la fenêtre",
+    "unpluggedTitle": "{name} — débranché"
+  },
   "devices": {
     "title": "Périphériques",
     "search": "Rechercher",

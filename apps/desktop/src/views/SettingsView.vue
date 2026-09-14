@@ -151,10 +151,12 @@ async function reset(): Promise<void> {
     problem.value = message(e)
   } finally {
     working.value = false
-    // Every device changed state at once, and the log level went back to the
-    // default.
+    // Every device changed state at once, and the log level and the language went
+    // back to their defaults.
     await refresh()
     await readJournal()
+    await readLanguage()
+    if (language.value) showIn(language.value.language)
   }
 }
 

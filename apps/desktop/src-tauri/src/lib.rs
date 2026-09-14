@@ -14,6 +14,7 @@ use tauri::{AppHandle, Manager, State};
 
 use storage::{DeviceState, Settings};
 
+mod i18n;
 mod journal;
 mod keys;
 mod language;

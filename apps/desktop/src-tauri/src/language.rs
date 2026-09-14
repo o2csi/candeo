@@ -118,18 +118,28 @@ fn status(setting: LanguageSetting) -> LanguageStatus {
     }
 }
 
-/// The interface language. Unreadable settings give the system's: the window
-/// must still be able to say what went wrong.
-#[tauri::command]
-pub fn get_language(app: AppHandle) -> LanguageStatus {
-    let setting = crate::storage::store(&app)
+/// The language setting, the default when the settings cannot be read: whatever
+/// shows text must still be able to say what went wrong.
+fn setting(app: &AppHandle) -> LanguageSetting {
+    crate::storage::store(app)
         .and_then(|s| s.read_settings())
         .map(|s| s.preferences.language)
-        .unwrap_or_default();
-    status(setting)
+        .unwrap_or_default()
 }
 
-/// Changes the interface language and saves it.
+/// The language the interface shows, for text Rust renders (the tray).
+pub fn current(app: &AppHandle) -> Language {
+    setting(app).resolve(system_language())
+}
+
+/// The interface language.
+#[tauri::command]
+pub fn get_language(app: AppHandle) -> LanguageStatus {
+    status(setting(&app))
+}
+
+/// Changes the interface language and saves it, and rebuilds the tray menu in
+/// it.
 #[tauri::command]
 pub fn set_language(app: AppHandle, setting: LanguageSetting) -> CmdResult<LanguageStatus> {
     let store = crate::storage::store(&app)?;
@@ -138,6 +148,7 @@ pub fn set_language(app: AppHandle, setting: LanguageSetting) -> CmdResult<Langu
         settings.preferences.language = setting;
         store.write_settings(&settings)?;
     }
+    crate::tray::refresh(&app);
     Ok(status(setting))
 }
 
