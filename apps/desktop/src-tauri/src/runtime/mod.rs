@@ -75,7 +75,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use candeo_device::{Keyboard, Layout};
-use candeo_protocol::Rgb;
+use candeo_protocol::{Effect, Rgb};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::runtime::InterruptHandler;
 use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
@@ -382,6 +382,11 @@ pub(crate) trait DeviceOut: Send {
     /// critical section as the write. Deciding outside it would race with a
     /// reconnection: the loop could close the keyboard that was just reopened.
     fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>>;
+
+    /// Turns the backlight off, when an effect stopped on its own: its last frame,
+    /// frozen, would look like an effect still running (#48). Nothing to do
+    /// without a device.
+    fn turn_off(&self) {}
 }
 
 /// A device handle, shared between the commands and its loop.
@@ -404,6 +409,13 @@ impl DeviceOut for Handle {
             *guard = None;
         }
         Some(result)
+    }
+
+    fn turn_off(&self) {
+        let guard = self.lock().unwrap();
+        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(Effect::Off)) {
+            tracing::warn!("backlight not turned off after the effect stopped: {e}");
+        }
     }
 }
 
@@ -1037,9 +1049,13 @@ fn render_loop(
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     tracing::error!(
                         failures = MAX_CONSECUTIVE_ERRORS,
-                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures: {e}"
+                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
+                         backlight turned off: {e}"
                     );
                     shared.stop.store(true, Ordering::Relaxed);
+                    // A frozen last frame reads as an effect still running; off
+                    // says nothing runs, and the gallery says why (#48).
+                    out.turn_off();
                     break;
                 }
             }
@@ -1848,6 +1864,8 @@ mod tests {
         transient_failures: AtomicU32,
         /// Set when the loop dropped the device, as the real handle does.
         closed: AtomicBool,
+        /// Set when the loop turned the backlight off.
+        turned_off: AtomicBool,
         /// The last frame written.
         last: Mutex<Vec<Rgb>>,
     }
@@ -1870,6 +1888,10 @@ mod tests {
             *self.last.lock().unwrap() = colors.to_vec();
             self.written.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
+        }
+
+        fn turn_off(&self) {
+            self.turned_off.store(true, Ordering::Relaxed);
         }
     }
 
@@ -2717,6 +2739,9 @@ mod tests {
             0,
             "a frame came out of an effect that never finished one"
         );
+        // #48: stopped on its own, the effect does not leave a frame that looks
+        // like it still runs.
+        assert!(out.turned_off.load(Ordering::Relaxed), "backlight left on");
 
         // The loop did give its thread back: otherwise this is where the test
         // would stop forever, waiting for it to end.
