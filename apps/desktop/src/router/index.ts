@@ -27,6 +27,12 @@ export const router = createRouter({
       meta: { title: 'Périphériques' },
     },
     {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('../views/SettingsView.vue'),
+      meta: { title: 'Réglages' },
+    },
+    {
       // L'éditeur est un **mode** : il remplace le contenu de la fenêtre.
       // `:id` absent = nouvel effet.
       path: '/editor/:id?',
