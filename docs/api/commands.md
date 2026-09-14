@@ -353,9 +353,7 @@ a `.ts` file in the folder; its name is the key of everything that refers to it 
 `settings.json`, the engine, the tray menu. Names follow the Windows rules on
 every system: no `< > : " / \ | ? *` or control characters, no leading or
 trailing space or dot, not a reserved device name (`CON`, `NUL`, `COM1`…), at most
-64 characters. Two names that differ only by case are one effect. A name equal to
-a built-in's id, whatever its case, is refused when saving and skipped when
-listing.
+64 characters. Two names that differ only by case are one effect.
 
 **Rust cannot strip TypeScript types, the window can.** Listing reports each
 file with the hash of its bytes and whether the cache holds a result for that
@@ -367,11 +365,11 @@ JavaScript compiled from a file's **current** bytes.
 
 ```ts
 {
-  id: string,                     // l'identifiant d'un intégré, ou le nom du fichier
-  kind: 'builtin' | 'user',
+  id: string,                     // le nom du fichier
+  kind: 'builtin' | 'user',       // `builtin` : un fichier livré avec l'application
   state: 'ready' | 'stale' | 'broken',
   error?: string,                 // pourquoi un effet `broken` ne se charge pas
-  hash?: string,                  // SHA-256 du fichier, absent pour un intégré
+  hash: string,                   // SHA-256 du fichier
   swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
   description: string,
@@ -380,9 +378,9 @@ JavaScript compiled from a file's **current** bytes.
 }
 ```
 
-Built-in **and** file effects, in a single list: built-in ones are compiled into
-the binary and have no file, `kind` tells them apart. They come first, the files
-after, sorted by name regardless of case.
+Every file in the effects folder, sorted by name regardless of case. `kind` is
+`builtin` for a file copied from the application and recorded as such — modified
+or not — and `user` for the others; it decides nothing but the gallery section.
 
 | `state` | Meaning |
 |---|---|
@@ -464,10 +462,6 @@ a uniform effect cannot look alike.
 **Once per version of a file**, by `cache_effect`, in the cache record next to the
 JavaScript — never when the list is displayed, which remains a disk read.
 
-**Built-in** effects have no file: their swatch lives **in memory**, computed at
-the first read of the library and kept for the lifetime of the process. It is a
-property of the binary, not of the user's library.
-
 #### What can go wrong
 
 This is user code: it can throw, fail to load, or loop forever. Sampling is
@@ -478,21 +472,36 @@ failure: its swatch is black, and that is the truth about what it does.
 
 `swatch` is a **list**, not a quadruple, and nothing in storage fixes its length.
 
-### The built-in effects
+### The shipped effects
 
-Five are shipped, written in **JavaScript against the same API** as the user's
-effects and loaded by the same engine. They live in
-[`apps/desktop/src-tauri/src/builtins/`](../../apps/desktop/src-tauri/src/builtins/)
-and keep their ids until they become files themselves
-([`effects-library.md`](../design/effects-library.md) §4).
+Five are shipped, written in **TypeScript against the same API** as the user's
+effects, in [`packages/effects/`](../../packages/effects/), and embedded in the
+binary. At startup each one is copied into the effects folder **once**, and
+`settings.json` records it under `shippedEffects`: the hash of the copied version,
+or `null` when a file of that name was already there and was left alone.
 
-| `id` | Name | What sets it apart |
+| State at startup | Action |
+|---|---|
+| not recorded, no file of that name | copy it, record its hash |
+| not recorded, a file of that name exists | leave the file, record it as not ours |
+| recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
+| recorded, file modified | leave it |
+| recorded, file missing (deleted or renamed) | leave it: never copied again |
+
+From then on they are ordinary files: edited in place, renamed — a renamed copy
+becomes the user's — and deleted. A deleted shipped effect comes back by saving
+its file from the repository into the folder.
+
+| Name | Former id | What sets it apart |
 |---|---|---|
-| `onde-radiale` | "Onde radiale" (Radial wave) | moving hue, in circles at the physical distance of the keys |
-| `onde-matricielle` | "Onde diagonale" (Diagonal wave) | moving hue, in diagonals from a corner of the matrix |
-| `respiration` | "Respiration" (Breathing) | a single color, no variation in space |
-| `balayage` | "Balayage" (Sweep) | one lit row, the rest off |
-| `degrade-fixe` | "Dégradé fixe" (Fixed gradient) | two colors, motionless — its `render` ignores `time` |
+| Radial wave | `onde-radiale` | moving hue, in circles at the physical distance of the keys |
+| Diagonal wave | `onde-matricielle` | moving hue, in diagonals from a corner of the matrix |
+| Breathing | `respiration` | a single color, no variation in space |
+| Sweep | `balayage` | one lit row, the rest off |
+| Fixed gradient | `degrade-fixe` | two colors, motionless — its `render` ignores `time` |
+
+The former ids are those of the version that compiled them into the binary: the
+migration below moves the settings that still use them.
 
 ### `rename_effect(from, to)`
 
@@ -509,7 +518,7 @@ back.
 ### `delete_effect(id)`
 
 Deletes the file and its cache. A name that is not valid is refused before any
-disk access. A built-in effect has no file and cannot be deleted.
+disk access. A shipped effect is deleted like any other, and is not copied again.
 
 Also takes away everything `settings.json` remembered about it: the **settings**, on
 all devices, and its **application** (`activeEffects`). Forgetting comes after
@@ -524,8 +533,8 @@ a file removed by hand does not go through here.
 
 **Three steps, and the order is part of the contract:**
 
-1. **the refusal**, first of all — a built-in effect or a name that designates
-   nothing gets a no without anything having been stopped or erased;
+1. **the refusal**, first of all — a name that designates nothing gets a no
+   without anything having been stopped or erased;
 2. **stopping the loops** running this effect, on **all** devices and in the
    preview, before erasing. The engine keeps the JavaScript it loaded at start: a
    loop left alive would carry on without the slightest visible error, on a file
@@ -537,9 +546,7 @@ guarantees it whoever the caller is.
 
 ### `read_effect_source(id) -> string`
 
-The source, to open it in the editor. A built-in effect returns its JavaScript,
-which **is** its source. That is the intended use — start from an effect that
-works, modify it, save it under another name.
+The source, to open it in the editor.
 
 ### `legacy_effect_ids() -> Record<string, string>`
 
@@ -554,8 +561,9 @@ At startup, before anything reads the library or the settings, each
 `effects/<id>/` holding a `source.ts` becomes `effects/<name>.ts`, `<name>` being
 its manifest's name made valid (forbidden characters replaced by `-`, ` (2)` on a
 collision). `activeEffects` and `effectParams` are rewritten from the old ids to
-the names, and `settings.json` records `version: 1` so that this happens once;
-built-in ids are untouched. Settings are rewritten **before** files are moved, and
+the names, and `settings.json` records `version: 1` so that this happens once.
+Then the former ids of the shipped effects move to their names, recorded as
+`version: 2`, and the shipped effects are copied. Settings are rewritten **before** files are moved, and
 a directory is removed only once its file is written: an interrupted run is
 finished by the next startup without duplicating an effect.
 
@@ -925,8 +933,7 @@ devices, and that is what keeps a failing device from affecting any other.
 
 ### `start_effect(device, id, params)`
 
-Loads the effect's JavaScript — a built-in's, otherwise the one compiled from
-the file's current bytes, refused while the file is `stale` or `broken` — and
+Loads the JavaScript compiled from the effect file's current bytes, refused while the file is `stale` or `broken` — and
 starts the loop **of this device**. The engine makes
 no difference between the two: a shipped effect is a module loaded
 exactly like the one you just wrote.

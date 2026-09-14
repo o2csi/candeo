@@ -242,11 +242,12 @@ export default defineEffect({
 })
 ```
 
-The five effects shipped with the application — radial wave, diagonal wave,
-breathing, sweep, static gradient — are written against this same API, in
-[`apps/desktop/src-tauri/src/builtins/`](apps/desktop/src-tauri/src/builtins/).
-They are compiled into the binary, not written in Rust: the first example you
-open must be exactly what you could write yourself.
+The five effects shipped with the application — Radial wave, Diagonal wave,
+Breathing, Sweep, Fixed gradient — are written against this same API, in
+[`packages/effects/`](packages/effects/). They are copied into your effects folder
+at first launch, and from then on they are your files: open, change, rename or
+delete them like any other. A shipped effect you deleted comes back by saving its
+file from this repository into the folder.
 
 ---
 
