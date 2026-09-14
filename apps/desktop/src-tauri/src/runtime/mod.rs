@@ -1462,7 +1462,7 @@ fn js_error(e: rquickjs::Error) -> String {
 // ---------------------------------------------------------------- commands
 
 use crate::{AppState, CmdResult, DeviceRef, Failure};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 /// Starts an effect, built-in or installed, **on a device**.
 ///
@@ -1508,6 +1508,95 @@ pub fn start_effect(
     // the file presents as applied.
     remember_active_effect(&app, device, Some(&id));
     Ok(())
+}
+
+/// Starts `effect` on `device` with the settings saved for it on that device.
+///
+/// What the tray and resuming do, through [`start_effect`] itself: neither may
+/// start an effect differently from the gallery.
+pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> CmdResult<()> {
+    let store = crate::storage::store(app)?;
+    let entry = store
+        .list_effects()?
+        .into_iter()
+        .find(|e| e.id == effect)
+        .ok_or_else(|| Failure::new("effectNotFound").with("name", effect))?;
+    let settings = store.read_settings()?;
+    let params = crate::storage::starting_params(
+        &entry.manifest,
+        settings.effect_params(device.vid, device.pid, effect),
+    );
+    start_effect(
+        app.clone(),
+        app.state(),
+        device,
+        effect.to_owned(),
+        serde_json::Value::Object(params),
+    )
+}
+
+/// Gives a device that just opened the effect applied on it (#102): at startup,
+/// on adoption, and on replug.
+///
+/// Nothing happens when the setting is off, when nothing is applied, or when that
+/// effect already runs on the device — a replug finds the loop still writing to
+/// the reopened handle.
+///
+/// An effect that cannot start keeps its record: deleted, it is the gallery's
+/// "no longer in the folder" notice; edited outside candeo, it waits for the
+/// window to compile it, and [`resume_waiting`] tries again then.
+pub(crate) fn resume_applied(app: &AppHandle, device: DeviceRef) {
+    let settings = match crate::storage::store(app).and_then(|s| s.read_settings()) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::warn!(device = %device, "applied effect not resumed: {e}");
+            return;
+        }
+    };
+    let running = app
+        .state::<AppState>()
+        .engine
+        .device_status()
+        .into_iter()
+        .find(|s| s.device == device && s.status.running)
+        .and_then(|s| s.status.effect_id);
+    let Some(effect) = to_resume(&settings, device, running.as_deref()) else {
+        return;
+    };
+    match start_saved(app, device, &effect) {
+        Ok(()) => tracing::info!(device = %device, effect, "applied effect resumed"),
+        Err(e) if e.code == "effectNotCompiled" => {
+            tracing::info!(device = %device, effect, "applied effect waits for compilation")
+        }
+        Err(e) => tracing::warn!(device = %device, effect, "applied effect not resumed: {e}"),
+    }
+}
+
+/// The effect to start on `device`, given what runs there now: the applied one,
+/// unless the setting is off or it already runs.
+fn to_resume(
+    settings: &crate::storage::Settings,
+    device: DeviceRef,
+    running: Option<&str>,
+) -> Option<String> {
+    if !settings.preferences.resume_effects {
+        return None;
+    }
+    let applied = settings.active_effect(device.vid, device.pid)?;
+    (running != Some(applied)).then(|| applied.to_owned())
+}
+
+/// Resumes, on every open device, `effect` if it is the one applied there: called
+/// once the window has compiled it.
+pub(crate) fn resume_waiting(app: &AppHandle, effect: &str) {
+    let Ok(settings) = crate::storage::store(app).and_then(|s| s.read_settings()) else {
+        return;
+    };
+    for device in app.state::<AppState>().open_devices() {
+        if settings.active_effect(device.vid, device.pid) == Some(effect) {
+            resume_applied(app, device);
+        }
+    }
 }
 
 /// The parameters as the loop reads them.
@@ -1717,6 +1806,25 @@ mod tests {
         vid: 0x1532,
         pid: 0x2222,
     };
+
+    /// #102: a device that opens gets its applied effect back, unless the setting
+    /// is off, nothing is applied there, or that effect already runs.
+    #[test]
+    fn the_applied_effect_is_resumed_unless_it_runs_or_resuming_is_off() {
+        let mut settings = crate::storage::Settings::default();
+        settings.set_active_effect(FIRST.vid, FIRST.pid, Some("Rain"));
+
+        assert_eq!(to_resume(&settings, FIRST, None), Some("Rain".into()));
+        assert_eq!(
+            to_resume(&settings, FIRST, Some("Swirl")),
+            Some("Rain".into())
+        );
+        assert_eq!(to_resume(&settings, FIRST, Some("Rain")), None);
+        assert_eq!(to_resume(&settings, SECOND, None), None);
+
+        settings.preferences.resume_effects = false;
+        assert_eq!(to_resume(&settings, FIRST, None), None);
+    }
 
     /// Beyond this, the expected condition is considered not to be coming.
     ///

@@ -662,7 +662,8 @@ finished by the next startup without duplicating an effect.
 {
   preferences: {
     logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
-    language?: 'en' | 'fr'        // absent : la langue du système
+    language?: 'en' | 'fr',       // absent : la langue du système
+    resumeEffects?: false         // absent: a device that opens resumes its applied effect
   },
   devices: {
     vid: number,
@@ -726,6 +727,15 @@ who was in the middle of hunting down a failure.
 `activeEffects` is written by `start_effect` and cleared by `stop_effect`; the preview
 never touches it. Deleting an effect purges its entry everywhere — see
 `delete_effect`.
+
+### `set_resume_effects(on)`
+
+Whether a device that opens starts its applied effect again: at startup and on
+adoption. On by default; only `false` is written. Rust resumes the effect itself,
+with the settings saved for it on that device, so it works with the window
+hidden. Nothing starts when the effect already runs there. An effect that cannot
+start keeps its `activeEffects` entry and is logged; one edited outside candeo
+waits for the window to compile it, and `cache_effect` resumes it then.
 
 ### `reset_settings()`
 

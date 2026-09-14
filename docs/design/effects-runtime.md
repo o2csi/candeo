@@ -491,7 +491,7 @@ goes through the existing commands.
 - [x] Execution bounds for an effect: a compute time per frame and at
       load, a memory limit per effect — a `while (true)` or an array that
       grows every frame becomes a frame error, not a freeze
-- [ ] Resuming the active effect at startup
+- [x] Resuming the active effect at startup and on adoption (#102)
 - [ ] Verification of the `hidraw` backend **on hardware** — feature report
       writes, filtering by `interface_number`, paths resolved by
       Tauri. Requires a keyboard plugged into a Linux machine.
