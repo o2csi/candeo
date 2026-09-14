@@ -823,9 +823,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 s.status.effect_id.as_deref().unwrap_or("none"),
                 if s.status.to_keyboard { "on" } else { "off" },
                 s.status.reaching_keyboard,
-                s.status
-                    .error
-                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
+                s.status.error.map_or(String::new(), |e| format!(
+                    " · effect error: {}",
+                    crate::runtime::loggable(&e, s.status.reads_keys)
+                )),
                 s.status
                     .device_error
                     .map_or(String::new(), |e| format!(" · write error: {e}")),
@@ -847,8 +848,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 if p.running { "running" } else { "stopped" },
                 p.effect_id.as_deref().unwrap_or("none"),
                 p.layout_of,
-                p.error
-                    .map_or(String::new(), |e| format!(" · effect error: {e}")),
+                p.error.map_or(String::new(), |e| format!(
+                    " · effect error: {}",
+                    crate::runtime::loggable(&e, p.reads_keys)
+                )),
             ),
         },
     );

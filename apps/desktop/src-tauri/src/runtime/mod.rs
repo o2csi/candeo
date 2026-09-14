@@ -265,6 +265,9 @@ struct Shared {
     /// Name of the running effect, so that the interface knows what to
     /// highlight after the window restarts.
     effect_id: Mutex<Option<String>>,
+    /// The effect reads key presses: its error text stays out of the log and
+    /// the diagnostic. See [`loggable`].
+    reads_keys: AtomicBool,
 }
 
 impl Default for Shared {
@@ -279,7 +282,22 @@ impl Default for Shared {
             reaching: AtomicBool::new(false),
             device_failures: AtomicU32::new(0),
             effect_id: Mutex::new(None),
+            reads_keys: AtomicBool::new(false),
         }
+    }
+}
+
+/// What the log and the diagnostic may say of an effect's error.
+///
+/// An effect that reads key presses chooses its error text, and could write the
+/// presses into it; nothing about key presses reaches the log or the diagnostic
+/// (`docs/design/key-input.md` §3, #44). Its text is left out there; the window,
+/// which is local, still shows it.
+pub(crate) fn loggable(error: &str, reads_keys: bool) -> &str {
+    if reads_keys {
+        "(text not logged: the effect reads key presses)"
+    } else {
+        error
     }
 }
 
@@ -296,6 +314,9 @@ pub struct EngineStatus {
     /// True if the frames actually reach a keyboard.
     pub reaching_keyboard: bool,
     pub to_keyboard: bool,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_keys: bool,
 }
 
 /// A device's state, and which device it belongs to.
@@ -342,6 +363,9 @@ pub struct PreviewStatus {
     pub effect_id: Option<String>,
     /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_keys: bool,
 }
 
 /// Everything the engine knows, **arranged so that nothing gets confused**.
@@ -503,6 +527,7 @@ impl DeviceLoop {
                 device_error: s.device_error.lock().unwrap().clone(),
                 reaching_keyboard: s.reaching.load(Ordering::Relaxed),
                 to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
+                reads_keys: s.reads_keys.load(Ordering::Relaxed),
             },
         }
     }
@@ -706,6 +731,7 @@ impl Engine {
             running: !s.stop.load(Ordering::Relaxed),
             effect_id: s.effect_id.lock().unwrap().clone(),
             error: s.error.lock().unwrap().clone(),
+            reads_keys: s.reads_keys.load(Ordering::Relaxed),
         };
         Some(status)
     }
@@ -976,6 +1002,7 @@ fn render_loop(
     let reads_keys = ctx
         .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_keys"))
         .unwrap_or(false);
+    shared.reads_keys.store(reads_keys, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
     let keyboard = match target {
         Target::Device(d) => Some((d.vid, d.pid)),
@@ -1032,12 +1059,13 @@ fn render_loop(
                 let before = shared.error.lock().unwrap().replace(e.clone());
                 if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
                 {
-                    tracing::warn!("effect started failing: {e}");
+                    tracing::warn!("effect started failing: {}", loggable(&e, reads_keys));
                 }
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     tracing::error!(
                         failures = MAX_CONSECUTIVE_ERRORS,
-                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures: {e}"
+                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures: {}",
+                        loggable(&e, reads_keys)
                     );
                     shared.stop.store(true, Ordering::Relaxed);
                     break;
@@ -2671,6 +2699,31 @@ mod tests {
         });
         let error = status(&engine, FIRST).error.unwrap();
         assert!(error.contains("boum"), "message rewritten: {error}");
+        assert!(!status(&engine, FIRST).reads_keys);
+
+        engine.stop(FIRST);
+    }
+
+    /// #44: an effect reading key presses could write them into its error; the
+    /// window still shows the text, the log and the diagnostic do not.
+    #[test]
+    fn the_error_of_an_effect_reading_keys_stays_out_of_the_log() {
+        let engine = Engine::default();
+        let js = "export default { name: 'X', inputs: ['keys'], render() { throw new Error('A pressed') } }";
+        start_js(&engine, FIRST, js, Arc::new(Output::default())).expect("start");
+
+        wait_for("no error recorded", || {
+            status(&engine, FIRST).error.is_some()
+        });
+        let s = status(&engine, FIRST);
+        assert!(s.reads_keys);
+        let error = s.error.unwrap();
+        assert!(
+            error.contains("A pressed"),
+            "the window lost the text: {error}"
+        );
+        assert!(!loggable(&error, s.reads_keys).contains("A pressed"));
+        assert_eq!(loggable("boum", false), "boum");
 
         engine.stop(FIRST);
     }

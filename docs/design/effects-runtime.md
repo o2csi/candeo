@@ -5,9 +5,11 @@ the moment a key lights up. The **interface** decisions are in
 [`studio.md`](studio.md); these concern execution.
 
 > **Storage has changed since.** §2 and §3 describe the first layout, one
-> directory per effect written through `install_effect`. Effects are now `.ts`
-> files named after the effect, compiled into a cache: see
-> [`effects-library.md`](effects-library.md). The engine part is unchanged.
+> directory per effect written through `install_effect`, with built-ins compiled
+> into the binary and a reserved built-in identifier. Effects are now `.ts`
+> files named after the effect, compiled into a cache, and the manifest is read
+> by running the module: see [`effects-library.md`](effects-library.md). The
+> engine part is unchanged.
 
 ---
 
@@ -231,9 +233,10 @@ Two consequences, and they are not cosmetic:
 loader of `rquickjs` to an **internal** module, provided by the host. No
 bundling, no path resolution, no `node_modules`.
 
-The `manifest.json` carries the API version used at write time: that is what
-will make it possible to cleanly refuse an effect written against an API that no longer exists, rather
-than letting it fail at the first frame.
+The module declares the API version it was written against (`apiVersion`, a
+whole number, 1 when absent): that is what makes it possible to cleanly refuse
+an effect written against an API this version does not know, rather than
+letting it fail at the first frame.
 
 ---
 
@@ -498,11 +501,10 @@ goes through the existing commands.
 
 ### What the implementation clarified
 
-- **The manifest is read from the code, not by running the effect.** The front end
-  never runs user code: `name`, `description` and `params` are
-  read from the syntax tree by the compiler that Monaco already bundles. These
-  three fields must therefore be literals, and anything else is refused at
-  validation rather than discovered at the first frame.
+- **The manifest is read by running the module**, once, in Rust, under the load
+  budget, when the library compiles it (`effects-library.md` §3). It was first
+  read from the syntax tree by Monaco's compiler, which required literals; that
+  reader is gone, and defaults may be computed.
 - **An effect exports by default.** The glue imports the namespace rather than
   the default export: `import effect from 'effect'` fails at module *linking*
   when it is missing, with a QuickJS message that cannot be tied to
