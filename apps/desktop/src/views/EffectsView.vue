@@ -69,9 +69,7 @@ import {
   getLayout,
   listEffects,
   startEffect,
-  startPreview,
   stopEffect,
-  stopPreview,
   type EffectEntry,
   type EngineReport,
 } from '../api/candeo'
@@ -82,30 +80,11 @@ import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
-import { useEngineFrames } from '../keyboard/engineFrames'
 import type { LayoutView } from '../keyboard/layout'
+import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
 /** Période d'interrogation du moteur, en millisecondes. */
 const STATUS_PERIOD = 1000
-
-/**
- * Repos de la sélection avant de (re)lancer l'aperçu, en millisecondes.
- *
- * **Chaque aperçu construit un contexte QuickJS et en détruit un.** Parcourir la
- * galerie à la flèche du clavier en produirait plusieurs par seconde, dont aucun
- * n'aurait le temps de rendre une image qu'on regarde.
- *
- * Bornée ici, du côté du **geste**, et non dans le moteur : le Rust aurait dû
- * choisir entre faire attendre la dernière sélection et la perdre, et la fenêtre
- * aurait ensuite eu à réconcilier ce qu'elle croyait avoir demandé avec ce qui
- * tourne. C'est la même leçon que l'échantillonnage du repère de couleurs, qui a
- * eu à résoudre exactement ce problème (issue #29) : on ne paie pas un contexte
- * par affichage.
- *
- * 180 ms : au-dessus du rythme d'une flèche maintenue, en dessous du temps qu'il
- * faut pour décider qu'on regarde vraiment cet effet-là.
- */
-const PREVIEW_DELAY = 180
 
 /**
  * Plage de la luminosité.
@@ -476,8 +455,6 @@ watch(
   { immediate: true },
 )
 
-const { frame, listen, listenPreview, stop: stopFrames } = useEngineFrames(() => board.value)
-
 /**
  * L'effet sélectionné est-il déjà celui qui tourne **sur l'appareil** ?
  *
@@ -492,90 +469,21 @@ const applied = computed(
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
 
-/**
- * Le canal d'images suit ce qu'on regarde : les images de l'appareil quand
- * l'effet sélectionné est celui qui tourne dessus, rien sinon — c'est le
- * démarrage de l'aperçu qui pose son propre abonnement, voir plus bas.
- *
- * Un seul canal à la fois — `useEngineFrames` ferme le précédent en changeant de
- * source —, sans quoi deux flux alimenteraient le même simulateur et l'image
- * sauterait de l'un à l'autre.
- *
- * ⚠️ **Surveiller l'état de l'aperçu ici serait un piège.** `engine_status` est
- * relu chaque seconde et rend un objet neuf à chaque fois : la surveillance
- * partirait une fois par seconde, et reposerait un canal par seconde pour rien.
- * Ce qui est surveillé ici ne porte donc que des valeurs comparables.
- */
-watch(
-  [deviceKey, showsDevice],
-  ([, appareil]) => {
-    const d = selectedDevice.value
-    if (d && appareil) void listen({ vid: d.vid, pid: d.pid })
-    else stopFrames()
+const { frame } = useSimulatorFeed({
+  layout: () => board.value,
+  device: () => selectedDevice.value,
+  showsDevice: () => showsDevice.value,
+  // A hardware effect is run by the firmware and the app never sees its frames:
+  // previewing it would mean inventing them.
+  previewed: () => {
+    const c = selectedEffect.value
+    return c && !c.hardware ? c.id : null
   },
-  { immediate: true },
-)
-
-// ------------------------------------------------------- la boucle d'aperçu
-
-/** Temporisation de la sélection. Voir {@link PREVIEW_DELAY}. */
-let previewTimer = 0
-
-/**
- * Ce que l'aperçu devrait montrer, ou `null` quand il n'a rien à montrer.
- *
- * Trois cas où l'on ne prévisualise pas, et aucun n'est un échec :
- *
- * - **l'effet est déjà appliqué ici** : le clavier produit les vraies images,
- *   les doubler dans un second moteur coûterait un contexte pour rien ;
- * - **c'est un effet matériel** : il est exécuté par le micrologiciel, et
- *   l'application ne voit jamais ses images — en inventer serait décrire un
- *   effet qu'on n'a pas regardé, exactement ce que le repère de couleurs refuse
- *   déjà de faire pour les vignettes ;
- * - **rien n'est sélectionné**.
- */
-const toPreview = computed(() => {
-  const c = selectedEffect.value
-  if (!c || c.hardware || showsDevice.value) return null
-  return c
+  params: () => paramValues.value,
+  onError: (e) => {
+    problem.value = message(e)
+  },
 })
-
-/**
- * Démarre, remplace ou arrête l'aperçu, après le repos de la sélection.
- *
- * La temporisation couvre le cas qui compte : parcourir la galerie. L'arrêt, lui,
- * part **sans attendre** — laisser un aperçu tourner 180 ms de plus quand on
- * vient d'appliquer un effet ferait clignoter le simulateur entre deux sources.
- */
-watch(
-  [toPreview, deviceKey],
-  ([c]) => {
-    window.clearTimeout(previewTimer)
-    if (!c) {
-      void stopPreview()
-      return
-    }
-    previewTimer = window.setTimeout(() => {
-      const d = selectedDevice.value
-      // Le **gabarit** de l'appareil sélectionné, pas l'appareil : l'aperçu lui
-      // ressemble sans rien lui prendre. `null` quand aucun n'est piloté — le
-      // Rust retombe alors sur le gabarit par défaut, et on prévisualise sans
-      // posséder de clavier.
-      const gabarit = d ? { vid: d.vid, pid: d.pid } : null
-      startPreview(gabarit, c.id, paramValues.value)
-        // **Le réabonnement est obligatoire après chaque démarrage.** Le canal
-        // vit dans l'état de la boucle, et `start_preview` en construit un neuf :
-        // celui de l'aperçu précédent est parti avec lui. Sans cette ligne, le
-        // simulateur resterait figé sur la dernière image du précédent, sans
-        // qu'aucune erreur ne le dise — même piège que dans l'éditeur.
-        .then(() => listenPreview())
-        .catch((e: unknown) => {
-          problem.value = message(e)
-        })
-    }, PREVIEW_DELAY)
-  },
-  { immediate: true },
-)
 
 /**
  * Ce que le simulateur montre, dit en toutes lettres plutôt que deviné.
@@ -639,7 +547,6 @@ async function applyEffect(): Promise<void> {
   try {
     if (c.hardware) {
       if (statusOf(d)?.running === true) await stopEffect(device)
-      stopFrames()
       await apply(device, c.hardware)
     } else {
       // Les réglages retenus pour **cette paire**, et non les valeurs déclarées :
@@ -941,12 +848,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   alive = false
   window.clearInterval(statusTimer)
-  window.clearTimeout(previewTimer)
-  // **L'aperçu s'arrête avec l'écran, l'effet appliqué non.** C'est toute la
-  // différence entre les deux : l'un est ce que le clavier fait, l'autre ce
-  // qu'on regarde — et il n'y a plus personne pour regarder. Le Rust fait le
-  // même geste quand la fenêtre se replie, qui ne passe pas par ici.
-  void stopPreview()
   // Le dernier mouvement d'un curseur ne doit pas dépendre du fait qu'on soit
   // resté devant le temps du repos d'écriture.
   flushParams()
