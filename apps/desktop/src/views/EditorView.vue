@@ -30,6 +30,13 @@
  * changing it renames the file and moves its settings and draft; for a new
  * effect or a copy, it is the name the first save creates.
  *
+ * ## Built-ins are read, not edited
+ *
+ * Their code and name are read-only, and "Dupliquer" takes the place of
+ * "Enregistrer": the copy is the user's to change, and the built-in keeps
+ * receiving updates (`docs/design/effects-library.md` §4). A draft left from
+ * before goes with the copy.
+ *
  * ## What the simulator shows
  *
  * The device's frames when the device runs exactly the saved version, the
@@ -55,6 +62,7 @@ import type { ParamSpec } from '@candeo/effects-api'
 
 import {
   cacheEffect,
+  duplicateEffect,
   engineStatus,
   getDefaultLayout,
   legacyEffectIds,
@@ -74,6 +82,7 @@ import { useDevice } from '../composables/useDevice'
 import { useSettings } from '../composables/useSettings'
 import { clearDraft, migrateDrafts, moveDraft, readDraft, writeDraft } from '../editor/draft'
 import { transpile } from '../editor/effect'
+import { refreshLibrary } from '../editor/library'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
 import type { LayoutView } from '../keyboard/layout'
@@ -112,6 +121,9 @@ const problem = ref<string | null>(null)
  */
 const savedSpecs = ref<Record<string, ParamSpec>>({})
 
+/** A shipped effect: read-only here, see the header comment. */
+const builtin = ref(false)
+
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
   return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
@@ -119,13 +131,11 @@ function message(e: unknown): string {
 
 // ---------------------------------------------------------------- ouverture
 
-/**
- * Opens the effect in place, shipped ones included: they are files like any
- * other, and the source is the user's to change.
- */
+/** Opens the effect in place; a built-in opens read-only. */
 async function open(): Promise<void> {
   loading.value = true
   name.value = id.value ?? ''
+  builtin.value = false
   await migrateDrafts(legacyEffectIds)
   const draft = readDraft(id.value)
   try {
@@ -134,6 +144,7 @@ async function open(): Promise<void> {
     if (id.value !== null) {
       const entry = (await listEffects()).find((e) => e.id === id.value)
       savedSpecs.value = entry?.params ?? {}
+      builtin.value = entry?.kind === 'builtin'
     }
 
     saved.value = disk
@@ -443,6 +454,24 @@ const applyToDevice = () =>
   })
 
 /**
+ * Copies a built-in and opens the copy, carrying the text on screen: a draft
+ * restored on a built-in cannot be saved there, and must not be lost.
+ */
+const duplicate = () =>
+  act(async () => {
+    const original = id.value
+    if (original === null) return
+    const copy = await duplicateEffect(original)
+    if (source.value !== saved.value) writeDraft(copy, source.value)
+    clearDraft(original)
+    // The copy takes the original's cache, which is stale when the file changed
+    // outside the application: compiled first, so that its preview starts.
+    await refreshLibrary()
+    await router.replace({ name: 'editor', params: { id: copy } })
+    await open()
+  })
+
+/**
  * Stops the device loop. The last frame stays on the keyboard, since stopping
  * does not turn the LEDs off; the preview comes back once the report says so.
  */
@@ -505,7 +534,7 @@ onBeforeUnmount(() => {
         <input
           v-model="name"
           type="text"
-          :disabled="loading || busy"
+          :disabled="loading || busy || builtin"
           placeholder="Nom de l'effet"
           @change="rename"
           @keyup.enter="rename"
@@ -513,6 +542,7 @@ onBeforeUnmount(() => {
       </label>
 
       <p v-if="creating" class="what">nouvel effet</p>
+      <p v-else-if="builtin" class="what">intégré · lecture seule</p>
 
       <span class="spacer" />
 
@@ -531,14 +561,17 @@ onBeforeUnmount(() => {
       <button
         v-if="deviceName"
         class="ghost"
-        :disabled="busy || loading || applied"
+        :disabled="busy || loading || applied || (builtin && unsaved)"
         :title="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
         :aria-label="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
         @click="applyToDevice"
       >
         {{ applied ? 'Appliqué' : 'Appliquer' }}
       </button>
-      <button class="solid" :disabled="busy || loading" @click="save">
+      <button v-if="builtin" class="solid" :disabled="busy || loading" @click="duplicate">
+        {{ busy ? 'Un instant…' : 'Dupliquer' }}
+      </button>
+      <button v-else class="solid" :disabled="busy || loading" @click="save">
         {{ busy ? 'Un instant…' : 'Enregistrer' }}
       </button>
     </header>
@@ -550,11 +583,15 @@ onBeforeUnmount(() => {
         </p>
 
         <p v-if="restored" class="notice" role="status">
-          Brouillon restauré — cette version n'a pas été enregistrée.
+          {{
+            builtin
+              ? "Brouillon restauré — un effet intégré ne s'enregistre pas : dupliquez-le pour le garder."
+              : "Brouillon restauré — cette version n'a pas été enregistrée."
+          }}
           <button class="link" @click="discard">Revenir à la version enregistrée</button>
         </p>
 
-        <CodeEditor v-model="source" :disabled="loading" class="code" />
+        <CodeEditor v-model="source" :disabled="loading || builtin" class="code" />
 
         <!--
           One place for every failure. What was just attempted comes first: it

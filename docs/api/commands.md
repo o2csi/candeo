@@ -370,6 +370,7 @@ JavaScript compiled from a file's **current** bytes.
   state: 'ready' | 'stale' | 'broken',
   error?: string,                 // pourquoi un effet `broken` ne se charge pas
   hash: string,                   // SHA-256 du fichier
+  modified: boolean,              // un intégré modifié hors de l'application
   swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
   description: string | Record<string, string>,   // une chaîne, ou une par langue
@@ -380,7 +381,9 @@ JavaScript compiled from a file's **current** bytes.
 
 Every file in the effects folder, sorted by name regardless of case. `kind` is
 `builtin` for a file copied from the application and recorded as such — modified
-or not — and `user` for the others; it decides nothing but the gallery section.
+or not — and `user` for the others. A built-in is listed in its own gallery
+section, and is not deleted, renamed or saved over (§The shipped effects).
+`modified` is true for a built-in whose file no longer has the recorded hash.
 
 | `state` | Meaning |
 |---|---|
@@ -397,15 +400,17 @@ whole list. The swatch travels with the entry, not behind a second call.
 Writes `effects/<name>.ts` and returns the SHA-256 of what was written. `create`
 names the gesture, so that neither can do the other's job by accident: creating
 refuses a name an effect already has, in any case; saving again refuses a name no
-effect has. The file is written through a temporary file and a rename, so that a
-Refresh never compiles half a file.
+effect has. Saving over a built-in is refused. Creating a file under the name of
+a shipped effect whose file is gone records that name as not ours. The file is
+written through a temporary file and a rename, so that a Refresh never compiles
+half a file.
 
 ### `cache_effect(name, hash, js) -> EffectEntry`
 
 Records the JavaScript the window compiled from the version of the file that has
 `hash`, and returns the entry. Refused when the file no longer has that hash: it
 changed while the window compiled, and recording would pair this code with
-another version of the source.
+another version of the source. The entry is marked built-in as in the listing.
 
 Rust loads the module **once**, under the time budget swatch sampling uses, and
 reads what it declares: `description`, `params`, `apiVersion`. `description` and
@@ -490,10 +495,13 @@ or `null` when a file of that name was already there and was left alone.
 | recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
 | recorded, file modified | leave it |
 | recorded, file missing (deleted or renamed) | leave it: never copied again |
+| recorded, no longer shipped by this version | forget the record: the file is the user's |
 
-From then on they are ordinary files: edited in place, renamed — a renamed copy
-becomes the user's — and deleted. A deleted shipped effect comes back by saving
-its file from the repository into the folder.
+**The application does not delete, rename or save over a built-in**: an edited
+copy stops receiving updates without a word, and a renamed or deleted one never
+comes back. `duplicate_effect` makes an editable copy. The folder stays the
+user's; what was done there is repaired on request, never at startup — see
+`missing_builtins` and `restore_builtin` below.
 
 | Name | Former id | What sets it apart |
 |---|---|---|
@@ -519,13 +527,26 @@ hashes where it looks random.
 The former ids are those of the version that compiled them into the binary: the
 migration below moves the settings that still use them.
 
+### `missing_builtins() -> string[]`
+
+The shipped effects with no file of their name, regardless of case.
+
+### `restore_builtin(name)`
+
+Records the shipped effect's hash, then writes its file: a missing one comes back,
+a modified one is overwritten, and both receive updates again. Loops running a
+modified version keep the code they loaded until the effect is applied again.
+Refused for a name this version does not ship, and when an effect of the user's
+holds the name, so that restoring never overwrites code of one's own.
+
 ### `rename_effect(from, to)`
 
 Renames the file and its cache, then moves every reference: the settings on all
 devices, and the loops running the effect, preview included. A running effect
 **keeps running**: the loops keep the code they loaded, only the id they report
 changes. Refused when `to` is not a valid name or is already an effect's name —
-except the same effect under another case.
+except the same effect under another case, and for a built-in. Renaming onto the
+name of a shipped effect whose file is gone records that name as not ours.
 
 Renaming the file outside the application makes a new effect: the old name's
 settings stay in `settings.json`, unused, and come back if the file gets its name
@@ -542,8 +563,7 @@ a new effect, the user's.
 ### `open_effects_dir()`
 
 Opens the effects folder in the system file manager, creating it on a first
-launch. Adding an effect is saving a `.ts` file there, and getting back a deleted
-shipped effect is saving its file from the repository there.
+launch. Adding an effect is saving a `.ts` file there.
 
 ### `forget_effect_settings(id)`
 
@@ -556,7 +576,7 @@ restores everything.
 ### `delete_effect(id)`
 
 Deletes the file and its cache. A name that is not valid is refused before any
-disk access. A shipped effect is deleted like any other, and is not copied again.
+disk access, and so is a built-in, before any loop is stopped.
 
 Also takes away everything `settings.json` remembered about it: the **settings**, on
 all devices, and its **application** (`activeEffects`). Forgetting comes after
@@ -688,7 +708,9 @@ makes a bug report usable.
 
 What goes: the adoption decisions — everything goes back to `detected` —, the
 remembered brightness of each device, the effect applied on each, and the
-settings remembered per device / effect pair.
+settings remembered per device / effect pair. `shippedEffects` stays: it describes
+the folder, and without it every built-in would become the user's at the next
+launch.
 
 **No effect is touched.** Written effects live in
 `app_data_dir()/effects/`, not in `settings.json`; removing them is a different

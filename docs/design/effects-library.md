@@ -129,10 +129,36 @@ translated, and English is the reference language of the interface.
 | Recorded, file unchanged, shipped version changed | overwrite it **silently**, record the new hash |
 | Recorded, file modified | leave it |
 | Recorded, file missing (deleted or renamed) | leave it; never copied again |
+| Recorded, no longer shipped by this version | forget the record; the file becomes the user's |
 
-A deleted shipped effect comes back by downloading its file from the repository
-into the folder. The gallery's **Built-in** section lists the files whose name
-is recorded as shipped, modified or not; a renamed one becomes the user's.
+The gallery's **Built-in** section lists the files whose name is recorded as
+shipped, modified or not. Resetting the configuration keeps `shippedEffects`: it
+describes the folder, not a preference, and losing it would turn every built-in
+into the user's at the next launch.
+
+### Built-ins are read-only in the application
+
+Deleting, renaming or saving over a built-in is refused, in the window and in
+Rust. Duplicate makes an editable copy, which is the user's. Two reasons:
+
+- an edited copy no longer receives updates (the table above), without anything
+  saying so;
+- a renamed or deleted one never comes back, so the three gestures lose the same
+  thing.
+
+The folder stays the user's: a built-in edited, renamed or deleted from the
+file manager is dealt with below, not prevented.
+
+- **Modified**: a built-in whose file no longer has the recorded hash is marked
+  modified, with **Restore original**, which overwrites the file after a
+  confirmation.
+- **Missing**: shipped effects with no file of their name are offered back with
+  **Restore built-ins**, which copies them and records them again, so updates
+  resume. Never at startup: removing a built-in from the folder must stay
+  possible.
+- A user effect created or renamed onto the name of a missing built-in takes the
+  name: the record becomes "not ours", and restoring that built-in is refused
+  until the name is free.
 
 ## 5. Library actions
 
@@ -143,12 +169,14 @@ is recorded as shipped, modified or not; a renamed one becomes the user's.
   `<name> (copie)`, `(copie 2)`… while the interface is French — ready at once,
   since its cache is copied too, and the user's even when the original was
   shipped.
-- **Delete**: stops the loops running it, removes the file and its cache,
-  forgets its settings.
+- **Delete**, the user's effects only: stops the loops running it, removes the
+  file and its cache, forgets its settings.
 - **Missing effect**: when `activeEffects` or `effectParams` name an effect the
   folder no longer holds, the gallery says so once — "Radial wave" is no
-  longer in the folder — with **Forget its settings**. Nothing is purged
-  automatically: putting the file back under that name restores everything.
+  longer in the folder — with **Forget its settings**, and **Restore** when it is
+  a built-in. Nothing is purged automatically: putting the file back under that
+  name restores everything.
+- **Restore built-ins** and **Restore original**: see §4.
 
 ## 6. Migration from the directory layout
 
@@ -176,8 +204,8 @@ swatches, the Rust manifest copies and their test, copy-on-open in the editor,
 `derive_id`, per-effect directories.
 
 `EffectKind` stays, with another meaning: `builtin` marks a file recorded as
-shipped, which is what the gallery's Built-in section lists. It decides nothing
-else.
+shipped, which the gallery lists in its Built-in section and the application does
+not delete, rename or overwrite (§4).
 
 Stays: one engine, one API, the swatch sampled by running the effect, per-device
 settings, preview versus Apply.

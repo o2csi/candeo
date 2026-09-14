@@ -21,5 +21,7 @@ describe('transpile', () => {
     expect(js).not.toContain('require(')
     expect(js).toContain('export default defineEffect(')
     expect(js).not.toContain(': number')
-  })
+    // Loading Monaco's TypeScript compiler alone takes seconds, and ran past the
+    // 5-second default with four suites running at once.
+  }, 30_000)
 })

@@ -1127,6 +1127,8 @@ pub fn run() {
             storage::read_effect_source,
             storage::legacy_effect_ids,
             storage::duplicate_effect,
+            storage::missing_builtins,
+            storage::restore_builtin,
             storage::open_effects_dir,
             storage::forget_effect_settings,
             storage::get_settings,
