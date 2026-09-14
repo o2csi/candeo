@@ -41,7 +41,7 @@
 //! [`fingerprint`].
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -334,7 +334,9 @@ pub fn init(app: &AppHandle) {
         version = app.package_info().version.to_string(),
         os = std::env::consts::OS,
         architecture = std::env::consts::ARCH,
-        log = dir.as_ref().map(|d| d.display().to_string()),
+        log = dir
+            .as_deref()
+            .map(|d| without_home(d, app.path().home_dir().ok().as_deref())),
         "candeo starting"
     );
     if let Some(e) = file_error {
@@ -345,6 +347,18 @@ pub fn init(app: &AppHandle) {
     }
     if let Some(level) = resolution.level {
         warn_if_verbose(level);
+    }
+}
+
+/// `path` with the home directory written `~`.
+///
+/// The log and the diagnostic end up pasted into public bug reports, and the home
+/// directory usually carries the user's name. What follows it is what tells
+/// where the files are.
+fn without_home(path: &Path, home: Option<&Path>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => Path::new("~").join(rest).display().to_string(),
+        None => path.display().to_string(),
     }
 }
 
@@ -760,6 +774,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let api = crate::hid();
 
     let log = journal_status(settings.as_ref().ok().and_then(|s| s.preferences.log_level));
+    let log_dir = COLLECTOR
+        .get()
+        .and_then(|c| c.dir.as_deref())
+        .map(|d| without_home(d, app.path().home_dir().ok().as_deref()));
     line(
         &mut out,
         "log",
@@ -769,7 +787,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             // file contains, or does not.
             log.level
                 .map_or_else(|| "directive".to_string(), |l| l.to_string()),
-            log.dir.as_deref().unwrap_or("no file"),
+            log_dir.as_deref().unwrap_or("no file"),
             if log.forced_by_env {
                 format!(", forced by {VARIABLE}")
             } else {
@@ -1240,6 +1258,23 @@ mod tests {
     }
 
     // -------------------------------------------------------- transitions
+
+    #[test]
+    fn the_home_directory_is_not_shown() {
+        let home = Path::new("home").join("someone");
+        let logs = home.join("logs");
+        assert_eq!(
+            without_home(&logs, Some(&home)),
+            Path::new("~").join("logs").display().to_string()
+        );
+        // A name that only starts like the home directory is another directory.
+        let other = Path::new("home").join("someone-else").join("logs");
+        assert_eq!(
+            without_home(&other, Some(&home)),
+            other.display().to_string()
+        );
+        assert_eq!(without_home(&logs, None), logs.display().to_string());
+    }
 
     #[test]
     fn the_distribution_is_read_from_os_release() {
