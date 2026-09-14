@@ -64,6 +64,9 @@ sha2 = "0.10"
 # (`src/language.rs`). Already in the tree through Tauri.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
+  # Devices plugged in and unplugged (`src/hotplug.rs`).
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Devices_HumanInterfaceDevice",
   "Win32_Foundation",
   "Win32_Globalization",
   # The Windows build in the copied diagnostic (`src/journal.rs`).
@@ -72,6 +75,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+# Kernel uevents for devices plugged in and unplugged (`src/hotplug.rs`). Already
+# in the tree.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # Le stockage se teste dans un dossier temporaire, jamais dans celui de

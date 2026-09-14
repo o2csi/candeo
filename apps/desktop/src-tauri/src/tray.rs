@@ -619,25 +619,10 @@ fn quit(app: &AppHandle) {
 }
 
 fn start(app: &AppHandle, device: DeviceRef, effect: &str) {
-    let params = match current_params(app, device, effect) {
-        Ok(params) => params,
-        Err(e) => {
-            tracing::error!(device = %device, effect, "effect not started from the system tray: {e}");
-            return;
-        }
-    };
-
     // The window's command, not a copy: starting an effect from the menu must
     // do exactly what the gallery does — same library lookup, same layout, same
-    // handle shared with the loop. A second implementation of this path would
-    // diverge at the first change.
-    if let Err(e) = crate::runtime::start_effect(
-        app.clone(),
-        app.state(),
-        device,
-        effect.to_owned(),
-        serde_json::Value::Object(params),
-    ) {
+    // handle shared with the loop, settings re-read now.
+    if let Err(e) = crate::runtime::start_saved(app, device, effect) {
         // The engine may already have named the cause under its own *span*;
         // what would be missing without this line is **where the request came
         // from** — and the most likely failure here, an effect deleted since
@@ -646,26 +631,6 @@ fn start(app: &AppHandle, device: DeviceRef, effect: &str) {
         // per-frame logging, not a human gesture.
         tracing::error!(device = %device, effect, "effect not started from the system tray: {e}");
     }
-}
-
-/// The values to start this effect with, re-read now.
-fn current_params(
-    app: &AppHandle,
-    device: DeviceRef,
-    effect: &str,
-) -> Built<serde_json::Map<String, serde_json::Value>> {
-    let store = storage::store(app)?;
-    let entry = store
-        .list_effects()?
-        .into_iter()
-        .find(|e| e.id == effect)
-        .ok_or_else(|| format!("no effect named “{effect}”"))?;
-    let settings = store.read_settings()?;
-
-    Ok(storage::starting_params(
-        &entry.manifest,
-        settings.effect_params(device.vid, device.pid, effect),
-    ))
 }
 
 /// Toggles the keyboard output, **based on the engine state**.
