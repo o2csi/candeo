@@ -8,20 +8,19 @@ use candeo_protocol::{CommandId, Effect, Report, Rgb};
 pub mod inspection;
 pub mod layout;
 
-pub use inspection::{Check, Inspection, Verdict};
+pub use inspection::{Check, Inspection, Verdict, Warning};
 pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO, NO_SCANCODE};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("périphérique introuvable (VID {vid:#06x}, PID {pid:#06x})")]
+    #[error("device not found (VID {vid:#06x}, PID {pid:#06x})")]
     NotFound { vid: u16, pid: u16 },
-    #[error("accès HID : {0}")]
+    #[error("HID access: {0}")]
     Hid(#[from] hidapi::HidError),
-    #[error("la rangée {row} dépasse la matrice ({rows} rangées)")]
+    #[error("row {row} is outside the matrix ({rows} rows)")]
     RowOutOfRange { row: u8, rows: u8 },
     #[error(
-        "commande {command} non envoyée : ce micrologiciel a répondu à l'ouverture qu'il ne la \
-         connaît pas"
+        "command {command} not sent: on open, this firmware answered that it does not know it"
     )]
     Refused { command: CommandId },
 }

@@ -27,6 +27,15 @@ export interface DeviceRef {
   pid: number
 }
 
+/**
+ * A command's failure as Rust sends it: a key under `errors.` and its parameters,
+ * for the window to say in its language. See `api/journal.ts`, `message`.
+ */
+export interface Failure {
+  code: string
+  params: Record<string, string>
+}
+
 export interface DeviceInfo {
   name: string
   vid: number
@@ -46,7 +55,7 @@ export interface DeviceInfo {
    * Chacun porte le sien : une ouverture qui échoue n'empêche pas les autres de
    * fonctionner, et ne leur fait pas porter son message.
    */
-  error: string | null
+  error: Failure | null
   /**
    * Micrologiciel contre lequel le gabarit a été relevé, `v1.5`. Connu sans rien
    * ouvrir : c'est une donnée du gabarit.
@@ -66,6 +75,8 @@ export interface DeviceInfo {
    *
    * `readonly` : la liste des appareils est exposée en lecture seule par
    * `useDevice`, et un appareil se repasse tel quel aux commandes d'adoption.
+   *
+   * Already in the interface language: Rust renders them when listing.
    */
   warnings: readonly string[]
 }

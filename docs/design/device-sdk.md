@@ -335,11 +335,11 @@ new fits in the last two blocks.
 
 ```rust
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
-    name: "Razer DeathStalker V2 Pro (filaire)",
+    name: "Razer DeathStalker V2 Pro",
     kind: DeviceKind::Keyboard,
     vid: 0x1532,
     pid: 0x0292,
-    interface: 3,                       // MI_03 — l'éclairage, et lui seul
+    interface: 3,                       // MI_03: lighting, and lighting only
 
     grid: Some(Grid { rows: 6, cols: 22, matrix: &[/* 132 positions */] }),
     keys: &[/* 106 touches, nommées et dessinées */],

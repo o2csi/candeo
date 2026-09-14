@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
+import { message } from '../api/journal'
+import en from '../locales/en.json'
+import fr from '../locales/fr.json'
+import { showIn } from '.'
 import { localized } from './text'
+
+describe('message', () => {
+  it('says a failure from Rust in the interface language, and in English for the log', () => {
+    const failure = { code: 'effectNotFound', params: { name: 'Rain' } }
+    showIn('fr')
+    expect(message(failure)).toBe('Aucun effet nommé « Rain ».')
+    expect(message(failure, 'en')).toBe('No effect is named “Rain”.')
+    showIn('en')
+    expect(message(new Error('boom'))).toBe('boom')
+  })
+})
 
 describe('localized', () => {
   it('takes a plain string as it is', () => {
@@ -20,6 +35,23 @@ describe('localized', () => {
   })
 
   it('uses the interface language by default', () => {
+    showIn('fr')
     expect(localized({ en: 'Speed', fr: 'Vitesse' })).toBe('Vitesse')
+    showIn('en')
+    expect(localized({ en: 'Speed', fr: 'Vitesse' })).toBe('Speed')
+  })
+})
+
+describe('catalogs', () => {
+  /** Every key path of a catalog, `a.b.c`. */
+  function keys(catalog: object, prefix = ''): string[] {
+    return Object.entries(catalog).flatMap(([k, v]) =>
+      typeof v === 'object' && v !== null ? keys(v, `${prefix}${k}.`) : [`${prefix}${k}`],
+    )
+  }
+
+  /** `vue-tsc` checks French against the English shape; this also catches extra keys. */
+  it('say the same things in English and French', () => {
+    expect(keys(fr).sort()).toEqual(keys(en).sort())
   })
 })

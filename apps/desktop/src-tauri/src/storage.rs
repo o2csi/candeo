@@ -64,7 +64,10 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::failure::Failure;
+use crate::i18n;
 use crate::journal::LogLevel;
+use crate::language::{Language, LanguageSetting};
 use crate::runtime::swatch::{self, Swatch};
 use crate::shipped::Shipped;
 use crate::{AppState, CmdResult, DeviceRef};
@@ -380,6 +383,9 @@ pub struct Preferences {
     /// the notice the interface shows about it. See [`crate::journal`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log_level: Option<LogLevel>,
+    /// Interface language. `system`, the default, is not written.
+    #[serde(skip_serializing_if = "LanguageSetting::is_system")]
+    pub language: LanguageSetting,
 }
 
 /// Persistent settings.
@@ -794,28 +800,25 @@ fn is_reserved(name: &str) -> bool {
 /// characters, which is what lets the tray menu use it as a separator.
 pub(crate) fn validate_name(name: &str) -> CmdResult<()> {
     if name.is_empty() {
-        return Err("l'effet doit avoir un nom".into());
+        return Err(Failure::new("nameEmpty"));
     }
     if name.chars().count() > MAX_NAME_LEN {
-        return Err(format!(
-            "nom d'effet trop long : {MAX_NAME_LEN} caractères au plus"
-        ));
+        return Err(Failure::new("nameTooLong").with("max", MAX_NAME_LEN));
     }
     if name
         .chars()
         .any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
     {
-        return Err(format!(
-            "« {name} » : un nom d'effet ne peut pas contenir < > : \" / \\ | ? *"
-        ));
+        let characters: Vec<String> = FORBIDDEN_CHARS.iter().map(char::to_string).collect();
+        return Err(Failure::new("nameForbiddenCharacter")
+            .with("name", name)
+            .with("characters", characters.join(" ")));
     }
     if name.starts_with([' ', '.']) || name.ends_with([' ', '.']) {
-        return Err(format!(
-            "« {name} » : un nom d'effet ne peut ni commencer ni finir par une espace ou un point"
-        ));
+        return Err(Failure::new("nameEdges").with("name", name));
     }
     if is_reserved(name) {
-        return Err(format!("« {name} » est un nom réservé par Windows"));
+        return Err(Failure::new("nameReserved").with("name", name));
     }
     Ok(())
 }
@@ -835,14 +838,14 @@ fn sanitize_name(wanted: &str) -> String {
     let trimmed: String = replaced
         .trim_matches([' ', '.'])
         .chars()
-        .take(MAX_NAME_LEN - " effet".len())
+        .take(MAX_NAME_LEN - " effect".len())
         .collect();
     let name = trimmed.trim_end_matches([' ', '.']);
 
     if name.is_empty() {
-        "Effet".into()
+        "Effect".into()
     } else if is_reserved(name) {
-        format!("{name} effet")
+        format!("{name} effect")
     } else {
         name.to_owned()
     }
@@ -869,18 +872,23 @@ fn free_name(base: &str, taken: &BTreeSet<String>) -> String {
         .expect("an unbounded range always has a free name")
 }
 
-/// `<name> (copie)`, `<name> (copie 2)`… — the first one `taken` does not hold.
+/// `<name> (copy)`, `<name> (copy 2)`… — the first one `taken` does not hold.
 ///
-/// The suffix is interface text, French like the rest of the interface until the
-/// catalogs exist. The name is shortened to leave room for it.
-fn copy_name(name: &str, taken: &BTreeSet<String>) -> String {
+/// The suffix is interface text, in `language`. The name is shortened to leave
+/// room for it.
+fn copy_name(name: &str, taken: &BTreeSet<String>, language: Language) -> String {
     (1..)
         .map(|n| {
-            let suffix = if n == 1 {
-                " (copie)".to_owned()
+            let copy = if n == 1 {
+                i18n::text(language, "effects.copy")
             } else {
-                format!(" (copie {n})")
+                i18n::t(
+                    language,
+                    "effects.copyN",
+                    &BTreeMap::from([("n", n.to_string())]),
+                )
             };
+            let suffix = format!(" ({copy})");
             let stem: String = name
                 .chars()
                 .take(MAX_NAME_LEN - suffix.chars().count())
@@ -967,17 +975,17 @@ impl Store {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => {
-                return Err(format!(
-                    "lecture de {} impossible : {e}",
+                return Err(Failure::unexpected(format!(
+                    "cannot read {}: {e}",
                     self.effects_dir.display()
-                ))
+                )))
             }
         };
 
         let mut names = Vec::new();
         for entry in entries {
-            let entry =
-                entry.map_err(|e| format!("lecture de la bibliothèque interrompue : {e}"))?;
+            let entry = entry
+                .map_err(|e| Failure::unexpected(format!("library listing interrupted: {e}")))?;
             let path = entry.path();
             let is_source = path
                 .extension()
@@ -1019,7 +1027,7 @@ impl Store {
         validate_name(name)?;
         match self.existing(name)? {
             Some(existing) if existing == name => Ok(()),
-            _ => Err(format!("aucun effet nommé « {name} »")),
+            _ => Err(Failure::new("effectNotFound").with("name", name)),
         }
     }
 
@@ -1069,16 +1077,14 @@ impl Store {
         validate_name(name)?;
         match (self.existing(name)?, create) {
             (Some(existing), true) => {
-                return Err(format!("un effet nommé « {existing} » existe déjà"));
+                return Err(Failure::new("effectExists").with("name", existing));
             }
             (Some(existing), false) if existing == name => {
                 if self.is_builtin(name) {
-                    return Err(format!(
-                        "« {name} » est un effet intégré : dupliquez-le pour le modifier"
-                    ));
+                    return Err(Failure::new("builtinNotSaved").with("name", name));
                 }
             }
-            (_, false) => return Err(format!("aucun effet nommé « {name} »")),
+            (_, false) => return Err(Failure::new("effectNotFound").with("name", name)),
             (None, true) => self.take_shipped_name(name)?,
         }
         create_dir(&self.effects_dir)?;
@@ -1098,18 +1104,16 @@ impl Store {
         self.require(name)?;
         let current = sha256_hex(
             &fs::read(self.source_path(name))
-                .map_err(|e| format!("lecture de « {name} » impossible : {e}"))?,
+                .map_err(|e| Failure::unexpected(format!("cannot read “{name}”: {e}")))?,
         );
         if current != hash {
-            return Err(format!(
-                "« {name} » a changé pendant sa compilation : actualisez la bibliothèque"
-            ));
+            return Err(Failure::new("effectChanged").with("name", name));
         }
 
         let record = compile_record(hash, js);
         create_dir(&self.cache_dir)?;
-        let json =
-            serde_json::to_string(&record).map_err(|e| format!("cache non sérialisable : {e}"))?;
+        let json = serde_json::to_string(&record)
+            .map_err(|e| Failure::unexpected(format!("cache record not serialisable: {e}")))?;
         write_atomically(&self.cache_path(name), &json)?;
         Ok(mark_shipped(
             user_entry(name.to_owned(), hash.to_owned(), Some(record)),
@@ -1125,16 +1129,16 @@ impl Store {
         self.require(id)?;
         let hash = sha256_hex(
             &fs::read(self.source_path(id))
-                .map_err(|e| format!("lecture de « {id} » impossible : {e}"))?,
+                .map_err(|e| Failure::unexpected(format!("cannot read “{id}”: {e}")))?,
         );
         match self.read_cache(id).filter(|r| r.hash == hash) {
             Some(CacheRecord {
                 error: Some(error), ..
-            }) => Err(format!("« {id} » ne se charge pas : {error}")),
+            }) => Err(Failure::new("effectBroken")
+                .with("name", id)
+                .with("error", error)),
             Some(record) => Ok(record.js),
-            None => Err(format!(
-                "« {id} » n'est pas encore compilé : actualisez la bibliothèque"
-            )),
+            None => Err(Failure::new("effectNotCompiled").with("name", id)),
         }
     }
 
@@ -1145,15 +1149,13 @@ impl Store {
     pub fn rename_effect(&self, from: &str, to: &str) -> CmdResult<()> {
         self.require(from)?;
         if self.is_builtin(from) {
-            return Err(format!(
-                "« {from} » est un effet intégré : dupliquez-le pour le renommer"
-            ));
+            return Err(Failure::new("builtinNotRenamed").with("name", from));
         }
         validate_name(to)?;
         if let Some(existing) = self.existing(to)? {
             // The same file under another case is a rename too: `Onde` → `onde`.
             if existing != from {
-                return Err(format!("un effet nommé « {existing} » existe déjà"));
+                return Err(Failure::new("effectExists").with("name", existing));
             }
         }
         if from == to {
@@ -1162,7 +1164,7 @@ impl Store {
         self.take_shipped_name(to)?;
         let (source, target) = (self.source_path(from), self.source_path(to));
         fs::rename(&source, &target)
-            .map_err(|e| format!("renommage de {} impossible : {e}", source.display()))?;
+            .map_err(|e| Failure::unexpected(format!("cannot rename {}: {e}", source.display())))?;
         // A cache that does not follow only costs a compilation at the next
         // Refresh: not a reason to undo a rename that succeeded.
         let _ = fs::rename(self.cache_path(from), self.cache_path(to));
@@ -1177,9 +1179,7 @@ impl Store {
     pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
         self.require(id)?;
         if self.is_builtin(id) {
-            return Err(format!(
-                "« {id} » est un effet intégré : il ne se supprime pas depuis candeo"
-            ));
+            return Err(Failure::new("builtinNotDeleted").with("name", id));
         }
         Ok(())
     }
@@ -1210,17 +1210,17 @@ impl Store {
         Ok(())
     }
 
-    /// Copies an effect under a new name and returns it: `<name> (copie)`, then
-    /// `(copie 2)`, `(copie 3)`…
+    /// Copies an effect under a new name and returns it: `<name> (copy)`, then
+    /// `(copy 2)`, `(copy 3)`…
     ///
     /// The cache is copied too: same bytes, same hash, so the copy is ready
     /// without a compilation. The copy is not recorded as shipped, even when the
     /// original is: it is a new effect, the user's.
-    pub fn duplicate_effect(&self, id: &str) -> CmdResult<String> {
+    pub fn duplicate_effect(&self, id: &str, language: Language) -> CmdResult<String> {
         self.require(id)?;
         let source = read(&self.source_path(id))?;
         let taken: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
-        let name = copy_name(id, &taken);
+        let name = copy_name(id, &taken, language);
 
         write_atomically(&self.source_path(&name), &source)?;
         if let Ok(record) = fs::read_to_string(self.cache_path(id)) {
@@ -1247,7 +1247,7 @@ impl Store {
         self.check_deletable(id)?;
         let path = self.source_path(id);
         fs::remove_file(&path)
-            .map_err(|e| format!("suppression de {} impossible : {e}", path.display()))?;
+            .map_err(|e| Failure::unexpected(format!("cannot delete {}: {e}", path.display())))?;
         let _ = fs::remove_file(self.cache_path(id));
         Ok(())
     }
@@ -1274,10 +1274,10 @@ impl Store {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
             Err(e) => {
-                return Err(format!(
-                    "lecture de {} impossible : {e}",
+                return Err(Failure::unexpected(format!(
+                    "cannot read {}: {e}",
                     self.effects_dir.display()
-                ))
+                )))
             }
         };
         let mut dirs: Vec<(String, PathBuf)> = entries
@@ -1326,8 +1326,9 @@ impl Store {
         create_dir(&self.effects_dir)?;
         for (_, dir, name, source) in &plan {
             write_atomically(&self.source_path(name), source)?;
-            fs::remove_dir_all(dir)
-                .map_err(|e| format!("suppression de {} impossible : {e}", dir.display()))?;
+            fs::remove_dir_all(dir).map_err(|e| {
+                Failure::unexpected(format!("cannot delete {}: {e}", dir.display()))
+            })?;
         }
         Ok(renames)
     }
@@ -1439,12 +1440,10 @@ impl Store {
         let effect = shipped
             .iter()
             .find(|s| s.name == name)
-            .ok_or_else(|| format!("« {name} » n'est pas un effet intégré"))?;
+            .ok_or_else(|| Failure::new("notBuiltin").with("name", name))?;
         if let Some(existing) = self.existing(name)? {
             if existing != name || !self.is_builtin(name) {
-                return Err(format!(
-                    "un effet à vous s'appelle déjà « {existing} » : renommez-le pour restaurer l'intégré"
-                ));
+                return Err(Failure::new("builtinNameTaken").with("name", existing));
             }
         }
         // Recorded first: a file that then fails to be written is simply still
@@ -1479,17 +1478,16 @@ impl Store {
             // the interface to treat the nominal case as an incident.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Settings::default()),
             Err(e) => {
-                return Err(format!(
-                    "lecture de {} impossible : {e}",
+                return Err(Failure::unexpected(format!(
+                    "cannot read {}: {e}",
                     self.settings_file.display()
-                ))
+                )))
             }
         };
         let mut settings: Settings = serde_json::from_str(&raw).map_err(|e| {
-            format!(
-                "réglages illisibles dans {} : {e}",
-                self.settings_file.display()
-            )
+            Failure::new("settingsUnreadable")
+                .with("path", self.settings_file.display())
+                .with("detail", e)
         })?;
         // Here and nowhere else: this is the only path by which a file enters the
         // application, so the only place where a legacy key can be translated
@@ -1520,19 +1518,19 @@ impl Store {
     /// without that would buy nothing.
     pub fn write_settings(&self, settings: &Settings) -> CmdResult<()> {
         let Some(parent) = self.settings_file.parent() else {
-            return Err("chemin de réglages sans dossier parent".into());
+            return Err(Failure::unexpected("settings path has no parent folder"));
         };
         create_dir(parent)?;
 
         let json = serde_json::to_string_pretty(settings)
-            .map_err(|e| format!("réglages non sérialisables : {e}"))?;
+            .map_err(|e| Failure::unexpected(format!("settings not serialisable: {e}")))?;
         let tmp = self.settings_file.with_extension("json.tmp");
         write(&tmp, &json)?;
         fs::rename(&tmp, &self.settings_file).map_err(|e| {
-            format!(
-                "écriture de {} impossible : {e}",
+            Failure::unexpected(format!(
+                "cannot write {}: {e}",
                 self.settings_file.display()
-            )
+            ))
         })
     }
 
@@ -1694,9 +1692,11 @@ impl Declared {
 }
 
 /// The fields of a declared manifest the library keeps, and the API version check.
-fn declared_fields(raw: &str) -> CmdResult<Declared> {
+///
+/// Its error is the effect's, for its author: English, like TypeScript's.
+fn declared_fields(raw: &str) -> Result<Declared, String> {
     let value: serde_json::Value =
-        serde_json::from_str(raw).map_err(|e| format!("manifeste illisible : {e}"))?;
+        serde_json::from_str(raw).map_err(|e| format!("unreadable manifest: {e}"))?;
     let description = text_or_empty(value.get("description"));
     let params = value
         .get("params")
@@ -1709,7 +1709,7 @@ fn declared_fields(raw: &str) -> CmdResult<Declared> {
     };
     if api_version == 0 || api_version > EFFECTS_API_VERSION {
         return Err(format!(
-            "effet écrit pour la version {api_version} de l'API d'effets ; cette version de candeo ne connaît que la {EFFECTS_API_VERSION}"
+            "effect written for version {api_version} of the effects API; this version of candeo only knows version {EFFECTS_API_VERSION}"
         ));
     }
     let reads_keys = value
@@ -1725,16 +1725,18 @@ fn declared_fields(raw: &str) -> CmdResult<Declared> {
 }
 
 fn create_dir(path: &Path) -> CmdResult<()> {
-    fs::create_dir_all(path).map_err(|e| format!("création de {} impossible : {e}", path.display()))
+    fs::create_dir_all(path)
+        .map_err(|e| Failure::unexpected(format!("cannot create {}: {e}", path.display())))
 }
 
 fn read(path: &Path) -> CmdResult<String> {
-    fs::read_to_string(path).map_err(|e| format!("lecture de {} impossible : {e}", path.display()))
+    fs::read_to_string(path)
+        .map_err(|e| Failure::unexpected(format!("cannot read {}: {e}", path.display())))
 }
 
 fn write(path: &Path, contents: &str) -> CmdResult<()> {
     fs::write(path, contents)
-        .map_err(|e| format!("écriture de {} impossible : {e}", path.display()))
+        .map_err(|e| Failure::unexpected(format!("cannot write {}: {e}", path.display())))
 }
 
 /// Writes through a temporary file and a rename, so that a reader never sees
@@ -1746,7 +1748,8 @@ fn write_atomically(path: &Path, contents: &str) -> CmdResult<()> {
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     write(&tmp, contents)?;
-    fs::rename(&tmp, path).map_err(|e| format!("écriture de {} impossible : {e}", path.display()))
+    fs::rename(&tmp, path)
+        .map_err(|e| Failure::unexpected(format!("cannot write {}: {e}", path.display())))
 }
 
 // ---------------------------------------------------------------- commands
@@ -1757,15 +1760,15 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     let data = app
         .path()
         .app_data_dir()
-        .map_err(|e| format!("dossier de données introuvable : {e}"))?;
+        .map_err(|e| Failure::unexpected(format!("no data folder: {e}")))?;
     let config = app
         .path()
         .app_config_dir()
-        .map_err(|e| format!("dossier de configuration introuvable : {e}"))?;
+        .map_err(|e| Failure::unexpected(format!("no configuration folder: {e}")))?;
     let cache = app
         .path()
         .app_cache_dir()
-        .map_err(|e| format!("dossier de cache introuvable : {e}"))?;
+        .map_err(|e| Failure::unexpected(format!("no cache folder: {e}")))?;
     Ok(Store::new(&data, &config, &cache))
 }
 
@@ -1865,7 +1868,7 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
 /// [`Store::duplicate_effect`].
 #[tauri::command]
 pub fn duplicate_effect(app: AppHandle, id: String) -> CmdResult<String> {
-    store(&app)?.duplicate_effect(&id)
+    store(&app)?.duplicate_effect(&id, crate::language::current(&app))
 }
 
 /// The shipped effects the folder no longer holds. See [`Store::missing_shipped`].
@@ -1893,7 +1896,7 @@ pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let dir = store.effects_dir()?;
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| format!("ouverture de {} impossible : {e}", dir.display()))
+        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
 }
 
 /// Forgets what `settings.json` keeps about an effect the folder no longer holds:
@@ -2148,7 +2151,7 @@ mod tests {
 
         assert_eq!(user_effect(&store, "Onde").state, EffectState::Stale);
         let err = store.effect_js("Onde").unwrap_err();
-        assert!(err.contains("pas encore compilé"), "message: {err}");
+        assert_eq!(err.code, "effectNotCompiled");
     }
 
     /// Recording JavaScript for a hash the file no longer has would pair this code
@@ -2164,7 +2167,7 @@ mod tests {
         let err = store
             .cache_effect("Onde", &hash, &solid_effect("00ff00"))
             .unwrap_err();
-        assert!(err.contains("a changé"), "message: {err}");
+        assert_eq!(err.code, "effectChanged");
         assert!(!cache_file(&tmp, "Onde").exists());
     }
 
@@ -2183,7 +2186,7 @@ mod tests {
         assert!(entry.error.as_deref().is_some_and(|e| !e.is_empty()));
         assert_eq!(user_effect(&store, "Cassé").state, EffectState::Broken);
         let err = store.effect_js("Cassé").unwrap_err();
-        assert!(err.contains("ne se charge pas"), "message: {err}");
+        assert_eq!(err.code, "effectBroken");
         assert_eq!(
             store.effect_source("Cassé").unwrap(),
             "export default { description: 'sans render' }"
@@ -2217,7 +2220,7 @@ mod tests {
 
         assert_eq!(entry.state, EffectState::Broken);
         let error = entry.error.unwrap();
-        assert!(error.contains("API d'effets"), "message: {error}");
+        assert!(error.contains("effects API"), "message: {error}");
     }
 
     /// A description in several languages is kept for the window; one that is
@@ -2264,10 +2267,10 @@ mod tests {
 
         for name in ["Onde", "onde", "ONDE"] {
             let err = store.save_effect_source(name, "x", true).unwrap_err();
-            assert!(err.contains("existe déjà"), "\"{name}\": {err}");
+            assert_eq!(err.code, "effectExists", "\"{name}\"");
         }
         let err = store.save_effect_source("Absent", "x", false).unwrap_err();
-        assert!(err.contains("aucun effet"), "message: {err}");
+        assert_eq!(err.code, "effectNotFound");
         // Saving again under another case is not this effect.
         assert!(store.save_effect_source("onde", "x", false).is_err());
 
@@ -2380,7 +2383,7 @@ mod tests {
                 store.save_effect_source(name, "x", true).unwrap_err(),
             ] {
                 assert!(
-                    !err.contains("aucun effet") && !err.contains("impossible"),
+                    !["effectNotFound", "unexpected"].contains(&err.code),
                     "\"{name}\" reached the disk: {err}"
                 );
             }
@@ -2403,8 +2406,8 @@ mod tests {
             validate_name(&name).unwrap_or_else(|e| panic!("\"{wanted}\" -> \"{name}\": {e}"));
         }
         assert_eq!(sanitize_name("Onde / Vague : v2"), "Onde - Vague - v2");
-        assert_eq!(sanitize_name("CON"), "CON effet");
-        assert_eq!(sanitize_name("  ..  "), "Effet");
+        assert_eq!(sanitize_name("CON"), "CON effect");
+        assert_eq!(sanitize_name("  ..  "), "Effect");
         assert_eq!(free_name("Onde", &taken), "Onde (3)");
         assert_eq!(free_name("ONDE", &taken), "ONDE (3)");
         assert_eq!(free_name("Vague", &taken), "Vague");
@@ -2428,7 +2431,7 @@ mod tests {
         assert_eq!(store.effect_js("Vague").unwrap(), js);
 
         let err = store.rename_effect("Vague", "autre").unwrap_err();
-        assert!(err.contains("existe déjà"), "message: {err}");
+        assert_eq!(err.code, "effectExists");
         assert!(store.rename_effect("Absent", "Nouveau").is_err());
         assert!(store.rename_effect("Vague", "a:b").is_err());
 
@@ -2453,7 +2456,7 @@ mod tests {
         assert!(user_effects(&store).is_empty());
 
         let err = store.delete_effect("Onde").unwrap_err();
-        assert!(err.contains("aucun effet"), "message: {err}");
+        assert_eq!(err.code, "effectNotFound");
     }
 
     /// A copy is a new effect: its own name, the same source, already compiled,
@@ -2464,28 +2467,30 @@ mod tests {
         let js = solid_effect("00ff00");
         create_and_cache(&store, "Onde", &js);
 
-        assert_eq!(store.duplicate_effect("Onde").unwrap(), "Onde (copie)");
-        assert_eq!(store.duplicate_effect("Onde").unwrap(), "Onde (copie 2)");
+        let duplicate = |id| store.duplicate_effect(id, Language::En).unwrap();
+        assert_eq!(duplicate("Onde"), "Onde (copy)");
+        assert_eq!(duplicate("Onde"), "Onde (copy 2)");
+        assert_eq!(duplicate("Onde (copy)"), "Onde (copy) (copy)");
         assert_eq!(
-            store.duplicate_effect("Onde (copie)").unwrap(),
-            "Onde (copie) (copie)"
+            store.duplicate_effect("Onde", Language::Fr).unwrap(),
+            "Onde (copie)"
         );
 
-        let copy = user_effect(&store, "Onde (copie)");
+        let copy = user_effect(&store, "Onde (copy)");
         assert_eq!(copy.state, EffectState::Ready);
-        assert_eq!(store.effect_js("Onde (copie)").unwrap(), js);
-        assert!(effects_dir(&tmp).join("Onde (copie 2).ts").is_file());
-        assert!(store.duplicate_effect("Absent").is_err());
+        assert_eq!(store.effect_js("Onde (copy)").unwrap(), js);
+        assert!(effects_dir(&tmp).join("Onde (copy 2).ts").is_file());
+        assert!(store.duplicate_effect("Absent", Language::En).is_err());
 
         store.seed_shipped(&shipped_v1()).unwrap();
-        let name = store.duplicate_effect("Livré").unwrap();
+        let name = duplicate("Livré");
         assert_eq!(user_effect(&store, &name).kind, EffectKind::User);
     }
 
     #[test]
     fn a_copy_name_stays_valid() {
         let long = "a".repeat(MAX_NAME_LEN);
-        let name = copy_name(&long, &BTreeSet::new());
+        let name = copy_name(&long, &BTreeSet::new(), Language::Fr);
         validate_name(&name).unwrap_or_else(|e| panic!("\"{name}\": {e}"));
         assert!(name.ends_with(" (copie)"), "name: {name}");
     }
@@ -2778,22 +2783,25 @@ mod tests {
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
 
-        for err in [
-            store.delete_effect("Livré").unwrap_err(),
-            store.rename_effect("Livré", "Le mien").unwrap_err(),
+        let codes = [
+            store.delete_effect("Livré").unwrap_err().code,
+            store.rename_effect("Livré", "Le mien").unwrap_err().code,
             store
                 .save_effect_source("Livré", "mine", false)
-                .unwrap_err(),
-        ] {
-            assert!(err.contains("effet intégré"), "message: {err}");
-        }
+                .unwrap_err()
+                .code,
+        ];
+        assert_eq!(
+            codes,
+            ["builtinNotDeleted", "builtinNotRenamed", "builtinNotSaved"]
+        );
         assert_eq!(
             fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
             shipped_v1()[0].source
         );
 
         // Duplicating is how it becomes someone's own.
-        let copy = store.duplicate_effect("Livré").unwrap();
+        let copy = store.duplicate_effect("Livré", Language::En).unwrap();
         store.save_effect_source(&copy, "mine", false).unwrap();
         store.rename_effect(&copy, "Le mien").unwrap();
         store.delete_effect("Le mien").unwrap();
@@ -2848,7 +2856,7 @@ mod tests {
             assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
             assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
             let err = store.restore_shipped(&shipped_v1(), "Livré").unwrap_err();
-            assert!(err.contains("effet à vous"), "message: {err}");
+            assert_eq!(err.code, "builtinNameTaken");
             assert_eq!(
                 fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
                 "mine"
@@ -2861,7 +2869,7 @@ mod tests {
     fn only_shipped_effects_are_restored() {
         let (_tmp, store) = temp_store();
         let err = store.restore_shipped(&shipped_v1(), "Autre").unwrap_err();
-        assert!(err.contains("pas un effet intégré"), "message: {err}");
+        assert_eq!(err.code, "notBuiltin");
     }
 
     #[test]
@@ -2993,6 +3001,7 @@ mod tests {
             version: SETTINGS_VERSION,
             preferences: Preferences {
                 log_level: Some(LogLevel::Debug),
+                language: LanguageSetting::Fr,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3160,6 +3169,7 @@ mod tests {
         let settings = Settings {
             preferences: Preferences {
                 log_level: Some(LogLevel::Trace),
+                ..Preferences::default()
             },
             ..Settings::default()
         };
@@ -3170,6 +3180,27 @@ mod tests {
         assert_eq!(
             store.read_settings().unwrap().preferences.log_level,
             Some(LogLevel::Trace)
+        );
+    }
+
+    /// The language follows the system until someone chooses, and only a choice
+    /// is written.
+    #[test]
+    fn the_language_is_written_only_when_chosen() {
+        let (tmp, store) = temp_store();
+        let file = tmp.path().join("config").join("settings.json");
+        store.write_settings(&Settings::default()).unwrap();
+        assert!(!fs::read_to_string(&file).unwrap().contains("language"));
+
+        let mut settings = store.read_settings().unwrap();
+        settings.preferences.language = LanguageSetting::En;
+        store.write_settings(&settings).unwrap();
+        assert!(fs::read_to_string(&file)
+            .unwrap()
+            .contains(r#""language": "en""#));
+        assert_eq!(
+            store.read_settings().unwrap().preferences.language,
+            LanguageSetting::En
         );
     }
 
@@ -3221,10 +3252,10 @@ mod tests {
         let (tmp, store) = temp_store();
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
-        fs::write(config.join("settings.json"), "{ ceci n'est pas du JSON").unwrap();
+        fs::write(config.join("settings.json"), "{ this is not JSON").unwrap();
 
         let err = store.read_settings().unwrap_err();
-        assert!(err.contains("réglages illisibles"), "message: {err}");
+        assert_eq!(err.code, "settingsUnreadable");
     }
 
     /// **The distinction this whole module keeps**, checked where it is most
@@ -3736,6 +3767,7 @@ mod tests {
         // exactly what it watches for.
         let preferences = Preferences {
             log_level: Some(LogLevel::Debug),
+            language: LanguageSetting::En,
         };
         mirror("Preferences", &preferences);
         mirror(

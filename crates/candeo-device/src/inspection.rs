@@ -119,13 +119,13 @@ pub struct Inspection {
 /// disclose nothing.
 impl std::fmt::Debug for Inspection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let serie = match &self.serial {
-            Ok(s) => format!("Ok(<masquée, {} caractères>)", s.chars().count()),
+        let serial = match &self.serial {
+            Ok(s) => format!("Ok(<hidden, {} characters>)", s.chars().count()),
             Err(e) => format!("Err({e:?})"),
         };
         f.debug_struct("Inspection")
             .field("firmware", &self.firmware)
-            .field("serial", &format_args!("{serie}"))
+            .field("serial", &format_args!("{serial}"))
             .field("checks", &self.checks)
             .finish()
     }
@@ -135,7 +135,8 @@ impl std::fmt::Debug for Inspection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Check {
     pub command: CommandId,
-    /// The name used when talking to a person: "luminosité" (brightness)…
+    /// The command's name for a person, `brightness`: the application translates
+    /// it.
     pub name: &'static str,
     pub verdict: Verdict,
 }
@@ -171,7 +172,7 @@ impl Inspection {
             .any(|c| c.command == command && c.verdict == Verdict::Unsupported)
     }
 
-    /// What deserves to be **seen**, in the interface language.
+    /// What deserves to be **seen**.
     ///
     /// An empty list means "nothing to report", **not** "compatible": an unverified
     /// command is not listed, because it is not an anomaly — it is the limit of what
@@ -181,33 +182,32 @@ impl Inspection {
     /// application useless after a routine update, when the protocol will most
     /// likely not have changed; the warning turns a silent failure into a stated
     /// suspicion.
-    pub fn warnings(&self, layout: &Layout) -> Vec<String> {
-        let releve = layout.surveyed_firmware;
+    pub fn warnings(&self, layout: &Layout) -> Vec<Warning> {
+        let surveyed = layout.surveyed_firmware;
         let mut out = Vec::new();
         match &self.firmware {
-            Ok(lu) if *lu != releve => out.push(format!(
-                "Micrologiciel {lu}, alors que ce gabarit a été relevé sur {releve}. Le protocole \
-                 n'a probablement pas bougé ; mais si le clavier n'obéit pas, c'est la première \
-                 piste."
-            )),
+            Ok(read) if *read != surveyed => out.push(Warning::FirmwareDiffers {
+                read: *read,
+                surveyed,
+            }),
             Ok(_) => {}
-            Err(e) => out.push(format!(
-                "Version du micrologiciel non lue ({e}) : impossible de la comparer à celle du \
-                 relevé ({releve})."
-            )),
+            Err(reason) => out.push(Warning::FirmwareNotRead {
+                reason: reason.clone(),
+                surveyed,
+            }),
         }
         for c in &self.checks {
             match &c.verdict {
-                Verdict::Unsupported => out.push(format!(
-                    "Ce micrologiciel ne connaît pas la commande « {} » ({}) : elle n'est plus \
-                     envoyée.",
-                    c.name, c.command
-                )),
-                Verdict::ReadBackDiffers { wrote, read } => out.push(format!(
-                    "Commande « {} » ({}) acceptée, mais l'appareil relit {read} après qu'on a \
-                     réécrit {wrote} : il ne la comprend plus comme au relevé.",
-                    c.name, c.command
-                )),
+                Verdict::Unsupported => out.push(Warning::Unsupported {
+                    name: c.name,
+                    command: c.command,
+                }),
+                Verdict::ReadBackDiffers { wrote, read } => out.push(Warning::ReadBackDiffers {
+                    name: c.name,
+                    command: c.command,
+                    wrote: wrote.clone(),
+                    read: read.clone(),
+                }),
                 Verdict::Understood | Verdict::Unverified(_) => {}
             }
         }
@@ -215,31 +215,85 @@ impl Inspection {
     }
 }
 
+/// A finding of the inspection, for the application to say in its language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Warning {
+    FirmwareDiffers {
+        read: Firmware,
+        surveyed: Firmware,
+    },
+    FirmwareNotRead {
+        reason: String,
+        surveyed: Firmware,
+    },
+    Unsupported {
+        name: &'static str,
+        command: CommandId,
+    },
+    ReadBackDiffers {
+        name: &'static str,
+        command: CommandId,
+        wrote: String,
+        read: String,
+    },
+}
+
+/// In English, for the log and the diagnostic.
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FirmwareDiffers { read, surveyed } => write!(
+                f,
+                "firmware {read}, while this layout was surveyed on {surveyed}"
+            ),
+            Self::FirmwareNotRead { reason, surveyed } => write!(
+                f,
+                "firmware version not read ({reason}), cannot compare with the surveyed \
+                 {surveyed}"
+            ),
+            Self::Unsupported { name, command } => write!(
+                f,
+                "the firmware does not know the {name} command ({command}), no longer sent"
+            ),
+            Self::ReadBackDiffers {
+                name,
+                command,
+                wrote,
+                read,
+            } => write!(
+                f,
+                "{name} command ({command}) accepted, but reads back {read} after {wrote} was \
+                 rewritten"
+            ),
+        }
+    }
+}
+
 /// Inspects a device that was just opened. **Cannot fail**: every unanswered
 /// question becomes a reason, never an open error.
 pub(crate) fn inspect(t: &impl Transport) -> Inspection {
     let firmware = read(t, &Report::read_firmware())
-        .and_then(|r| r.firmware().ok_or_else(|| "réponse vide".to_string()));
+        .and_then(|r| r.firmware().ok_or_else(|| "empty response".to_string()));
     let serial = read(t, &Report::read_serial())
-        .and_then(|r| r.serial().ok_or_else(|| "réponse illisible".to_string()));
+        .and_then(|r| r.serial().ok_or_else(|| "unreadable response".to_string()));
 
     let checks = vec![
         Check {
             command: SET_BRIGHTNESS,
-            name: "luminosité",
+            name: "brightness",
             verdict: check_brightness(t),
         },
         Check {
             command: SET_EFFECT,
-            name: "effet",
+            name: "effect",
             verdict: check_effect(t),
         },
         Check {
             command: WRITE_ROW,
-            name: "rangée",
+            name: "row",
             verdict: Verdict::Unverified(
-                "jamais émise à l'ouverture : aucune relecture de couleur n'existe, toute rangée \
-                 écrite se verrait sur le clavier"
+                "never sent on open: no color read-back exists, any written row would show on \
+                 the keyboard"
                     .into(),
             ),
         },
@@ -256,9 +310,11 @@ fn check_brightness(t: &impl Transport) -> Verdict {
     let level = match read(t, &Report::read_brightness()) {
         Ok(r) => match r.brightness() {
             Some(n) => n,
-            None => return Verdict::Unverified("luminosité relue sous une forme inconnue".into()),
+            None => return Verdict::Unverified("brightness read back in an unknown form".into()),
         },
-        Err(e) => return Verdict::Unverified(format!("luminosité non relue, rien émis : {e}")),
+        Err(e) => {
+            return Verdict::Unverified(format!("brightness not read back, nothing sent: {e}"))
+        }
     };
     rewrite(
         t,
@@ -276,13 +332,13 @@ fn check_effect(t: &impl Transport) -> Verdict {
             Some(e) => e,
             None => {
                 return Verdict::Unverified(
-                    "l'effet en cours ne se réécrit pas à l'identique (couleur ou forme non \
-                     établie au relevé), rien émis"
+                    "the current effect cannot be rewritten identically (color or shape not \
+                     established by the survey), nothing sent"
                         .into(),
                 )
             }
         },
-        Err(e) => return Verdict::Unverified(format!("effet non relu, rien émis : {e}")),
+        Err(e) => return Verdict::Unverified(format!("effect not read back, nothing sent: {e}")),
     };
     rewrite(
         t,
@@ -305,12 +361,12 @@ fn rewrite<T: PartialEq + Copy>(
 ) -> Verdict {
     let response = match exchange(t, write) {
         Ok(r) => r,
-        Err(e) => return Verdict::Unverified(format!("réécriture sans réponse : {e}")),
+        Err(e) => return Verdict::Unverified(format!("rewrite without a response: {e}")),
     };
     match response.status() {
         Status::Understood => {}
         Status::Unsupported => return Verdict::Unsupported,
-        autre => return Verdict::Unverified(format!("réécriture rendue {autre}")),
+        other => return Verdict::Unverified(format!("rewrite answered {other}")),
     }
     match read(t, reread) {
         Ok(r) => match decode(&r) {
@@ -321,22 +377,22 @@ fn rewrite<T: PartialEq + Copy>(
             },
             None => Verdict::ReadBackDiffers {
                 wrote: render(before),
-                read: "une forme inconnue".into(),
+                read: "an unknown form".into(),
             },
         },
-        Err(e) => Verdict::Unverified(format!("réécriture comprise, mais pas relue : {e}")),
+        Err(e) => Verdict::Unverified(format!("rewrite understood, but not read back: {e}")),
     }
 }
 
 /// An effect, as named to a person — not the name of a Rust variant.
 fn effect_name(effect: Effect) -> String {
     match effect {
-        Effect::Off => "éteint".into(),
-        Effect::SpectrumCycle => "spectre".into(),
+        Effect::Off => "off".into(),
+        Effect::SpectrumCycle => "spectrum".into(),
         Effect::Wave { direction, speed } => {
-            format!("vague (direction {direction}, vitesse {speed})")
+            format!("wave (direction {direction}, speed {speed})")
         }
-        Effect::Custom => "piloté par l'hôte".into(),
+        Effect::Custom => "host-controlled".into(),
     }
 }
 
@@ -345,7 +401,7 @@ fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
     let r = exchange(t, request)?;
     match r.status() {
         Status::Understood => Ok(r),
-        autre => Err(format!("{} rend l'état {autre}", request.id())),
+        other => Err(format!("{} answers status {other}", request.id())),
     }
 }
 
@@ -356,28 +412,28 @@ fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
 /// as ours. Better to conclude nothing than to conclude on someone else's response.
 fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
     t.send(&request.to_feature_buffer())
-        .map_err(|e| format!("écriture refusée : {e}"))?;
+        .map_err(|e| format!("write refused: {e}"))?;
     for _ in 0..RELECTURES {
         let mut buf = Response::buffer();
-        let lus = t
+        let received = t
             .receive(&mut buf)
-            .map_err(|e| format!("lecture refusée : {e}"))?;
-        let r = Response::from_feature_buffer(&buf, lus)
-            .ok_or_else(|| format!("réponse tronquée : {lus} octets"))?;
+            .map_err(|e| format!("read refused: {e}"))?;
+        let r = Response::from_feature_buffer(&buf, received)
+            .ok_or_else(|| format!("truncated response: {received} bytes"))?;
         if r.status() == Status::Busy {
             std::thread::sleep(BUSY_DELAY);
             continue;
         }
         if !r.answers(request) {
             return Err(format!(
-                "réponse à {} relue au lieu de {}",
+                "response to {} read instead of {}",
                 r.id(),
                 request.id()
             ));
         }
         return Ok(r);
     }
-    Err(format!("toujours occupé après {RELECTURES} relectures"))
+    Err(format!("still busy after {RELECTURES} reads"))
 }
 
 // ---------------------------------------------------------------- tests
@@ -471,7 +527,7 @@ mod tests {
         fn receive(&self, buf: &mut [u8]) -> Result<usize, String> {
             let mut e = self.state.borrow_mut();
             if e.read_denied {
-                return Err("accès en lecture refusé".into());
+                return Err("read access denied".into());
             }
             let request = e.last.as_ref().expect("read without a command").id();
             buf.fill(0);
@@ -550,10 +606,13 @@ mod tests {
         let fake = Fake::as_surveyed().with(|e| e.version = [0x01, 0x06]);
         let i = inspect(&fake);
 
-        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(warnings[0].contains("v1.6"), "{warnings:?}");
-        assert!(warnings[0].contains("v1.5"), "{warnings:?}");
+        assert_eq!(
+            i.warnings(&DEATHSTALKER_V2_PRO),
+            [Warning::FirmwareDiffers {
+                read: Firmware { major: 1, minor: 6 },
+                surveyed: Firmware { major: 1, minor: 5 },
+            }]
+        );
         assert!(!i.refuses(SET_EFFECT) && !i.refuses(SET_BRIGHTNESS));
     }
 
@@ -567,10 +626,12 @@ mod tests {
         assert_eq!(verdict(&i, SET_EFFECT), &Verdict::Unsupported);
         assert!(i.refuses(SET_EFFECT));
         assert!(!i.refuses(SET_BRIGHTNESS));
-        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
-        assert!(
-            warnings.iter().any(|a| a.contains("« effet »")),
-            "{warnings:?}"
+        assert_eq!(
+            i.warnings(&DEATHSTALKER_V2_PRO),
+            [Warning::Unsupported {
+                name: "effect",
+                command: SET_EFFECT,
+            }]
         );
     }
 
@@ -650,8 +711,10 @@ mod tests {
         assert!(!sent.contains(&SET_BRIGHTNESS), "{sent:?}");
         // The unread version is reported, since it can no longer be compared.
         let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-        assert!(warnings[0].contains("non lue"));
+        assert!(
+            matches!(warnings[..], [Warning::FirmwareNotRead { .. }]),
+            "{warnings:?}"
+        );
     }
 
     /// The serial number does not leak through a careless `{:?}`.

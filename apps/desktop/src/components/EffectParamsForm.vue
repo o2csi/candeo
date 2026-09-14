@@ -37,6 +37,7 @@ import { computed, useId } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { EffectParams } from '../api/candeo'
 import { sameValue } from '../composables/useSettings'
+import { t } from '../i18n'
 import { localized } from '../i18n/text'
 
 const props = defineProps<{
@@ -125,7 +126,7 @@ type Field =
   | (Common & { kind: 'number'; value: number; min: number; max: number; step: number })
   | (Common & { kind: 'color'; hex: string })
   | (Common & { kind: 'boolean'; on: boolean })
-  | (Common & { kind: 'choice'; value: string; options: readonly string[] })
+  | (Common & { kind: 'choice'; value: string; options: { value: string; label: string }[] })
 
 const fields = computed<Field[]>(() =>
   Object.entries(props.specs).map(([id, spec]): Field => {
@@ -152,11 +153,16 @@ const fields = computed<Field[]>(() =>
       }
       case 'boolean': {
         const on = typeof v === 'boolean' ? v : spec.default
-        return { ...head, kind: 'boolean', on, shown: on ? 'activé' : 'désactivé' }
+        const shown = on ? t('effects.params.on') : t('effects.params.off')
+        return { ...head, kind: 'boolean', on, shown }
       }
       case 'choice': {
         const value = typeof v === 'string' ? v : spec.default
-        return { ...head, kind: 'choice', value, options: spec.options, shown: value }
+        const options = spec.options.map((o) =>
+          typeof o === 'string' ? { value: o, label: o } : { value: o.value, label: localized(o.label) },
+        )
+        const shown = options.find((o) => o.value === value)?.label ?? value
+        return { ...head, kind: 'choice', value, options, shown }
       }
     }
   }),
@@ -224,7 +230,7 @@ function onChoice(id: string, e: Event) {
     à parcourir. Le `h2` suffit à situer le bloc dans le plan du document.
   -->
   <section class="settings">
-    <h2>Réglages</h2>
+    <h2>{{ t('effects.params.title') }}</h2>
 
     <!--
       La région d'annonce, **montée en permanence** — hors de tout `v-if`, y
@@ -321,7 +327,7 @@ function onChoice(id: string, e: Event) {
             :value="f.value"
             @change="onChoice(f.id, $event)"
           >
-            <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+            <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
 
@@ -330,7 +336,7 @@ function onChoice(id: string, e: Event) {
           donc la même règle que les curseurs quand l'effet ne tourne pas.
         -->
         <button v-if="touched" class="revert" type="button" @click="emit('reset')">
-          Rétablir les valeurs de l'effet
+          {{ t('effects.params.reset') }}
         </button>
       </fieldset>
     </template>

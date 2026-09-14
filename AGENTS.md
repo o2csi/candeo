@@ -45,30 +45,37 @@ mix both languages inside a new function or type.
 
 ## Internationalisation
 
-Introduced by #73. Until the catalogs exist, interface strings stay inline and
-in French, new ones included; list new ones in the pull request, in English.
+Introduced by #73. Every screen, the tray and command errors go through the
+catalogs; new interface text goes there too.
 
 - **Catalogs:** `apps/desktop/src/locales/en.json` is the reference, `fr.json`
   a complete translation. Missing keys fall back to English.
 - **Keys** are namespaced by screen or feature: `devices.adopt`, `tray.quit`,
   `errors.deviceNotOpen`. Placeholders are named (`{name}`); never build a
   sentence by joining translated fragments.
-- **Front end:** `vue-i18n` with the Composition API, typed from `en.json`, so
-  an unknown key fails `vue-tsc`. No raw text in templates.
-- **Command errors** cross the IPC boundary as a code with parameters, not as a
-  sentence: the front end translates them. The Rust side logs its own English
-  message.
-- **Text rendered by Rust** (the tray menu) uses the same JSON catalogs, embedded
-  with `include_str!` and read through a `t(lang, key, params)` lookup.
+- **Front end:** `vue-i18n`, used through `t` from `src/i18n`, whose keys are
+  typed from `en.json`: an unknown key fails `vue-tsc` (vue-i18n's own `t`
+  accepts any string). No raw text in templates.
+- **Command errors** cross the IPC boundary as a `Failure` (`src-tauri/src/failure.rs`):
+  a code under `errors.` with parameters, which `message()` in `api/journal.ts`
+  translates. Its `Display` is the English text, for the log. An error nobody
+  can act on is `Failure::unexpected` with an English detail.
+- **Text rendered by Rust** (the tray menu, device warnings, copy names) uses the
+  same JSON catalogs, embedded with `include_str!` and read through
+  `i18n::t(language, key, params)`.
+- **English only:** logs, the copied diagnostic, and what an effect's author
+  reads: load and render errors, like TypeScript's diagnostics.
 - **Language setting:** `language` in `settings.json`, `"system"` by default,
-  or `"en"` / `"fr"`. The system locale comes from `tauri-plugin-os`; an
-  unsupported locale falls back to English. Changing it re-renders the window
-  and rebuilds the tray menu.
+  or `"en"` / `"fr"`, resolved in Rust (`src-tauri/src/language.rs`): the
+  display language on Windows (`GetUserDefaultUILanguage`), `LC_ALL`,
+  `LC_MESSAGES` or `LANG` elsewhere; an unsupported language falls back to
+  English. Changing it re-renders the window and rebuilds the tray menu.
 - **Effects:** an effect's name is its file name and is not translated. Its
   `description` and parameter `label`s accept a string or a map of languages
   (`docs/design/effects-library.md` §2); they do not go through the catalogs.
-- **Guards:** a test checks that `en.json` and `fr.json` have the same keys and
-  that every key used from Rust exists.
+- **Guards:** `vue-tsc` checks `fr.json` against the shape of `en.json`, a test
+  checks that they have the same keys, and a Rust test reads the sources for
+  every key and `Failure` code used from Rust.
 
 ## Interface text
 

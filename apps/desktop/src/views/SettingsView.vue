@@ -2,9 +2,7 @@
 /**
  * Settings: what concerns the application as a whole, and no device.
  *
- * The log and the configuration reset lived at the bottom of the devices screen,
- * which made it a catch-all. Devices keep their screen; the language setting
- * (#73) will come here.
+ * The language, the log and the configuration reset.
  *
  * The reset stays **out of the library**: the neighbouring gesture there deletes
  * hand-written code.
@@ -15,34 +13,53 @@ import { onMounted, ref } from 'vue'
 import {
   diagnostic,
   getJournal,
+  getLanguage,
   openLogDir,
   resetSettings,
+  setLanguage,
   setLogLevel,
   type JournalStatus,
+  type LanguageSetting,
+  type LanguageStatus,
   type LogLevel,
 } from '../api/candeo'
 import { erreur, message } from '../api/journal'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
+import { showIn, t } from '../i18n'
 
 const { busy, refresh } = useDevice()
 const { dropAll } = useSettings()
 const { forgetPosed } = useEffects()
 
+// ---------------------------------------------------------------- language
+
+const language = ref<LanguageStatus | null>(null)
+const languageProblem = ref<string | null>(null)
+
+/** Each language named in itself: whoever cannot read the current one finds theirs. */
+const LANGUAGES = ['en', 'fr'] as const
+
+async function readLanguage(): Promise<void> {
+  language.value = await getLanguage()
+}
+
+async function chooseLanguage(event: Event): Promise<void> {
+  languageProblem.value = null
+  try {
+    language.value = await setLanguage((event.target as HTMLSelectElement).value as LanguageSetting)
+    showIn(language.value.language)
+  } catch (e) {
+    languageProblem.value = message(e)
+    await readLanguage()
+  }
+}
+
 // ---------------------------------------------------------------- log
 
-/**
- * The five levels, said by what they bring rather than by their technical name.
- * A record, so that a sixth level cannot be forgotten here.
- */
-const LEVELS: Record<LogLevel, string> = {
-  error: 'Erreurs seules',
-  warn: 'Avertissements',
-  info: 'Cycle de vie (défaut)',
-  debug: 'Détaillé — par image',
-  trace: 'Tout — par image',
-}
+/** The five levels, said by what they bring rather than by their technical name. */
+const LEVELS: readonly LogLevel[] = ['error', 'warn', 'info', 'debug', 'trace']
 
 const journal = ref<JournalStatus | null>(null)
 /** What kept the log from being read or changed. */
@@ -97,10 +114,10 @@ async function copyDiagnostic(): Promise<void> {
     report.value = text
     try {
       await navigator.clipboard.writeText(text)
-      copied.value = 'Copié dans le presse-papiers.'
+      copied.value = t('settings.log.copied')
     } catch (e) {
-      copied.value = 'Copie refusée par le système — le texte est ci-dessous, à sélectionner.'
-      erreur('diagnostic', `clipboard unavailable: ${message(e)}`, e)
+      copied.value = t('settings.log.copyRefused')
+      erreur('diagnostic', `clipboard unavailable: ${message(e, 'en')}`, e)
     }
   } catch (e) {
     journalProblem.value = message(e)
@@ -134,37 +151,64 @@ async function reset(): Promise<void> {
     problem.value = message(e)
   } finally {
     working.value = false
-    // Every device changed state at once, and the log level went back to the
-    // default.
+    // Every device changed state at once, and the log level and the language went
+    // back to their defaults.
     await refresh()
     await readJournal()
+    await readLanguage()
+    if (language.value) showIn(language.value.language)
   }
 }
 
-onMounted(readJournal)
+onMounted(() => {
+  void readLanguage()
+  void readJournal()
+})
 </script>
 
 <template>
   <section class="page">
     <header class="head">
-      <h1>Réglages</h1>
+      <h1>{{ t('settings.title') }}</h1>
     </header>
 
+    <section v-if="language" class="block" aria-labelledby="language-title">
+      <h2 id="language-title">{{ t('settings.language.title') }}</h2>
+
+      <p v-if="languageProblem" class="err" role="alert">{{ languageProblem }}</p>
+
+      <div class="level">
+        <label for="language">{{ t('settings.language.label') }}</label>
+        <select id="language" :value="language.setting" @change="chooseLanguage">
+          <option value="system">
+            {{
+              t('settings.language.system', {
+                language: t(`settings.language.names.${language.system}`),
+              })
+            }}
+          </option>
+          <option v-for="code in LANGUAGES" :key="code" :value="code">
+            {{ t(`settings.language.names.${code}`) }}
+          </option>
+        </select>
+      </div>
+    </section>
+
     <section v-if="journal" class="block" aria-labelledby="journal-title">
-      <h2 id="journal-title">Journal</h2>
+      <h2 id="journal-title">{{ t('settings.log.title') }}</h2>
 
       <p v-if="journalProblem" class="err" role="alert">{{ journalProblem }}</p>
 
       <div class="level">
-        <label for="log-level">Niveau</label>
+        <label for="log-level">{{ t('settings.log.level') }}</label>
         <select
           id="log-level"
           :value="journal.setting ?? 'info'"
           :disabled="busy"
           @change="chooseLevel"
         >
-          <option v-for="(label, level) in LEVELS" :key="level" :value="level">
-            {{ label }}
+          <option v-for="level in LEVELS" :key="level" :value="level">
+            {{ t(`settings.log.levels.${level}`) }}
           </option>
         </select>
       </div>
@@ -174,33 +218,29 @@ onMounted(readJournal)
         and forgotten, it fills the disk, since rotation caps the number of files,
         not the size of today's.
       -->
-      <p v-if="journal.verbose" class="warn" role="status">
-        Niveau détaillé actif : le journal grossit vite et <strong>reste actif après un
-        redémarrage</strong>.
-      </p>
+      <p v-if="journal.verbose" class="warn" role="status">{{ t('settings.log.verbose') }}</p>
 
       <!-- The environment variable always wins: say so rather than let a setting look applied. -->
       <p v-if="journal.forcedByEnv" class="note" role="status">
-        CANDEO_LOG impose le niveau {{ journal.level ?? 'demandé' }} pour cette exécution. Le réglage
-        ci-dessus s'appliquera au prochain lancement sans cette variable.
+        {{ t('settings.log.forcedByEnv', { level: journal.level ?? t('settings.log.requested') }) }}
       </p>
 
       <div class="actions">
         <button class="ghost" :disabled="!journal.dir" @click="showLogs">
-          Ouvrir le dossier des journaux
+          {{ t('settings.log.openFolder') }}
         </button>
-        <button class="ghost" @click="copyDiagnostic">Copier le diagnostic</button>
+        <button class="ghost" @click="copyDiagnostic">{{ t('settings.log.copyDiagnostic') }}</button>
       </div>
 
       <p v-if="journal.dir" class="mono path">{{ journal.dir }}</p>
-      <p v-else class="err">Aucun fichier : le journal n'a pas pu ouvrir son dossier.</p>
+      <p v-else class="err">{{ t('settings.log.noFolder') }}</p>
 
       <p v-if="copied" class="note" role="status">{{ copied }}</p>
       <pre v-if="report" class="report">{{ report }}</pre>
     </section>
 
     <section class="block" aria-labelledby="config-title">
-      <h2 id="config-title">Configuration</h2>
+      <h2 id="config-title">{{ t('settings.config.title') }}</h2>
 
       <p v-if="problem" class="err" role="alert">{{ problem }}</p>
 
@@ -210,38 +250,31 @@ onMounted(readJournal)
         answer, which follows in the document.
       -->
       <button class="ghost danger" :disabled="busy || working" @click="asking = true">
-        Remettre la configuration au défaut
+        {{ t('settings.config.reset') }}
       </button>
 
       <div v-if="asking" class="confirm" role="group" aria-labelledby="confirm-reset">
         <p id="confirm-reset" class="confirm-title" role="alert">
-          Repartir de la configuration par défaut ?
+          {{ t('settings.config.confirmTitle') }}
         </p>
         <!-- What goes, listed, and what does not, said as plainly: the last line matters most. -->
         <ul class="what">
+          <li>{{ t('settings.config.detected') }}</li>
+          <li>{{ t('settings.config.stopped') }}</li>
+          <li>{{ t('settings.config.forgetDevices') }}</li>
+          <li>{{ t('settings.config.forgetParams') }}</li>
           <li>
-            Tous les appareils repassent en <strong>détecté</strong> : plus aucun n'est ouvert au
-            démarrage.
-          </li>
-          <li>
-            Les effets en cours s'arrêtent et le rétroéclairage s'éteint, plutôt que de rester figé
-            sur la dernière image.
-          </li>
-          <li>
-            L'effet appliqué et la luminosité retenue de chaque appareil sont oubliés : tout repart
-            à pleine luminosité, sans effet.
-          </li>
-          <li>Les réglages retenus pour chaque effet, sur chaque appareil, sont oubliés.</li>
-          <li>
-            <strong>Vos effets ne sont pas touchés.</strong> Les supprimer est une autre action, une
-            par effet, depuis la bibliothèque.
+            <strong>{{ t('settings.config.effectsKept') }}</strong>
+            {{ t('settings.config.effectsKeptDetail') }}
           </li>
         </ul>
         <div class="confirm-actions">
           <button class="solid danger" :disabled="working" @click="reset">
-            Remettre au défaut
+            {{ t('settings.config.confirm') }}
           </button>
-          <button class="ghost" :disabled="working" @click="asking = false">Annuler</button>
+          <button class="ghost" :disabled="working" @click="asking = false">
+            {{ t('settings.config.cancel') }}
+          </button>
         </div>
       </div>
     </section>

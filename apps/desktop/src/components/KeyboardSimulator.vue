@@ -38,6 +38,7 @@
 import { computed, watch } from 'vue'
 
 import { erreur } from '../api/journal'
+import { t } from '../i18n'
 import type { Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
 
@@ -146,7 +147,7 @@ if (import.meta.env.DEV) {
       :viewBox="`0 0 ${size.w} ${size.h}`"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      :aria-label="`Aperçu de ${layout.name} : ${layout.keys.length} touches éclairées`"
+      :aria-label="t('effects.simulator', { layout: layout.name, keys: layout.keys.length })"
     >
       <rect
         v-for="cap in caps"

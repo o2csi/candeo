@@ -78,16 +78,18 @@ import {
   type EffectState,
   type EngineReport,
 } from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
-import { DEVICE_STATUS_LABELS, deviceStatus } from '../composables/deviceStatus'
+import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
+import { t } from '../i18n'
 import { localized } from '../i18n/text'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
@@ -132,10 +134,6 @@ const {
 } = useSettings()
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 // ---------------------------------------------------------------- appareils
 
 /**
@@ -246,7 +244,7 @@ function fromEntry(e: EffectEntry): Choice {
     id: e.id,
     name: e.name,
     nature: e.kind,
-    description: localized(e.description) || 'Sans description.',
+    description: localized(e.description) || t('effects.noDescription'),
     swatch: e.swatch,
     params: e.params ?? {},
     hardware: null,
@@ -260,9 +258,9 @@ function fromEntry(e: EffectEntry): Choice {
 function fromHardware(e: HardwareEffect): Choice {
   return {
     id: e.id,
-    name: e.name,
+    name: t(`effects.hardwareEffects.${e.key}.name`),
     nature: 'hardware',
-    description: e.summary,
+    description: t(`effects.hardwareEffects.${e.key}.summary`),
     swatch: [],
     params: {},
     hardware: e,
@@ -290,14 +288,14 @@ const choices = computed<Choice[]>(() => [
  * entry of `choices`, a built-in: a hardware effect would open the screen on a
  * simulator with nothing to animate.
  */
-const GROUPS: readonly { nature: Nature; title: string }[] = [
-  { nature: 'hardware', title: 'matériel' },
-  { nature: 'builtin', title: 'intégrés' },
-  { nature: 'user', title: 'à vous' },
-]
+const GROUPS: readonly Nature[] = ['hardware', 'builtin', 'user']
 
 const grouped = computed(() =>
-  GROUPS.map((g) => ({ ...g, items: choices.value.filter((c) => c.nature === g.nature) })),
+  GROUPS.map((nature) => ({
+    nature,
+    title: t(`effects.groups.${nature}`),
+    items: choices.value.filter((c) => c.nature === nature),
+  })),
 )
 
 /**
@@ -345,17 +343,9 @@ function toggleSection(nature: Nature): void {
   writeSectionFolded(nature, folded)
 }
 
-const NATURES: Record<Nature, string> = {
-  builtin: 'intégré',
-  user: 'à vous',
-  hardware: 'matériel',
-}
-
-/** Le coût réel, en clair : c'est ce qui départage les trois natures. */
-const COSTS: Record<Nature, string> = {
-  builtin: 'boucle hôte · tourne fenêtre fermée',
-  user: 'boucle hôte · tourne fenêtre fermée',
-  hardware: 'micrologiciel · aucun temps processeur · survit à tout',
+/** The real cost, spelled out: it is what tells the three natures apart. */
+function cost(nature: Nature): string {
+  return t(nature === 'hardware' ? 'effects.costs.hardware' : 'effects.costs.host')
 }
 
 const chosenEffect = ref<string | null>(null)
@@ -414,7 +404,7 @@ function deviceLine(d: { vid: number; pid: number }): string {
   const tourne = effectName(runningOn(d))
   if (tourne !== null) return tourne
   const retenu = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
-  return retenu !== null ? `arrêté · retenu : ${retenu}` : 'aucun effet'
+  return retenu !== null ? t('effects.deviceStopped', { name: retenu }) : t('effects.deviceIdle')
 }
 
 /** Le seul effet marqué **appliqué** : celui de l'appareil sélectionné. */
@@ -527,27 +517,21 @@ const { frame, restartPreview } = useSimulatorFeed({
  */
 const previewNote = computed(() => {
   const c = selectedEffect.value
-  if (showsDevice.value) {
-    return 'Images du moteur, exactement celles qui partent vers le clavier.'
-  }
-  if (c?.hardware) {
-    return "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici."
-  }
+  if (showsDevice.value) return t('effects.preview.device')
+  if (c?.hardware) return t('effects.preview.hardware')
 
   const tourne = effectName(activeId.value)
   const ailleurs = runningHere.value && tourne !== null
   if (preview.value) {
     // Sans appareil piloté, ne pas promettre « Appliquer » : le bouton est
     // désactivé, et l'annoncer enverrait chercher pourquoi il ne répond pas.
-    if (!selectedDevice.value) {
-      return "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté."
-    }
+    if (!selectedDevice.value) return t('effects.preview.noDevice')
     return ailleurs
-      ? `Aperçu : rien n'est envoyé au clavier, où « ${tourne} » continue de tourner.`
-      : "Aperçu : rien n'est envoyé au clavier. « Appliquer » y envoie celui-ci."
+      ? t('effects.preview.elsewhere', { name: tourne })
+      : t('effects.preview.apply')
   }
-  if (previewError.value !== null) return "L'aperçu s'est arrêté sur une erreur."
-  return 'Aperçu en préparation…'
+  if (previewError.value !== null) return t('effects.preview.stopped')
+  return t('effects.preview.starting')
 })
 
 // ---------------------------------------------------------------- actions
@@ -843,16 +827,12 @@ const frozen = computed<string | null>(() => {
   // Un effet matériel n'a rien à ajuster non plus, mais il ne déclare aucun
   // paramètre : c'est `noParams` qui parle pour lui, et le redire ici ferait lire
   // deux fois la même phrase.
-  return previewError.value === null
-    ? null
-    : "L'aperçu ne tourne pas. Les valeurs ci-dessous restent retenues, et « Appliquer » lancera l'effet avec."
+  return previewError.value === null ? null : t('effects.frozen')
 })
 
 /** Un effet sans paramètre le dit — et il ne le dit pas de la même façon selon sa nature. */
 const noParams = computed(() =>
-  selectedEffect.value?.hardware
-    ? "Exécuté par le micrologiciel : il n'expose aucun réglage à l'application."
-    : "Cet effet n'en déclare aucun : il fait la même chose à chaque lancement.",
+  selectedEffect.value?.hardware ? t('effects.noParamsHardware') : t('effects.noParams'),
 )
 
 /**
@@ -866,12 +846,10 @@ const savedNote = computed<string | null>(() => {
   const c = selectedEffect.value
   const d = selectedDevice.value
   if (!c || c.hardware || Object.keys(specs.value).length === 0) return null
-  if (!d) {
-    return "Valeurs déclarées par l'effet. Elles ne seront retenues que pour un appareil piloté."
-  }
+  if (!d) return t('effects.savedNoDevice')
   return keptFor({ vid: d.vid, pid: d.pid }, c.id)
-    ? `Réglages enregistrés pour ${d.name} : ils sont repris au prochain lancement de cet effet, y compris depuis la zone de notification.`
-    : `Valeurs déclarées par l'effet. Ce qui s'en écarte est enregistré pour ${d.name}, sans rien demander.`
+    ? t('effects.savedKept', { device: d.name })
+    : t('effects.savedDeclared', { device: d.name })
 })
 
 /**
@@ -996,20 +974,20 @@ onBeforeUnmount(() => {
 <template>
   <section class="studio" :class="{ 'shut-1': shutDevices, 'shut-2': shutEffects }">
     <!-- ------------------------------------------------------- appareils -->
-    <section class="col devices" :class="{ shut: shutDevices }" aria-label="Appareils">
+    <section class="col devices" :class="{ shut: shutDevices }" :aria-label="t('effects.columns.devices')">
       <!--
         Un intitulé, pas un titre de niveau : le seul `h1` de l'écran est le nom
         de l'effet qu'on configure, et il vient après dans le document. Chaque
         colonne est déjà nommée pour les lecteurs d'écran par son `aria-label`.
       -->
       <div class="col-head">
-        <p class="col-title">Appareils</p>
+        <p class="col-title">{{ t('effects.columns.devices') }}</p>
         <button
           class="collapse"
           type="button"
           aria-controls="col-devices"
           :aria-expanded="!shutDevices"
-          :aria-label="shutDevices ? 'Déplier la colonne des appareils' : 'Replier la colonne des appareils'"
+          :aria-label="shutDevices ? t('effects.expandDevices') : t('effects.collapseDevices')"
           @click="shutDevices = !shutDevices"
         >
           {{ shutDevices ? '›' : '‹' }}
@@ -1032,8 +1010,8 @@ onBeforeUnmount(() => {
             class="entry"
             type="button"
             :aria-pressed="deviceKey === key(d)"
-            :aria-label="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
-            :title="`${d.name} · ${DEVICE_STATUS_LABELS[deviceStatus(d)]}`"
+            :aria-label="`${d.name} · ${statusLabel(deviceStatus(d))}`"
+            :title="`${d.name} · ${statusLabel(deviceStatus(d))}`"
             @click="choose(d)"
           >
             <!--
@@ -1084,8 +1062,8 @@ onBeforeUnmount(() => {
           -->
           <div v-if="deviceKey === key(d)" class="lum">
             <label class="lum-head" :for="`lum-${key(d)}`">
-              <span class="lum-label">Luminosité</span>
-              <span class="lum-value">{{ brightnessPercent }} %</span>
+              <span class="lum-label">{{ t('effects.brightness') }}</span>
+              <span class="lum-value">{{ t('effects.percent', { n: brightnessPercent }) }}</span>
             </label>
             <input
               :id="`lum-${key(d)}`"
@@ -1102,22 +1080,22 @@ onBeforeUnmount(() => {
         </div>
 
         <p v-if="!piloted.length" class="none">
-          Aucun appareil piloté.
-          <RouterLink to="/devices" class="link">Choisir un périphérique</RouterLink>
+          {{ t('effects.noDevice') }}
+          <RouterLink to="/devices" class="link">{{ t('effects.chooseDevice') }}</RouterLink>
         </p>
       </div>
     </section>
 
     <!-- ---------------------------------------------------------- effets -->
-    <section class="col effects" :class="{ shut: shutEffects }" aria-label="Effets">
+    <section class="col effects" :class="{ shut: shutEffects }" :aria-label="t('effects.columns.effects')">
       <div class="col-head">
-        <p class="col-title">Effets</p>
+        <p class="col-title">{{ t('effects.columns.effects') }}</p>
         <button
           class="collapse"
           type="button"
           aria-controls="col-effects"
           :aria-expanded="!shutEffects"
-          :aria-label="shutEffects ? 'Déplier la colonne des effets' : 'Replier la colonne des effets'"
+          :aria-label="shutEffects ? t('effects.expandEffects') : t('effects.collapseEffects')"
           @click="shutEffects = !shutEffects"
         >
           {{ shutEffects ? '›' : '‹' }}
@@ -1177,36 +1155,40 @@ onBeforeUnmount(() => {
               class="entry"
               type="button"
               :aria-pressed="selectedEffect?.id === c.id"
-              :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
+              :aria-label="activeId === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name"
               :title="c.name"
               @click="chosenEffect = c.id"
             >
               <EffectSwatch class="mark" :colors="c.swatch" />
               <span class="fx-name">{{ c.name }}</span>
-              <span v-if="activeId === c.id" class="fx-state">appliqué</span>
-              <span v-else-if="c.state === 'broken'" class="fx-state broken">erreur</span>
-              <span v-else-if="c.state === 'stale'" class="fx-state stale">à compiler</span>
+              <span v-if="activeId === c.id" class="fx-state">{{ t('effects.entryApplied') }}</span>
+              <span v-else-if="c.state === 'broken'" class="fx-state broken">
+                {{ t('effects.entryBroken') }}
+              </span>
+              <span v-else-if="c.state === 'stale'" class="fx-state stale">
+                {{ t('effects.entryStale') }}
+              </span>
             </button>
           </div>
         </template>
 
         <button class="new" type="button" @click="router.push({ name: 'editor' })">
           <span class="plus" aria-hidden="true">＋</span>
-          <span>Nouvel effet</span>
+          <span>{{ t('effects.new') }}</span>
         </button>
         <button
           class="new"
           type="button"
           :disabled="working"
-          title="Relire le dossier des effets"
+          :title="t('effects.refreshTitle')"
           @click="refreshEffects"
         >
           <span class="plus" aria-hidden="true">↻</span>
-          <span>Actualiser</span>
+          <span>{{ t('effects.refresh') }}</span>
         </button>
-        <button class="new" type="button" title="Ouvrir le dossier des effets" @click="openFolder">
+        <button class="new" type="button" :title="t('effects.openFolderTitle')" @click="openFolder">
           <span class="plus" aria-hidden="true">↗</span>
-          <span>Ouvrir le dossier</span>
+          <span>{{ t('effects.openFolder') }}</span>
         </button>
         <!--
           With the column's other actions rather than in the Built-in heading,
@@ -1218,26 +1200,26 @@ onBeforeUnmount(() => {
           class="new"
           type="button"
           :disabled="working"
-          :title="`Restaurer ${missingBuiltinNames.join(', ')}`"
+          :title="t('effects.restoreTitle', { names: missingBuiltinNames.join(', ') })"
           @click="restore(missingBuiltinNames)"
         >
           <span class="plus" aria-hidden="true">↺</span>
-          <span>Restaurer les intégrés ({{ missingBuiltinNames.length }})</span>
+          <span>{{ t('effects.restoreBuiltins', { n: missingBuiltinNames.length }) }}</span>
         </button>
       </div>
     </section>
 
     <!-- --------------------------------------------------------- réglages -->
-    <section class="col detail" aria-label="Réglages">
+    <section class="col detail" :aria-label="t('effects.columns.settings')">
       <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
       <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
       <p v-if="applyError" class="failure" role="alert">{{ applyError }}</p>
       <p v-if="paramsError" class="failure" role="alert">{{ paramsError }}</p>
       <p v-if="status?.error" class="failure" role="alert">
-        Erreur de l'effet, à l'image en cours : {{ status.error }}
+        {{ t('effects.effectError', { error: status.error }) }}
       </p>
       <p v-if="status?.deviceError" class="notice warn" role="alert">
-        Écriture vers l'appareil impossible : {{ status.deviceError }}
+        {{ message(status.deviceError) }}
       </p>
       <!--
         L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le
@@ -1245,7 +1227,7 @@ onBeforeUnmount(() => {
         clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
       -->
       <p v-if="previewError" class="notice warn" role="alert">
-        Erreur de l'effet prévisualisé, sans conséquence sur le clavier : {{ previewError }}
+        {{ t('effects.previewError', { error: previewError }) }}
       </p>
 
       <!--
@@ -1255,7 +1237,7 @@ onBeforeUnmount(() => {
         part. Mais l'écran dit ce qui manque et où aller.
       -->
       <p v-for="name in missingEffects" :key="name" class="notice warn" role="status">
-        « {{ name }} » n'est plus dans le dossier.
+        {{ t('effects.missing', { name }) }}
         <button
           v-if="missingBuiltinNames.includes(name)"
           class="link"
@@ -1263,31 +1245,36 @@ onBeforeUnmount(() => {
           :disabled="working"
           @click="restore([name])"
         >
-          Restaurer
+          {{ t('effects.restore') }}
         </button>
-        <button class="link" type="button" @click="forgetMissing(name)">Oublier ses réglages</button>
+        <button class="link" type="button" @click="forgetMissing(name)">
+          {{ t('effects.forgetSettings') }}
+        </button>
       </p>
 
       <p v-if="noDevice" class="notice" role="status">
-        Aucun appareil piloté : la bibliothèque se parcourt et l'aperçu tourne sur le gabarit par
-        défaut, mais appliquer un effet demande un appareil que candeo a le droit de piloter.
-        <RouterLink to="/devices" class="link">Choisir un périphérique</RouterLink>
+        {{ t('effects.noDeviceNotice') }}
+        <RouterLink to="/devices" class="link">{{ t('effects.chooseDevice') }}</RouterLink>
       </p>
 
       <template v-if="selectedEffect">
         <header class="fx-head">
           <h1>{{ selectedEffect.name }}</h1>
           <span class="badge" :class="selectedEffect.nature">
-            {{ NATURES[selectedEffect.nature] }}{{ selectedEffect.modified ? ' · modifié' : '' }}
+            {{
+              selectedEffect.modified
+                ? t('effects.modified', { nature: t(`effects.natures.${selectedEffect.nature}`) })
+                : t(`effects.natures.${selectedEffect.nature}`)
+            }}
           </span>
-          <span v-if="selectedEffect.readsKeys" class="badge keys">réagit aux frappes</span>
+          <span v-if="selectedEffect.readsKeys" class="badge keys">{{ t('effects.readsKeys') }}</span>
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>
         <p v-if="selectedEffect.state === 'broken'" class="failure" role="alert">
           {{ selectedEffect.error }}
         </p>
-        <p class="cost">{{ COSTS[selectedEffect.nature] }}</p>
+        <p class="cost">{{ cost(selectedEffect.nature) }}</p>
 
         <div class="preview">
           <p class="cost">{{ previewNote }}</p>
@@ -1296,9 +1283,7 @@ onBeforeUnmount(() => {
             ne dessine pas un clavier vide en attendant.
           -->
           <KeyboardSimulator v-if="board" class="sim" :layout="board" :frame="frame" />
-          <p v-if="board && !opened" class="cost">
-            Dessin d'après le gabarit par défaut : aucun appareil ouvert.
-          </p>
+          <p v-if="board && !opened" class="cost">{{ t('effects.preview.defaultLayout') }}</p>
         </div>
 
         <!--
@@ -1325,7 +1310,7 @@ onBeforeUnmount(() => {
             :disabled="!selectedDevice || working || applied || selectedEffect.state !== 'ready'"
             @click="applyEffect"
           >
-            {{ applied ? 'Appliqué' : 'Appliquer' }}
+            {{ applied ? t('effects.applied') : t('effects.apply') }}
           </button>
 
           <!--
@@ -1333,7 +1318,7 @@ onBeforeUnmount(() => {
             c'est elle qui écrit, quel que soit l'effet qu'on regarde.
           -->
           <button v-if="runningHere" class="ghost" :disabled="working" @click="halt">
-            Arrêter
+            {{ t('effects.stop') }}
           </button>
 
           <!-- Un effet matériel n'a pas de code : le dire vaut mieux que de
@@ -1343,7 +1328,7 @@ onBeforeUnmount(() => {
             :disabled="selectedEffect.hardware !== null"
             @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
           >
-            {{ selectedEffect.nature === 'builtin' ? 'Voir le code' : 'Modifier' }}
+            {{ selectedEffect.nature === 'builtin' ? t('effects.viewCode') : t('effects.edit') }}
           </button>
 
           <button
@@ -1352,7 +1337,7 @@ onBeforeUnmount(() => {
             :disabled="working"
             @click="duplicateSelected"
           >
-            Dupliquer
+            {{ t('effects.duplicate') }}
           </button>
 
           <button
@@ -1361,7 +1346,7 @@ onBeforeUnmount(() => {
             :disabled="working"
             @click="pendingRestore = selectedEffect.id"
           >
-            Rétablir l'original
+            {{ t('effects.restoreOriginal') }}
           </button>
 
           <!--
@@ -1377,17 +1362,13 @@ onBeforeUnmount(() => {
             :disabled="working"
             @click="pendingRemoval = selectedEffect.id"
           >
-            Supprimer
+            {{ t('effects.delete') }}
           </button>
 
           <span class="spacer" />
 
           <p class="cost">
-            {{
-              selectedEffect.hardware
-                ? "exécuté par l'appareil · rien à modifier"
-                : "l'aperçu tourne dès la sélection · « Appliquer » envoie au clavier"
-            }}
+            {{ selectedEffect.hardware ? t('effects.footerHardware') : t('effects.footerPreview') }}
           </p>
         </footer>
 
@@ -1408,24 +1389,20 @@ onBeforeUnmount(() => {
           aria-labelledby="confirm-remove"
         >
           <p id="confirm-remove" class="confirm-title" role="alert">
-            Supprimer « {{ selectedEffect.name }} » ?
+            {{ t('effects.deleteTitle', { name: selectedEffect.name }) }}
           </p>
           <!--
             Ce qui part, dit en toutes lettres. La source est le seul élément
             irremplaçable de la liste : les réglages se refont, la boucle se
             relance, le code écrit à la main ne se réinstalle pas.
           -->
-          <p class="cost">
-            Le fichier de l'effet est supprimé : c'est du code écrit à la main, et rien ne le
-            réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle
-            s'arrête sur les appareils où il tourne. Les autres effets ne sont pas touchés.
-          </p>
+          <p class="cost">{{ t('effects.deleteDetail') }}</p>
           <div class="confirm-actions">
             <button class="solid danger" :disabled="working" @click="removeEffect">
-              Supprimer définitivement
+              {{ t('effects.deleteConfirm') }}
             </button>
             <button class="ghost" :disabled="working" @click="pendingRemoval = null">
-              Annuler
+              {{ t('effects.cancel') }}
             </button>
           </div>
         </div>
@@ -1438,17 +1415,15 @@ onBeforeUnmount(() => {
           aria-labelledby="confirm-restore"
         >
           <p id="confirm-restore" class="confirm-title" role="alert">
-            Rétablir l'original de « {{ selectedEffect.name }} » ?
+            {{ t('effects.restoreOriginalTitle', { name: selectedEffect.name }) }}
           </p>
-          <p class="cost">
-            Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.
-          </p>
+          <p class="cost">{{ t('effects.restoreOriginalDetail') }}</p>
           <div class="confirm-actions">
             <button class="solid danger" :disabled="working" @click="restoreOriginal">
-              Rétablir l'original
+              {{ t('effects.restoreOriginal') }}
             </button>
             <button class="ghost" :disabled="working" @click="pendingRestore = null">
-              Annuler
+              {{ t('effects.cancel') }}
             </button>
           </div>
         </div>

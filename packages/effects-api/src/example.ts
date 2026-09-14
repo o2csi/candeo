@@ -1,24 +1,27 @@
 /**
- * Effet de référence — onde partant du centre de la matrice.
+ * Reference effect — a wave spreading from the center of the matrix.
  *
- * Sert de modèle : un effet tient en quelques lignes et se lit comme ce qu'il
- * fait. C'est aussi la démonstration du contrat attendu par le moteur —
- * **un export par défaut**, et rien d'autre.
+ * It is the template a new effect starts from: an effect fits in a few lines and
+ * reads as what it does. It also shows the contract the engine expects — **a
+ * default export**, and nothing else.
  *
- * Il mesure en **coordonnées de matrice** : une case par touche, quelle que soit
- * sa taille. C'est le calcul qui fonctionne partout, y compris sur un gabarit
- * dont personne n'a dessiné la disposition. Pour une onde ronde sur le bureau
- * plutôt que dans la matrice, l'effet livré « Onde radiale » lit le rectangle
- * des touches — voir `Key.x`, qui dit ce que ça engage.
+ * It measures in **matrix coordinates**: one cell per key, whatever its size.
+ * That works everywhere, including on a layout whose arrangement nobody has
+ * drawn. For a round wave on the desk rather than in the matrix, the shipped
+ * effect "Radial wave" reads the keys' rectangles — see `Key.x` for what that
+ * implies.
  */
 
 import { defineEffect, hsv } from './index'
 
 export default defineEffect({
-  description: 'Une onde de teinte se propage depuis le centre de la matrice',
+  description: {
+    en: 'A hue wave spreads from the center of the matrix',
+    fr: 'Une onde de teinte se propage depuis le centre de la matrice',
+  },
   params: {
-    speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
-    scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },
+    speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
+    scale: { kind: 'number', label: { en: 'Scale', fr: 'Échelle' }, min: 1, max: 60, default: 18 },
   },
   render({ layout, time, frame, params }) {
     const cx = (layout.cols - 1) / 2
@@ -26,9 +29,9 @@ export default defineEffect({
     const speed = Number(params.speed ?? 120)
     const scale = Number(params.scale ?? 18)
 
-    // On itère `layout.keys`, donc uniquement les positions portant une LED.
-    // Les trous de la matrice restent noirs, ce qui est le bon défaut : une
-    // image couvre 132 positions, le clavier n'en éclaire que 106.
+    // `layout.keys` holds only the positions that carry an LED. The matrix holes
+    // stay black, which is the right default: a frame covers 132 positions, the
+    // keyboard lights 106.
     for (const key of layout.keys) {
       const d = Math.hypot(key.col - cx, key.row - cy)
       frame.set(key, hsv(time * speed + d * scale, 1, 1))

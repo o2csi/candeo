@@ -51,7 +51,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt as fmt_layer, reload, EnvFilter, Registry};
 
-use crate::{AppState, CmdResult, DeviceRef};
+use crate::{AppState, CmdResult, DeviceRef, Failure};
 
 /// The environment variable that overrides everything else.
 ///
@@ -359,7 +359,7 @@ fn open_log_file(
     let dir = app
         .path()
         .app_log_dir()
-        .map_err(|e| format!("dossier des journaux introuvable : {e}"))?;
+        .map_err(|e| format!("no log folder: {e}"))?;
     let appender = rolling_appender_in(&dir)?;
     Ok((dir, appender))
 }
@@ -374,8 +374,7 @@ fn rolling_appender_in(
 ) -> Result<tracing_appender::rolling::RollingFileAppender, String> {
     // Created here rather than on the first write: a directory that cannot be
     // created is reported now, not at the first failure we wanted to record.
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("création de {} impossible : {e}", dir.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 
     tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
@@ -383,7 +382,7 @@ fn rolling_appender_in(
         .filename_suffix(FILE_SUFFIX)
         .max_log_files(MAX_FILES)
         .build(dir)
-        .map_err(|e| format!("journal non ouvert dans {} : {e}", dir.display()))
+        .map_err(|e| format!("log not opened in {}: {e}", dir.display()))
 }
 
 /// Reads the level saved in `settings.json` back and applies it.
@@ -489,7 +488,7 @@ pub(crate) enum Transition {
 }
 
 /// The transition between two successive error states.
-pub(crate) fn transition(before: Option<&str>, after: Option<&str>) -> Transition {
+pub(crate) fn transition<T: ?Sized>(before: Option<&T>, after: Option<&T>) -> Transition {
     match (before, after) {
         (None, Some(_)) => Transition::Started,
         (Some(_), None) => Transition::Recovered,
@@ -633,13 +632,14 @@ pub fn set_log_level(app: AppHandle, level: LogLevel) -> CmdResult<JournalStatus
 /// system: giving it to read is not enough, the user has to be taken there.
 #[tauri::command]
 pub fn open_log_dir(app: AppHandle) -> CmdResult<()> {
-    let dir = COLLECTOR.get().and_then(|c| c.dir.clone()).ok_or_else(|| {
-        "aucun dossier de journaux : le journal n'écrit pas sur disque".to_string()
-    })?;
+    let dir = COLLECTOR
+        .get()
+        .and_then(|c| c.dir.clone())
+        .ok_or_else(|| Failure::unexpected("no log folder: the log does not write to disk"))?;
 
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| format!("ouverture de {} impossible : {e}", dir.display()))
+        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
 }
 
 /// The diagnostic, ready to be pasted into a bug report.
@@ -792,15 +792,15 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 line(&mut out, "    protocol serial", &format!("not read ({e})"));
             }
             for warning in i.warnings(layout) {
-                line(&mut out, "    warning", &warning);
+                line(&mut out, "    warning", &warning.to_string());
             }
         }
     }
     if let Err(e) = &api {
-        line(&mut out, "  USB enumeration", e);
+        line(&mut out, "  USB enumeration", &e.to_string());
     }
     if let Err(e) = &settings {
-        line(&mut out, "  settings", e);
+        line(&mut out, "  settings", &e.to_string());
     }
 
     out.push_str("\nEngine\n");
@@ -1160,7 +1160,7 @@ mod tests {
     fn only_a_state_change_is_logged() {
         assert_eq!(transition(None, Some("refused")), Transition::Started);
         assert_eq!(transition(Some("refused"), None), Transition::Recovered);
-        assert_eq!(transition(None, None), Transition::Unchanged);
+        assert_eq!(transition::<str>(None, None), Transition::Unchanged);
         assert_eq!(
             transition(Some("refused"), Some("refused")),
             Transition::Unchanged

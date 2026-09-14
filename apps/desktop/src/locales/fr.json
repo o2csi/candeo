@@ -1,0 +1,272 @@
+{
+  "app": {
+    "title": "candeo - {summary}",
+    "tabs": {
+      "effects": "Effets",
+      "devices": "Périphériques",
+      "settings": "Réglages"
+    },
+    "closeHides": "Fermer replie dans la zone de notification",
+    "closeHidesDetail": "Fermer la fenêtre n'arrête pas candeo : l'effet continue de tourner sur le clavier, et l'icône de la zone de notification garde la main dessus. Pour quitter vraiment, clic droit sur cette icône, puis « Quitter candeo »."
+  },
+  "effects": {
+    "columns": {
+      "devices": "Appareils",
+      "effects": "Effets",
+      "settings": "Réglages"
+    },
+    "expandDevices": "Déplier la colonne des appareils",
+    "collapseDevices": "Replier la colonne des appareils",
+    "expandEffects": "Déplier la colonne des effets",
+    "collapseEffects": "Replier la colonne des effets",
+    "brightness": "Luminosité",
+    "percent": "{n} %",
+    "noDevice": "Aucun appareil piloté.",
+    "chooseDevice": "Choisir un périphérique",
+    "noDeviceNotice": "Aucun appareil piloté : la bibliothèque se parcourt et l'aperçu tourne sur le gabarit par défaut, mais appliquer un effet demande un appareil que candeo a le droit de piloter.",
+    "deviceStopped": "arrêté · retenu : {name}",
+    "deviceIdle": "aucun effet",
+    "groups": {
+      "hardware": "matériel",
+      "builtin": "intégrés",
+      "user": "à vous"
+    },
+    "natures": {
+      "hardware": "matériel",
+      "builtin": "intégré",
+      "user": "à vous"
+    },
+    "modified": "{nature} · modifié",
+    "readsKeys": "réagit aux frappes",
+    "costs": {
+      "host": "boucle hôte · tourne fenêtre fermée",
+      "hardware": "micrologiciel · aucun temps processeur · survit à tout"
+    },
+    "noDescription": "Sans description.",
+    "appliedOnDevice": "{name} — appliqué sur l'appareil",
+    "entryApplied": "appliqué",
+    "entryBroken": "erreur",
+    "entryStale": "à compiler",
+    "new": "Nouvel effet",
+    "refresh": "Actualiser",
+    "refreshTitle": "Relire le dossier des effets",
+    "openFolder": "Ouvrir le dossier",
+    "openFolderTitle": "Ouvrir le dossier des effets",
+    "restoreBuiltins": "Restaurer les intégrés ({n})",
+    "restoreTitle": "Restaurer {names}",
+    "effectError": "Erreur de l'effet, à l'image en cours : {error}",
+    "previewError": "Erreur de l'effet prévisualisé, sans conséquence sur le clavier : {error}",
+    "missing": "« {name} » n'est plus dans le dossier.",
+    "restore": "Restaurer",
+    "forgetSettings": "Oublier ses réglages",
+    "preview": {
+      "device": "Images du moteur, exactement celles qui partent vers le clavier.",
+      "hardware": "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici.",
+      "noDevice": "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté.",
+      "elsewhere": "Aperçu : rien n'est envoyé au clavier, où « {name} » continue de tourner.",
+      "apply": "Aperçu : rien n'est envoyé au clavier. « Appliquer » y envoie celui-ci.",
+      "stopped": "L'aperçu s'est arrêté sur une erreur.",
+      "starting": "Aperçu en préparation…",
+      "defaultLayout": "Dessin d'après le gabarit par défaut : aucun appareil ouvert."
+    },
+    "frozen": "L'aperçu ne tourne pas. Les valeurs ci-dessous restent retenues, et « Appliquer » lancera l'effet avec.",
+    "noParamsHardware": "Exécuté par le micrologiciel : il n'expose aucun réglage à l'application.",
+    "noParams": "Cet effet n'en déclare aucun : il fait la même chose à chaque lancement.",
+    "savedNoDevice": "Valeurs déclarées par l'effet. Elles ne seront retenues que pour un appareil piloté.",
+    "savedKept": "Réglages enregistrés pour {device} : ils sont repris au prochain lancement de cet effet, y compris depuis la zone de notification.",
+    "savedDeclared": "Valeurs déclarées par l'effet. Ce qui s'en écarte est enregistré pour {device}, sans rien demander.",
+    "apply": "Appliquer",
+    "applied": "Appliqué",
+    "stop": "Arrêter",
+    "viewCode": "Voir le code",
+    "edit": "Modifier",
+    "duplicate": "Dupliquer",
+    "copy": "copie",
+    "copyN": "copie {n}",
+    "restoreOriginal": "Rétablir l'original",
+    "delete": "Supprimer",
+    "footerHardware": "exécuté par l'appareil · rien à modifier",
+    "footerPreview": "l'aperçu tourne dès la sélection · « Appliquer » envoie au clavier",
+    "deleteTitle": "Supprimer « {name} » ?",
+    "deleteDetail": "Le fichier de l'effet est supprimé : c'est du code écrit à la main, et rien ne le réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle s'arrête sur les appareils où il tourne. Les autres effets ne sont pas touchés.",
+    "deleteConfirm": "Supprimer définitivement",
+    "restoreOriginalTitle": "Rétablir l'original de « {name} » ?",
+    "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
+    "cancel": "Annuler",
+    "hardwareEffects": {
+      "spectrumCycle": {
+        "name": "Spectrum Cycle",
+        "summary": "Tout le clavier change de teinte ensemble, sans fin."
+      },
+      "wave": {
+        "name": "Wave",
+        "summary": "Un dégradé traverse le clavier de part en part."
+      },
+      "off": {
+        "name": "Éteint",
+        "summary": "Rétroéclairage coupé, sans débrancher quoi que ce soit."
+      }
+    },
+    "params": {
+      "title": "Réglages",
+      "on": "activé",
+      "off": "désactivé",
+      "reset": "Rétablir les valeurs de l'effet"
+    },
+    "swatchKnown": "Couleurs prélevées en exécutant l'effet",
+    "swatchUnknown": "Repère indisponible",
+    "simulator": "Aperçu de {layout} : {keys} touches éclairées"
+  },
+  "editor": {
+    "back": "Retour",
+    "name": "Nom de l'effet",
+    "new": "nouvel effet",
+    "builtinReadOnly": "intégré · lecture seule",
+    "stop": "Arrêter",
+    "apply": "Appliquer",
+    "applied": "Appliqué",
+    "applyOn": "Appliquer sur {device}",
+    "appliedOn": "Appliqué sur {device}",
+    "wait": "Un instant…",
+    "duplicate": "Dupliquer",
+    "save": "Enregistrer",
+    "draftRestoredBuiltin": "Brouillon restauré — un effet intégré ne s'enregistre pas : dupliquez-le pour le garder.",
+    "draftRestored": "Brouillon restauré — cette version n'a pas été enregistrée.",
+    "discard": "Revenir à la version enregistrée",
+    "effectError": "Erreur de l'effet, à l'image en cours : {error}",
+    "hint": "Le code est transpilé ici, exécuté côté Rust : un effet ne voit ni le DOM, ni l'application. Ce moteur n'a pas de console, et l'autocomplétion n'en propose pas.",
+    "simulator": "Simulateur",
+    "simDevice": "Images de {device}",
+    "theDevice": "l'appareil",
+    "simPreview": "Aperçu",
+    "simStopped": "Aperçu arrêté",
+    "simNone": "Aucun aperçu",
+    "simStarting": "Aperçu en préparation…",
+    "noKeyboard": "Aucun clavier connecté : dessin d'après le gabarit par défaut.",
+    "nameRequired": "Donnez un nom à l'effet avant de l'enregistrer",
+    "compileErrors": "{n} erreur dans l'effet — ligne {line} : {message} | {n} erreurs dans l'effet — ligne {line} : {message}",
+    "savedButBroken": "L'effet est enregistré, mais il ne se charge pas"
+  },
+  "tray": {
+    "noDevice": "Aucun appareil piloté",
+    "devicesUnavailable": "Appareils indisponibles",
+    "openWindow": "Ouvrir la fenêtre",
+    "quit": "Quitter candeo",
+    "sendToKeyboard": "Envoyer au clavier",
+    "turnOff": "Éteindre",
+    "notOpenTitle": "{name} — non ouvert",
+    "notOpenReason": "Branché mais non ouvert — voir la fenêtre",
+    "unpluggedTitle": "{name} — débranché"
+  },
+  "devices": {
+    "title": "Périphériques",
+    "search": "Rechercher",
+    "status": {
+      "controlled": "piloté",
+      "notOpen": "non ouvert",
+      "unplugged": "débranché"
+    },
+    "summary": {
+      "controlled": "aucun appareil piloté | 1 appareil piloté | {n} appareils pilotés",
+      "unreachable": "{summary} · {n} injoignable | {summary} · {n} injoignable | {summary} · {n} injoignables"
+    },
+    "state": {
+      "adopted": "Piloté",
+      "detected": "Détecté",
+      "ignored": "Ignoré"
+    },
+    "plugged": "Branché",
+    "unplugged": "Débranché",
+    "firmware": "micrologiciel {version} · gabarit relevé sur {surveyed}",
+    "firmwareNotRead": "non lu",
+    "firmwareNotReadClosed": "non lu, appareil fermé",
+    "matrix": "matrice {rows} × {cols} · image de {frameLen} couleurs · {keys} touches éclairées",
+    "control": "Piloter",
+    "ignore": "Ignorer",
+    "none": "Aucun gabarit connu.",
+    "neverSeen": "Un appareil jamais vu est listé mais non piloté : la décision se prend une fois, puis se retient.",
+    "warnings": {
+      "firmwareDiffers": "Micrologiciel {read}, alors que ce gabarit a été relevé sur {surveyed}. Le protocole n'a probablement pas bougé ; mais si le clavier n'obéit pas, c'est la première piste.",
+      "firmwareNotRead": "Version du micrologiciel non lue ({reason}) : impossible de la comparer à celle du relevé ({surveyed}).",
+      "unsupported": "Ce micrologiciel ne connaît pas la commande « {name} » ({command}) : elle n'est plus envoyée.",
+      "readBackDiffers": "Commande « {name} » ({command}) acceptée, mais l'appareil relit {read} après qu'on a réécrit {wrote} : il ne la comprend plus comme au relevé.",
+      "commands": {
+        "brightness": "luminosité",
+        "effect": "effet",
+        "row": "rangée"
+      }
+    }
+  },
+  "errors": {
+    "unexpected": "Une erreur s'est produite : {detail}",
+    "nameEmpty": "Un effet doit avoir un nom.",
+    "nameTooLong": "Un nom d'effet compte {max} caractères au plus.",
+    "nameForbiddenCharacter": "« {name} » : un nom d'effet ne peut pas contenir {characters}",
+    "nameEdges": "« {name} » : un nom d'effet ne peut ni commencer ni finir par une espace ou un point.",
+    "nameReserved": "« {name} » est un nom réservé par Windows.",
+    "effectNotFound": "Aucun effet nommé « {name} ».",
+    "effectExists": "Un effet nommé « {name} » existe déjà.",
+    "builtinNotSaved": "« {name} » est un effet intégré : dupliquez-le pour le modifier.",
+    "builtinNotRenamed": "« {name} » est un effet intégré : dupliquez-le pour le renommer.",
+    "builtinNotDeleted": "« {name} » est un effet intégré : il ne se supprime pas depuis candeo.",
+    "notBuiltin": "« {name} » n'est pas un effet intégré.",
+    "builtinNameTaken": "Un effet à vous s'appelle déjà « {name} » : renommez-le pour restaurer l'intégré.",
+    "effectChanged": "« {name} » a changé pendant sa compilation : actualisez la bibliothèque.",
+    "effectNotCompiled": "« {name} » n'est pas encore compilé : actualisez la bibliothèque.",
+    "effectBroken": "« {name} » ne se charge pas : {error}",
+    "effectNotStarted": "« {name} » n'a pas démarré : {error}",
+    "settingsUnreadable": "Les réglages de {path} sont illisibles : {detail}",
+    "noLayout": "Aucun gabarit connu pour {device}.",
+    "deviceNotOpen": "Aucun appareil ouvert pour {device}.",
+    "deviceNotFound": "Clavier introuvable : branchez-le et réessayez.",
+    "deviceAccess": "Le clavier ne répond pas : {detail}",
+    "commandUnsupported": "Ce micrologiciel ne prend pas en charge la commande {command}.",
+    "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
+    "deviceWrite": "Écriture vers le clavier impossible : {detail}",
+    "deviceClosed": "Appareil refermé : reconnectez-le depuis Périphériques."
+  },
+  "settings": {
+    "title": "Réglages",
+    "language": {
+      "title": "Langue",
+      "label": "Langue de l'interface",
+      "system": "Système ({language})",
+      "names": {
+        "en": "English",
+        "fr": "Français"
+      }
+    },
+    "log": {
+      "title": "Journal",
+      "level": "Niveau",
+      "levels": {
+        "error": "Erreurs seules",
+        "warn": "Avertissements",
+        "info": "Cycle de vie (défaut)",
+        "debug": "Détaillé — par image",
+        "trace": "Tout — par image"
+      },
+      "verbose": "Niveau détaillé actif : le journal grossit vite et reste actif après un redémarrage.",
+      "forcedByEnv": "CANDEO_LOG impose le niveau {level} pour cette exécution. Le réglage ci-dessus s'appliquera au prochain lancement sans cette variable.",
+      "requested": "demandé",
+      "openFolder": "Ouvrir le dossier des journaux",
+      "copyDiagnostic": "Copier le diagnostic",
+      "noFolder": "Aucun fichier : le journal n'a pas pu ouvrir son dossier.",
+      "copied": "Copié dans le presse-papiers.",
+      "copyRefused": "Copie refusée par le système — le texte est ci-dessous, à sélectionner."
+    },
+    "config": {
+      "title": "Configuration",
+      "reset": "Remettre la configuration au défaut",
+      "confirmTitle": "Repartir de la configuration par défaut ?",
+      "detected": "Tous les appareils repassent en détecté : plus aucun n'est ouvert au démarrage.",
+      "stopped": "Les effets en cours s'arrêtent et le rétroéclairage s'éteint, plutôt que de rester figé sur la dernière image.",
+      "forgetDevices": "L'effet appliqué et la luminosité retenue de chaque appareil sont oubliés : tout repart à pleine luminosité, sans effet.",
+      "forgetParams": "Les réglages retenus pour chaque effet, sur chaque appareil, sont oubliés.",
+      "effectsKept": "Vos effets ne sont pas touchés.",
+      "effectsKeptDetail": "Les supprimer est une autre action, une par effet, depuis la bibliothèque.",
+      "confirm": "Remettre au défaut",
+      "cancel": "Annuler"
+    }
+  }
+}

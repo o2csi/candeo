@@ -11,11 +11,11 @@
  * The gallery's rule (§8), for the same reason: writing an effect must neither
  * take over the lighting in use nor require owning a keyboard.
  *
- * - "Enregistrer" chains the error check, `save_effect_source` (the file named
+ * - Save chains the error check, `save_effect_source` (the file named
  *   after the effect), `transpileModule()` and `cache_effect`, then restarts the
  *   effect in the **preview loop**, on the current device's layout. Not a byte
  *   reaches a keyboard.
- * - "Appliquer sur …" starts it on the current device for real, saving first
+ * - Apply starts it on the current device for real, saving first
  *   when the code differs from the saved version, with the parameters the
  *   gallery would use.
  *
@@ -32,8 +32,8 @@
  *
  * ## Built-ins are read, not edited
  *
- * Their code and name are read-only, and "Dupliquer" takes the place of
- * "Enregistrer": the copy is the user's to change, and the built-in keeps
+ * Their code and name are read-only, and Duplicate takes the place of Save:
+ * the copy is the user's to change, and the built-in keeps
  * receiving updates (`docs/design/effects-library.md` §4). A draft left from
  * before goes with the copy.
  *
@@ -74,7 +74,7 @@ import {
   stopEffect,
   type EngineReport,
 } from '../api/candeo'
-import { erreur } from '../api/journal'
+import { erreur, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
@@ -84,6 +84,7 @@ import { clearDraft, migrateDrafts, moveDraft, readDraft, writeDraft } from '../
 import { transpile } from '../editor/effect'
 import { refreshLibrary } from '../editor/library'
 import { errors } from '../editor/monaco'
+import { t } from '../i18n'
 import { NEW_EFFECT } from '../editor/template'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
@@ -125,10 +126,6 @@ const savedSpecs = ref<Record<string, ParamSpec>>({})
 const builtin = ref(false)
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 // ---------------------------------------------------------------- ouverture
 
 /** Opens the effect in place; a built-in opens read-only. */
@@ -271,7 +268,7 @@ async function refreshStatus(): Promise<void> {
 }
 
 /**
- * True when "Appliquer" must save first.
+ * True when Apply must save first.
  *
  * A device loop runs the JavaScript compiled from the saved file, so a new
  * effect, which has no file yet, must be saved first.
@@ -281,7 +278,7 @@ const unsaved = computed(() => creating.value || source.value !== saved.value)
 /**
  * This effect is the one the current device runs.
  *
- * "Arrêter" stops whatever the device runs, so it is offered only then.
+ * Stop stops whatever the device runs, so it is offered only then.
  */
 const runsHere = computed(
   () =>
@@ -352,11 +349,13 @@ const effectError = computed<string | null>(() =>
 
 /** Which source the simulator draws, as a state. */
 const simNote = computed(() => {
-  if (showsDevice.value) return `Images de ${deviceName.value ?? "l'appareil"}`
+  if (showsDevice.value) {
+    return t('editor.simDevice', { device: deviceName.value ?? t('editor.theDevice') })
+  }
   const p = report.value.preview
-  if (p?.running === true && p.effectId === id.value) return 'Aperçu'
-  if (previewError.value !== null) return 'Aperçu arrêté'
-  return id.value === null ? 'Aucun aperçu' : 'Aperçu en préparation…'
+  if (p?.running === true && p.effectId === id.value) return t('editor.simPreview')
+  if (previewError.value !== null) return t('editor.simStopped')
+  return id.value === null ? t('editor.simNone') : t('editor.simStarting')
 })
 
 // ---------------------------------------------------------------- actions
@@ -376,13 +375,17 @@ const simNote = computed(() => {
 async function install(): Promise<string> {
   const text = source.value
   const target = name.value.trim()
-  if (target === '') throw new Error("donnez un nom à l'effet avant de l'enregistrer")
+  if (target === '') throw new Error(t('editor.nameRequired'))
 
   const found = await errors()
   if (found.length > 0) {
     const first = found[0]
     throw new Error(
-      `${found.length} erreur(s) dans l'effet — ligne ${first.line} : ${first.message}`,
+      t(
+        'editor.compileErrors',
+        { n: found.length, line: first.line, message: first.message },
+        found.length,
+      ),
     )
   }
 
@@ -397,7 +400,7 @@ async function install(): Promise<string> {
   const entry = await cacheEffect(target, hash, await transpile(text))
   savedSpecs.value = entry.params ?? {}
   if (entry.state === 'broken') {
-    throw new Error(entry.error ?? "l'effet est enregistré, mais il ne se charge pas")
+    throw new Error(entry.error ?? t('editor.savedButBroken'))
   }
   return target
 }
@@ -526,23 +529,23 @@ onBeforeUnmount(() => {
 <template>
   <section class="page">
     <header class="head">
-      <button class="ghost" @click="router.push('/')">Retour</button>
+      <button class="ghost" @click="router.push('/')">{{ t('editor.back') }}</button>
 
       <!-- The name is the file name: renaming here renames the file. -->
       <label class="name">
-        <span class="sr-only">Nom de l'effet</span>
+        <span class="sr-only">{{ t('editor.name') }}</span>
         <input
           v-model="name"
           type="text"
           :disabled="loading || busy || builtin"
-          placeholder="Nom de l'effet"
+          :placeholder="t('editor.name')"
           @change="rename"
           @keyup.enter="rename"
         />
       </label>
 
-      <p v-if="creating" class="what">nouvel effet</p>
-      <p v-else-if="builtin" class="what">intégré · lecture seule</p>
+      <p v-if="creating" class="what">{{ t('editor.new') }}</p>
+      <p v-else-if="builtin" class="what">{{ t('editor.builtinReadOnly') }}</p>
 
       <span class="spacer" />
 
@@ -553,7 +556,7 @@ onBeforeUnmount(() => {
       <DeviceStatusDot v-if="targetDevice" :device="targetDevice" />
 
       <!-- Stops what the device runs, whichever effect it is: offered only for this one. -->
-      <button class="ghost" :disabled="busy || !runsHere" @click="halt">Arrêter</button>
+      <button class="ghost" :disabled="busy || !runsHere" @click="halt">{{ t('editor.stop') }}</button>
       <!--
         The device goes in the tooltip and the accessible name, not the label: a
         product name is long enough to wrap the header onto a second row.
@@ -562,33 +565,29 @@ onBeforeUnmount(() => {
         v-if="deviceName"
         class="ghost"
         :disabled="busy || loading || applied || (builtin && unsaved)"
-        :title="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
-        :aria-label="applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}`"
+        :title="t(applied ? 'editor.appliedOn' : 'editor.applyOn', { device: deviceName })"
+        :aria-label="t(applied ? 'editor.appliedOn' : 'editor.applyOn', { device: deviceName })"
         @click="applyToDevice"
       >
-        {{ applied ? 'Appliqué' : 'Appliquer' }}
+        {{ applied ? t('editor.applied') : t('editor.apply') }}
       </button>
       <button v-if="builtin" class="solid" :disabled="busy || loading" @click="duplicate">
-        {{ busy ? 'Un instant…' : 'Dupliquer' }}
+        {{ busy ? t('editor.wait') : t('editor.duplicate') }}
       </button>
       <button v-else class="solid" :disabled="busy || loading" @click="save">
-        {{ busy ? 'Un instant…' : 'Enregistrer' }}
+        {{ busy ? t('editor.wait') : t('editor.save') }}
       </button>
     </header>
 
     <div class="split">
       <div class="pane code-pane">
         <p v-if="runsHere && status?.deviceError" class="notice warn" role="alert">
-          Écriture vers le clavier impossible : {{ status.deviceError }}
+          {{ message(status.deviceError) }}
         </p>
 
         <p v-if="restored" class="notice" role="status">
-          {{
-            builtin
-              ? "Brouillon restauré — un effet intégré ne s'enregistre pas : dupliquez-le pour le garder."
-              : "Brouillon restauré — cette version n'a pas été enregistrée."
-          }}
-          <button class="link" @click="discard">Revenir à la version enregistrée</button>
+          {{ builtin ? t('editor.draftRestoredBuiltin') : t('editor.draftRestored') }}
+          <button class="link" @click="discard">{{ t('editor.discard') }}</button>
         </p>
 
         <CodeEditor v-model="source" :disabled="loading || builtin" class="code" />
@@ -600,22 +599,18 @@ onBeforeUnmount(() => {
         -->
         <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
         <p v-else-if="effectError" class="failure" role="alert">
-          Erreur de l'effet, à l'image en cours : {{ effectError }}
+          {{ t('editor.effectError', { error: effectError }) }}
         </p>
         <p v-else class="hint">
-          Le code est transpilé ici, exécuté côté Rust : un effet ne voit ni le DOM, ni
-          l'application. <code>console</code> n'existe pas dans ce moteur — l'autocomplétion ne le
-          propose pas.
+          {{ t('editor.hint') }}
         </p>
       </div>
 
       <div class="pane sim">
         <div class="sim-head">
-          <h2>Simulateur</h2>
+          <h2>{{ t('editor.simulator') }}</h2>
           <p class="sim-note">{{ simNote }}</p>
-          <p v-if="!layout" class="sim-note">
-            Aucun clavier connecté : dessin d'après le gabarit par défaut.
-          </p>
+          <p v-if="!layout" class="sim-note">{{ t('editor.noKeyboard') }}</p>
         </div>
 
         <!--

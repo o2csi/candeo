@@ -9,6 +9,7 @@ import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
 import { refreshLibrary } from './editor/library'
+import { t } from './i18n'
 
 const route = useRoute()
 const { devices, error, restore } = useDevice()
@@ -21,11 +22,12 @@ const { reload } = useSettings()
  * lives as long as the webview.
  */
 watch(
+  // Follows the language too: the summary is translated as it is computed.
   () => controlledSummary(devices.value),
   (summary) => {
     getCurrentWindow()
-      .setTitle(`candeo - ${summary}`)
-      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e)}`, e))
+      .setTitle(t('app.title', { summary }))
+      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e, 'en')}`, e))
   },
   { immediate: true },
 )
@@ -33,26 +35,13 @@ watch(
 /** L'éditeur occupe toute la fenêtre : c'est un mode, pas un onglet. */
 const full = computed(() => route.meta.full === true)
 
-/**
- * Ce que la croix fait désormais, dit en toutes lettres.
- *
- * Fermer ne quitte plus : c'est ce qui permet à un effet de continuer, et c'est
- * aussi ce qui rend la sortie non évidente. Le taire laisserait croire à une
- * application qui refuse de se fermer — la lecture la plus naturelle, et la
- * pire.
- */
-const REPLI = 'Fermer replie dans la zone de notification'
-const REPLI_DETAIL =
-  "Fermer la fenêtre n'arrête pas candeo : l'effet continue de tourner sur le clavier, " +
-  "et l'icône de la zone de notification garde la main dessus. Pour quitter vraiment, " +
-  'clic droit sur cette icône, puis « Quitter candeo ».'
 
 onMounted(() => {
   void restore()
   // Effects dropped in the folder are compiled now, not when the gallery opens:
   // the tray only offers what is compiled, and it may be all someone uses.
   refreshLibrary().catch((e: unknown) =>
-    alerte('App', `library not compiled: ${message(e)}`, e),
+    alerte('App', `library not compiled: ${message(e, 'en')}`, e),
   )
 
   // L'état peut changer **sans la fenêtre** : l'icône de zone de notification
@@ -74,7 +63,7 @@ onMounted(() => {
       // jusqu'à ce qu'on la rouvre. Rien à montrer à l'écran — l'utilisateur ne
       // peut rien en faire —, mais un journal qui l'explique évite de chercher
       // une panne d'écriture là où il n'y a qu'un écouteur manquant.
-      alerte('App', `resynchronisation hors fenêtre inactive : ${message(e)}`, e)
+      alerte('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
     })
 })
 </script>
@@ -84,19 +73,20 @@ onMounted(() => {
     <nav v-if="!full" class="rail">
       <span class="brand" aria-hidden="true">◈</span>
 
-      <RouterLink to="/" class="tab">Effets</RouterLink>
-      <RouterLink to="/devices" class="tab">Périphériques</RouterLink>
-      <RouterLink to="/settings" class="tab">Réglages</RouterLink>
+      <RouterLink to="/" class="tab">{{ t('app.tabs.effects') }}</RouterLink>
+      <RouterLink to="/devices" class="tab">{{ t('app.tabs.devices') }}</RouterLink>
+      <RouterLink to="/settings" class="tab">{{ t('app.tabs.settings') }}</RouterLink>
 
       <span class="spacer" />
 
       <!--
-        Permanent, not a message to dismiss: the gesture it is about, the close
-        button, is available at all times, and nobody reads twice a warning they
-        already dismissed. It gives way before the tabs when the window narrows;
-        the tooltip keeps the detail, and the README explains it in full.
+        What the close button does, said at all times: closing no longer quits,
+        which lets an effect run on, and makes quitting less obvious. Permanent,
+        not a message to dismiss, since the gesture is always available. It gives
+        way before the tabs when the window narrows; the tooltip keeps the detail,
+        and the README explains it in full.
       -->
-      <span class="repli" :title="REPLI_DETAIL">{{ REPLI }}</span>
+      <span class="repli" :title="t('app.closeHidesDetail')">{{ t('app.closeHides') }}</span>
     </nav>
 
     <main class="body">

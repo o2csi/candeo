@@ -6,6 +6,7 @@
  */
 
 import type { DeviceInfo } from '../api/types'
+import { t } from '../i18n'
 
 /** The three states of a device someone decided to control. */
 export type DeviceStatus = 'controlled' | 'notOpen' | 'unplugged'
@@ -15,25 +16,20 @@ export function deviceStatus(device: Pick<DeviceInfo, 'open' | 'present'>): Devi
   return device.present ? 'notOpen' : 'unplugged'
 }
 
-/** The interface's terms for each state (`AGENTS.md`, interface text). */
-export const DEVICE_STATUS_LABELS: Record<DeviceStatus, string> = {
-  controlled: 'piloté',
-  notOpen: 'non ouvert',
-  unplugged: 'débranché',
+/** The interface's term for a state (`AGENTS.md`, interface text). */
+export function statusLabel(status: DeviceStatus): string {
+  return t(`devices.status.${status}`)
 }
 
 /**
- * "1 appareil piloté", with how many of them cannot be reached.
+ * "1 device controlled", with how many of them cannot be reached.
  *
  * A controlled device that is unplugged still counts: merging the two would
  * leave "controlled but gone" unsayable, which is exactly the loss worth seeing.
  */
 export function controlledSummary(devices: readonly Pick<DeviceInfo, 'state' | 'open'>[]): string {
   const controlled = devices.filter((d) => d.state === 'adopted')
-  if (controlled.length === 0) return 'aucun appareil piloté'
-
+  const summary = t('devices.summary.controlled', controlled.length)
   const lost = controlled.filter((d) => !d.open).length
-  const base =
-    controlled.length === 1 ? '1 appareil piloté' : `${controlled.length} appareils pilotés`
-  return lost === 0 ? base : `${base} · ${lost} injoignable${lost > 1 ? 's' : ''}`
+  return lost === 0 ? summary : t('devices.summary.unreachable', { summary, n: lost }, lost)
 }

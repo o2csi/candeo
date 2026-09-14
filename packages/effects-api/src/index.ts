@@ -239,12 +239,23 @@ export type ParamsOf<P> = P extends Record<string, ParamSpec>
  */
 export type Text = string | { readonly [language: string]: string }
 
+/**
+ * An option of a `choice`: its value alone, shown as it is, or the value the effect
+ * receives and the text shown for it.
+ *
+ * ```ts
+ * options: ['calm', 'wild']
+ * options: [{ value: 'calm', label: { en: 'Calm', fr: 'Calme' } }]
+ * ```
+ */
+export type ChoiceOption = string | { readonly value: string; readonly label: Text }
+
 /** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
 export type ParamSpec =
   | { kind: 'number'; label: Text; min: number; max: number; step?: number; default: number }
   | { kind: 'color'; label: Text; default: Rgb }
   | { kind: 'boolean'; label: Text; default: boolean }
-  | { kind: 'choice'; label: Text; options: readonly string[]; default: string }
+  | { kind: 'choice'; label: Text; options: readonly ChoiceOption[]; default: string }
 
 /** A kind of device an effect can target. The list grows with the devices. */
 export type DeviceKind = 'keyboard'
@@ -417,10 +428,10 @@ export function bounds(layout: Layout): Rect {
  * moitié, et « il manque un rectangle » sans dire lequel ne se corrige pas.
  */
 function sansRectangle(key: Key): string {
-  const quoi = key.label === undefined ? `la position ${key.index}` : `« ${key.label} »`
+  const which = key.label === undefined ? `position ${key.index}` : `“${key.label}”`
   return (
-    `${quoi} n'a pas de rectangle : ce gabarit n'a pas de géométrie relevée, ` +
-    "et un effet qui mesure des distances physiques n'a rien à y mesurer."
+    `${which} has no rectangle: this layout has no surveyed geometry, ` +
+    'and an effect that measures physical distances has nothing to measure on it.'
   )
 }
 

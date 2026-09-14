@@ -22,7 +22,9 @@
  * tournerait en rond.
  */
 
+import { i18n, type MessageKey } from '../i18n'
 import { logFromWebview, type WebviewLevel } from './candeo'
+import type { Failure } from './types'
 
 /**
  * Envoie au Rust, et **double sur la console en développement**.
@@ -58,12 +60,20 @@ export function info(source: string, message: string, detail?: unknown): void {
   consigner('info', source, message, detail)
 }
 
+function isFailure(e: unknown): e is Failure {
+  return typeof e === 'object' && e !== null && 'code' in e && 'params' in e
+}
+
 /**
- * Le message d'une erreur, tel qu'on l'affiche et tel qu'on le journalise.
+ * An error as shown, in the interface language — or in `locale`: the log is
+ * written in English.
  *
- * Les erreurs remontées par Rust sont déjà lisibles, et arrivent sous forme de
- * chaîne ; celles de la fenêtre sont des `Error`. Les deux se disent pareil.
+ * Rust sends a {@link Failure}, the window throws `Error`s; both read the same.
  */
-export function message(e: unknown): string {
+export function message(e: unknown, locale?: 'en'): string {
+  if (isFailure(e)) {
+    const key = `errors.${e.code}` as MessageKey
+    return locale ? i18n.global.t(key, e.params, { locale }) : i18n.global.t(key, e.params)
+  }
   return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
 }

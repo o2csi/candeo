@@ -70,10 +70,10 @@ Lists **all known layouts**, plugged in or not, and in which state.
   present: boolean,
   state: 'detected' | 'adopted' | 'ignored',
   open: boolean,
-  error: string | null,
+  error: Failure | null,        // see Errors
   surveyedFirmware: string,     // 'v1.5' — donnée du gabarit, connue sans rien ouvrir
   firmware: string | null,      // lu à l'ouverture ; null si fermé ou non lu
-  warnings: string[]            // vide = rien à signaler, PAS « compatible »
+  warnings: string[]            // in the interface language; empty = nothing to report, NOT "compatible"
 }
 ```
 
@@ -437,8 +437,9 @@ changed while the window compiled, and recording would pair this code with
 another version of the source. The entry is marked built-in as in the listing.
 
 Rust loads the module **once**, under the time budget swatch sampling uses, and
-reads what it declares: `description`, `params`, `apiVersion`. `description` and
-each parameter's `label` are a string or a map of languages (`{ en, fr }`), kept
+reads what it declares: `description`, `params`, `apiVersion`. `description`,
+each parameter's `label` and each `choice` option's label are a string or a map
+of languages (`{ en, fr }`), kept
 as is: the window shows its language, then English, then the first entry. A
 description that is neither is dropped. The parameters are
 stored **as is**: their shape is that of `ParamSpec` in `@candeo/effects-api`, and
@@ -580,9 +581,9 @@ back.
 
 ### `duplicate_effect(id) -> string`
 
-Copies the file under the first free name among `<name> (copie)`, `(copie 2)`…,
-and returns it. The suffix is interface text, French until the i18n catalogs
-exist. The cache is copied with the file — same bytes, same hash — so the copy is
+Copies the file under the first free name among `<name> (copy)`, `(copy 2)`…,
+and returns it. The suffix is interface text, in the interface language
+(`effects.copy`). The cache is copied with the file — same bytes, same hash — so the copy is
 `ready` at once. It is not recorded as shipped, even when the original was: it is
 a new effect, the user's.
 
@@ -660,7 +661,8 @@ finished by the next startup without duplicating an effect.
 ```ts
 {
   preferences: {
-    logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace'
+    logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
+    language?: 'en' | 'fr'        // absent : la langue du système
   },
   devices: {
     vid: number,
@@ -884,9 +886,19 @@ without the other.
 
 ## Errors
 
-All fallible commands return `Result<T, String>`. The message is
-meant to be **displayed as is**: it must remain readable by a human, not
-become a code to translate on the front end.
+All fallible commands return `Result<T, Failure>`, which reaches the window as:
+
+```ts
+{ code: string, params: Record<string, string> }   // { code: 'effectNotFound', params: { name: 'Rain' } }
+```
+
+`code` names `errors.<code>` in the catalogs, and the window says it in its
+language (`message()` in `api/journal.ts`). Rust logs the English text. What
+nobody can act on — a disk refusing a write — is `unexpected`, with an English
+`detail`.
+
+An effect's own load or render error (`EffectEntry.error`, the engine's
+`error`) stays an English string, for its author.
 
 ---
 
@@ -966,6 +978,28 @@ announce it.
 
 `reset_settings()` also brings the level back to the default, and immediately: it has
 just been erased from the file, leaving it applied would make the screen lie.
+
+## Interface language
+
+### `get_language() -> LanguageStatus` · `set_language(setting) -> LanguageStatus`
+
+```ts
+{
+  setting: 'system' | 'en' | 'fr',   // ce qui a été choisi
+  language: 'en' | 'fr',             // ce que l'interface affiche
+  system: 'en' | 'fr'                // la langue du système, pour le choix « Système »
+}
+```
+
+`system`, the default, is not written to `settings.json`. It resolves in Rust, so
+that the window and the tray agree: the display language on Windows
+(`GetUserDefaultUILanguage`, not the regional format — someone reading Windows in
+English with French dates expects English), `LC_ALL`, `LC_MESSAGES` or `LANG`
+elsewhere, and English for any language the interface is not written in.
+
+`get_language` never fails: with unreadable settings it gives the system's
+language, since the window must still be able to say what went wrong. The window
+reads it before mounting, so that it does not show English for a moment.
 
 ### `open_log_dir()`
 
@@ -1156,7 +1190,7 @@ previous one, without any error saying so.
     running: boolean,
     effectId: string | null,
     error: string | null,
-    deviceError: string | null,
+    deviceError: Failure | null,   // deviceWrite, or deviceClosed: see Errors
     reachingKeyboard: boolean,
     toKeyboard: boolean
   }[],

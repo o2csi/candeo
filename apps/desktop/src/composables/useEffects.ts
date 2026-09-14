@@ -8,13 +8,13 @@
 import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceRef, Effect } from '../api/types'
 
 export interface HardwareEffect {
   id: string
-  name: string
-  /** Ce que l'effet fait, en une phrase. */
-  summary: string
+  /** Its name and one-sentence summary, under `effects.hardwareEffects.<key>`. */
+  key: 'spectrumCycle' | 'wave' | 'off'
   effect: Effect
 }
 
@@ -38,24 +38,13 @@ const WAVE_SPEED = 0x28
  * effet. Il apparaîtra avec le moteur (issue #6).
  */
 export const hardwareEffects: readonly HardwareEffect[] = [
-  {
-    id: 'hardware:spectrumCycle',
-    name: 'Spectrum Cycle',
-    summary: 'Tout le clavier change de teinte ensemble, sans fin.',
-    effect: { kind: 'spectrumCycle' },
-  },
+  { id: 'hardware:spectrumCycle', key: 'spectrumCycle', effect: { kind: 'spectrumCycle' } },
   {
     id: 'hardware:wave',
-    name: 'Wave',
-    summary: 'Un dégradé traverse le clavier de part en part.',
+    key: 'wave',
     effect: { kind: 'wave', direction: WAVE_DIRECTION, speed: WAVE_SPEED },
   },
-  {
-    id: 'hardware:off',
-    name: 'Éteint',
-    summary: 'Rétroéclairage coupé, sans débrancher quoi que ce soit.',
-    effect: { kind: 'off' },
-  },
+  { id: 'hardware:off', key: 'off', effect: { kind: 'off' } },
 ]
 
 /**
@@ -71,10 +60,6 @@ const error = ref<string | null>(null)
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 export function useEffects() {
   /**
    * Pose un effet matériel **sur un appareil**.

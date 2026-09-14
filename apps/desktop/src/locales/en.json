@@ -1,0 +1,272 @@
+{
+  "app": {
+    "title": "candeo - {summary}",
+    "tabs": {
+      "effects": "Effects",
+      "devices": "Devices",
+      "settings": "Settings"
+    },
+    "closeHides": "Closing hides to the notification area",
+    "closeHidesDetail": "Closing the window does not stop candeo: the effect keeps running on the keyboard, and the notification area icon keeps control of it. To quit, right-click that icon, then “Quit candeo”."
+  },
+  "effects": {
+    "columns": {
+      "devices": "Devices",
+      "effects": "Effects",
+      "settings": "Settings"
+    },
+    "expandDevices": "Expand the devices column",
+    "collapseDevices": "Collapse the devices column",
+    "expandEffects": "Expand the effects column",
+    "collapseEffects": "Collapse the effects column",
+    "brightness": "Brightness",
+    "percent": "{n}%",
+    "noDevice": "No device controlled.",
+    "chooseDevice": "Choose a device",
+    "noDeviceNotice": "No device controlled: the library can be browsed and the preview runs on the default layout, but applying an effect needs a device candeo is allowed to control.",
+    "deviceStopped": "stopped · remembered: {name}",
+    "deviceIdle": "no effect",
+    "groups": {
+      "hardware": "hardware",
+      "builtin": "built-in",
+      "user": "yours"
+    },
+    "natures": {
+      "hardware": "hardware",
+      "builtin": "built-in",
+      "user": "yours"
+    },
+    "modified": "{nature} · modified",
+    "readsKeys": "reacts to key presses",
+    "costs": {
+      "host": "host loop · runs with the window closed",
+      "hardware": "firmware · no processor time · survives everything"
+    },
+    "noDescription": "No description.",
+    "appliedOnDevice": "{name} — applied on the device",
+    "entryApplied": "applied",
+    "entryBroken": "error",
+    "entryStale": "to compile",
+    "new": "New effect",
+    "refresh": "Refresh",
+    "refreshTitle": "Read the effects folder again",
+    "openFolder": "Open the folder",
+    "openFolderTitle": "Open the effects folder",
+    "restoreBuiltins": "Restore built-ins ({n})",
+    "restoreTitle": "Restore {names}",
+    "effectError": "Effect error, on the current frame: {error}",
+    "previewError": "Error in the previewed effect, with no consequence for the keyboard: {error}",
+    "missing": "“{name}” is no longer in the folder.",
+    "restore": "Restore",
+    "forgetSettings": "Forget its settings",
+    "preview": {
+      "device": "Frames from the engine, exactly the ones sent to the keyboard.",
+      "hardware": "Run by the firmware: the application does not receive its frames, there is nothing to animate here.",
+      "noDevice": "Preview on the default layout: nothing is sent anywhere, and no device is controlled.",
+      "elsewhere": "Preview: nothing is sent to the keyboard, where “{name}” keeps running.",
+      "apply": "Preview: nothing is sent to the keyboard. “Apply” sends this one there.",
+      "stopped": "The preview stopped on an error.",
+      "starting": "Preparing the preview…",
+      "defaultLayout": "Drawn from the default layout: no device open."
+    },
+    "frozen": "The preview is not running. The values below stay remembered, and “Apply” will start the effect with them.",
+    "noParamsHardware": "Run by the firmware: it exposes no setting to the application.",
+    "noParams": "This effect declares none: it does the same thing every time it starts.",
+    "savedNoDevice": "Values declared by the effect. They are only remembered for a controlled device.",
+    "savedKept": "Settings saved for {device}: they are used the next time this effect starts, including from the notification area.",
+    "savedDeclared": "Values declared by the effect. What differs from them is saved for {device}, without asking.",
+    "apply": "Apply",
+    "applied": "Applied",
+    "stop": "Stop",
+    "viewCode": "View code",
+    "edit": "Edit",
+    "duplicate": "Duplicate",
+    "copy": "copy",
+    "copyN": "copy {n}",
+    "restoreOriginal": "Restore original",
+    "delete": "Delete",
+    "footerHardware": "run by the device · nothing to edit",
+    "footerPreview": "the preview runs as soon as an effect is selected · “Apply” sends to the keyboard",
+    "deleteTitle": "Delete “{name}”?",
+    "deleteDetail": "The effect's file is deleted: this is hand-written code, and nothing reinstalls it. The settings kept for it are forgotten, and its loop stops on the devices where it runs. Other effects are not touched.",
+    "deleteConfirm": "Delete permanently",
+    "restoreOriginalTitle": "Restore the original of “{name}”?",
+    "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
+    "cancel": "Cancel",
+    "hardwareEffects": {
+      "spectrumCycle": {
+        "name": "Spectrum Cycle",
+        "summary": "The whole keyboard changes hue together, endlessly."
+      },
+      "wave": {
+        "name": "Wave",
+        "summary": "A gradient crosses the keyboard from side to side."
+      },
+      "off": {
+        "name": "Off",
+        "summary": "Backlight off, without unplugging anything."
+      }
+    },
+    "params": {
+      "title": "Settings",
+      "on": "on",
+      "off": "off",
+      "reset": "Restore the effect's values"
+    },
+    "swatchKnown": "Colors sampled by running the effect",
+    "swatchUnknown": "No swatch",
+    "simulator": "Preview of {layout}: {keys} lit keys"
+  },
+  "editor": {
+    "back": "Back",
+    "name": "Effect name",
+    "new": "new effect",
+    "builtinReadOnly": "built-in · read-only",
+    "stop": "Stop",
+    "apply": "Apply",
+    "applied": "Applied",
+    "applyOn": "Apply on {device}",
+    "appliedOn": "Applied on {device}",
+    "wait": "One moment…",
+    "duplicate": "Duplicate",
+    "save": "Save",
+    "draftRestoredBuiltin": "Draft restored — a built-in effect is not saved: duplicate it to keep it.",
+    "draftRestored": "Draft restored — this version was not saved.",
+    "discard": "Back to the saved version",
+    "effectError": "Effect error, on the current frame: {error}",
+    "hint": "The code is transpiled here and run by Rust: an effect sees neither the DOM nor the application. This engine has no console, and autocompletion does not offer one.",
+    "simulator": "Simulator",
+    "simDevice": "Frames from {device}",
+    "theDevice": "the device",
+    "simPreview": "Preview",
+    "simStopped": "Preview stopped",
+    "simNone": "No preview",
+    "simStarting": "Preparing the preview…",
+    "noKeyboard": "No keyboard connected: drawn from the default layout.",
+    "nameRequired": "Name the effect before saving it",
+    "compileErrors": "{n} error in the effect — line {line}: {message} | {n} errors in the effect — line {line}: {message}",
+    "savedButBroken": "The effect is saved, but it does not load"
+  },
+  "tray": {
+    "noDevice": "No device controlled",
+    "devicesUnavailable": "Devices unavailable",
+    "openWindow": "Open window",
+    "quit": "Quit candeo",
+    "sendToKeyboard": "Send to keyboard",
+    "turnOff": "Turn off",
+    "notOpenTitle": "{name} — not open",
+    "notOpenReason": "Plugged in but not open — see the window",
+    "unpluggedTitle": "{name} — unplugged"
+  },
+  "devices": {
+    "title": "Devices",
+    "search": "Search",
+    "status": {
+      "controlled": "controlled",
+      "notOpen": "not open",
+      "unplugged": "unplugged"
+    },
+    "summary": {
+      "controlled": "no device controlled | 1 device controlled | {n} devices controlled",
+      "unreachable": "{summary} · {n} unreachable"
+    },
+    "state": {
+      "adopted": "Controlled",
+      "detected": "Detected",
+      "ignored": "Ignored"
+    },
+    "plugged": "Plugged in",
+    "unplugged": "Unplugged",
+    "firmware": "firmware {version} · layout surveyed on {surveyed}",
+    "firmwareNotRead": "not read",
+    "firmwareNotReadClosed": "not read, device closed",
+    "matrix": "matrix {rows} × {cols} · frame of {frameLen} colors · {keys} lit keys",
+    "control": "Control",
+    "ignore": "Ignore",
+    "none": "No known layout.",
+    "neverSeen": "A device never seen before is listed but not controlled: the decision is made once, then remembered.",
+    "warnings": {
+      "firmwareDiffers": "Firmware {read}, while this layout was surveyed on {surveyed}. The protocol has probably not changed; but if the keyboard does not obey, this is the first lead.",
+      "firmwareNotRead": "Firmware version not read ({reason}): it cannot be compared with the surveyed one ({surveyed}).",
+      "unsupported": "This firmware does not know the “{name}” command ({command}): it is no longer sent.",
+      "readBackDiffers": "The “{name}” command ({command}) is accepted, but the device reads back {read} after {wrote} was rewritten: it no longer understands it as when it was surveyed.",
+      "commands": {
+        "brightness": "brightness",
+        "effect": "effect",
+        "row": "row"
+      }
+    }
+  },
+  "errors": {
+    "unexpected": "Something went wrong: {detail}",
+    "nameEmpty": "An effect needs a name.",
+    "nameTooLong": "An effect name is {max} characters at most.",
+    "nameForbiddenCharacter": "“{name}”: an effect name cannot contain {characters}",
+    "nameEdges": "“{name}”: an effect name cannot start or end with a space or a dot.",
+    "nameReserved": "“{name}” is a name reserved by Windows.",
+    "effectNotFound": "No effect is named “{name}”.",
+    "effectExists": "An effect named “{name}” already exists.",
+    "builtinNotSaved": "“{name}” is a built-in effect: duplicate it to change it.",
+    "builtinNotRenamed": "“{name}” is a built-in effect: duplicate it to rename it.",
+    "builtinNotDeleted": "“{name}” is a built-in effect: it cannot be deleted from candeo.",
+    "notBuiltin": "“{name}” is not a built-in effect.",
+    "builtinNameTaken": "One of your effects is already named “{name}”: rename it to restore the built-in one.",
+    "effectChanged": "“{name}” changed while it was compiling: refresh the library.",
+    "effectNotCompiled": "“{name}” is not compiled yet: refresh the library.",
+    "effectBroken": "“{name}” does not load: {error}",
+    "effectNotStarted": "“{name}” did not start: {error}",
+    "settingsUnreadable": "The settings in {path} cannot be read: {detail}",
+    "noLayout": "No known layout for {device}.",
+    "deviceNotOpen": "No device open for {device}.",
+    "deviceNotFound": "Keyboard not found: plug it in and try again.",
+    "deviceAccess": "The keyboard cannot be reached: {detail}",
+    "commandUnsupported": "This firmware does not support command {command}.",
+    "wrongUnit": "The plugged-in unit (serial {fingerprint}) is not the one that was controlled: it stays closed. “Control” adopts it too.",
+    "deviceWrite": "Cannot write to the keyboard: {detail}",
+    "deviceClosed": "Device closed: reconnect it from Devices."
+  },
+  "settings": {
+    "title": "Settings",
+    "language": {
+      "title": "Language",
+      "label": "Interface language",
+      "system": "System ({language})",
+      "names": {
+        "en": "English",
+        "fr": "Français"
+      }
+    },
+    "log": {
+      "title": "Log",
+      "level": "Level",
+      "levels": {
+        "error": "Errors only",
+        "warn": "Warnings",
+        "info": "Lifecycle (default)",
+        "debug": "Detailed, per frame",
+        "trace": "Everything, per frame"
+      },
+      "verbose": "Detailed level on: the log grows fast and stays on after a restart.",
+      "forcedByEnv": "CANDEO_LOG imposes the {level} level for this run. The setting above applies at the next launch without that variable.",
+      "requested": "requested",
+      "openFolder": "Open the log folder",
+      "copyDiagnostic": "Copy the diagnostic",
+      "noFolder": "No file: the log could not open its folder.",
+      "copied": "Copied to the clipboard.",
+      "copyRefused": "The system refused to copy: the text is below, to select."
+    },
+    "config": {
+      "title": "Configuration",
+      "reset": "Reset the configuration to default",
+      "confirmTitle": "Start again from the default configuration?",
+      "detected": "Every device goes back to detected: none is opened at startup any more.",
+      "stopped": "Running effects stop and the backlight turns off, rather than staying frozen on the last frame.",
+      "forgetDevices": "Each device's applied effect and brightness are forgotten: everything starts again at full brightness, with no effect.",
+      "forgetParams": "The settings kept for each effect, on each device, are forgotten.",
+      "effectsKept": "Your effects are not touched.",
+      "effectsKeptDetail": "Deleting them is another action, one effect at a time, from the library.",
+      "confirm": "Reset to default",
+      "cancel": "Cancel"
+    }
+  }
+}

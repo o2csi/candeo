@@ -52,6 +52,7 @@
 //! oversight; the workaround would be to rebuild the menu on a timer, that is,
 //! to enumerate USB and read the disk in a loop for a menu nobody is looking at.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -64,9 +65,13 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
 
 use candeo_device::{Inspection, Layout};
 
+use crate::language::Language;
 use crate::runtime::DeviceEngineStatus;
 use crate::storage::{self, DeviceState, EffectEntry, EffectState};
-use crate::{journal, single_instance, AppState, CmdResult, DeviceRef};
+use crate::{i18n, journal, single_instance, AppState, DeviceRef};
+
+/// The tray's own failures are only logged: English sentences, never shown.
+type Built<T> = Result<T, String>;
 
 /// The icon's id, used to find it again and give it a new menu.
 const ICON_ID: &str = "candeo";
@@ -311,7 +316,7 @@ fn controlled_device(
 struct Presentation {
     title: String,
     /// A line explaining why nothing can be done, when that is the case.
-    reason: Option<&'static str>,
+    reason: Option<String>,
     effects: bool,
     output: bool,
     turn_off: bool,
@@ -321,11 +326,11 @@ struct Presentation {
 ///
 /// The actions still re-read the state when clicked (see the module header):
 /// greying items is honesty in the menu, not the protection.
-fn presentation(device: &ControlledDevice, loop_running: bool) -> Presentation {
-    let name = device.layout.name;
+fn presentation(device: &ControlledDevice, loop_running: bool, language: Language) -> Presentation {
+    let name = BTreeMap::from([("name", device.layout.name.to_owned())]);
     match device.availability {
         Availability::Open => Presentation {
-            title: name.to_owned(),
+            title: device.layout.name.to_owned(),
             reason: None,
             effects: true,
             // The toggle lives in the loop: without a loop there is nothing to toggle.
@@ -333,14 +338,14 @@ fn presentation(device: &ControlledDevice, loop_running: bool) -> Presentation {
             turn_off: true,
         },
         Availability::NotOpen => Presentation {
-            title: format!("{name} — non ouvert"),
-            reason: Some("Branché mais non ouvert — voir la fenêtre"),
+            title: i18n::t(language, "tray.notOpenTitle", &name),
+            reason: Some(i18n::text(language, "tray.notOpenReason")),
             effects: false,
             output: false,
             turn_off: false,
         },
         Availability::Unplugged => Presentation {
-            title: format!("{name} — débranché"),
+            title: i18n::t(language, "tray.unpluggedTitle", &name),
             reason: None,
             effects: false,
             output: false,
@@ -354,7 +359,7 @@ fn presentation(device: &ControlledDevice, loop_running: bool) -> Presentation {
 /// Kept apart from the rest of the menu because it is the only part that
 /// depends on the disk and on USB: see [`menu`], which treats its failure as a
 /// degradation and not as a refusal.
-fn device_submenus(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
+fn device_submenus(app: &AppHandle, language: Language) -> Built<Vec<Submenu<Wry>>> {
     let store = storage::store(app)?;
     let settings = store.read_settings()?;
     let library = store.list_effects()?;
@@ -369,7 +374,7 @@ fn device_submenus(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
 
     controlled_devices(&settings, &app.state::<AppState>())
         .iter()
-        .map(|controlled| device_submenu(app, controlled, &library, &engine_status))
+        .map(|controlled| device_submenu(app, controlled, &library, &engine_status, language))
         .collect()
 }
 
@@ -386,15 +391,19 @@ fn device_submenus(app: &AppHandle) -> CmdResult<Vec<Submenu<Wry>>> {
 /// And saying so **in the menu** is not a stopgap: in `release` the binary is
 /// built without a console, and the icon is precisely the place where a failure
 /// can be seen without opening one.
-fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
+fn menu(app: &AppHandle) -> Built<(Menu<Wry>, Option<String>)> {
+    let language = crate::language::current(app);
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
 
-    let degraded = match device_submenus(app) {
+    let degraded = match device_submenus(app, language) {
         Ok(submenus) => {
             if submenus.is_empty() {
                 // An empty section would read as a broken icon. Naming the
-                // absence costs one line; "Ouvrir la fenêtre" sits just below.
-                items.push(Box::new(inert_item(app, "Aucun appareil piloté")?));
+                // absence costs one line; Open window sits just below.
+                items.push(Box::new(inert_item(
+                    app,
+                    &i18n::text(language, "tray.noDevice"),
+                )?));
             }
             for device in submenus {
                 items.push(Box::new(device));
@@ -404,7 +413,10 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
         Err(e) => {
             // Never the raw error in the menu: it can hold a local file path,
             // and [`log_menu_failure`] already logs it.
-            items.push(Box::new(inert_item(app, "Appareils indisponibles")?));
+            items.push(Box::new(inert_item(
+                app,
+                &i18n::text(language, "tray.devicesUnavailable"),
+            )?));
             Some(e)
         }
     };
@@ -413,7 +425,7 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
     items.push(Box::new(item(
         app,
         &Action::OpenWindow,
-        "Ouvrir la fenêtre",
+        &i18n::text(language, "tray.openWindow"),
         true,
     )?));
     // Its own separator, and it is not decorative: closing the window no
@@ -423,12 +435,12 @@ fn menu(app: &AppHandle) -> CmdResult<(Menu<Wry>, Option<String>)> {
     items.push(Box::new(item(
         app,
         &Action::QuitApp,
-        "Quitter candeo",
+        &i18n::text(language, "tray.quit"),
         true,
     )?));
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(AsRef::as_ref).collect();
-    let assembled = Menu::with_items(app, &refs).map_err(|e| format!("menu non assemblé : {e}"))?;
+    let assembled = Menu::with_items(app, &refs).map_err(|e| format!("menu not assembled: {e}"))?;
     Ok((assembled, degraded))
 }
 
@@ -438,7 +450,8 @@ fn device_submenu(
     controlled: &ControlledDevice,
     library: &[EffectEntry],
     engine_status: &[DeviceEngineStatus],
-) -> CmdResult<Submenu<Wry>> {
+    language: Language,
+) -> Built<Submenu<Wry>> {
     let current = engine_status
         .iter()
         .find(|s| s.device == controlled.device)
@@ -451,10 +464,10 @@ fn device_submenu(
         .filter(|s| s.running)
         .and_then(|s| s.effect_id.as_deref());
 
-    let view = presentation(controlled, running_effect.is_some());
+    let view = presentation(controlled, running_effect.is_some(), language);
 
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
-    if let Some(reason) = view.reason {
+    if let Some(reason) = &view.reason {
         items.push(Box::new(inert_item(app, reason)?));
         items.push(Box::new(separator_item(app)?));
     }
@@ -479,7 +492,7 @@ fn device_submenu(
         &Action::ToggleOutput {
             device: controlled.device,
         },
-        "Envoyer au clavier",
+        &i18n::text(language, "tray.sendToKeyboard"),
         view.output,
         current.is_some_and(|s| s.to_keyboard),
     )?));
@@ -488,7 +501,7 @@ fn device_submenu(
         &Action::TurnOff {
             device: controlled.device,
         },
-        "Éteindre",
+        &i18n::text(language, "tray.turnOff"),
         // Greyed out is display comfort only: what really protects is that
         // [`turn_off_device`] re-reads the state when clicked. See the module
         // header.
@@ -497,46 +510,36 @@ fn device_submenu(
 
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(AsRef::as_ref).collect();
     Submenu::with_items(app, view.title, true, &refs)
-        .map_err(|e| format!("sous-menu de {} non assemblé : {e}", controlled.device))
+        .map_err(|e| format!("submenu of {} not assembled: {e}", controlled.device))
 }
 
-// `texte` keeps its name in the three builders below: it is interpolated by
-// name into their error messages.
-
-fn item(app: &AppHandle, action: &Action, texte: &str, enabled: bool) -> CmdResult<MenuItem<Wry>> {
-    MenuItem::with_id(app, action.to_id(), texte, enabled, None::<&str>)
-        .map_err(|e| format!("article « {texte} » non créé : {e}"))
+fn item(app: &AppHandle, action: &Action, text: &str, enabled: bool) -> Built<MenuItem<Wry>> {
+    MenuItem::with_id(app, action.to_id(), text, enabled, None::<&str>)
+        .map_err(|e| format!("item “{text}” not created: {e}"))
 }
 
 fn check_item(
     app: &AppHandle,
     action: &Action,
-    texte: &str,
+    text: &str,
     enabled: bool,
     is_checked: bool,
-) -> CmdResult<CheckMenuItem<Wry>> {
-    CheckMenuItem::with_id(
-        app,
-        action.to_id(),
-        texte,
-        enabled,
-        is_checked,
-        None::<&str>,
-    )
-    .map_err(|e| format!("bascule « {texte} » non créée : {e}"))
+) -> Built<CheckMenuItem<Wry>> {
+    CheckMenuItem::with_id(app, action.to_id(), text, enabled, is_checked, None::<&str>)
+        .map_err(|e| format!("check item “{text}” not created: {e}"))
 }
 
 /// An item that does nothing: it informs, and it is greyed out to say so.
 ///
 /// No identifier, hence no [`Action`]: clicking it is impossible, and giving it
 /// one would suggest otherwise.
-fn inert_item(app: &AppHandle, texte: &str) -> CmdResult<MenuItem<Wry>> {
-    MenuItem::new(app, texte, false, None::<&str>)
-        .map_err(|e| format!("article « {texte} » non créé : {e}"))
+fn inert_item(app: &AppHandle, text: &str) -> Built<MenuItem<Wry>> {
+    MenuItem::new(app, text, false, None::<&str>)
+        .map_err(|e| format!("item “{text}” not created: {e}"))
 }
 
-fn separator_item(app: &AppHandle) -> CmdResult<PredefinedMenuItem<Wry>> {
-    PredefinedMenuItem::separator(app).map_err(|e| format!("séparateur non créé : {e}"))
+fn separator_item(app: &AppHandle) -> Built<PredefinedMenuItem<Wry>> {
+    PredefinedMenuItem::separator(app).map_err(|e| format!("separator not created: {e}"))
 }
 
 // ---------------------------------------------------------------- the actions
@@ -646,24 +649,22 @@ fn start(app: &AppHandle, device: DeviceRef, effect: &str) {
 }
 
 /// The values to start this effect with, re-read now.
-///
-/// `effet` keeps its name: it is interpolated by name into the error message.
 fn current_params(
     app: &AppHandle,
     device: DeviceRef,
-    effet: &str,
-) -> CmdResult<serde_json::Map<String, serde_json::Value>> {
+    effect: &str,
+) -> Built<serde_json::Map<String, serde_json::Value>> {
     let store = storage::store(app)?;
     let entry = store
         .list_effects()?
         .into_iter()
-        .find(|e| e.id == effet)
-        .ok_or_else(|| format!("aucun effet nommé « {effet} »"))?;
+        .find(|e| e.id == effect)
+        .ok_or_else(|| format!("no effect named “{effect}”"))?;
     let settings = store.read_settings()?;
 
     Ok(storage::starting_params(
         &entry.manifest,
-        settings.effect_params(device.vid, device.pid, effet),
+        settings.effect_params(device.vid, device.pid, effect),
     ))
 }
 
@@ -701,9 +702,7 @@ fn turn_off_device(app: &AppHandle, device: DeviceRef) {
     // the window.
     crate::runtime::remember_active_effect(app, device, None);
 
-    if let Err(e) = crate::with_keyboard(&state, device, |kb| {
-        kb.set_effect(Effect::Off).map_err(|e| e.to_string())
-    }) {
+    if let Err(e) = crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(Effect::Off)?)) {
         // The expected case: the device was unplugged — or ignored from the
         // window — while the menu was open. The item was enabled when the menu
         // was built; the device was gone by the time of the click.
@@ -735,13 +734,13 @@ pub(crate) fn install(app: &AppHandle) {
     }
 }
 
-fn place_icon(app: &AppHandle) -> CmdResult<()> {
+fn place_icon(app: &AppHandle) -> Built<()> {
     // The application icon, not a second image to keep up to date: it is the
     // one the bundle already ships, and the one the user recognizes.
     let icon = app
         .default_window_icon()
         .cloned()
-        .ok_or_else(|| "aucune icône d'application dans le paquet".to_string())?;
+        .ok_or_else(|| "no application icon in the bundle".to_string())?;
 
     // The initial menu, degradation included; what was missing is recorded
     // through the same path as later rebuilds, so that only the onset is kept.
@@ -783,7 +782,7 @@ fn place_icon(app: &AppHandle) -> CmdResult<()> {
         // what keeps the icon alive, and [`refresh`] finds it again by its
         // id.
         .map(|_| ())
-        .map_err(|e| format!("icône non posée : {e}"))
+        .map_err(|e| format!("icon not placed: {e}"))
 }
 
 /// Rebuilds the menu from the current state.
@@ -804,7 +803,7 @@ pub(crate) fn refresh(app: &AppHandle) {
         // keeps of it is the start of the failure, not a line per hover.
         Ok((menu, degraded)) => icon
             .set_menu(Some(menu))
-            .map_err(|e| format!("menu non remplacé, l'ancien reste affiché : {e}"))
+            .map_err(|e| format!("menu not replaced, the previous one stays: {e}"))
             .err()
             .or(degraded),
         Err(e) => Some(e),
@@ -956,10 +955,15 @@ mod tests {
             controlled_device(layout, &settings, Some(None), None).expect("still controlled");
         assert_eq!(device.availability, Availability::NotOpen);
 
-        let view = presentation(&device, false);
+        let view = presentation(&device, false, Language::En);
         assert!(!view.effects && !view.output && !view.turn_off, "{view:?}");
         assert!(view.reason.is_some());
         assert_ne!(view.title, layout.name, "the title must not look ready");
+        assert_eq!(view.title, format!("{} — not open", layout.name));
+        assert_eq!(
+            presentation(&device, false, Language::Fr).title,
+            format!("{} — non ouvert", layout.name)
+        );
     }
 
     #[test]
@@ -972,14 +976,14 @@ mod tests {
             controlled_device(layout, &settings, Some(None), Some(&open)).expect("controlled");
         assert_eq!(device.availability, Availability::Open);
 
-        let view = presentation(&device, false);
+        let view = presentation(&device, false, Language::En);
         assert!(
             view.effects && view.turn_off && view.reason.is_none(),
             "{view:?}"
         );
         assert!(!view.output, "no loop, nothing to toggle");
         assert_eq!(view.title, layout.name);
-        assert!(presentation(&device, true).output);
+        assert!(presentation(&device, true, Language::En).output);
     }
 
     /// A handle can outlive the unplugging until the render loop closes it: the
@@ -993,7 +997,7 @@ mod tests {
         let device =
             controlled_device(layout, &settings, None, Some(&stale)).expect("still controlled");
         assert_eq!(device.availability, Availability::Unplugged);
-        assert!(!presentation(&device, true).effects);
+        assert!(!presentation(&device, true, Language::En).effects);
     }
 
     /// The open unit's serial decides, not the model: an open unit that is not

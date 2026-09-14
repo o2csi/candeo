@@ -251,7 +251,7 @@ struct Shared {
     /// the same cause nor the same remedy, and mixing them up would send
     /// someone looking in the wrong place. A flawless effect may well reach no
     /// LED.
-    device_error: Mutex<Option<String>>,
+    device_error: Mutex<Option<Failure>>,
     /// True if the last frame was actually written to a device.
     ///
     /// Without it, starting an effect with no keyboard connected produced **no
@@ -292,7 +292,7 @@ pub struct EngineStatus {
     /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
     /// Failed write to the keyboard — nothing to do with the effect code.
-    pub device_error: Option<String>,
+    pub device_error: Option<Failure>,
     /// True if the frames actually reach a keyboard.
     pub reaching_keyboard: bool,
     pub to_keyboard: bool,
@@ -587,7 +587,7 @@ impl DeviceLoop {
                     ready_tx,
                 )
             })
-            .map_err(|e| format!("impossible de démarrer le fil de rendu : {e}"))?;
+            .map_err(|e| format!("render thread not started: {e}"))?;
 
         // Wait for the load verdict: a syntax error must surface to the call,
         // not be discovered in a status later.
@@ -631,7 +631,7 @@ impl DeviceLoop {
             }
             Err(_) => {
                 let _ = handle.join();
-                let e = "le fil de rendu s'est arrêté avant d'avoir chargé l'effet".to_string();
+                let e = "the render thread stopped before loading the effect".to_string();
                 tracing::error!(target = ?target, effect = %effect_id, "{e}");
                 Err(e)
             }
@@ -958,7 +958,7 @@ fn render_loop(
             let _ = ready.send(Err(name_the_cause(
                 e,
                 &budget,
-                "le chargement de l'effet",
+                "loading the effect",
                 &format!("{} s", LOAD_BUDGET.as_secs()),
             )));
             return;
@@ -1021,8 +1021,8 @@ fn render_loop(
                 let e = name_the_cause(
                     e,
                     &budget,
-                    "l'effet",
-                    &format!("{} ms par image", FRAME_BUDGET.as_millis()),
+                    "the effect",
+                    &format!("{} ms per frame", FRAME_BUDGET.as_millis()),
                 );
                 consecutive_errors += 1;
                 // **One line when the failure starts, not one per frame.** At 30
@@ -1108,7 +1108,7 @@ pub(crate) fn declared_manifest(js: &str) -> Result<String, String> {
     let deadline = Instant::now() + swatch::BUDGET;
     let (_rt, ctx) = prepare_bounded(js, crate::default_layout(), Some(deadline))?;
     ctx.with(|ctx| ctx.globals().get::<_, String>("__candeo_manifest"))
-        .map_err(|e| format!("manifeste illisible : {e}"))
+        .map_err(|e| format!("unreadable manifest: {e}"))
 }
 
 /// JavaScript context ready to render, **with no time limit**.
@@ -1215,10 +1215,10 @@ fn prepare_with_layout(
 
         Module::evaluate(ctx.clone(), "bootstrap", BOOTSTRAP_JS)
             .catch(&ctx)
-            .map_err(|e| format!("chargement de l'effet : {e}"))?
+            .map_err(|e| format!("loading the effect: {e}"))?
             .finish::<()>()
             .catch(&ctx)
-            .map_err(|e| format!("chargement de l'effet : {e}"))?;
+            .map_err(|e| format!("loading the effect: {e}"))?;
         Ok(())
     })?;
 
@@ -1249,7 +1249,7 @@ fn render_with_presses(
         let render: Function = ctx
             .globals()
             .get("__candeo_render")
-            .map_err(|_| "la fonction de rendu a disparu du contexte".to_string())?;
+            .map_err(|_| "the render function is gone from the context".to_string())?;
 
         let out: Vec<u8> = render
             .call((time, frame_index, params, presses))
@@ -1258,7 +1258,7 @@ fn render_with_presses(
 
         if out.len() != frame_len * 3 {
             return Err(format!(
-                "l'effet a rendu {} octets, {} attendus",
+                "the effect rendered {} bytes, {} expected",
                 out.len(),
                 frame_len * 3
             ));
@@ -1284,20 +1284,23 @@ const QUICKJS_OOM: &str = "out of memory";
 /// — hence the comparison, and the fallback to the raw error when it says
 /// nothing: misnaming a cause would be worse than not naming it.
 ///
-/// `sujet` (subject) tells the two bounded places apart — a frame, a load. The
-/// loop that never ends is not at the same place in the file, and the time
-/// granted (`accorde`) is not the same.
-fn name_the_cause(error: String, budget: &Budget, sujet: &str, accorde: &str) -> String {
+/// `subject` tells the two bounded places apart — a frame, a load. The loop that
+/// never ends is not at the same place in the file, and the time `granted` is not
+/// the same.
+///
+/// English, like the TypeScript diagnostics next to it: the reader is the effect's
+/// author.
+fn name_the_cause(error: String, budget: &Budget, subject: &str, granted: &str) -> String {
     if budget.exceeded.get() {
         return format!(
-            "{sujet} a dépassé son temps de calcul ({accorde}) : \
-             une boucle qui ne se termine pas, ou un calcul trop lourd."
+            "{subject} exceeded its computing time ({granted}): \
+             a loop that never ends, or a computation too heavy."
         );
     }
     if error.contains(QUICKJS_OOM) {
         return format!(
-            "{sujet} a dépassé la mémoire qui lui est accordée ({} Mo) : \
-             un état qui grandit à chaque image, ou une allocation démesurée.",
+            "{subject} exceeded the memory granted to it ({} MB): \
+             a state that grows on every frame, or an oversized allocation.",
             MEMORY_BUDGET / (1024 * 1024)
         );
     }
@@ -1340,7 +1343,7 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
             Some(Ok(())) => {
                 shared.device_failures.store(0, Ordering::Relaxed);
                 let before = shared.device_error.lock().unwrap().take();
-                if journal::transition(before.as_deref(), None) == journal::Transition::Recovered {
+                if journal::transition(before.as_ref(), None) == journal::Transition::Recovered {
                     tracing::info!("writing to the device recovered");
                 }
                 shared.reaching.store(true, Ordering::Relaxed);
@@ -1351,8 +1354,7 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
                 // what to do, a closed device is reopened by the existing
                 // commands; the technical cause goes to the log only.
                 shared.device_failures.store(0, Ordering::Relaxed);
-                *shared.device_error.lock().unwrap() =
-                    Some("Appareil refermé : reconnectez-le depuis Périphériques.".to_owned());
+                *shared.device_error.lock().unwrap() = Some(Failure::new("deviceClosed"));
                 tracing::warn!(
                     "device closed after {MAX_DEVICE_WRITE_ERRORS} consecutive failed writes: {e}"
                 );
@@ -1365,8 +1367,10 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
                 shared
                     .device_failures
                     .store(failures + 1, Ordering::Relaxed);
-                let before = shared.device_error.lock().unwrap().replace(e.clone());
-                if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
+                let failure = Failure::new("deviceWrite").with("detail", &e);
+                let before = shared.device_error.lock().unwrap().replace(failure.clone());
+                if journal::transition(before.as_ref(), Some(&failure))
+                    == journal::Transition::Started
                 {
                     tracing::warn!("writing to the device started failing: {e}");
                 }
@@ -1457,7 +1461,7 @@ fn js_error(e: rquickjs::Error) -> String {
 
 // ---------------------------------------------------------------- commands
 
-use crate::{AppState, CmdResult, DeviceRef};
+use crate::{AppState, CmdResult, DeviceRef, Failure};
 use tauri::{AppHandle, State};
 
 /// Starts an effect, built-in or installed, **on a device**.
@@ -1489,21 +1493,34 @@ pub fn start_effect(
     let layout = crate::find_layout(device)?;
     let js = crate::storage::store(&app)?.effect_js(&id)?;
 
-    let params = serde_json::to_string(&params)
-        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
+    let params = serialised(&params)?;
 
     // The handle is shared with the loop, not copied: closing the device later
     // — ignored, unplugged — shows on the next frame.
     let out = Box::new(state.handle(device));
     state
         .engine
-        .start(device, id.clone(), js, params, layout, out)?;
+        .start(device, id.clone(), js, params, layout, out)
+        .map_err(|error| not_started(&id, error))?;
 
     // **After** the start, never before: only what actually runs is
     // remembered. An effect whose load fails must not leave behind an id that
     // the file presents as applied.
     remember_active_effect(&app, device, Some(&id));
     Ok(())
+}
+
+/// The parameters as the loop reads them.
+fn serialised(params: &serde_json::Value) -> CmdResult<String> {
+    serde_json::to_string(params)
+        .map_err(|e| Failure::unexpected(format!("parameters not serialisable: {e}")))
+}
+
+/// A load that failed: the effect's own error, for its author, in English.
+fn not_started(id: &str, error: String) -> Failure {
+    Failure::new("effectNotStarted")
+        .with("name", id)
+        .with("error", error)
 }
 
 #[tauri::command]
@@ -1562,12 +1579,12 @@ pub fn start_preview(
         None => crate::default_layout(),
     };
     let js = crate::storage::store(&app)?.effect_js(&id)?;
-    let params = serde_json::to_string(&params)
-        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
+    let params = serialised(&params)?;
 
     state
         .engine
-        .start_preview(DeviceRef::of(layout), id, js, params, layout)
+        .start_preview(DeviceRef::of(layout), id.clone(), js, params, layout)
+        .map_err(|error| not_started(&id, error))
 }
 
 #[tauri::command]
@@ -1579,9 +1596,7 @@ pub fn stop_preview(state: State<'_, AppState>) {
 /// device. The loop re-reads the JSON on every frame.
 #[tauri::command]
 pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
-    let params = serde_json::to_string(&params)
-        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
-    state.engine.set_preview_params(params);
+    state.engine.set_preview_params(serialised(&params)?);
     Ok(())
 }
 
@@ -1608,9 +1623,7 @@ pub fn set_effect_params(
     device: DeviceRef,
     params: serde_json::Value,
 ) -> CmdResult<()> {
-    let params = serde_json::to_string(&params)
-        .map_err(|e| format!("paramètres non sérialisables : {e}"))?;
-    state.engine.set_params(device, params);
+    state.engine.set_params(device, serialised(&params)?);
     Ok(())
 }
 
@@ -1744,7 +1757,7 @@ mod tests {
                 if abandon {
                     self.closed.store(true, Ordering::Relaxed);
                 }
-                return Some(Err("écriture refusée par l'appareil".into()));
+                return Some(Err("write refused by the device".into()));
             }
             *self.last.lock().unwrap() = colors.to_vec();
             self.written.fetch_add(1, Ordering::Relaxed);
@@ -1771,8 +1784,7 @@ mod tests {
         let status = status(&engine, FIRST);
         assert!(status.running, "closing the device stopped the loop");
         assert!(!status.reaching_keyboard);
-        let message = status.device_error.unwrap_or_default();
-        assert!(message.contains("refermé"), "{message}");
+        assert_eq!(status.device_error, Some(Failure::new("deviceClosed")));
 
         engine.stop(FIRST);
     }
@@ -2357,9 +2369,9 @@ mod tests {
 
     #[test]
     fn a_syntax_error_surfaces_at_load() {
-        let err = load_error("ceci n'est pas du JavaScript {{{");
+        let err = load_error("this is not JavaScript {{{");
         assert!(
-            err.contains("chargement de l'effet"),
+            err.contains("loading the effect"),
             "unexpected message: {err}"
         );
     }
@@ -2367,10 +2379,7 @@ mod tests {
     #[test]
     fn a_module_without_a_default_export_is_refused() {
         let err = load_error("export const x = 1");
-        assert!(
-            err.contains("export par défaut"),
-            "unexpected message: {err}"
-        );
+        assert!(err.contains("default export"), "unexpected message: {err}");
     }
 
     /// An exception at run time must not bring the engine down: it surfaces as
@@ -2470,7 +2479,7 @@ mod tests {
     /// mandatory rectangle — but that is what a device contributed without the
     /// `geometry` capability of `docs/design/device-sdk.md` §3.2 will be. Two
     /// positions are enough: what is tested is the absence of the fields.
-    const NO_GEOMETRY: &str = r#"{"name":"Gabarit non dessiné","rows":1,"cols":2,"keys":[{"index":0,"row":0,"col":0,"label":"A"},{"index":1,"row":0,"col":1,"label":"B"}]}"#;
+    const NO_GEOMETRY: &str = r#"{"name":"Undrawn layout","rows":1,"cols":2,"keys":[{"index":0,"row":0,"col":0,"label":"A"},{"index":1,"row":0,"col":1,"label":"B"}]}"#;
 
     /// **The pattern we are fighting.** Without geometry, `key.x` is
     /// `undefined`, the distance `NaN`, and the color would be clamped to zero:
@@ -2482,7 +2491,7 @@ mod tests {
         let (_rt, ctx) = prepare_with_layout(js, 2, NO_GEOMETRY.to_string(), None).expect("load");
 
         let err = render_once(&ctx, 0.0, 0, "{}", 2).unwrap_err();
-        assert!(err.contains("géométrie"), "unexpected message: {err}");
+        assert!(err.contains("geometry"), "unexpected message: {err}");
         assert!(
             err.contains('A') || err.contains('B'),
             "the message must name the offending key: {err}"
@@ -2586,13 +2595,13 @@ mod tests {
         // limit promises — thirty cut frames, each taking its whole budget.
         wait_at_most(
             FRAME_BUDGET * MAX_CONSECUTIVE_ERRORS * 3,
-            "la boucle ne s'est pas arrêtée",
+            "the loop did not stop",
             || !status(&engine, FIRST).running,
         );
 
         let error = status(&engine, FIRST).error.expect("no error recorded");
         assert!(
-            error.contains("temps de calcul"),
+            error.contains("computing time"),
             "the cause is not named: {error}"
         );
         assert_eq!(
@@ -2620,7 +2629,7 @@ mod tests {
         wait_for("the loop did not stop", || !status(&engine, FIRST).running);
 
         let error = status(&engine, FIRST).error.expect("no error recorded");
-        assert!(error.contains("mémoire"), "the cause is not named: {error}");
+        assert!(error.contains("memory"), "the cause is not named: {error}");
 
         engine.stop(FIRST);
     }
@@ -2644,7 +2653,7 @@ mod tests {
         });
 
         assert!(
-            error.contains("temps de calcul"),
+            error.contains("computing time"),
             "the cause is not named: {error}"
         );
     }

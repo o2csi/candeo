@@ -47,7 +47,7 @@ async function compileStale(): Promise<EffectEntry[]> {
       // The file changed or disappeared between the listing and now: it stays
       // stale, and the next Refresh sees its new content. One file must not
       // keep the others from compiling.
-      alerte('library', `${entry.id}: not compiled: ${message(e)}`, e)
+      alerte('library', `${entry.id}: not compiled: ${message(e, 'en')}`, e)
     }
   }
 

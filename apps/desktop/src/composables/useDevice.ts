@@ -20,6 +20,7 @@
 import { computed, readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
+import { message } from '../api/journal'
 import type { DeviceInfo, DeviceRef, LayoutInfo } from '../api/types'
 
 const devices = ref<DeviceInfo[]>([])
@@ -60,10 +61,6 @@ const current = computed<DeviceRef | null>(() => {
 })
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-function message(e: unknown): string {
-  return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
 async function run<T>(task: () => Promise<T>): Promise<T | null> {
   busy.value = true
   error.value = null

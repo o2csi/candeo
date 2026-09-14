@@ -10,7 +10,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
-import type { DeviceInfo, DeviceRef, DeviceState, Effect, LayoutInfo, Rgb } from './types'
+import type { DeviceInfo, DeviceRef, DeviceState, Effect, Failure, LayoutInfo, Rgb } from './types'
 
 /** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -399,6 +399,31 @@ export interface ActiveEffectRecord {
 export interface Preferences {
   /** Le niveau du journal, quand quelqu'un l'a changé. Absent = le défaut. */
   logLevel?: LogLevel
+  /** The interface language someone chose. Absent = the system's. */
+  language?: LanguageSetting
+}
+
+/** What someone chose for the interface language. */
+export type LanguageSetting = 'system' | 'en' | 'fr'
+
+/** A language the interface is written in. */
+export type Language = 'en' | 'fr'
+
+/** The setting, the language it resolves to, and the system's. */
+export interface LanguageStatus {
+  setting: LanguageSetting
+  language: Language
+  system: Language
+}
+
+/** The interface language; the system's when the settings cannot be read. */
+export function getLanguage(): Promise<LanguageStatus> {
+  return invoke('get_language')
+}
+
+/** Changes the interface language and saves it. */
+export function setLanguage(setting: LanguageSetting): Promise<LanguageStatus> {
+  return invoke('set_language', { setting })
 }
 
 /**
@@ -510,7 +535,7 @@ export interface EngineStatus {
    * Les deux sont distincts parce qu'ils n'ont ni la même cause ni le même
    * remède : un effet impeccable peut n'atteindre aucune LED.
    */
-  deviceError: string | null
+  deviceError: Failure | null
   /**
    * Vrai si les images parviennent effectivement à un clavier.
    *
