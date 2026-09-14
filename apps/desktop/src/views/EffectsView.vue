@@ -270,19 +270,70 @@ const choices = computed<Choice[]>(() => [
 ])
 
 /**
- * Groupé par nature. Le coût de chacune est dit dans le panneau de droite, pas
- * seulement suggéré par l'ordre : un effet matériel ne coûte aucun temps
- * processeur et survit à la fermeture, et cela se lit en toutes lettres.
+ * Grouped by nature. The cost of each one is spelled out in the right-hand
+ * panel, not merely suggested by the order.
+ *
+ * Hardware comes first: it costs no processor time and survives everything,
+ * which often makes it the right choice (`docs/design/studio.md` §1).
+ *
+ * The order is for display only. The fallback selection still takes the first
+ * entry of `choices`, a built-in: a hardware effect would open the screen on a
+ * simulator with nothing to animate.
  */
 const GROUPS: readonly { nature: Nature; title: string }[] = [
+  { nature: 'hardware', title: 'matériel' },
   { nature: 'builtin', title: 'intégrés' },
   { nature: 'user', title: 'à vous' },
-  { nature: 'hardware', title: 'matériel — dans le clavier' },
 ]
 
 const grouped = computed(() =>
   GROUPS.map((g) => ({ ...g, items: choices.value.filter((c) => c.nature === g.nature) })),
 )
+
+/**
+ * Folded sections, remembered per viewer in the webview storage.
+ *
+ * A viewer who never uses hardware effects folds them once; asking again at
+ * every launch would make folding pointless. Storage may be refused (hardened
+ * webview, read-only profile): sections then open expanded and still fold for
+ * the session.
+ */
+const SECTION_STORAGE_PREFIX = 'candeo:effects-section:'
+
+function readSectionFolded(nature: Nature): boolean {
+  try {
+    return localStorage.getItem(SECTION_STORAGE_PREFIX + nature) === 'folded'
+  } catch {
+    return false
+  }
+}
+
+function writeSectionFolded(nature: Nature, folded: boolean): void {
+  try {
+    // Removed rather than stored as "expanded": expanded is the default, and a
+    // missing key must keep meaning it.
+    if (folded) localStorage.setItem(SECTION_STORAGE_PREFIX + nature, 'folded')
+    else localStorage.removeItem(SECTION_STORAGE_PREFIX + nature)
+  } catch {
+    // See `SECTION_STORAGE_PREFIX`: the fold simply does not outlive the session.
+  }
+}
+
+const foldedSections = ref<Record<Nature, boolean>>({
+  hardware: readSectionFolded('hardware'),
+  builtin: readSectionFolded('builtin'),
+  user: readSectionFolded('user'),
+})
+
+/**
+ * Folding only hides entries: the selection is left alone, so the settings
+ * panel keeps showing the effect even when its section is folded.
+ */
+function toggleSection(nature: Nature): void {
+  const folded = !foldedSections.value[nature]
+  foldedSections.value[nature] = folded
+  writeSectionFolded(nature, folded)
+}
 
 const NATURES: Record<Nature, string> = {
   builtin: 'intégré',
@@ -1034,27 +1085,66 @@ onBeforeUnmount(() => {
 
       <div id="col-effects" class="col-body">
         <template v-for="g in grouped" :key="g.nature">
-          <p class="group">{{ g.title }}</p>
           <!--
-            « appliqué », et non « actif ». Le mot d'avant valait pour les deux
-            états à la fois, or ils n'ont rien à voir : l'un dit ce que le
-            clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
-            déjà sur `aria-pressed` et sur la bordure.
+            The title attribute names the button once the column is collapsed
+            and only the chevron is left.
           -->
           <button
-            v-for="c in g.items"
-            :key="c.id"
-            class="entry"
+            :id="`fx-section-head-${g.nature}`"
+            class="group"
             type="button"
-            :aria-pressed="selectedEffect?.id === c.id"
-            :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
-            :title="c.name"
-            @click="chosenEffect = c.id"
+            :aria-expanded="!foldedSections[g.nature]"
+            :aria-controls="`fx-section-${g.nature}`"
+            :title="g.title"
+            @click="toggleSection(g.nature)"
           >
-            <EffectSwatch class="mark" :colors="c.swatch" />
-            <span class="fx-name">{{ c.name }}</span>
-            <span v-if="activeId === c.id" class="fx-state">appliqué</span>
+            <svg
+              class="chevron"
+              viewBox="0 0 10 10"
+              width="10"
+              height="10"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
+              <path d="M3.5 2l3 3-3 3" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span class="group-title">{{ g.title }}</span>
           </button>
+          <!--
+            `v-show` rather than `v-if`: the element named by `aria-controls`
+            must exist while folded, and `display: none` already takes its
+            entries out of the tab order.
+          -->
+          <div
+            v-show="!foldedSections[g.nature]"
+            :id="`fx-section-${g.nature}`"
+            class="group-items"
+            role="group"
+            :aria-labelledby="`fx-section-head-${g.nature}`"
+          >
+            <!--
+              « appliqué », et non « actif ». Le mot d'avant valait pour les deux
+              états à la fois, or ils n'ont rien à voir : l'un dit ce que le
+              clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
+              déjà sur `aria-pressed` et sur la bordure.
+            -->
+            <button
+              v-for="c in g.items"
+              :key="c.id"
+              class="entry"
+              type="button"
+              :aria-pressed="selectedEffect?.id === c.id"
+              :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
+              :title="c.name"
+              @click="chosenEffect = c.id"
+            >
+              <EffectSwatch class="mark" :colors="c.swatch" />
+              <span class="fx-name">{{ c.name }}</span>
+              <span v-if="activeId === c.id" class="fx-state">appliqué</span>
+            </button>
+          </div>
         </template>
 
         <button class="new" type="button" @click="router.push('/editor')">
@@ -1417,16 +1507,37 @@ onBeforeUnmount(() => {
 }
 
 .group {
+  display: flex;
+  gap: var(--gap-1);
+  align-items: center;
+  width: 100%;
   margin: var(--gap-3) 0 var(--gap-1);
-  padding-left: var(--gap-2);
+  padding: 2px var(--gap-2);
+  border-radius: var(--r-sm);
   color: var(--text-faint);
   font-size: 10px;
   letter-spacing: 0.08em;
+  text-align: left;
   text-transform: uppercase;
+}
+
+.group:hover {
+  color: var(--text-muted);
 }
 
 .group:first-child {
   margin-top: 0;
+}
+
+.chevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+/* Keyed on `aria-expanded` itself, so the chevron cannot disagree with what
+   assistive technology announces. */
+.group[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
 }
 
 .fx-name {
@@ -1519,6 +1630,12 @@ onBeforeUnmount(() => {
   }
 
   .col.shut .col-body > .group {
+    display: flex;
+  }
+
+  /* A folded section keeps its own `display: none`, set inline by `v-show`,
+     which this rule cannot override. */
+  .col.shut .col-body > .group-items {
     display: block;
   }
 
@@ -1565,15 +1682,26 @@ onBeforeUnmount(() => {
     padding-inline: 0;
   }
 
-  /* Le titre de groupe devient un filet : la séparation reste, le texte part. */
+  /*
+   * A section header shrinks to a rule and its chevron, same form as above:
+   * everything hidden, the chevron restored. It stays a button, because a
+   * header reduced to a bare rule would leave a folded section impossible to
+   * reopen without first expanding the column.
+   */
+  .col.shut .group > * {
+    display: none;
+  }
+
+  .col.shut .group > .chevron {
+    display: block;
+  }
+
   .col.shut .group {
-    height: 0;
-    margin: var(--gap-2) var(--gap-1);
-    padding: 0;
-    overflow: hidden;
+    justify-content: center;
+    margin: var(--gap-2) 0 var(--gap-1);
+    padding: 2px 0;
     border-top: 1px solid var(--line);
-    font-size: 0;
-    line-height: 0;
+    border-radius: 0;
   }
 
   .col.shut .group:first-child {

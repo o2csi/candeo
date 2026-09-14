@@ -390,6 +390,23 @@ never been written. Remembered per device, and **reapplied on plug-in**: a
 level that is not reapplied is useless, and the surveyed protocol can
 write brightness but not read it back.
 
+### The effects column
+
+Three sections, in this order: **hardware** ("matériel"), **built-in**
+("intégrés"), **yours** ("à vous"). Hardware comes first: it costs no processor
+time and survives everything, which often makes it the right choice (§1). The
+order is for display only: on opening, the selection still falls on the first
+built-in effect, since a hardware effect would give the simulator nothing to
+animate.
+
+Each section header is a button that folds its section. Sections are expanded
+by default, and the choice is remembered per viewer in the webview storage;
+where storage is refused, they open expanded and still fold for the session.
+**Folding hides entries, never the selection**: the settings panel keeps the
+effect even when its section is folded. "Nouvel effet" (New effect) sits
+outside the sections and stays visible. In the collapsed column a header
+shrinks to a rule and its chevron, so a folded section can still be reopened.
+
 ### A single "applied" effect, that of the selected device
 
 Marking as active the effects of all devices in a list that describes what
