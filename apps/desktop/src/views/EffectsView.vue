@@ -66,7 +66,9 @@ import {
   deleteEffect,
   duplicateEffect,
   forgetEffectSettings,
+  missingBuiltins,
   openEffectsDir,
+  restoreBuiltin,
   engineStatus,
   getDefaultLayout,
   getLayout,
@@ -225,6 +227,8 @@ interface Choice {
   state: EffectState
   /** Why a `broken` effect does not load. */
   error: string | null
+  /** A built-in whose file was edited outside the application. */
+  modified: boolean
 }
 
 const library = ref<EffectEntry[]>([])
@@ -246,6 +250,7 @@ function fromEntry(e: EffectEntry): Choice {
     hardware: null,
     state: e.state,
     error: e.error ?? null,
+    modified: e.modified,
   }
 }
 
@@ -260,6 +265,7 @@ function fromHardware(e: HardwareEffect): Choice {
     hardware: e,
     state: 'ready',
     error: null,
+    modified: false,
   }
 }
 
@@ -490,7 +496,7 @@ const applied = computed(
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
 
-const { frame } = useSimulatorFeed({
+const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
   device: () => selectedDevice.value,
   showsDevice: () => showsDevice.value,
@@ -622,13 +628,55 @@ async function halt(): Promise<void> {
 // ------------------------------------------------------------- suppression
 
 /**
- * Every effect that is a file can be deleted, shipped ones included; a hardware
- * effect lives in the firmware and has nothing to remove.
- *
- * A deleted shipped effect does not come back at the next launch: getting it
- * back means saving its file from the repository into the effects folder.
+ * Only the user's effects are deleted from here. A built-in is not
+ * (`docs/design/effects-library.md` §4), and a hardware effect lives in the
+ * firmware.
  */
-const removable = computed(() => selectedEffect.value?.nature !== 'hardware')
+const removable = computed(() => selectedEffect.value?.nature === 'user')
+
+/**
+ * Shipped effects the folder no longer holds, offered back. Read with the
+ * library, since both change with the folder.
+ */
+const missingBuiltinNames = ref<string[]>([])
+
+async function readLibrary(): Promise<void> {
+  const [entries, missing] = await Promise.all([refreshLibrary(), missingBuiltins()])
+  library.value = entries
+  missingBuiltinNames.value = missing
+}
+
+/**
+ * Writes shipped effects' files again: missing ones, or a modified one whose
+ * original is wanted back. The previewed code may have changed with them.
+ */
+async function restore(names: readonly string[]): Promise<void> {
+  problem.value = null
+  working.value = true
+  try {
+    for (const name of names) await restoreBuiltin(name)
+  } catch (e) {
+    problem.value = message(e)
+  }
+  try {
+    await readLibrary()
+    restartPreview()
+  } catch (e) {
+    listError.value = message(e)
+  } finally {
+    working.value = false
+  }
+}
+
+/** The built-in whose original waits for confirmation, by id, like a removal. */
+const pendingRestore = ref<string | null>(null)
+
+async function restoreOriginal(): Promise<void> {
+  const id = pendingRestore.value
+  if (id === null) return
+  await restore([id])
+  if (problem.value === null) pendingRestore.value = null
+}
 
 /**
  * Effects the settings still refer to that the folder no longer holds: renamed
@@ -661,7 +709,7 @@ async function duplicateSelected(): Promise<void> {
   working.value = true
   try {
     const name = await duplicateEffect(c.id)
-    library.value = await refreshLibrary()
+    await readLibrary()
     chosenEffect.value = name
   } catch (e) {
     problem.value = message(e)
@@ -686,7 +734,7 @@ async function refreshEffects(): Promise<void> {
   listError.value = null
   working.value = true
   try {
-    library.value = await refreshLibrary()
+    await readLibrary()
   } catch (e) {
     listError.value = message(e)
   } finally {
@@ -714,6 +762,7 @@ watch(
   () => selectedEffect.value?.id,
   () => {
     pendingRemoval.value = null
+    pendingRestore.value = null
   },
 )
 
@@ -745,7 +794,7 @@ async function removeEffect(): Promise<void> {
     // La sélection retombe sur le premier de la liste : l'effet qu'elle désignait
     // n'existe plus.
     if (chosenEffect.value === id) chosenEffect.value = null
-    library.value = await refreshLibrary()
+    await readLibrary()
   } catch (e) {
     problem.value = message(e)
   } finally {
@@ -918,7 +967,7 @@ onMounted(async () => {
   // Une seule alerte : la bibliothèque est lue d'un coup, elle échoue d'un coup.
   // Les effets matériels, eux, sont écrits ici : la colonne n'est jamais vide.
   try {
-    library.value = await refreshLibrary()
+    await readLibrary()
     libraryRead.value = true
   } catch (e) {
     listError.value = message(e)
@@ -1155,6 +1204,22 @@ onBeforeUnmount(() => {
           <span class="plus" aria-hidden="true">↗</span>
           <span>Ouvrir le dossier</span>
         </button>
+        <!--
+          With the column's other actions rather than in the Built-in heading,
+          which is the folding button: this one stays reachable folded, and in
+          the collapsed column.
+        -->
+        <button
+          v-if="missingBuiltinNames.length"
+          class="new"
+          type="button"
+          :disabled="working"
+          :title="`Restaurer ${missingBuiltinNames.join(', ')}`"
+          @click="restore(missingBuiltinNames)"
+        >
+          <span class="plus" aria-hidden="true">↺</span>
+          <span>Restaurer les intégrés ({{ missingBuiltinNames.length }})</span>
+        </button>
       </div>
     </section>
 
@@ -1187,6 +1252,15 @@ onBeforeUnmount(() => {
       -->
       <p v-for="name in missingEffects" :key="name" class="notice warn" role="status">
         « {{ name }} » n'est plus dans le dossier.
+        <button
+          v-if="missingBuiltinNames.includes(name)"
+          class="link"
+          type="button"
+          :disabled="working"
+          @click="restore([name])"
+        >
+          Restaurer
+        </button>
         <button class="link" type="button" @click="forgetMissing(name)">Oublier ses réglages</button>
       </p>
 
@@ -1200,7 +1274,7 @@ onBeforeUnmount(() => {
         <header class="fx-head">
           <h1>{{ selectedEffect.name }}</h1>
           <span class="badge" :class="selectedEffect.nature">
-            {{ NATURES[selectedEffect.nature] }}
+            {{ NATURES[selectedEffect.nature] }}{{ selectedEffect.modified ? ' · modifié' : '' }}
           </span>
         </header>
 
@@ -1264,7 +1338,7 @@ onBeforeUnmount(() => {
             :disabled="selectedEffect.hardware !== null"
             @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
           >
-            Modifier
+            {{ selectedEffect.nature === 'builtin' ? 'Voir le code' : 'Modifier' }}
           </button>
 
           <button
@@ -1276,8 +1350,17 @@ onBeforeUnmount(() => {
             Dupliquer
           </button>
 
+          <button
+            v-if="selectedEffect.modified"
+            class="ghost"
+            :disabled="working"
+            @click="pendingRestore = selectedEffect.id"
+          >
+            Rétablir l'original
+          </button>
+
           <!--
-            Offered for files only: a hardware effect lives in the firmware.
+            Offered for the user's effects only.
 
             Il reste en place et actif pendant que la question est posée : le
             masquer ou le désactiver retirerait le focus du clavier au moment
@@ -1328,8 +1411,8 @@ onBeforeUnmount(() => {
             relance, le code écrit à la main ne se réinstalle pas.
           -->
           <p class="cost">
-            Le dossier de l'effet part entier, sa source comprise : c'est du code écrit à la main,
-            et rien ne le réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle
+            Le fichier de l'effet est supprimé : c'est du code écrit à la main, et rien ne le
+            réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle
             s'arrête sur les appareils où il tourne. Les autres effets ne sont pas touchés.
           </p>
           <div class="confirm-actions">
@@ -1337,6 +1420,29 @@ onBeforeUnmount(() => {
               Supprimer définitivement
             </button>
             <button class="ghost" :disabled="working" @click="pendingRemoval = null">
+              Annuler
+            </button>
+          </div>
+        </div>
+
+        <!-- Same placement and keyboard path as the removal question above. -->
+        <div
+          v-if="pendingRestore"
+          class="confirm"
+          role="group"
+          aria-labelledby="confirm-restore"
+        >
+          <p id="confirm-restore" class="confirm-title" role="alert">
+            Rétablir l'original de « {{ selectedEffect.name }} » ?
+          </p>
+          <p class="cost">
+            Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.
+          </p>
+          <div class="confirm-actions">
+            <button class="solid danger" :disabled="working" @click="restoreOriginal">
+              Rétablir l'original
+            </button>
+            <button class="ghost" :disabled="working" @click="pendingRestore = null">
               Annuler
             </button>
           </div>

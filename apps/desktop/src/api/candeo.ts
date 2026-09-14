@@ -228,20 +228,14 @@ export function readEffectSource(id: string): Promise<string> {
 }
 
 /**
- * Supprime un effet écrit : son dossier, sa source, et les réglages retenus pour
- * lui sur tous les appareils.
+ * Deletes one of the user's effects: its file, its cache, and the settings kept
+ * for it on every device. There is no undo, so the caller asks first.
  *
- * **Sans retour possible.** La source part avec : c'est du code écrit à la main,
- * et rien ne le réinstalle — l'appelant demande confirmation.
+ * A built-in is refused, as renaming and saving over one are: see
+ * {@link restoreBuiltin}.
  *
- * Un effet **intégré** est refusé : il est compilé dans le binaire, il n'y a pas
- * de dossier à retirer. L'interface ne propose donc pas le geste plutôt que de
- * le laisser échouer après coup.
- *
- * Le Rust **arrête les boucles** qui font tourner cet effet, sur quelque appareil
- * que ce soit, avant d'effacer quoi que ce soit : rien à faire ici. Une boucle
- * oubliée continuerait d'exécuter un `effect.js` chargé en mémoire, sans erreur
- * visible, alors que son dossier n'existe plus.
+ * Rust stops the loops running the effect, on every device, before erasing
+ * anything: a loop left running would carry on with code whose file is gone.
  */
 export function deleteEffect(id: string): Promise<void> {
   return invoke('delete_effect', { id })
@@ -253,6 +247,24 @@ export function deleteEffect(id: string): Promise<void> {
  */
 export function duplicateEffect(id: string): Promise<string> {
   return invoke('duplicate_effect', { id })
+}
+
+/** The shipped effects the folder no longer holds, to offer them back. */
+export function missingBuiltins(): Promise<string[]> {
+  return invoke('missing_builtins')
+}
+
+/**
+ * Writes a shipped effect's file again: a missing one comes back, a modified one
+ * is overwritten, and it receives updates again.
+ *
+ * The application does not delete, rename or save over a built-in: an edited
+ * copy would stop receiving updates, a renamed or deleted one would never come
+ * back. Duplicating makes an editable copy. Refused when an effect of the user's
+ * holds the name.
+ */
+export function restoreBuiltin(name: string): Promise<void> {
+  return invoke('restore_builtin', { name })
 }
 
 /** Opens the effects folder in the system file manager. */
@@ -280,8 +292,8 @@ export type EffectState = 'ready' | 'stale' | 'broken'
 /**
  * A library effect: its manifest, plus what is not part of it.
  *
- * Built-ins are compiled into the binary and have no file; `kind` tells them
- * apart, so the interface has a single list to show.
+ * Every effect is a file; `builtin` marks one recorded as shipped, which the
+ * application does not delete, rename or save over.
  */
 export interface EffectEntry extends EffectManifest {
   /** The built-in's id, or the effect's name, which is its file name. */
@@ -290,8 +302,10 @@ export interface EffectEntry extends EffectManifest {
   state: EffectState
   /** Why a `broken` effect does not load. */
   error?: string
-  /** SHA-256 of the source file, for {@link cacheEffect}. Absent for built-ins. */
+  /** SHA-256 of the source file, for {@link cacheEffect}. */
   hash?: string
+  /** A built-in whose file was edited outside the application. */
+  modified: boolean
   /**
    * Repère de couleurs, **prélevé en exécutant l'effet** — jamais déclaré.
    *

@@ -18,7 +18,7 @@ vi.mock('../api/journal', () => ({ alerte, message: String }))
 import { refreshLibrary } from './library'
 
 function entry(id: string, state: EffectEntry['state'], hash?: string): EffectEntry {
-  return { id, name: id, kind: 'user', state, hash, swatch: [], apiVersion: 1 }
+  return { id, name: id, kind: 'user', state, hash, modified: false, swatch: [], apiVersion: 1 }
 }
 
 beforeEach(() => {

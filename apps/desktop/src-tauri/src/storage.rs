@@ -48,9 +48,11 @@
 //! # Shipped effects are files too
 //!
 //! The effects candeo ships are copied into the folder once, at startup, and are
-//! from then on ordinary files: listed, edited, renamed and deleted like any
-//! other. `settings.json` only remembers what was copied, to update an unchanged
-//! copy and never bring back one someone removed — see [`Store::seed_shipped`].
+//! from then on files: listed and run like any other. `settings.json` remembers
+//! what was copied, to update an unchanged copy and never bring back one someone
+//! removed — see [`Store::seed_shipped`]. The application does not delete, rename
+//! or overwrite them, and brings them back on request — see
+//! [`Store::restore_shipped`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -154,6 +156,9 @@ pub struct EffectEntry {
     /// with its JavaScript. Absent for built-ins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
+    /// A built-in whose file no longer has the hash recorded when it was copied:
+    /// edited outside the application. Always false for the user's effects.
+    pub modified: bool,
     /// Color swatch, **sampled by running the effect**.
     ///
     /// It is not in the manifest, and that is not a filing detail: the manifest
@@ -1023,11 +1028,7 @@ impl Store {
     /// Listing reads files and hashes them, and runs nothing: whatever has to run
     /// happened in [`Self::cache_effect`].
     pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
-        // Unreadable settings only lose the shipped mark, not the library.
-        let shipped = self
-            .read_settings()
-            .map(|s| s.shipped_effects)
-            .unwrap_or_default();
+        let shipped = self.shipped_records();
         let mut effects = Vec::new();
         for name in self.names()? {
             // A file that cannot be read right now — locked by an editor, say —
@@ -1037,11 +1038,7 @@ impl Store {
             };
             let hash = sha256_hex(&bytes);
             let record = self.read_cache(&name).filter(|r| r.hash == hash);
-            let mut entry = user_entry(name, hash, record);
-            if matches!(shipped.get(&entry.id), Some(Some(_))) {
-                entry.kind = EffectKind::Builtin;
-            }
-            effects.push(entry);
+            effects.push(mark_shipped(user_entry(name, hash, record), &shipped));
         }
         Ok(effects)
     }
@@ -1060,15 +1057,23 @@ impl Store {
     ///
     /// Written through a temporary file and a rename: a Refresh reading the
     /// folder at that instant must never compile half a file.
+    ///
+    /// A built-in is not saved over: see [`Store::restore_shipped`] for why.
     pub fn save_effect_source(&self, name: &str, source: &str, create: bool) -> CmdResult<String> {
         validate_name(name)?;
         match (self.existing(name)?, create) {
             (Some(existing), true) => {
                 return Err(format!("un effet nommé « {existing} » existe déjà"));
             }
-            (Some(existing), false) if existing == name => {}
+            (Some(existing), false) if existing == name => {
+                if self.is_builtin(name) {
+                    return Err(format!(
+                        "« {name} » est un effet intégré : dupliquez-le pour le modifier"
+                    ));
+                }
+            }
             (_, false) => return Err(format!("aucun effet nommé « {name} »")),
-            (None, true) => {}
+            (None, true) => self.take_shipped_name(name)?,
         }
         create_dir(&self.effects_dir)?;
         write_atomically(&self.source_path(name), source)?;
@@ -1100,7 +1105,10 @@ impl Store {
         let json =
             serde_json::to_string(&record).map_err(|e| format!("cache non sérialisable : {e}"))?;
         write_atomically(&self.cache_path(name), &json)?;
-        Ok(user_entry(name.to_owned(), hash.to_owned(), Some(record)))
+        Ok(mark_shipped(
+            user_entry(name.to_owned(), hash.to_owned(), Some(record)),
+            &self.shipped_records(),
+        ))
     }
 
     /// An effect's executable JavaScript: what the engine loads.
@@ -1130,6 +1138,11 @@ impl Store {
     /// business: see [`rename_effect`].
     pub fn rename_effect(&self, from: &str, to: &str) -> CmdResult<()> {
         self.require(from)?;
+        if self.is_builtin(from) {
+            return Err(format!(
+                "« {from} » est un effet intégré : dupliquez-le pour le renommer"
+            ));
+        }
         validate_name(to)?;
         if let Some(existing) = self.existing(to)? {
             // The same file under another case is a rename too: `Onde` → `onde`.
@@ -1140,6 +1153,7 @@ impl Store {
         if from == to {
             return Ok(());
         }
+        self.take_shipped_name(to)?;
         let (source, target) = (self.source_path(from), self.source_path(to));
         fs::rename(&source, &target)
             .map_err(|e| format!("renommage de {} impossible : {e}", source.display()))?;
@@ -1155,7 +1169,39 @@ impl Store {
     /// **between** the refusal and the erasure: refusing afterwards would make a
     /// running effect pay for a stop it was not owed.
     pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
-        self.require(id)
+        self.require(id)?;
+        if self.is_builtin(id) {
+            return Err(format!(
+                "« {id} » est un effet intégré : il ne se supprime pas depuis candeo"
+            ));
+        }
+        Ok(())
+    }
+
+    /// What `settings.json` records about shipped effects. Unreadable settings
+    /// only lose the built-in mark, not the library.
+    fn shipped_records(&self) -> BTreeMap<String, Option<String>> {
+        self.read_settings()
+            .map(|s| s.shipped_effects)
+            .unwrap_or_default()
+    }
+
+    /// True for a file recorded as shipped: see [`EffectKind::Builtin`].
+    fn is_builtin(&self, name: &str) -> bool {
+        matches!(self.shipped_records().get(name), Some(Some(_)))
+    }
+
+    /// A user effect takes the name of a shipped effect whose file is gone: the
+    /// name is the user's from now on, as when the file was there before the
+    /// first copy, and restoring the shipped one is refused until it is free.
+    fn take_shipped_name(&self, name: &str) -> CmdResult<()> {
+        let mut settings = self.read_settings()?;
+        if let Some(record) = settings.shipped_effects.get_mut(name) {
+            if record.take().is_some() {
+                return self.write_settings(&settings);
+            }
+        }
+        Ok(())
     }
 
     /// Copies an effect under a new name and returns it: `<name> (copie)`, then
@@ -1311,6 +1357,7 @@ impl Store {
     /// | recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
     /// | recorded, file modified | leave it |
     /// | recorded, file missing (deleted or renamed) | leave it: never copied again |
+    /// | recorded, no longer shipped | forget the record: the file is the user's |
     ///
     /// "Unchanged" means the file still has the hash recorded when it was copied:
     /// an update never overwrites a line someone wrote.
@@ -1348,11 +1395,61 @@ impl Store {
                 .shipped_effects
                 .insert(effect.name.to_owned(), record);
         }
+        // An effect this version no longer ships becomes the user's: nothing
+        // could restore or update it, and the built-in mark would keep it from
+        // being deleted.
+        settings
+            .shipped_effects
+            .retain(|name, _| shipped.iter().any(|s| s.name == name));
 
         if settings != before {
             self.write_settings(&settings)?;
         }
         Ok(seeding)
+    }
+
+    /// The shipped effects with no file of their name, to offer them back.
+    pub fn missing_shipped(&self, shipped: &[Shipped]) -> CmdResult<Vec<String>> {
+        let names: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
+        Ok(shipped
+            .iter()
+            .filter(|s| !names.contains(&s.name.to_lowercase()))
+            .map(|s| s.name.to_owned())
+            .collect())
+    }
+
+    /// Writes a shipped effect's file again and records it: a missing one comes
+    /// back, a modified one is overwritten, and updates resume for both.
+    ///
+    /// The application refuses to delete, rename or save over a built-in, because
+    /// each of those loses the same thing: an edited copy stops receiving updates
+    /// without a word, a renamed or deleted one never comes back. Duplicating is
+    /// how a built-in becomes someone's own. The folder stays theirs, though, and
+    /// this is what repairs what was done there.
+    ///
+    /// Refused when an effect of the user's holds the name: restoring never
+    /// overwrites a line written in an effect of one's own.
+    pub fn restore_shipped(&self, shipped: &[Shipped], name: &str) -> CmdResult<()> {
+        let effect = shipped
+            .iter()
+            .find(|s| s.name == name)
+            .ok_or_else(|| format!("« {name} » n'est pas un effet intégré"))?;
+        if let Some(existing) = self.existing(name)? {
+            if existing != name || !self.is_builtin(name) {
+                return Err(format!(
+                    "un effet à vous s'appelle déjà « {existing} » : renommez-le pour restaurer l'intégré"
+                ));
+            }
+        }
+        // Recorded first: a file that then fails to be written is simply still
+        // missing, and offered again.
+        let mut settings = self.read_settings()?;
+        settings
+            .shipped_effects
+            .insert(name.to_owned(), Some(sha256_hex(effect.source.as_bytes())));
+        self.write_settings(&settings)?;
+        create_dir(&self.effects_dir)?;
+        write_atomically(&self.source_path(name), effect.source)
     }
 
     /// Every startup step that brings the library up to date, in order, and the
@@ -1445,8 +1542,15 @@ impl Store {
     /// [`Self::read_settings`] returns the defaults when there is no file — but a
     /// file that disappears looks like damage, whereas a file reset to defaults
     /// can be read and compared.
+    ///
+    /// The record of shipped effects stays: it describes the folder, not a
+    /// preference, and without it every built-in would become the user's at the
+    /// next launch.
     pub fn reset_settings(&self) -> CmdResult<()> {
-        self.write_settings(&Settings::default())
+        self.write_settings(&Settings {
+            shipped_effects: self.shipped_records(),
+            ..Settings::default()
+        })
     }
 }
 
@@ -1454,6 +1558,16 @@ impl Store {
 const LEGACY_SOURCE_FILE: &str = "source.ts";
 /// Its manifest, which held the name the file is given.
 const LEGACY_MANIFEST_FILE: &str = "manifest.json";
+
+/// Marks an entry built-in when its name is recorded as shipped, and modified
+/// when its file no longer has the hash recorded.
+fn mark_shipped(mut entry: EffectEntry, shipped: &BTreeMap<String, Option<String>>) -> EffectEntry {
+    if let Some(Some(recorded)) = shipped.get(&entry.id) {
+        entry.kind = EffectKind::Builtin;
+        entry.modified = entry.hash.as_ref() != Some(recorded);
+    }
+    entry
+}
 
 /// The library entry of a file, from what its cache holds for its current hash.
 fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> EffectEntry {
@@ -1489,6 +1603,7 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
         state,
         error,
         hash: Some(hash),
+        modified: false,
         swatch,
         manifest: Manifest {
             name,
@@ -1727,11 +1842,25 @@ pub fn duplicate_effect(app: AppHandle, id: String) -> CmdResult<String> {
     store(&app)?.duplicate_effect(&id)
 }
 
+/// The shipped effects the folder no longer holds. See [`Store::missing_shipped`].
+#[tauri::command]
+pub fn missing_builtins(app: AppHandle) -> CmdResult<Vec<String>> {
+    store(&app)?.missing_shipped(&crate::shipped::ALL)
+}
+
+/// Writes a shipped effect's file again. See [`Store::restore_shipped`].
+///
+/// Loops running a modified version keep the code they loaded, as after any
+/// change to a file: applying it again runs the restored one.
+#[tauri::command]
+pub fn restore_builtin(app: AppHandle, name: String) -> CmdResult<()> {
+    store(&app)?.restore_shipped(&crate::shipped::ALL, &name)
+}
+
 /// Opens the effects folder in the system file manager.
 ///
-/// Adding an effect is saving a `.ts` file there, and getting back a shipped one
-/// that was deleted is saving its file from the repository there: the folder has
-/// to be one click away, not a path to look up.
+/// Adding an effect is saving a `.ts` file there: the folder has to be one click
+/// away, not a path to look up.
 #[tauri::command]
 pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let store = store(&app)?;
@@ -2539,12 +2668,13 @@ mod tests {
         assert_eq!(user_effects(&store).len(), 0);
     }
 
-    /// A shipped effect someone deleted or renamed does not come back.
+    /// A shipped effect someone deleted or renamed in the folder does not come
+    /// back by itself.
     #[test]
     fn a_deleted_or_renamed_copy_never_comes_back() {
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        store.delete_effect("Livré").unwrap();
+        fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
         assert_eq!(
             store.seed_shipped(&shipped_v2()).unwrap(),
             Seeding::default()
@@ -2553,7 +2683,11 @@ mod tests {
 
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        store.rename_effect("Livré", "Le mien").unwrap();
+        fs::rename(
+            effects_dir(&tmp).join("Livré.ts"),
+            effects_dir(&tmp).join("Le mien.ts"),
+        )
+        .unwrap();
         assert_eq!(
             store.seed_shipped(&shipped_v2()).unwrap(),
             Seeding::default()
@@ -2583,6 +2717,145 @@ mod tests {
             Some(&None)
         );
         assert_eq!(user_effect(&store, "livré").kind, EffectKind::User);
+    }
+
+    fn builtin(store: &Store, name: &str) -> EffectEntry {
+        store
+            .list_effects()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id == name && e.kind == EffectKind::Builtin)
+            .unwrap_or_else(|| panic!("\"{name}\" is not a listed built-in"))
+    }
+
+    #[test]
+    fn a_builtin_is_not_deleted_renamed_or_saved_over() {
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+
+        for err in [
+            store.delete_effect("Livré").unwrap_err(),
+            store.rename_effect("Livré", "Le mien").unwrap_err(),
+            store
+                .save_effect_source("Livré", "mine", false)
+                .unwrap_err(),
+        ] {
+            assert!(err.contains("effet intégré"), "message: {err}");
+        }
+        assert_eq!(
+            fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
+            shipped_v1()[0].source
+        );
+
+        // Duplicating is how it becomes someone's own.
+        let copy = store.duplicate_effect("Livré").unwrap();
+        store.save_effect_source(&copy, "mine", false).unwrap();
+        store.rename_effect(&copy, "Le mien").unwrap();
+        store.delete_effect("Le mien").unwrap();
+    }
+
+    #[test]
+    fn a_builtin_edited_in_the_folder_is_marked_and_restored() {
+        let (tmp, store) = temp_store();
+        let file = effects_dir(&tmp).join("Livré.ts");
+        store.seed_shipped(&shipped_v1()).unwrap();
+        assert!(!builtin(&store, "Livré").modified);
+
+        fs::write(&file, "export default { render() {} } // mine").unwrap();
+        assert!(builtin(&store, "Livré").modified);
+
+        store.restore_shipped(&shipped_v1(), "Livré").unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), shipped_v1()[0].source);
+        assert!(!builtin(&store, "Livré").modified);
+    }
+
+    #[test]
+    fn a_missing_builtin_comes_back_on_request_and_is_updated_again() {
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
+
+        fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
+        assert_eq!(store.missing_shipped(&shipped_v1()).unwrap(), ["Livré"]);
+
+        store.restore_shipped(&shipped_v1(), "Livré").unwrap();
+        assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
+        assert!(!builtin(&store, "Livré").modified);
+        assert_eq!(store.seed_shipped(&shipped_v2()).unwrap().updated, 1);
+    }
+
+    /// Restoring never overwrites an effect of the user's, whichever gesture gave
+    /// it a shipped effect's name.
+    #[test]
+    fn a_users_effect_named_after_a_missing_builtin_is_not_restored_over() {
+        for rename in [false, true] {
+            let (tmp, store) = temp_store();
+            store.seed_shipped(&shipped_v1()).unwrap();
+            fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
+
+            if rename {
+                store.save_effect_source("Autre", "mine", true).unwrap();
+                store.rename_effect("Autre", "Livré").unwrap();
+            } else {
+                store.save_effect_source("Livré", "mine", true).unwrap();
+            }
+
+            assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
+            assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
+            let err = store.restore_shipped(&shipped_v1(), "Livré").unwrap_err();
+            assert!(err.contains("effet à vous"), "message: {err}");
+            assert_eq!(
+                fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
+                "mine"
+            );
+            store.delete_effect("Livré").unwrap();
+        }
+    }
+
+    #[test]
+    fn only_shipped_effects_are_restored() {
+        let (_tmp, store) = temp_store();
+        let err = store.restore_shipped(&shipped_v1(), "Autre").unwrap_err();
+        assert!(err.contains("pas un effet intégré"), "message: {err}");
+    }
+
+    #[test]
+    fn an_effect_no_longer_shipped_becomes_the_users() {
+        let (_tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+
+        store.seed_shipped(&[]).unwrap();
+
+        assert!(store.read_settings().unwrap().shipped_effects.is_empty());
+        assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
+        store.delete_effect("Livré").unwrap();
+    }
+
+    #[test]
+    fn a_compiled_builtin_is_still_listed_as_one() {
+        let (_tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        let hash = sha256_hex(shipped_v1()[0].source.as_bytes());
+
+        let entry = store
+            .cache_effect("Livré", &hash, &solid_effect("00ff00"))
+            .unwrap();
+
+        assert_eq!(entry.kind, EffectKind::Builtin);
+    }
+
+    #[test]
+    fn reset_keeps_the_record_of_shipped_effects() {
+        let (_tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+
+        store.reset_settings().unwrap();
+
+        assert_eq!(
+            store.seed_shipped(&shipped_v1()).unwrap(),
+            Seeding::default()
+        );
+        builtin(&store, "Livré");
     }
 
     #[test]
