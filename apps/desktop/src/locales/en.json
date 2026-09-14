@@ -244,6 +244,8 @@
     "log": {
       "title": "Log",
       "level": "Level",
+      "filesKept": "Files kept",
+      "filesKeptDetail": "One file a day; 0 keeps them all.",
       "levels": {
         "error": "Errors only",
         "warn": "Warnings",

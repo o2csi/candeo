@@ -673,7 +673,8 @@ finished by the next startup without duplicating an effect.
   preferences: {
     logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
     language?: 'en' | 'fr',       // absent : la langue du système
-    resumeEffects?: false         // absent: a device that opens resumes its applied effect
+    resumeEffects?: false,        // absent: a device that opens resumes its applied effect
+    logFilesKept?: number         // absent: 7; 0 keeps every log file
   },
   devices: {
     vid: number,
@@ -929,9 +930,16 @@ application's `setup` — **before the store is resolved**, otherwise a failure
 to resolve the configuration folder would happen before there was anything to
 write it with. Design and trade-offs in `src-tauri/src/journal.rs`.
 
-The file rotates **daily**, seven at most, in `app_log_dir()` — through the
+The file rotates **daily**, in `app_log_dir()` — through the
 Tauri API, never a hard-coded path: logs are neither data nor
 configuration, and on Linux the three folders differ.
+
+How many files are kept is a setting, `preferences.logFilesKept`: seven by
+default, `0` for all of them, as OpenRGB's `file_count_limit`.
+`set_log_files_kept(keep)` saves it and deletes the files beyond it at once;
+otherwise candeo deletes them at startup, once the settings are read, and when a
+new day's file starts. Only `candeo.YYYY-MM-DD.log` files are ever deleted. The
+cap counts files, not bytes: what bounds a day's size is the level.
 
 | Level | What it means |
 |---|---|

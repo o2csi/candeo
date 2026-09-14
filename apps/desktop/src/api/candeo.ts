@@ -403,6 +403,8 @@ export interface Preferences {
   language?: LanguageSetting
   /** A device that opens starts its applied effect again. Absent = on. */
   resumeEffects?: boolean
+  /** Log files kept, one per day; `0` keeps them all. Absent = 7. */
+  logFilesKept?: number
 }
 
 /** Turns resuming applied effects on or off. */
@@ -803,6 +805,8 @@ export interface JournalStatus {
    * et oublié, il remplit le disque en silence.
    */
   verbose: boolean
+  /** Log files kept, one per day; `0` keeps them all. */
+  filesKept: number
 }
 
 /** L'état du journal : niveau appliqué, niveau retenu, dossier. */
@@ -823,6 +827,11 @@ export function getJournal(): Promise<JournalStatus> {
  */
 export function setLogLevel(level: LogLevel): Promise<JournalStatus> {
   return invoke('set_log_level', { level })
+}
+
+/** Changes how many log files are kept, and deletes those beyond it now. */
+export function setLogFilesKept(keep: number): Promise<JournalStatus> {
+  return invoke('set_log_files_kept', { keep })
 }
 
 /** Ouvre le dossier des journaux dans le gestionnaire de fichiers du système. */

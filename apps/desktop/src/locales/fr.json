@@ -244,6 +244,8 @@
     "log": {
       "title": "Journal",
       "level": "Niveau",
+      "filesKept": "Fichiers conservés",
+      "filesKeptDetail": "Un fichier par jour ; 0 les garde tous.",
       "levels": {
         "error": "Erreurs seules",
         "warn": "Avertissements",

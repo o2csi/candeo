@@ -1262,6 +1262,7 @@ pub fn run() {
             storage::remember_effect_params,
             journal::get_journal,
             journal::set_log_level,
+            journal::set_log_files_kept,
             language::get_language,
             language::set_language,
             journal::open_log_dir,
