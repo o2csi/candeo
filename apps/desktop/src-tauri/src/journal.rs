@@ -642,6 +642,87 @@ pub fn open_log_dir(app: AppHandle) -> CmdResult<()> {
         .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
 }
 
+/// The system's version as a bug report needs it: the release and build on
+/// Windows, read from the registry because `ProductName` still says "Windows 10"
+/// on Windows 11.
+#[cfg(windows)]
+fn os_version() -> String {
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+
+    let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(Some(0)).collect() };
+    let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+    let text = |name: &str| -> Option<String> {
+        let name = wide(name);
+        let mut buffer = [0u16; 64];
+        let mut size = std::mem::size_of_val(&buffer) as u32;
+        // SAFETY: `size` is the buffer's size in bytes; both strings end in NUL.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        let chars = (size as usize / 2).saturating_sub(1);
+        (status == 0).then(|| String::from_utf16_lossy(&buffer[..chars]))
+    };
+    let number = |name: &str| -> Option<u32> {
+        let name = wide(name);
+        let mut value = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: `value` is a DWORD, `size` its size; both strings end in NUL.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                std::ptr::addr_of_mut!(value).cast(),
+                &mut size,
+            )
+        };
+        (status == 0).then_some(value)
+    };
+
+    let Some(build) = text("CurrentBuild") else {
+        return "Windows, version not read".into();
+    };
+    let revision = number("UBR").map(|r| format!(".{r}")).unwrap_or_default();
+    match text("DisplayVersion") {
+        Some(release) => format!("Windows {release}, build {build}{revision}"),
+        None => format!("Windows, build {build}{revision}"),
+    }
+}
+
+/// The distribution and the kernel.
+#[cfg(not(windows))]
+fn os_version() -> String {
+    let distribution = std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|content| pretty_name(&content))
+        .unwrap_or_else(|| std::env::consts::OS.to_owned());
+    match std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+        Ok(kernel) => format!("{distribution}, kernel {}", kernel.trim()),
+        Err(_) => distribution,
+    }
+}
+
+/// `PRETTY_NAME` from an `os-release` file.
+#[cfg_attr(windows, allow(dead_code))]
+fn pretty_name(os_release: &str) -> Option<String> {
+    os_release
+        .lines()
+        .find_map(|l| l.strip_prefix("PRETTY_NAME="))
+        .map(|v| v.trim().trim_matches('"').to_owned())
+}
+
 /// The diagnostic, ready to be pasted into a bug report.
 ///
 /// **It beats any digging through logs**: everything we ask for every time
@@ -661,10 +742,16 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     };
 
     line(&mut out, "candeo", &app.package_info().version.to_string());
+    // The first two things asked about odd rendering or a crash at startup (#48).
     line(
         &mut out,
         "system",
-        &format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+        &format!("{} · {}", os_version(), std::env::consts::ARCH),
+    );
+    line(
+        &mut out,
+        "webview",
+        &tauri::webview_version().unwrap_or_else(|e| format!("not read ({e})")),
     );
     // Settings and HID are gathered separately, and neither is unwrapped: being
     // unable to enumerate USB or read `settings.json` back is exactly what a
@@ -1156,6 +1243,17 @@ mod tests {
     }
 
     // -------------------------------------------------------- transitions
+
+    #[test]
+    fn the_distribution_is_read_from_os_release() {
+        let file = "NAME=\"Ubuntu\"\nPRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nID=ubuntu\n";
+        assert_eq!(pretty_name(file).as_deref(), Some("Ubuntu 24.04.1 LTS"));
+        assert_eq!(
+            pretty_name("PRETTY_NAME=Arch Linux"),
+            Some("Arch Linux".into())
+        );
+        assert_eq!(pretty_name("ID=debian\n"), None);
+    }
 
     /// **Transitions, never occurrences.** At 30 frames per second, a failing
     /// write would produce thirty lines per second.

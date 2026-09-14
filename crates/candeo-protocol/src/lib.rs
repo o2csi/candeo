@@ -299,10 +299,9 @@ impl std::fmt::Display for Status {
 
 /// Firmware version, as `0x00`/`0x81` returns it.
 ///
-/// Two bytes kept as two numbers rather than a string: the survey writes
-/// sometimes "v1.5" (§1, and what the device reports elsewhere) and sometimes
-/// "1.05" (§8), for the same bytes `01 05`. Comparing strings would turn that
-/// difference in notation into a difference in version.
+/// Two bytes kept as two numbers rather than a string: `01 05` is v1.5, and the
+/// survey once also wrote it "1.05". Comparing strings would turn a difference
+/// in notation into a difference in version.
 ///
 /// **This is not `release_number`.** HID enumeration returns `0x0200` across
 /// the whole composite: that is the `bcdDevice`, a frozen hardware revision.
@@ -327,8 +326,9 @@ impl std::fmt::Display for Firmware {
 /// are reading back the expected response and not that of a command sent in
 /// the meantime by someone else.
 ///
-/// The checksum is not verified: nothing in the survey establishes that the
-/// device sets a correct one in its responses.
+/// The device sets a correct checksum in its responses: every response to an
+/// open's inspection carried one, firmware v1.5, 14/09/2026 (#74). See
+/// [`Response::checksum_matches`].
 #[derive(Debug, Clone)]
 pub struct Response([u8; REPORT_LEN]);
 
@@ -369,6 +369,11 @@ impl Response {
     /// True if this response is the one to `request`, according to the echo.
     pub fn answers(&self, request: &Report) -> bool {
         self.id() == request.id()
+    }
+
+    /// True if byte 88 holds the checksum of the rest, as in a [`Report`].
+    pub fn checksum_matches(&self) -> bool {
+        self.0[88] == checksum(&self.0)
     }
 
     fn args(&self) -> &[u8] {
