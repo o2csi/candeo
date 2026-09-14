@@ -21,6 +21,7 @@ use candeo_device::Layout;
 pub const KEEP_FOR: Duration = Duration::from_secs(10);
 
 /// How many presses are kept at most: more than any trail an effect draws.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const KEEP_AT_MOST: usize = 32;
 
 /// A key going down.
@@ -91,7 +92,9 @@ impl Presses {
         Reading(Arc::clone(self))
     }
 
-    /// Records a press, unless nobody reads them any more.
+    /// Records a press, unless nobody reads them any more. Fed by the system's
+    /// capture, which does not exist everywhere yet.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn push(&self, press: Press) {
         let mut state = self.state.lock().unwrap();
         if state.readers == 0 {
