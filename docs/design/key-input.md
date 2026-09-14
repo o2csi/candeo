@@ -80,7 +80,7 @@ declaring keys simply receives no presses there.
 |---|---|
 | Capture runs only when needed | registered while at least one running loop — a device's or the preview — runs an effect declaring `inputs: ['keys']`, unregistered (`RIDEV_REMOVE`) as soon as none does |
 | Positions, never characters | only scancodes and times are kept; nothing turns a press into a character |
-| Nothing written | no scancode in the log at any level, nor in the copied diagnostic; the log says only when capture starts and stops |
+| Nothing written | no scancode in the log at any level, nor in the copied diagnostic; the log says only when capture starts and stops. An effect reading keys chooses its error text and could put presses in it: that text stays out of both, and only the window shows it (#44) |
 | Nothing kept | the last 32 presses younger than 10 seconds, in memory; older ones are dropped |
 | Visible | the gallery marks an effect that declares keys ("réagit aux frappes") |
 

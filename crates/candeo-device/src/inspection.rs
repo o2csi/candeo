@@ -32,8 +32,9 @@
 //! - **effect** — read back through `0x0f`/`0x82`, rewritten as is **only** if it is
 //!   one whose read-back returns every argument. `Static` and `Breathing` carry a
 //!   color whose position in the read-back is not established: rewriting them could
-//!   turn them off, so we refrain and say so. At worst, an effect animated by the
-//!   firmware restarts from the beginning of its cycle;
+//!   turn them off, so we refrain and say so. Rewriting a running Spectrum Cycle or
+//!   Wave shows no visible restart: watched on the keyboard, firmware v1.5, the
+//!   first with #35, the Wave on 14/09/2026 (#74);
 //! - **row** — **never sent.** No color read-back exists, so no written row is
 //!   invisible.
 //!
@@ -269,13 +270,29 @@ impl std::fmt::Display for Warning {
     }
 }
 
+/// Inspects a device that was just opened, whatever unit it is.
+#[cfg(test)]
+pub(crate) fn inspect(t: &impl Transport) -> Inspection {
+    inspect_if(t, |_| true).expect("a unit nobody refuses is inspected")
+}
+
 /// Inspects a device that was just opened. **Cannot fail**: every unanswered
 /// question becomes a reason, never an open error.
-pub(crate) fn inspect(t: &impl Transport) -> Inspection {
+///
+/// The identity comes first, in class `0x00`, which is read only. `accept` is
+/// asked about the serial then, and a refused unit gets no rewrite: `None`
+/// (#74).
+pub(crate) fn inspect_if(
+    t: &impl Transport,
+    accept: impl FnOnce(Option<&str>) -> bool,
+) -> Option<Inspection> {
     let firmware = read(t, &Report::read_firmware())
         .and_then(|r| r.firmware().ok_or_else(|| "empty response".to_string()));
     let serial = read(t, &Report::read_serial())
         .and_then(|r| r.serial().ok_or_else(|| "unreadable response".to_string()));
+    if !accept(serial.as_deref().ok()) {
+        return None;
+    }
 
     let checks = vec![
         Check {
@@ -299,11 +316,11 @@ pub(crate) fn inspect(t: &impl Transport) -> Inspection {
         },
     ];
 
-    Inspection {
+    Some(Inspection {
         firmware,
         serial,
         checks,
-    }
+    })
 }
 
 fn check_brightness(t: &impl Transport) -> Verdict {
@@ -431,6 +448,11 @@ fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
                 request.id()
             ));
         }
+        // The device sets a correct checksum in its responses: 8 of 8 on an open,
+        // firmware v1.5, 14/09/2026 (#74). A mismatch is a garbled reply.
+        if !r.checksum_matches() {
+            return Err(format!("response to {} has a wrong checksum", r.id()));
+        }
         return Ok(r);
     }
     Err(format!("still busy after {RELECTURES} reads"))
@@ -468,6 +490,8 @@ mod tests {
         read_denied: bool,
         /// Forced echo, as if another command had been sent in the meantime.
         echo: Option<CommandId>,
+        /// Every response carries a wrong checksum.
+        garbled: bool,
         last: Option<Report>,
         sent: Vec<CommandId>,
     }
@@ -488,6 +512,7 @@ mod tests {
                     busy: 0,
                     read_denied: false,
                     echo: None,
+                    garbled: false,
                     last: None,
                     sent: Vec::new(),
                 }),
@@ -534,24 +559,28 @@ mod tests {
             if e.busy > 0 {
                 e.busy -= 1;
                 buf[1] = 0x01;
-                return Ok(buf.len());
+            } else {
+                let echo = e.echo.unwrap_or(request);
+                buf[1 + 6] = echo.class;
+                buf[1 + 7] = echo.command;
+                if e.unknown.contains(&request) {
+                    buf[1] = 0x05;
+                } else {
+                    buf[1] = 0x02;
+                    let args = &mut buf[1 + 8..];
+                    match (request.class, request.command) {
+                        (0x00, 0x81) => args[..2].copy_from_slice(&e.version),
+                        (0x00, 0x82) => args[..e.serial.len()].copy_from_slice(e.serial),
+                        (0x0f, 0x82) => args[..6].copy_from_slice(&e.effect),
+                        (0x0f, 0x84) => args[2] = e.brightness,
+                        _ => {}
+                    }
+                }
             }
-            let echo = e.echo.unwrap_or(request);
-            buf[1 + 6] = echo.class;
-            buf[1 + 7] = echo.command;
-            if e.unknown.contains(&request) {
-                buf[1] = 0x05;
-                return Ok(buf.len());
-            }
-            buf[1] = 0x02;
-            let args = &mut buf[1 + 8..];
-            match (request.class, request.command) {
-                (0x00, 0x81) => args[..2].copy_from_slice(&e.version),
-                (0x00, 0x82) => args[..e.serial.len()].copy_from_slice(e.serial),
-                (0x0f, 0x82) => args[..6].copy_from_slice(&e.effect),
-                (0x0f, 0x84) => args[2] = e.brightness,
-                _ => {}
-            }
+            // As the device does (#74), unless the test garbles it.
+            let mut report = [0u8; 90];
+            report.copy_from_slice(&buf[1..91]);
+            buf[1 + 88] = candeo_protocol::checksum(&report) ^ u8::from(e.garbled);
             Ok(buf.len())
         }
     }
@@ -744,5 +773,36 @@ mod tests {
         assert!(i.firmware.is_err());
         assert!(matches!(verdict(&i, SET_EFFECT), Verdict::Unverified(_)));
         assert!(!fake.sent().contains(&SET_EFFECT));
+    }
+
+    /// #74: a garbled reply is not read as an answer.
+    #[test]
+    fn a_response_with_a_wrong_checksum_concludes_nothing() {
+        let fake = Fake::as_surveyed().with(|e| e.garbled = true);
+        let i = inspect(&fake);
+
+        assert!(i.firmware.is_err() && i.serial.is_err());
+        assert!(!fake.sent().contains(&SET_BRIGHTNESS));
+        assert!(!fake.sent().contains(&SET_EFFECT));
+    }
+
+    /// #74: another unit of the model is refused on its serial, **before** the
+    /// inspection rewrites anything: it receives reads only.
+    #[test]
+    fn a_refused_unit_receives_no_write() {
+        let fake = Fake::as_surveyed();
+        let mut asked = None;
+        let inspection = inspect_if(&fake, |serial| {
+            asked = serial.map(str::to_owned);
+            false
+        });
+
+        assert!(inspection.is_none());
+        assert_eq!(asked.as_deref(), Some("XY24ABCDEFG0001"));
+        assert!(
+            fake.sent().iter().all(|id| id.command >= 0x80),
+            "a refused unit was written to: {:?}",
+            fake.sent()
+        );
     }
 }

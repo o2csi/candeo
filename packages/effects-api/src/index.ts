@@ -439,7 +439,6 @@ function sansRectangle(key: Key): string {
 // n'exporte pas d'effet. Un export par défaut ici ferait de la bibliothèque
 // elle-même un effet, ce qu'elle n'est pas.
 //
-// Les effets **livrés avec l'application** sont ailleurs encore, dans
-// `apps/desktop/src-tauri/src/builtins/` : ils sont compilés dans le binaire et
-// écrits en JavaScript, contre cette même API. C'est la meilleure lecture
-// disponible de ce qu'on peut écrire ici.
+// The effects shipped with the application live in `packages/effects/`: plain
+// `.ts` files against this same API, copied into the effects folder at startup.
+// They are the best reading of what can be written here.

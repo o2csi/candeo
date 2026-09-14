@@ -75,7 +75,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use candeo_device::{Keyboard, Layout};
-use candeo_protocol::Rgb;
+use candeo_protocol::{Effect, Rgb};
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::runtime::InterruptHandler;
 use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
@@ -265,6 +265,9 @@ struct Shared {
     /// Name of the running effect, so that the interface knows what to
     /// highlight after the window restarts.
     effect_id: Mutex<Option<String>>,
+    /// The effect reads key presses: its error text stays out of the log and
+    /// the diagnostic. See [`loggable`].
+    reads_keys: AtomicBool,
 }
 
 impl Default for Shared {
@@ -279,7 +282,22 @@ impl Default for Shared {
             reaching: AtomicBool::new(false),
             device_failures: AtomicU32::new(0),
             effect_id: Mutex::new(None),
+            reads_keys: AtomicBool::new(false),
         }
+    }
+}
+
+/// What the log and the diagnostic may say of an effect's error.
+///
+/// An effect that reads key presses chooses its error text, and could write the
+/// presses into it; nothing about key presses reaches the log or the diagnostic
+/// (`docs/design/key-input.md` §3, #44). Its text is left out there; the window,
+/// which is local, still shows it.
+pub(crate) fn loggable(error: &str, reads_keys: bool) -> &str {
+    if reads_keys {
+        "(text not logged: the effect reads key presses)"
+    } else {
+        error
     }
 }
 
@@ -296,6 +314,9 @@ pub struct EngineStatus {
     /// True if the frames actually reach a keyboard.
     pub reaching_keyboard: bool,
     pub to_keyboard: bool,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_keys: bool,
 }
 
 /// A device's state, and which device it belongs to.
@@ -342,6 +363,9 @@ pub struct PreviewStatus {
     pub effect_id: Option<String>,
     /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_keys: bool,
 }
 
 /// Everything the engine knows, **arranged so that nothing gets confused**.
@@ -382,6 +406,11 @@ pub(crate) trait DeviceOut: Send {
     /// critical section as the write. Deciding outside it would race with a
     /// reconnection: the loop could close the keyboard that was just reopened.
     fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>>;
+
+    /// Turns the backlight off, when an effect stopped on its own: its last frame,
+    /// frozen, would look like an effect still running (#48). Nothing to do
+    /// without a device.
+    fn turn_off(&self) {}
 }
 
 /// A device handle, shared between the commands and its loop.
@@ -404,6 +433,13 @@ impl DeviceOut for Handle {
             *guard = None;
         }
         Some(result)
+    }
+
+    fn turn_off(&self) {
+        let guard = self.lock().unwrap();
+        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(Effect::Off)) {
+            tracing::warn!("backlight not turned off after the effect stopped: {e}");
+        }
     }
 }
 
@@ -503,6 +539,7 @@ impl DeviceLoop {
                 device_error: s.device_error.lock().unwrap().clone(),
                 reaching_keyboard: s.reaching.load(Ordering::Relaxed),
                 to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
+                reads_keys: s.reads_keys.load(Ordering::Relaxed),
             },
         }
     }
@@ -706,6 +743,7 @@ impl Engine {
             running: !s.stop.load(Ordering::Relaxed),
             effect_id: s.effect_id.lock().unwrap().clone(),
             error: s.error.lock().unwrap().clone(),
+            reads_keys: s.reads_keys.load(Ordering::Relaxed),
         };
         Some(status)
     }
@@ -976,6 +1014,7 @@ fn render_loop(
     let reads_keys = ctx
         .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_keys"))
         .unwrap_or(false);
+    shared.reads_keys.store(reads_keys, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
     let keyboard = match target {
         Target::Device(d) => Some((d.vid, d.pid)),
@@ -1032,14 +1071,19 @@ fn render_loop(
                 let before = shared.error.lock().unwrap().replace(e.clone());
                 if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
                 {
-                    tracing::warn!("effect started failing: {e}");
+                    tracing::warn!("effect started failing: {}", loggable(&e, reads_keys));
                 }
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     tracing::error!(
                         failures = MAX_CONSECUTIVE_ERRORS,
-                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures: {e}"
+                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
+                         backlight turned off: {}",
+                        loggable(&e, reads_keys)
                     );
                     shared.stop.store(true, Ordering::Relaxed);
+                    // A frozen last frame reads as an effect still running; off
+                    // says nothing runs, and the gallery says why (#48).
+                    out.turn_off();
                     break;
                 }
             }
@@ -1848,6 +1892,8 @@ mod tests {
         transient_failures: AtomicU32,
         /// Set when the loop dropped the device, as the real handle does.
         closed: AtomicBool,
+        /// Set when the loop turned the backlight off.
+        turned_off: AtomicBool,
         /// The last frame written.
         last: Mutex<Vec<Rgb>>,
     }
@@ -1870,6 +1916,10 @@ mod tests {
             *self.last.lock().unwrap() = colors.to_vec();
             self.written.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
+        }
+
+        fn turn_off(&self) {
+            self.turned_off.store(true, Ordering::Relaxed);
         }
     }
 
@@ -2717,6 +2767,9 @@ mod tests {
             0,
             "a frame came out of an effect that never finished one"
         );
+        // #48: stopped on its own, the effect does not leave a frame that looks
+        // like it still runs.
+        assert!(out.turned_off.load(Ordering::Relaxed), "backlight left on");
 
         // The loop did give its thread back: otherwise this is where the test
         // would stop forever, waiting for it to end.
@@ -2779,6 +2832,31 @@ mod tests {
         });
         let error = status(&engine, FIRST).error.unwrap();
         assert!(error.contains("boum"), "message rewritten: {error}");
+        assert!(!status(&engine, FIRST).reads_keys);
+
+        engine.stop(FIRST);
+    }
+
+    /// #44: an effect reading key presses could write them into its error; the
+    /// window still shows the text, the log and the diagnostic do not.
+    #[test]
+    fn the_error_of_an_effect_reading_keys_stays_out_of_the_log() {
+        let engine = Engine::default();
+        let js = "export default { name: 'X', inputs: ['keys'], render() { throw new Error('A pressed') } }";
+        start_js(&engine, FIRST, js, Arc::new(Output::default())).expect("start");
+
+        wait_for("no error recorded", || {
+            status(&engine, FIRST).error.is_some()
+        });
+        let s = status(&engine, FIRST);
+        assert!(s.reads_keys);
+        let error = s.error.unwrap();
+        assert!(
+            error.contains("A pressed"),
+            "the window lost the text: {error}"
+        );
+        assert!(!loggable(&error, s.reads_keys).contains("A pressed"));
+        assert_eq!(loggable("boum", false), "boum");
 
         engine.stop(FIRST);
     }

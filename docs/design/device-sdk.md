@@ -348,7 +348,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     color: Color::Rgb,                  // le seul terme déclaré
 
     provenance: Provenance {
-        firmware: "1.05",
+        firmware: Firmware { major: 1, minor: 5 },
         firmware_read_by: "classe 0x00, commande 0x81",
         surveyed_on: "2026-09-12",
         method: Method::CapturedAndVerified,
@@ -412,7 +412,6 @@ arrives, its cell turns ✅ **without the effect being reopened**.
 
 ```ts
 export default defineEffect({
-  name: 'Balayage',
   kinds: ['keyboard'],
   requires: { matrix: { rowsMin: 3 } },
   render({ layout, time, frame, params }) { … },
@@ -470,7 +469,7 @@ path to the real version is a device command — `0x00`/`0x81` here.
 A contributor in a hurry will copy `release_number`, because it is there, it
 looks like a version, and nothing contradicts it. Hence the second field:
 
-> **`firmware_read_by` is as mandatory as `firmware`.** "1.05, read by
+> **`firmware_read_by` is as mandatory as `firmware`.** "v1.5, read by
 > class 0x00 command 0x81" is verifiable and open to discussion. "2.00", alone,
 > is not — and it is precisely the value one gets by getting it wrong.
 
@@ -518,10 +517,10 @@ stated suspicion — and that is all one can honestly do with it.
 
 > **Already in place for the existing layout**, without waiting for this SDK:
 > `Layout::surveyed_firmware` carries the version as **two numbers**
-> (`Firmware { major: 1, minor: 5 }`) and not as the string `"1.05"` written
-> above — the survey writes "v1.5" in some places and "1.05" in others for the
-> same bytes, and comparing strings would turn a difference in wording into a
-> difference in version. The inspection on open is in
+> (`Firmware { major: 1, minor: 5 }`) and not as a string: the survey once wrote
+> "v1.5" in some places and "1.05" in others for the same bytes `01 05`, and
+> comparing strings would turn a difference in wording into a difference in
+> version. It now writes v1.5 everywhere (#74). The inspection on open is in
 > [`inspection.rs`](../../crates/candeo-device/src/inspection.rs).
 
 ---
@@ -740,9 +739,9 @@ Described, not written: the implementation is the body of [#34].
   gains a zone role. The shipped effects gain one line each. Its `Key`
   already carries the rectangle, optional, since [#60]: that is the "effect
   side" half of `geometry`, and it did not wait for the rest.
-- **The manifest read from the syntax tree** ([`effects-runtime.md`](effects-runtime.md))
-  must read these two fields the way it already reads `name` and `params`: literals,
-  refused at validation rather than discovered at the first frame.
+- **The manifest**, read by running the module ([`effects-library.md`](effects-library.md) §3),
+  must carry these two fields the way it carries `params`, and refuse a malformed
+  one with a sentence rather than discover it at the first frame.
 - **The simulator** must know how to draw something other than an ISO keyboard: a
   grid of squares without geometry, named dots for zones.
 
