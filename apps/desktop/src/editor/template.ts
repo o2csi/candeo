@@ -26,8 +26,7 @@ export const NEW_EFFECT = example.replace(LOCAL, PUBLIC)
 // la compilation — rien de ceci ne subsiste dans l'application livrée.
 if (import.meta.env.DEV && !example.includes(LOCAL)) {
   erreur(
-    'modèle',
-    `${LOCAL} est introuvable dans example.ts — le modèle importe un module que le ` +
-      'moteur ne saura pas résoudre.',
+    'template',
+    `${LOCAL} not found in example.ts: the template imports a module the engine cannot resolve`,
   )
 }

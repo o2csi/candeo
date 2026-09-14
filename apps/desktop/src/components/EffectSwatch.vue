@@ -14,6 +14,8 @@
  */
 import { computed } from 'vue'
 
+import { t } from '../i18n'
+
 const props = defineProps<{
   /** Couleurs `#rrggbb`. Peut être vide : voir `EffectEntry.swatch`. */
   colors: string[]
@@ -32,7 +34,7 @@ const known = computed(() => props.colors.length > 0)
     class="swatch"
     :class="{ unknown: !known }"
     aria-hidden="true"
-    :title="known ? 'Couleurs prélevées en exécutant l\'effet' : 'Repère indisponible'"
+    :title="known ? t('effects.swatchKnown') : t('effects.swatchUnknown')"
   >
     <span v-for="(c, i) in colors" :key="i" :style="{ background: c }" />
   </span>

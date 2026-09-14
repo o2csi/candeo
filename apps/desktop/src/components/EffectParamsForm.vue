@@ -37,6 +37,7 @@ import { computed, useId } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { EffectParams } from '../api/candeo'
 import { sameValue } from '../composables/useSettings'
+import { t } from '../i18n'
 import { localized } from '../i18n/text'
 
 const props = defineProps<{
@@ -152,7 +153,8 @@ const fields = computed<Field[]>(() =>
       }
       case 'boolean': {
         const on = typeof v === 'boolean' ? v : spec.default
-        return { ...head, kind: 'boolean', on, shown: on ? 'activé' : 'désactivé' }
+        const shown = on ? t('effects.params.on') : t('effects.params.off')
+        return { ...head, kind: 'boolean', on, shown }
       }
       case 'choice': {
         const value = typeof v === 'string' ? v : spec.default
@@ -224,7 +226,7 @@ function onChoice(id: string, e: Event) {
     à parcourir. Le `h2` suffit à situer le bloc dans le plan du document.
   -->
   <section class="settings">
-    <h2>Réglages</h2>
+    <h2>{{ t('effects.params.title') }}</h2>
 
     <!--
       La région d'annonce, **montée en permanence** — hors de tout `v-if`, y
@@ -330,7 +332,7 @@ function onChoice(id: string, e: Event) {
           donc la même règle que les curseurs quand l'effet ne tourne pas.
         -->
         <button v-if="touched" class="revert" type="button" @click="emit('reset')">
-          Rétablir les valeurs de l'effet
+          {{ t('effects.params.reset') }}
         </button>
       </fieldset>
     </template>

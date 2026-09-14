@@ -63,7 +63,7 @@ onMounted(() => {
       // jusqu'à ce qu'on la rouvre. Rien à montrer à l'écran — l'utilisateur ne
       // peut rien en faire —, mais un journal qui l'explique évite de chercher
       // une panne d'écriture là où il n'y a qu'un écouteur manquant.
-      alerte('App', `resynchronisation hors fenêtre inactive : ${message(e)}`, e)
+      alerte('App', `no resynchronisation after changes made outside the window: ${message(e)}`, e)
     })
 })
 </script>
