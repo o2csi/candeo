@@ -401,6 +401,13 @@ export interface Preferences {
   logLevel?: LogLevel
   /** The interface language someone chose. Absent = the system's. */
   language?: LanguageSetting
+  /** A device that opens starts its applied effect again. Absent = on. */
+  resumeEffects?: boolean
+}
+
+/** Turns resuming applied effects on or off. */
+export function setResumeEffects(on: boolean): Promise<void> {
+  return invoke('set_resume_effects', { on })
 }
 
 /** What someone chose for the interface language. */

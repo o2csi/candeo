@@ -366,7 +366,7 @@ pub struct EffectParamsRecord {
 /// prevents the confusion this module just came out of. Anything that depends on
 /// a keyboard lives in an indexed list; what does not lives here, and the
 /// language — when it arrives — will have nothing to decide.
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     /// Log level, when someone changed it from the application.
@@ -386,6 +386,24 @@ pub struct Preferences {
     /// Interface language. `system`, the default, is not written.
     #[serde(skip_serializing_if = "LanguageSetting::is_system")]
     pub language: LanguageSetting,
+    /// A device that opens starts its applied effect again. On by default, and
+    /// written only when turned off. See [`crate::runtime::resume_applied`].
+    #[serde(skip_serializing_if = "is_true")]
+    pub resume_effects: bool,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            log_level: None,
+            language: LanguageSetting::default(),
+            resume_effects: true,
+        }
+    }
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// Persistent settings.
@@ -1804,7 +1822,11 @@ pub fn cache_effect(
     hash: String,
     js: String,
 ) -> CmdResult<EffectEntry> {
-    store(&app)?.cache_effect(&name, &hash, &js)
+    let entry = store(&app)?.cache_effect(&name, &hash, &js)?;
+    // An applied effect edited outside candeo waits for this compilation to
+    // resume: see [`crate::runtime::resume_applied`].
+    crate::runtime::resume_waiting(&app, &name);
+    Ok(entry)
 }
 
 /// Renames an effect, **and everything that refers to it**: its settings on every
@@ -1946,6 +1968,19 @@ pub fn get_settings(app: AppHandle) -> CmdResult<Settings> {
 #[tauri::command]
 pub fn set_settings(app: AppHandle, settings: Settings) -> CmdResult<()> {
     store(&app)?.write_settings(&settings)
+}
+
+/// Turns resuming applied effects on or off. Read, changed and written here, so a
+/// decision taken meanwhile elsewhere in the file is kept.
+#[tauri::command]
+pub fn set_resume_effects(app: AppHandle, on: bool) -> CmdResult<()> {
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.preferences.resume_effects == on {
+        return Ok(());
+    }
+    settings.preferences.resume_effects = on;
+    store.write_settings(&settings)
 }
 
 /// Resets the configuration to the default, and releases the devices.
@@ -3019,6 +3054,7 @@ mod tests {
             preferences: Preferences {
                 log_level: Some(LogLevel::Debug),
                 language: LanguageSetting::Fr,
+                resume_effects: false,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3219,6 +3255,25 @@ mod tests {
             store.read_settings().unwrap().preferences.language,
             LanguageSetting::En
         );
+    }
+
+    /// On by default, so a file written before the setting existed resumes; only
+    /// turning it off is written.
+    #[test]
+    fn resuming_effects_is_on_unless_turned_off() {
+        let (tmp, store) = temp_store();
+        let file = tmp.path().join("config").join("settings.json");
+        store.write_settings(&Settings::default()).unwrap();
+        assert!(!fs::read_to_string(&file).unwrap().contains("resumeEffects"));
+        assert!(store.read_settings().unwrap().preferences.resume_effects);
+
+        let mut settings = store.read_settings().unwrap();
+        settings.preferences.resume_effects = false;
+        store.write_settings(&settings).unwrap();
+        assert!(fs::read_to_string(&file)
+            .unwrap()
+            .contains(r#""resumeEffects": false"#));
+        assert!(!store.read_settings().unwrap().preferences.resume_effects);
     }
 
     /// **The v2.1 bridge.** `logLevel` left the root for [`Preferences`]; an
@@ -3785,6 +3840,7 @@ mod tests {
         let preferences = Preferences {
             log_level: Some(LogLevel::Debug),
             language: LanguageSetting::En,
+            resume_effects: false,
         };
         mirror("Preferences", &preferences);
         mirror(

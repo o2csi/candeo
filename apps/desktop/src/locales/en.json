@@ -236,6 +236,11 @@
         "fr": "Français"
       }
     },
+    "startup": {
+      "title": "Startup",
+      "resume": "Resume applied effects",
+      "resumeDetail": "When candeo starts or a keyboard is plugged back in, the effect applied on it starts again."
+    },
     "log": {
       "title": "Log",
       "level": "Level",
