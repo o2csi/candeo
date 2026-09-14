@@ -239,7 +239,7 @@
     "startup": {
       "title": "Démarrage",
       "resume": "Relancer les effets appliqués",
-      "resumeDetail": "Au démarrage de candeo, l'effet appliqué sur chaque clavier repart."
+      "resumeDetail": "Au démarrage de candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart."
     },
     "log": {
       "title": "Journal",

@@ -16,6 +16,7 @@ use failure::Failure;
 use storage::{DeviceState, Settings};
 
 mod failure;
+mod hotplug;
 mod i18n;
 mod journal;
 mod keys;
@@ -504,12 +505,26 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
     }
 }
 
-/// Applies the stored decisions, at application startup.
+/// What [`apply_adoptions`] did.
+#[derive(Default)]
+struct Adoptions {
+    opened: Vec<DeviceRef>,
+    /// An adopted device is plugged in but did not open, for a reason that may
+    /// pass: not ready yet, not permitted yet. Another unit of the model is not
+    /// one.
+    retry: bool,
+}
+
+/// Applies the stored decisions: at application startup, and when a device is
+/// plugged in (#81). Devices in `already_open` are left alone.
 ///
-/// Returns nothing and cannot fail: unreadable settings or a missing HID must
-/// not stop the window from opening — it is what would let the situation be
-/// fixed.
-fn apply_adoptions(app: &AppHandle, state: &AppState) {
+/// Cannot fail: unreadable settings or a missing HID must not stop the window
+/// from opening — it is what would let the situation be fixed.
+fn apply_adoptions(
+    app: &AppHandle,
+    state: &AppState,
+    already_open: &HashSet<DeviceRef>,
+) -> Adoptions {
     let (store, settings) = match storage::store(app).and_then(|s| {
         let settings = s.read_settings()?;
         Ok((s, settings))
@@ -517,19 +532,24 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         Ok(loaded) => loaded,
         Err(e) => {
             tracing::error!("adoption abandoned, no device opened: {e}");
-            return;
+            return Adoptions::default();
         }
     };
     let api = match hid() {
         Ok(api) => api,
         Err(e) => {
             tracing::error!("adoption abandoned, no device opened: {e}");
-            return;
+            return Adoptions::default();
         }
     };
 
+    let layouts: Vec<&'static Layout> = LAYOUTS
+        .iter()
+        .copied()
+        .filter(|l| !already_open.contains(&DeviceRef::of(l)))
+        .collect();
     let (newly_opened, outcomes) = open_adopted(
-        LAYOUTS,
+        &layouts,
         &settings,
         |l| plugged(&api, l),
         |l| Keyboard::open(&api, l).map_err(Failure::from),
@@ -538,12 +558,12 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
 
     // What the openings learn, to be stored once the loop is done.
     let mut learned = settings.clone();
+    let mut done = Adoptions::default();
 
-    // Handles first, failures next: two tables, never locked together. Nothing
-    // else could have opened anything yet — the state has just been built and
-    // is not yet handed to the manager.
+    // Handles first, failures next: two tables, never locked together.
     for (layout, keyboard) in newly_opened {
         let device = DeviceRef::of(layout);
+        done.opened.push(device);
         // The second `plugged` enumerates nothing again — it reads back the
         // list `api` already holds — and it avoids making [`OpenOutcome`]
         // carry the serial, which reports an attempt and has no business
@@ -586,6 +606,7 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
                 // `error` and not `warn`: an adopted device that does not open
                 // means the user's lighting will not come on.
                 tracing::error!(device = %outcome.device, "adopted device not opened: {e}");
+                done.retry |= e.code != "wrongUnit";
                 failures.insert(outcome.device, e);
             }
             None => {
@@ -593,6 +614,51 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
             }
         }
     }
+    done
+}
+
+/// Brings the open devices in line with what is plugged in (#81): a device that
+/// left is closed, an adopted one that came back is opened — its serial checked,
+/// its brightness and applied effect given back — and the window and the tray
+/// are told.
+///
+/// A loop still running on a device that left keeps running, writing nowhere:
+/// the handle it shares is filled again on replug, so the effect comes back
+/// without restarting.
+///
+/// Returns true when an adopted device is plugged in but did not open for a
+/// reason that may pass: [`hotplug`] tries again.
+pub(crate) fn reconcile_devices(app: &AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let api = match hid() {
+        Ok(api) => api,
+        Err(e) => {
+            tracing::warn!("devices not reconciled: {e}");
+            return false;
+        }
+    };
+    let open = state.open_devices();
+    let mut changed = false;
+    for layout in LAYOUTS {
+        let device = DeviceRef::of(layout);
+        if open.contains(&device) && plugged(&api, layout).is_none() {
+            state.set_open(device, None);
+            state.failures.lock().unwrap().remove(&device);
+            tracing::info!(device = %device, "device unplugged, closed");
+            changed = true;
+        }
+    }
+
+    let adoptions = apply_adoptions(app, &state, &state.open_devices());
+    for device in &adoptions.opened {
+        runtime::resume_applied(app, *device);
+    }
+    // A failed open changes what Devices shows too.
+    if changed || !adoptions.opened.is_empty() || adoptions.retry {
+        tray::refresh(app);
+        tray::notify_state_changed(app);
+    }
+    adoptions.retry
 }
 
 /// Puts back on the keyboard the brightness stored for it.
@@ -1100,7 +1166,7 @@ pub fn run() {
             let state = AppState::default();
             // Before `manage`: the state is afterwards only reachable through
             // the manager, and adoption needs nothing but the state.
-            apply_adoptions(app.handle(), &state);
+            apply_adoptions(app.handle(), &state, &HashSet::new());
             app.manage(state);
 
             // After `manage`, since starting goes through the command path, which
@@ -1115,6 +1181,8 @@ pub fn run() {
             // After adoption too, so that the first menu shows the devices
             // already open rather than an empty list.
             tray::install(app.handle());
+            // Last: a replug reconciles through everything above.
+            hotplug::watch(app.handle());
             Ok(())
         })
         // The close button **hides**, it does not quit — as long as there is a

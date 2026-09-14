@@ -396,6 +396,7 @@ dependencies = [
  "candeo-device",
  "candeo-protocol",
  "hidapi",
+ "libc",
  "rquickjs",
  "serde",
  "serde_json",
