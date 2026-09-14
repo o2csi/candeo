@@ -515,6 +515,28 @@ Renaming the file outside the application makes a new effect: the old name's
 settings stay in `settings.json`, unused, and come back if the file gets its name
 back.
 
+### `duplicate_effect(id) -> string`
+
+Copies the file under the first free name among `<name> (copie)`, `(copie 2)`…,
+and returns it. The suffix is interface text, French until the i18n catalogs
+exist. The cache is copied with the file — same bytes, same hash — so the copy is
+`ready` at once. It is not recorded as shipped, even when the original was: it is
+a new effect, the user's.
+
+### `open_effects_dir()`
+
+Opens the effects folder in the system file manager, creating it on a first
+launch. Adding an effect is saving a `.ts` file there, and getting back a deleted
+shipped effect is saving its file from the repository there.
+
+### `forget_effect_settings(id)`
+
+Forgets what `settings.json` keeps about an effect the folder no longer holds —
+its parameters on every device, and where it was applied — without touching any
+file. The gallery offers it next to the notice saying an effect it remembers is
+missing; nothing is forgotten until then, so putting the file back under its name
+restores everything.
+
 ### `delete_effect(id)`
 
 Deletes the file and its cache. A name that is not valid is refused before any
