@@ -59,9 +59,9 @@ as they are and flag any new one in the pull request.
   or `"en"` / `"fr"`. The system locale comes from `tauri-plugin-os`; an
   unsupported locale falls back to English. Changing it re-renders the window
   and rebuilds the tray menu.
-- **Effects:** built-in effect names and parameter labels come from the
-  catalogs. User effects are shown as their author wrote them; localized
-  manifest fields are decided with #44.
+- **Effects:** an effect's name is its file name and is not translated. Its
+  `description` and parameter `label`s accept a string or a map of languages
+  (`docs/design/effects-library.md` §2); they do not go through the catalogs.
 - **Guards:** a test checks that `en.json` and `fr.json` have the same keys and
   that every key used from Rust exists.
 
