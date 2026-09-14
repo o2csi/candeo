@@ -86,6 +86,7 @@ import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
+import { localized } from '../i18n/text'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
@@ -239,7 +240,7 @@ function fromEntry(e: EffectEntry): Choice {
     id: e.id,
     name: e.name,
     nature: e.kind,
-    description: e.description ?? 'Sans description.',
+    description: localized(e.description) || 'Sans description.',
     swatch: e.swatch,
     params: e.params ?? {},
     hardware: null,

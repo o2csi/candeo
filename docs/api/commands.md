@@ -372,7 +372,7 @@ JavaScript compiled from a file's **current** bytes.
   hash: string,                   // SHA-256 du fichier
   swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
-  description: string,
+  description: string | Record<string, string>,   // une chaîne, ou une par langue
   params: Record<string, ParamSpec>,
   apiVersion: number
 }
@@ -408,7 +408,10 @@ changed while the window compiled, and recording would pair this code with
 another version of the source.
 
 Rust loads the module **once**, under the time budget swatch sampling uses, and
-reads what it declares: `description`, `params`, `apiVersion`. The parameters are
+reads what it declares: `description`, `params`, `apiVersion`. `description` and
+each parameter's `label` are a string or a map of languages (`{ en, fr }`), kept
+as is: the window shows its language, then English, then the first entry. A
+description that is neither is dropped. The parameters are
 stored **as is**: their shape is that of `ParamSpec` in `@candeo/effects-api`, and
 the Rust side does not interpret them. `apiVersion` is 1 when the module declares
 none; an effect written for a version this application does not know is

@@ -192,12 +192,25 @@ export type ParamsOf<P> = P extends Record<string, ParamSpec>
   ? { readonly [K in keyof P]: ValueOfSpec<P[K]> }
   : Readonly<Record<string, ParamValue>>
 
+/**
+ * Text shown to the user: a string, or the same text in several languages.
+ *
+ * ```ts
+ * label: 'Vitesse'
+ * label: { en: 'Speed', fr: 'Vitesse' }
+ * ```
+ *
+ * The interface picks its own language, then English, then the first entry.
+ * A plain string suits an effect written for one language.
+ */
+export type Text = string | { readonly [language: string]: string }
+
 /** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
 export type ParamSpec =
-  | { kind: 'number'; label: string; min: number; max: number; step?: number; default: number }
-  | { kind: 'color'; label: string; default: Rgb }
-  | { kind: 'boolean'; label: string; default: boolean }
-  | { kind: 'choice'; label: string; options: readonly string[]; default: string }
+  | { kind: 'number'; label: Text; min: number; max: number; step?: number; default: number }
+  | { kind: 'color'; label: Text; default: Rgb }
+  | { kind: 'boolean'; label: Text; default: boolean }
+  | { kind: 'choice'; label: Text; options: readonly string[]; default: string }
 
 /** A kind of device an effect can target. The list grows with the devices. */
 export type DeviceKind = 'keyboard'
@@ -208,6 +221,8 @@ export interface EffectModule<P = undefined> {
    * Kept so that effects written before still type-check.
    */
   readonly name?: string
+  /** What the effect does, in one sentence. See {@link Text}. */
+  readonly description?: Text
   /**
    * The version of the effects API this effect was written against. Absent
    * means the first one; candeo refuses to load an effect written for a newer
@@ -220,7 +235,6 @@ export interface EffectModule<P = undefined> {
    * keeps the effect right the day a second kind arrives.
    */
   readonly kinds?: readonly DeviceKind[] | 'all'
-  readonly description?: string
   readonly params?: P
   /** `ctx.params` est typé d'après `params` ci-dessus. */
   readonly render: (ctx: EffectContext<P>) => void
