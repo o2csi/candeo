@@ -51,6 +51,18 @@ impl Keyboard {
     /// a device that receives our writes, and refusing it for that would block the
     /// lighting on a question left unanswered. See [`inspection`].
     pub fn open(api: &hidapi::HidApi, layout: &'static Layout) -> Result<Self, Error> {
+        Ok(Self::open_if(api, layout, |_| true)?.expect("a unit nobody refuses is opened"))
+    }
+
+    /// [`Self::open`], unless `accept` refuses the unit the device names: its
+    /// serial, read over the protocol (`None` when it does not answer), is asked
+    /// about **before** the inspection rewrites anything. A refused unit is closed
+    /// having received reads only, and `None` is returned (#74).
+    pub fn open_if(
+        api: &hidapi::HidApi,
+        layout: &'static Layout,
+        accept: impl FnOnce(Option<&str>) -> bool,
+    ) -> Result<Option<Self>, Error> {
         let info = api
             .device_list()
             .find(|d| {
@@ -62,12 +74,13 @@ impl Keyboard {
             })?;
 
         let device = info.open_device(api)?;
-        let inspection = inspection::inspect(&device);
-        Ok(Self {
-            device,
-            layout,
-            inspection,
-        })
+        Ok(
+            inspection::inspect_if(&device, accept).map(|inspection| Self {
+                device,
+                layout,
+                inspection,
+            }),
+        )
     }
 
     pub fn layout(&self) -> &'static Layout {

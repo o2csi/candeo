@@ -398,6 +398,10 @@ fn log_opening(device: DeviceRef, keyboard: &Keyboard, usb: Option<String>, what
 
 // ---------------------------------------------------------------- adoption
 
+/// Asked about the serial a device reads on opening: `Some(reason)` refuses the
+/// unit. See [`open_adopted`].
+type Judge<'a> = &'a dyn Fn(Option<&str>) -> Option<Failure>;
+
 /// What the attempt to open **one** device produced.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct OpenOutcome {
@@ -416,21 +420,21 @@ pub(crate) struct OpenOutcome {
 /// open devices (issue #26). The second controlled device is therefore no
 /// longer left closed for lack of room.
 ///
-/// # The serial is checked **after** opening
+/// # The serial is checked on opening, before anything is written
 ///
 /// The USB descriptor carries no serial on this hardware: before opening, the
 /// decision can only match on VID and PID, and any unit of the model passes.
-/// `serial_of` returns the one the device gave over the protocol; if it
-/// designates a unit the decision does not cover, the handle is **released**
-/// and the attempt reports why. Otherwise plugging in a colleague's keyboard —
-/// same model — would have it controlled on behalf of a decision taken for
-/// another.
+/// `open` therefore receives a judge: the device reads its serial over the
+/// protocol and asks it, **before** the inspection rewrites anything. A unit the
+/// decision does not cover is closed having received reads only, and the
+/// attempt reports why (#74). Otherwise plugging in a colleague's keyboard —
+/// same model — would have it controlled, or at least written to, on behalf of
+/// a decision taken for another.
 fn open_adopted<K>(
     layouts: &[&'static Layout],
     settings: &Settings,
     present: impl Fn(&Layout) -> Option<Option<String>>,
-    mut open: impl FnMut(&'static Layout) -> Result<K, Failure>,
-    serial_of: impl Fn(&K) -> Option<String>,
+    mut open: impl FnMut(&'static Layout, Judge<'_>) -> Result<K, Failure>,
 ) -> (Vec<(&'static Layout, K)>, Vec<OpenOutcome>) {
     let mut opened = Vec::new();
     let mut outcomes = Vec::new();
@@ -444,15 +448,12 @@ fn open_adopted<K>(
         {
             continue;
         }
-        let error = match open(layout) {
-            Ok(k) => match wrong_unit(settings, layout, serial_of(&k).as_deref()) {
-                None => {
-                    opened.push((*layout, k));
-                    None
-                }
-                // `k` is dropped here, and the handle closes with it.
-                Some(refusal) => Some(refusal),
-            },
+        let judge = |serial: Option<&str>| wrong_unit(settings, layout, serial);
+        let error = match open(layout, &judge) {
+            Ok(k) => {
+                opened.push((*layout, k));
+                None
+            }
             Err(e) => Some(e),
         };
         outcomes.push(OpenOutcome {
@@ -532,8 +533,14 @@ fn apply_adoptions(app: &AppHandle, state: &AppState) {
         LAYOUTS,
         &settings,
         |l| plugged(&api, l),
-        |l| Keyboard::open(&api, l).map_err(Failure::from),
-        |kb| kb.inspection().serial.clone().ok(),
+        |l, judge| {
+            let mut refusal = None;
+            let opened = Keyboard::open_if(&api, l, |serial| {
+                refusal = judge(serial);
+                refusal.is_none()
+            })?;
+            opened.ok_or_else(|| refusal.expect("a refused unit has a reason"))
+        },
     );
 
     // What the openings learn, to be stored once the loop is done.
@@ -753,6 +760,19 @@ fn adopt_device(
 ) -> CmdResult<Option<LayoutInfo>> {
     let device = DeviceRef { vid, pid };
     let layout = find_layout(device)?;
+
+    // Already open: its inspection says which unit it is. Opening it again would
+    // inspect it on a second handle while its loop writes on the first, and the
+    // replies could cross (#74).
+    if let Some(inspection) = state.inspection(device) {
+        let store = storage::store(&app)?;
+        let mut settings = store.read_settings()?;
+        let serial = known_serial(Some(&inspection), None);
+        settings.set_device_state(vid, pid, serial.as_deref(), DeviceState::Adopted);
+        store.write_settings(&settings)?;
+        return Ok(Some(LayoutInfo::from(layout)));
+    }
+
     let api = hid()?;
     let plugged_in = plugged(&api, layout);
     let opening = plugged_in.is_some().then(|| Keyboard::open(&api, layout));
@@ -886,6 +906,10 @@ pub(crate) fn release_devices(state: &AppState) {
 fn connect(state: State<'_, AppState>, vid: u16, pid: u16) -> CmdResult<LayoutInfo> {
     let device = DeviceRef { vid, pid };
     let layout = find_layout(device)?;
+    // Already open: not a second handle beside its loop, see [`adopt_device`].
+    if state.inspection(device).is_some() {
+        return Ok(LayoutInfo::from(layout));
+    }
 
     let api = hid()?;
     let kb = Keyboard::open(&api, layout)?;
@@ -1273,10 +1297,13 @@ mod tests {
         Some(Some(format!("S{:04x}", l.pid)))
     }
 
-    /// An open device that does not answer reads: no serial over the protocol,
-    /// the matching stays that of the enumeration.
-    fn silent(_: &&'static str) -> Option<String> {
-        None
+    /// A device that reads `serial` over the protocol — `None` when it does not
+    /// answer reads — and asks the judge before any write, as `Keyboard::open_if`
+    /// does.
+    fn unit(
+        serial: Option<&'static str>,
+    ) -> impl FnMut(&'static Layout, Judge<'_>) -> Result<&'static str, Failure> {
+        move |l, judge| judge(serial).map_or(Ok(l.name), Err)
     }
 
     fn both_controlled() -> Settings {
@@ -1309,7 +1336,7 @@ mod tests {
             &[&FIRST, &SECOND],
             &both_controlled(),
             plugged_with_serial,
-            |l| {
+            |l, _| {
                 attempts.push(l.pid);
                 if l.pid == FIRST.pid {
                     Err(Failure::new("deviceAccess").with("detail", "access denied"))
@@ -1317,7 +1344,6 @@ mod tests {
                     Ok(l.name)
                 }
             },
-            silent,
         );
 
         assert_eq!(
@@ -1362,11 +1388,10 @@ mod tests {
             &[&FIRST, &SECOND], // FIRST was never seen: detected
             &settings,
             plugged_with_serial,
-            |l| {
+            |l, _| {
                 attempts += 1;
                 Ok(l.name)
             },
-            silent,
         );
 
         assert_eq!(attempts, 0, "a device not controlled was opened");
@@ -1378,13 +1403,8 @@ mod tests {
     /// report — it is not a failure, the device is simply elsewhere.
     #[test]
     fn a_controlled_but_unplugged_device_produces_no_error() {
-        let (opened, outcomes) = open_adopted(
-            &[&FIRST, &SECOND],
-            &both_controlled(),
-            |_| None,
-            |l| Ok(l.name) as Result<&'static str, Failure>,
-            silent,
-        );
+        let (opened, outcomes) =
+            open_adopted(&[&FIRST, &SECOND], &both_controlled(), |_| None, unit(None));
 
         assert!(opened.is_empty());
         assert!(outcomes.is_empty());
@@ -1400,11 +1420,10 @@ mod tests {
             &[&FIRST, &SECOND],
             &both_controlled(),
             plugged_with_serial,
-            |l| {
+            |l, _| {
                 attempts.push(l.pid);
                 Ok(l.name)
             },
-            silent,
         );
 
         assert_eq!(attempts, vec![FIRST.pid, SECOND.pid]);
@@ -1436,8 +1455,7 @@ mod tests {
             &[&FIRST],
             &controlled_for(Some("XY01")),
             plugged_without_serial,
-            |l| Ok(l.name),
-            |_| Some("XY02".to_string()),
+            unit(Some("XY02")),
         );
 
         assert!(opened.is_empty(), "the neighboring unit was controlled");
@@ -1457,8 +1475,7 @@ mod tests {
             &[&FIRST],
             &controlled_for(Some("XY01")),
             plugged_without_serial,
-            |l| Ok(l.name),
-            |_| Some("XY01".to_string()),
+            unit(Some("XY01")),
         );
 
         assert_eq!(newly_opened(&opened), vec!["Premier"]);
@@ -1473,8 +1490,7 @@ mod tests {
             &[&FIRST],
             &controlled_for(None),
             plugged_without_serial,
-            |l| Ok(l.name),
-            |_| Some("XY02".to_string()),
+            unit(Some("XY02")),
         );
         assert_eq!(newly_opened(&opened), vec!["Premier"]);
     }
@@ -1488,8 +1504,7 @@ mod tests {
             &[&FIRST],
             &controlled_for(Some("XY01")),
             plugged_without_serial,
-            |l| Ok(l.name),
-            silent,
+            unit(None),
         );
         assert_eq!(newly_opened(&opened), vec!["Premier"]);
     }

@@ -380,6 +380,12 @@ class (`0xee`) and a nonexistent command on a valid class
 (`0x0f`/`0xee`) both return `0x05`, whereas a valid command returns
 `0x02`.
 
+**The response checksum is correct** (byte 88, the XOR of bytes 2 to 87, as
+in a report): every response to an open's inspection carried one — firmware,
+serial, brightness and effect reads, their rewrites and read-backs, 8 of 8 —
+firmware v1.5, 14/09/2026. The inspection therefore rejects a response whose
+checksum does not match, as a garbled reply (#74).
+
 ⚠️ **Measured limit**: an aberrant argument size on a valid command
 still returns `0x02`. The device validates the **class/command pair**, not the
 consistency of its arguments. A compatibility check can therefore only assert
@@ -391,7 +397,7 @@ Surveyed on 12/09/2026 on our unit, firmware v1.5.
 
 | Command | Response | Meaning | Established by |
 |---|---|---|---|
-| `0x81` | `01 05` | **firmware version — 1.05** | match with the version declared elsewhere |
+| `0x81` | `01 05` | **firmware version — v1.5** (major `01`, minor `05`) | match with the version declared elsewhere |
 | `0x82` | *(masked)* | **serial number** (15 ASCII chars) | format, and stability across reads |
 | `0x83` | `01 25` | **unknown** | unknown to OpenRazer as well |
 | `0x84` | `00 00` | **device mode** — `0x00` normal, `0x03` driver | see below |
@@ -529,6 +535,7 @@ hex dump, and the byte positions give the component order without inferring it.
 | 2026-09-12 | **Identifiers `0x05` and `0x07` are refused** by this device, even though the write returns `0x02`. Live demonstration that a status byte does not validate the arguments |
 | 2026-09-12 | **Throughput measured**: 13.1 ms per full update, ceiling ~76 fps, no refused write. The bottleneck is the bus, not the computation — the engine frame rate goes from 60 to **30 fps** |
 | 2026-09-13 | **The `interface -1` entry explained** by the device tree: virtual HID collection under `RZVIRTUAL`, `RzDev_0292` service of the manufacturer's driver — not the keyboard |
+| 2026-09-14 | **Response checksums are correct**: 8 of 8 responses to an open's inspection (§8) |
 
 ## 12. Captures
 
