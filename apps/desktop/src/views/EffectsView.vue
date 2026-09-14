@@ -270,19 +270,70 @@ const choices = computed<Choice[]>(() => [
 ])
 
 /**
- * Groupé par nature. Le coût de chacune est dit dans le panneau de droite, pas
- * seulement suggéré par l'ordre : un effet matériel ne coûte aucun temps
- * processeur et survit à la fermeture, et cela se lit en toutes lettres.
+ * Grouped by nature. The cost of each one is spelled out in the right-hand
+ * panel, not merely suggested by the order.
+ *
+ * Hardware comes first: it costs no processor time and survives everything,
+ * which often makes it the right choice (`docs/design/studio.md` §1).
+ *
+ * The order is for display only. The fallback selection still takes the first
+ * entry of `choices`, a built-in: a hardware effect would open the screen on a
+ * simulator with nothing to animate.
  */
 const GROUPS: readonly { nature: Nature; title: string }[] = [
+  { nature: 'hardware', title: 'matériel' },
   { nature: 'builtin', title: 'intégrés' },
   { nature: 'user', title: 'à vous' },
-  { nature: 'hardware', title: 'matériel — dans le clavier' },
 ]
 
 const grouped = computed(() =>
   GROUPS.map((g) => ({ ...g, items: choices.value.filter((c) => c.nature === g.nature) })),
 )
+
+/**
+ * Folded sections, remembered per viewer in the webview storage.
+ *
+ * A viewer who never uses hardware effects folds them once; asking again at
+ * every launch would make folding pointless. Storage may be refused (hardened
+ * webview, read-only profile): sections then open expanded and still fold for
+ * the session.
+ */
+const SECTION_STORAGE_PREFIX = 'candeo:effects-section:'
+
+function readSectionFolded(nature: Nature): boolean {
+  try {
+    return localStorage.getItem(SECTION_STORAGE_PREFIX + nature) === 'folded'
+  } catch {
+    return false
+  }
+}
+
+function writeSectionFolded(nature: Nature, folded: boolean): void {
+  try {
+    // Removed rather than stored as "expanded": expanded is the default, and a
+    // missing key must keep meaning it.
+    if (folded) localStorage.setItem(SECTION_STORAGE_PREFIX + nature, 'folded')
+    else localStorage.removeItem(SECTION_STORAGE_PREFIX + nature)
+  } catch {
+    // See `SECTION_STORAGE_PREFIX`: the fold simply does not outlive the session.
+  }
+}
+
+const foldedSections = ref<Record<Nature, boolean>>({
+  hardware: readSectionFolded('hardware'),
+  builtin: readSectionFolded('builtin'),
+  user: readSectionFolded('user'),
+})
+
+/**
+ * Folding only hides entries: the selection is left alone, so the settings
+ * panel keeps showing the effect even when its section is folded.
+ */
+function toggleSection(nature: Nature): void {
+  const folded = !foldedSections.value[nature]
+  foldedSections.value[nature] = folded
+  writeSectionFolded(nature, folded)
+}
 
 const NATURES: Record<Nature, string> = {
   builtin: 'intégré',
@@ -926,87 +977,83 @@ onBeforeUnmount(() => {
       </div>
 
       <div id="col-devices" class="col-body">
-        <button
+        <!--
+          The card is a plain container, not the button: the brightness slider
+          lives in it, and an interactive control nested in a button is invalid
+          markup that would also re-select the device on every drag.
+        -->
+        <div
           v-for="d in piloted"
           :key="`${d.vid}:${d.pid}`"
-          class="entry"
-          type="button"
-          :aria-pressed="deviceKey === `${d.vid}:${d.pid}`"
-          :aria-label="d.name"
-          :title="d.name"
-          @click="choose(d)"
+          class="card"
+          :class="{ selected: deviceKey === key(d) }"
         >
-          <!--
-            Un pictogramme de type, pas un logo de fabricant : ce sont des
-            marques protégées, elles ne distinguent pas un clavier d'une souris,
-            et le nom du produit porte déjà l'information. Le seul gabarit connu
-            est un clavier ; le jour où le Rust déclarera un type, il viendra de
-            là plutôt que d'être deviné sur le nom.
-          -->
-          <svg
-            class="glyph"
-            viewBox="0 0 24 16"
-            width="18"
-            height="12"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.6"
+          <button
+            class="entry"
+            type="button"
+            :aria-pressed="deviceKey === key(d)"
+            :aria-label="d.name"
+            :title="d.name"
+            @click="choose(d)"
           >
-            <rect x="1" y="2" width="22" height="12" rx="2" />
-            <path d="M6 11h12" stroke-linecap="round" />
-            <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
-          </svg>
+            <!--
+              Un pictogramme de type, pas un logo de fabricant : ce sont des
+              marques protégées, elles ne distinguent pas un clavier d'une souris,
+              et le nom du produit porte déjà l'information. Le seul gabarit connu
+              est un clavier ; le jour où le Rust déclarera un type, il viendra de
+              là plutôt que d'être deviné sur le nom.
+            -->
+            <svg
+              class="glyph"
+              viewBox="0 0 24 16"
+              width="18"
+              height="12"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
+              <rect x="1" y="2" width="22" height="12" rx="2" />
+              <path d="M6 11h12" stroke-linecap="round" />
+              <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
+            </svg>
 
-          <span class="entry-text">
-            <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
-                 distingue deux claviers de la même marque. Il passe à la ligne
-                 plutôt que d'être tronqué. -->
-            <span class="dev-name">{{ d.name }}</span>
-            <span class="dev-fx">{{ deviceLine(d) }}</span>
-          </span>
-        </button>
+            <span class="entry-text">
+              <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
+                   distingue deux claviers de la même marque. Il passe à la ligne
+                   plutôt que d'être tronqué. -->
+              <span class="dev-name">{{ d.name }}</span>
+              <span class="dev-fx">{{ deviceLine(d) }}</span>
+            </span>
+          </button>
 
-        <!--
-          La luminosité de l'appareil **sélectionné**, ici et pas ailleurs :
-          c'est une propriété de l'appareil, pas un réglage d'effet. Elle
-          n'apparaît que pour celui qu'on regarde — une par ligne alourdirait la
-          colonne pour un réglage qu'on pose une fois.
-
-          Aucune règle à écrire pour la colonne repliée : le bloc n'est ni
-          `.entry`, ni `.group`, ni `.new`, donc le masquage universel plus bas
-          l'emporte sans qu'on ait à le nommer.
-        -->
-        <div v-if="selectedDevice" class="lum">
-          <label class="lum-head" :for="`lum-${deviceKey}`">
-            <span>Luminosité</span>
-            <span class="lum-value">{{ brightnessPercent }} %</span>
-          </label>
-          <input
-            :id="`lum-${deviceKey}`"
-            type="range"
-            min="0"
-            :max="BRIGHTNESS_MAX"
-            step="1"
-            :value="brightness"
-            :disabled="!selectedDevice.open"
-            @input="onBrightness($event, false)"
-            @change="onBrightness($event, true)"
-          />
           <!--
-            Deux phrases différentes, parce que ce sont deux situations
-            différentes : le niveau se retient toujours, mais il n'atteint le
-            clavier que s'il est ouvert. Le taire ferait glisser un curseur sans
-            effet visible, et c'est exactement le genre de silence qui coûte une
-            session.
+            Brightness is a device property, not an effect setting, so it sits
+            in the device card. Only the selected card carries it: one slider
+            per row would weigh down the column for a setting set once.
+
+            Collapsed column: the card rules below restore the button alone, so
+            the slider is hidden without having to be named.
           -->
-          <p class="lum-note">
-            {{
-              selectedDevice.open
-                ? 'Retenue pour cet appareil, et réappliquée au branchement.'
-                : "Appareil non ouvert : le niveau est retenu et s'appliquera au branchement."
-            }}
-          </p>
+          <div v-if="deviceKey === key(d)" class="lum">
+            <label class="lum-head" :for="`lum-${key(d)}`">
+              <span class="lum-label">Luminosité</span>
+              <!-- A disabled slider that does not say why reads as broken. -->
+              <span v-if="!d.open" class="lum-state">non ouvert</span>
+              <span class="lum-value">{{ brightnessPercent }} %</span>
+            </label>
+            <input
+              :id="`lum-${key(d)}`"
+              type="range"
+              min="0"
+              :max="BRIGHTNESS_MAX"
+              step="1"
+              :value="brightness"
+              :disabled="!d.open"
+              @input="onBrightness($event, false)"
+              @change="onBrightness($event, true)"
+            />
+          </div>
         </div>
 
         <p v-if="!piloted.length" class="none">
@@ -1034,27 +1081,66 @@ onBeforeUnmount(() => {
 
       <div id="col-effects" class="col-body">
         <template v-for="g in grouped" :key="g.nature">
-          <p class="group">{{ g.title }}</p>
           <!--
-            « appliqué », et non « actif ». Le mot d'avant valait pour les deux
-            états à la fois, or ils n'ont rien à voir : l'un dit ce que le
-            clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
-            déjà sur `aria-pressed` et sur la bordure.
+            The title attribute names the button once the column is collapsed
+            and only the chevron is left.
           -->
           <button
-            v-for="c in g.items"
-            :key="c.id"
-            class="entry"
+            :id="`fx-section-head-${g.nature}`"
+            class="group"
             type="button"
-            :aria-pressed="selectedEffect?.id === c.id"
-            :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
-            :title="c.name"
-            @click="chosenEffect = c.id"
+            :aria-expanded="!foldedSections[g.nature]"
+            :aria-controls="`fx-section-${g.nature}`"
+            :title="g.title"
+            @click="toggleSection(g.nature)"
           >
-            <EffectSwatch class="mark" :colors="c.swatch" />
-            <span class="fx-name">{{ c.name }}</span>
-            <span v-if="activeId === c.id" class="fx-state">appliqué</span>
+            <svg
+              class="chevron"
+              viewBox="0 0 10 10"
+              width="10"
+              height="10"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            >
+              <path d="M3.5 2l3 3-3 3" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span class="group-title">{{ g.title }}</span>
           </button>
+          <!--
+            `v-show` rather than `v-if`: the element named by `aria-controls`
+            must exist while folded, and `display: none` already takes its
+            entries out of the tab order.
+          -->
+          <div
+            v-show="!foldedSections[g.nature]"
+            :id="`fx-section-${g.nature}`"
+            class="group-items"
+            role="group"
+            :aria-labelledby="`fx-section-head-${g.nature}`"
+          >
+            <!--
+              « appliqué », et non « actif ». Le mot d'avant valait pour les deux
+              états à la fois, or ils n'ont rien à voir : l'un dit ce que le
+              clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
+              déjà sur `aria-pressed` et sur la bordure.
+            -->
+            <button
+              v-for="c in g.items"
+              :key="c.id"
+              class="entry"
+              type="button"
+              :aria-pressed="selectedEffect?.id === c.id"
+              :aria-label="activeId === c.id ? `${c.name} — appliqué sur l'appareil` : c.name"
+              :title="c.name"
+              @click="chosenEffect = c.id"
+            >
+              <EffectSwatch class="mark" :colors="c.swatch" />
+              <span class="fx-name">{{ c.name }}</span>
+              <span v-if="activeId === c.id" class="fx-state">appliqué</span>
+            </button>
+          </div>
         </template>
 
         <button class="new" type="button" @click="router.push('/editor')">
@@ -1332,9 +1418,20 @@ onBeforeUnmount(() => {
   background: var(--raised-2);
 }
 
+/*
+ * A device is framed by its card, not its button: the card also holds the
+ * brightness slider, and framing the button alone would leave the slider
+ * outside the selection it belongs to.
+ */
+.card {
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+}
+
 /* Doublé de la marque « actif » pour les effets, et de la position dans la
    liste pour les appareils : la bordure ambrée ne porte rien seule. */
-.entry[aria-pressed="true"] {
+.effects .entry[aria-pressed="true"],
+.card.selected {
   background: var(--raised-2);
   border-color: var(--accent);
 }
@@ -1373,25 +1470,32 @@ onBeforeUnmount(() => {
 }
 
 /*
- * La luminosité de l'appareil sélectionné. Séparée des entrées par un filet :
- * c'est un réglage, pas une ligne de liste, et rien ne doit laisser croire qu'on
- * peut cliquer dessus pour changer d'appareil.
+ * Aligned with the device name, not the card edge, so the slider reads as part
+ * of that device. The left offset adds up the button's border, padding, glyph
+ * width and gap.
  */
 .lum {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: var(--gap-3);
-  padding: var(--gap-2);
-  border-top: 1px solid var(--line);
+  gap: 2px;
+  padding: 0 var(--gap-2) 6px calc(1px + var(--gap-2) + 18px + var(--gap-2));
 }
 
 .lum-head {
   display: flex;
-  justify-content: space-between;
-  gap: var(--gap-2);
+  flex-wrap: wrap;
+  gap: 0 var(--gap-2);
+  align-items: baseline;
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.lum-label {
+  flex: 1;
+}
+
+.lum-state {
+  color: var(--warn);
 }
 
 /* Le chiffre en clair : un curseur sans valeur ne se repose pas au même endroit
@@ -1411,22 +1515,38 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-.lum-note {
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
 .group {
+  display: flex;
+  gap: var(--gap-1);
+  align-items: center;
+  width: 100%;
   margin: var(--gap-3) 0 var(--gap-1);
-  padding-left: var(--gap-2);
+  padding: 2px var(--gap-2);
+  border-radius: var(--r-sm);
   color: var(--text-faint);
   font-size: 10px;
   letter-spacing: 0.08em;
+  text-align: left;
   text-transform: uppercase;
+}
+
+.group:hover {
+  color: var(--text-muted);
 }
 
 .group:first-child {
   margin-top: 0;
+}
+
+.chevron {
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+/* Keyed on `aria-expanded` itself, so the chevron cannot disagree with what
+   assistive technology announces. */
+.group[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
 }
 
 .fx-name {
@@ -1507,18 +1627,34 @@ onBeforeUnmount(() => {
     padding-inline: var(--gap-1);
   }
 
-  /* Premier niveau : le corps ne montre que des entrées, un filet de groupe et
-     le bouton d'ajout. Tout le reste — messages, aides, ce qu'on ajoutera —
-     disparaît sans avoir à être nommé. */
+  /* First level: the body shows only device cards, section headers with their
+     entries, and the add button. Everything else — messages, hints, whatever
+     gets added — disappears without having to be named. */
   .col.shut .col-body > * {
     display: none;
   }
 
-  .col.shut .col-body > .entry {
+  .col.shut .col-body > .card {
+    display: block;
+  }
+
+  /* Inside a card only the selection button survives: the brightness slider
+     has no room in 40 px and goes with the rest. */
+  .col.shut .card > * {
+    display: none;
+  }
+
+  .col.shut .card > .entry {
     display: flex;
   }
 
   .col.shut .col-body > .group {
+    display: flex;
+  }
+
+  /* A folded section keeps its own `display: none`, set inline by `v-show`,
+     which this rule cannot override. */
+  .col.shut .col-body > .group-items {
     display: block;
   }
 
@@ -1565,15 +1701,26 @@ onBeforeUnmount(() => {
     padding-inline: 0;
   }
 
-  /* Le titre de groupe devient un filet : la séparation reste, le texte part. */
+  /*
+   * A section header shrinks to a rule and its chevron, same form as above:
+   * everything hidden, the chevron restored. It stays a button, because a
+   * header reduced to a bare rule would leave a folded section impossible to
+   * reopen without first expanding the column.
+   */
+  .col.shut .group > * {
+    display: none;
+  }
+
+  .col.shut .group > .chevron {
+    display: block;
+  }
+
   .col.shut .group {
-    height: 0;
-    margin: var(--gap-2) var(--gap-1);
-    padding: 0;
-    overflow: hidden;
+    justify-content: center;
+    margin: var(--gap-2) 0 var(--gap-1);
+    padding: 2px 0;
     border-top: 1px solid var(--line);
-    font-size: 0;
-    line-height: 0;
+    border-radius: 0;
   }
 
   .col.shut .group:first-child {
