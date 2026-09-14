@@ -64,6 +64,9 @@ import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import {
   deleteEffect,
+  duplicateEffect,
+  forgetEffectSettings,
+  openEffectsDir,
   engineStatus,
   getDefaultLayout,
   getLayout,
@@ -117,6 +120,7 @@ const {
   settle,
   forget,
   dropEffect,
+  referencedEffects,
   lastAppliedOn,
   brightnessOf,
   setBrightness,
@@ -223,6 +227,8 @@ interface Choice {
 }
 
 const library = ref<EffectEntry[]>([])
+/** False until the library was read once: before that, every effect looks missing. */
+const libraryRead = ref(false)
 /** Déjà lisible : les messages du Rust s'affichent tels quels. */
 const listError = ref<string | null>(null)
 /** Ce qui a empêché d'appliquer ou d'arrêter. Déjà lisible aussi. */
@@ -624,6 +630,54 @@ async function halt(): Promise<void> {
 const removable = computed(() => selectedEffect.value?.nature !== 'hardware')
 
 /**
+ * Effects the settings still refer to that the folder no longer holds: renamed
+ * or removed outside the application.
+ *
+ * Said, not purged: putting the file back under its name restores everything,
+ * and forgetting is a gesture of its own.
+ */
+const missingEffects = computed(() => {
+  if (!libraryRead.value) return []
+  const present = new Set(library.value.map((e) => e.id))
+  return [...referencedEffects.value].filter((name) => !present.has(name)).sort()
+})
+
+async function forgetMissing(name: string): Promise<void> {
+  problem.value = null
+  try {
+    await forgetEffectSettings(name)
+    dropEffect(name)
+  } catch (e) {
+    problem.value = message(e)
+  }
+}
+
+/** Copies the selected effect, then selects the copy. */
+async function duplicateSelected(): Promise<void> {
+  const c = selectedEffect.value
+  if (!c || c.hardware) return
+  problem.value = null
+  working.value = true
+  try {
+    const name = await duplicateEffect(c.id)
+    library.value = await refreshLibrary()
+    chosenEffect.value = name
+  } catch (e) {
+    problem.value = message(e)
+  } finally {
+    working.value = false
+  }
+}
+
+async function openFolder(): Promise<void> {
+  try {
+    await openEffectsDir()
+  } catch (e) {
+    listError.value = message(e)
+  }
+}
+
+/**
  * Reads the effects folder again, compiling what changed: effects saved there
  * from outside the application appear, edited ones are recompiled.
  */
@@ -864,6 +918,7 @@ onMounted(async () => {
   // Les effets matériels, eux, sont écrits ici : la colonne n'est jamais vide.
   try {
     library.value = await refreshLibrary()
+    libraryRead.value = true
   } catch (e) {
     listError.value = message(e)
   }
@@ -1095,6 +1150,10 @@ onBeforeUnmount(() => {
           <span class="plus" aria-hidden="true">↻</span>
           <span>Actualiser</span>
         </button>
+        <button class="new" type="button" title="Ouvrir le dossier des effets" @click="openFolder">
+          <span class="plus" aria-hidden="true">↗</span>
+          <span>Ouvrir le dossier</span>
+        </button>
       </div>
     </section>
 
@@ -1125,6 +1184,11 @@ onBeforeUnmount(() => {
         tourne quand même — sur le gabarit par défaut, sans rien écrire nulle
         part. Mais l'écran dit ce qui manque et où aller.
       -->
+      <p v-for="name in missingEffects" :key="name" class="notice warn" role="status">
+        « {{ name }} » n'est plus dans le dossier.
+        <button class="link" type="button" @click="forgetMissing(name)">Oublier ses réglages</button>
+      </p>
+
       <p v-if="noDevice" class="notice" role="status">
         Aucun appareil piloté : la bibliothèque se parcourt et l'aperçu tourne sur le gabarit par
         défaut, mais appliquer un effet demande un appareil que candeo a le droit de piloter.
@@ -1200,6 +1264,15 @@ onBeforeUnmount(() => {
             @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
           >
             Modifier
+          </button>
+
+          <button
+            v-if="selectedEffect.hardware === null"
+            class="ghost"
+            :disabled="working"
+            @click="duplicateSelected"
+          >
+            Dupliquer
           </button>
 
           <!--

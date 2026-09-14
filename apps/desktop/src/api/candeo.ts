@@ -247,6 +247,27 @@ export function deleteEffect(id: string): Promise<void> {
 }
 
 /**
+ * Copies an effect under a new name — `<name> (copie)`, `(copie 2)`… — and
+ * returns that name. The copy is ready at once, and it is the user's.
+ */
+export function duplicateEffect(id: string): Promise<string> {
+  return invoke('duplicate_effect', { id })
+}
+
+/** Opens the effects folder in the system file manager. */
+export function openEffectsDir(): Promise<void> {
+  return invoke('open_effects_dir')
+}
+
+/**
+ * Forgets the settings kept for an effect the folder no longer holds: its
+ * parameters on every device, and where it was applied.
+ */
+export function forgetEffectSettings(id: string): Promise<void> {
+  return invoke('forget_effect_settings', { id })
+}
+
+/**
  * Whether an effect can run, as far as its cache says.
  *
  * - `ready`: compiled for the file's current bytes;

@@ -48,7 +48,7 @@
  * l'éditeur détruit la vue, et les réglages en vol ne doivent pas partir avec.
  */
 
-import { readonly, ref } from 'vue'
+import { computed, readonly, ref } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
@@ -736,9 +736,8 @@ export function useSettings() {
    * pas déclenché.
    */
   function dropEffect(effect: string): void {
-    // Un identifiant d'effet ne contient ni `/` ni `:` — la liste blanche du Rust
-    // n'accepte que `a-z`, `0-9` et le tiret. Le suffixe ne peut donc pas
-    // désigner la mauvaise paire.
+    // An effect name cannot contain `/`, which Windows forbids in file names: the
+    // suffix cannot designate the wrong pair.
     const suffix = `/${effect}`
     const autres = (k: string) => !k.endsWith(suffix)
     cancelWrites(autres)
@@ -773,9 +772,22 @@ export function useSettings() {
     brightness.value = {}
   }
 
+  /**
+   * Every effect the settings refer to, applied or tuned on any device.
+   *
+   * What the gallery compares with the library to tell someone that an effect
+   * they tuned is no longer in the folder.
+   */
+  const referencedEffects = computed(() => {
+    const names = new Set(Object.values(applied.value))
+    for (const key of Object.keys(remembered.value)) names.add(key.slice(key.indexOf('/') + 1))
+    return names
+  })
+
   return {
     load,
     reload,
+    referencedEffects,
     valuesFor,
     keptFor,
     adjust,

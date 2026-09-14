@@ -139,7 +139,10 @@ is recorded as shipped, modified or not; a renamed one becomes the user's.
 - **Refresh**, and **Open folder**, in the effects column.
 - **Rename** from the editor header: renames the file, moves its settings and
   its draft. The name is edited there only; sources have no `name`.
-- **Duplicate**: a copy named `<name> (copy)`, `(copy 2)`…
+- **Duplicate**: a copy named with a copy suffix in the interface language —
+  `<name> (copie)`, `(copie 2)`… while the interface is French — ready at once,
+  since its cache is copied too, and the user's even when the original was
+  shipped.
 - **Delete**: stops the loops running it, removes the file and its cache,
   forgets its settings.
 - **Missing effect**: when `activeEffects` or `effectParams` name an effect the

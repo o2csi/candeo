@@ -60,6 +60,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::journal::LogLevel;
 use crate::runtime::swatch::{self, Swatch};
@@ -858,6 +859,28 @@ fn free_name(base: &str, taken: &BTreeSet<String>) -> String {
         .expect("an unbounded range always has a free name")
 }
 
+/// `<name> (copie)`, `<name> (copie 2)`… — the first one `taken` does not hold.
+///
+/// The suffix is interface text, French like the rest of the interface until the
+/// catalogs exist. The name is shortened to leave room for it.
+fn copy_name(name: &str, taken: &BTreeSet<String>) -> String {
+    (1..)
+        .map(|n| {
+            let suffix = if n == 1 {
+                " (copie)".to_owned()
+            } else {
+                format!(" (copie {n})")
+            };
+            let stem: String = name
+                .chars()
+                .take(MAX_NAME_LEN - suffix.chars().count())
+                .collect();
+            format!("{}{suffix}", stem.trim_end_matches([' ', '.']))
+        })
+        .find(|candidate| !taken.contains(&candidate.to_lowercase()))
+        .expect("an unbounded range always has a free name")
+}
+
 /// SHA-256 of a source, in lowercase hexadecimal.
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -1132,6 +1155,35 @@ impl Store {
     /// running effect pay for a stop it was not owed.
     pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
         self.require(id)
+    }
+
+    /// Copies an effect under a new name and returns it: `<name> (copie)`, then
+    /// `(copie 2)`, `(copie 3)`…
+    ///
+    /// The cache is copied too: same bytes, same hash, so the copy is ready
+    /// without a compilation. The copy is not recorded as shipped, even when the
+    /// original is: it is a new effect, the user's.
+    pub fn duplicate_effect(&self, id: &str) -> CmdResult<String> {
+        self.require(id)?;
+        let source = read(&self.source_path(id))?;
+        let taken: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
+        let name = copy_name(id, &taken);
+
+        write_atomically(&self.source_path(&name), &source)?;
+        if let Ok(record) = fs::read_to_string(self.cache_path(id)) {
+            // A cache that does not follow only costs a compilation at the next
+            // Refresh.
+            let _ = write_atomically(&self.cache_path(&name), &record);
+        }
+        Ok(name)
+    }
+
+    /// The effects folder, created if it does not exist yet: opening it must work
+    /// on a first launch too, since saving a file there is how an effect is
+    /// added.
+    pub fn effects_dir(&self) -> CmdResult<&Path> {
+        create_dir(&self.effects_dir)?;
+        Ok(&self.effects_dir)
     }
 
     /// Deletes an effect's file and its cache.
@@ -1649,6 +1701,43 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     Ok(())
 }
 
+/// Copies an effect under a new name, and returns that name. See
+/// [`Store::duplicate_effect`].
+#[tauri::command]
+pub fn duplicate_effect(app: AppHandle, id: String) -> CmdResult<String> {
+    store(&app)?.duplicate_effect(&id)
+}
+
+/// Opens the effects folder in the system file manager.
+///
+/// Adding an effect is saving a `.ts` file there, and getting back a shipped one
+/// that was deleted is saving its file from the repository there: the folder has
+/// to be one click away, not a path to look up.
+#[tauri::command]
+pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
+    let store = store(&app)?;
+    let dir = store.effects_dir()?;
+    app.opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| format!("ouverture de {} impossible : {e}", dir.display()))
+}
+
+/// Forgets what `settings.json` keeps about an effect the folder no longer holds:
+/// its parameters on every device, and where it was applied.
+///
+/// Only on request: putting the file back under its name restores everything as
+/// long as nobody asked to forget.
+#[tauri::command]
+pub fn forget_effect_settings(app: AppHandle, id: String) -> CmdResult<()> {
+    validate_name(&id)?;
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.forget_effect(&id) {
+        store.write_settings(&settings)?;
+    }
+    Ok(())
+}
+
 /// Returns an effect's source, to open it in the editor.
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
@@ -2139,6 +2228,40 @@ mod tests {
 
         let err = store.delete_effect("Onde").unwrap_err();
         assert!(err.contains("aucun effet"), "message: {err}");
+    }
+
+    /// A copy is a new effect: its own name, the same source, already compiled,
+    /// and not shipped even when the original is.
+    #[test]
+    fn duplicating_makes_a_ready_copy_under_a_free_name() {
+        let (tmp, store) = temp_store();
+        let js = solid_effect("00ff00");
+        create_and_cache(&store, "Onde", &js);
+
+        assert_eq!(store.duplicate_effect("Onde").unwrap(), "Onde (copie)");
+        assert_eq!(store.duplicate_effect("Onde").unwrap(), "Onde (copie 2)");
+        assert_eq!(
+            store.duplicate_effect("Onde (copie)").unwrap(),
+            "Onde (copie) (copie)"
+        );
+
+        let copy = user_effect(&store, "Onde (copie)");
+        assert_eq!(copy.state, EffectState::Ready);
+        assert_eq!(store.effect_js("Onde (copie)").unwrap(), js);
+        assert!(effects_dir(&tmp).join("Onde (copie 2).ts").is_file());
+        assert!(store.duplicate_effect("Absent").is_err());
+
+        store.seed_shipped(&shipped_v1()).unwrap();
+        let name = store.duplicate_effect("Livré").unwrap();
+        assert_eq!(user_effect(&store, &name).kind, EffectKind::User);
+    }
+
+    #[test]
+    fn a_copy_name_stays_valid() {
+        let long = "a".repeat(MAX_NAME_LEN);
+        let name = copy_name(&long, &BTreeSet::new());
+        validate_name(&name).unwrap_or_else(|e| panic!("\"{name}\": {e}"));
+        assert!(name.ends_with(" (copie)"), "name: {name}");
     }
 
     // ------------------------------------------------------------ migration
