@@ -86,15 +86,15 @@ onMounted(() => {
 
       <RouterLink to="/" class="tab">Effets</RouterLink>
       <RouterLink to="/devices" class="tab">Périphériques</RouterLink>
+      <RouterLink to="/settings" class="tab">Réglages</RouterLink>
 
       <span class="spacer" />
 
       <!--
-        Permanent, et non un message qu'on ferme : le geste dont il parle — la
-        croix — reste disponible à tout instant, et personne ne lit deux fois un
-        avertissement qu'il a déjà écarté. Il s'efface avant les onglets quand la
-        fenêtre rétrécit ; le détail reste alors dans l'infobulle, et la section
-        « Fenêtre et sortie » des périphériques le porte en entier.
+        Permanent, not a message to dismiss: the gesture it is about, the close
+        button, is available at all times, and nobody reads twice a warning they
+        already dismissed. It gives way before the tabs when the window narrows;
+        the tooltip keeps the detail, and the README explains it in full.
       -->
       <span class="repli" :title="REPLI_DETAIL">{{ REPLI }}</span>
     </nav>
