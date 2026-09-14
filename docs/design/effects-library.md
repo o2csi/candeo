@@ -1,187 +1,190 @@
-# The effects library — one kind of effect
+# The effects library — effects are files
 
-Status: **accepted**. Covers the redesign of the shipped effects and the identity
-and format of #44, which turn out to be one project.
+Status: **proposed**. Replaces the uid-based version accepted in #83, which was
+set aside during implementation review for a simpler model. Covers the shipped
+effects and the identity and format of #44.
 
 ## Why
 
 candeo ships five effects as JavaScript compiled into the binary, and treats
 them as a second kind of effect. That kind costs a special case almost
-everywhere:
+everywhere: reserved ids, refused deletion, copy-before-editing, manifests
+written twice, swatches kept in memory, `EffectKind::Builtin` checks in storage,
+listing and the gallery.
 
-- ids reserved at install, and a refusal when a name derives to one;
-- deletion refused, and a "copy before editing" flow in the editor;
-- manifests written twice, in Rust and in the module, kept equal by a test;
-- swatches kept in memory instead of on disk;
-- `EffectKind::Builtin` checks in storage, listing and the gallery.
+Meanwhile #44 needs an identity and a single-file format for effects that come
+from elsewhere. The first design answered with a generated uid written into the
+source. In review it proved heavier than the need: a uid the user can edit is
+a way to overwrite another effect by pasting its code, and it adds a second
+identity next to a name that is already unique.
 
-Meanwhile #44 needs a stable identity and a single-file exchange format for
-effects that come from elsewhere. A shipped effect is exactly that: an effect
-that comes from elsewhere, the application being its author.
+**Decision: an effect is a `.ts` file in the effects folder, and its file name
+is its name.** candeo is a tool for power users: listing a folder is the whole
+library, adding an effect is saving a file there, and naming it is renaming
+the file.
 
-**Decision: every effect is an ordinary library effect, in the portable format.**
-The application seeds its effects into the library like an import it performs
-itself. The special kind disappears.
+## 1. Identity: the file name
 
-## 1. Identity: a `uid`, not a name
+```text
+app_data_dir()/effects/
+  Radial wave.ts
+  Breathing.ts
+  My effect.ts
+```
 
-As decided in #44 §1:
-
-- `id = derive_id(name)` stops being the identity. A stable `uid` is.
-- Saving again or renaming keeps the `uid`; duplicating or "save as" creates a
-  new one; importing a known `uid` offers an update.
-- Remembered settings (`activeEffects`, `effectParams`) are indexed by `uid`, so
-  renaming no longer orphans them.
-
-**Where the `uid` lives: in the source**, `defineEffect({ uid, … })`, like every
-other manifest field (#44 §2, "one file, one truth").
-
-- A **shipped** effect carries a fixed `uid`, written once in its source: every
-  installation recognizes it, which is what makes updates possible.
-- A **user** effect gets one at its first save: the editor inserts
-  `uid: '…'` into the source before installing. The author sees it and can
-  keep it when sharing.
-- Format: a lowercase UUID v4. It passes `validate_id` (`[a-z0-9-]`, at most
-  64 characters) and contains no `:`, which the tray menu uses as a separator.
-
-**The directory keeps a readable name** derived from the title, with a numeric
-suffix on collision (#44). Nothing decides on it any more: the `uid` does.
-
-**Hardware effects** (`wave`, `off`, defined in the front end) currently share
-the id space: a user effect named "Wave" collides with them. They move to a
-namespace of their own, `hardware:wave`, outside the library.
+- The name shown everywhere is the file name without `.ts`. Sources no longer
+  declare `name`.
+- It is the key of everything that refers to an effect: `activeEffects` and
+  `effectParams` in `settings.json`, the engine, the tray menu, editor drafts.
+- **Allowed names** follow the Windows rules on every system, so a folder copied
+  between machines means the same thing: no `< > : " / \ | ? *` or control
+  characters, no leading or trailing space or dot, not a reserved device name
+  (`CON`, `NUL`, `COM1`…), at most 64 characters. Two names that differ only by
+  case are refused.
+- **Renaming from the app** renames the file and moves its settings and draft.
+  **Renaming outside the app** makes a new effect: the settings of the old name
+  stay in `settings.json`, unused. See §5.
+- **Hardware effects** (`wave`, `off`, `spectrumCycle`, defined in the front
+  end) move to ids with a prefix no file name can hold, `hardware:wave`, so a
+  file named `wave.ts` cannot collide with them. The tray menu reads an effect
+  id as everything after the product id, so the `:` does not break it.
 
 ## 2. Format: one self-contained `.ts` file
 
-Unchanged from #44 §2:
-
-- no `manifest.json` shipped: the manifest is read from the source;
-- no `.js` shipped: the bytes executed derive from the text that can be read;
-- the local `manifest.json` and `swatch.json` stay, as **caches** written at
-  install so that listing starts no engine.
-
-New manifest fields, in `defineEffect({…})`: `uid`, `author` (free text, a
-claim and never shown as verified), `version` (the effect's, not the API's).
-
-**Every default must be a literal.** The manifest is read from the syntax tree,
-without running the module. Three shipped effects declare defaults through
-constants (`respiration`, `balayage`, `degrade-fixe`) and cannot be saved from
-the editor today: they are rewritten with literal defaults.
-
-## 3. Shipping the effects
-
-The sources move to `packages/effects/*.ts`, next to the effects API. Adding
-that folder to the `include` of `apps/desktop/tsconfig.json` makes `vue-tsc`
-type-check them, as it already does `example.ts`.
-
-**Compiling without a window.** The seeded effects must run at first launch,
-with the window closed, so their JavaScript has to exist before the app
-starts. Three ways:
-
-| Option | Cost | Limit |
-|---|---|---|
-| **A. Generated `.js` committed next to each `.ts`**, produced by a `pnpm` script with the same `transpileModule` as the editor; the `web` CI job regenerates and fails on any difference | small; no new dependency | a generated file in the tree |
-| B. Type stripping in Rust (`oxc`) | one heavy dependency | also enables importing without a window |
-| C. Shipped sources restricted to TypeScript that is valid JavaScript | none | no types in the effects meant to be read and copied |
-
-**Decision: A.** The CI check keeps the executed bytes equal to what a reviewer
-reads, which is the principle of #44 §2. B stays open for the day import must
-work without a window. The Rust `rust` CI job has no Node, which rules out
-running `tsc` from `build.rs`.
-
-Either way, the shipped sources and their JavaScript are **embedded in the
-binary**: seeding happens at first launch, window closed and possibly offline.
-
-## 4. Seeding and updates
-
-At startup, for each shipped effect, keyed by `uid`:
-
-| Library state | Action |
-|---|---|
-| Absent, never deleted | install it |
-| Present, source equal to the version shipped last time | update it, **silently**, if the shipped version changed |
-| Present, source modified by the user | keep the user's version; mark "update available" |
-| Deleted by the user | leave it deleted |
-
-To tell these apart, an installed effect records its **origin**: the shipped
-`uid` and the hash of the source it was installed from. A deletion of a shipped
-effect is remembered in `settings.json`, so it does not come back at the next
-launch.
-
-**No "Restore shipped effects" action.** candeo is open source: a deleted shipped
-effect comes back by importing its file from the repository, once import exists
-(#44 §3–4). Until then it stays deleted on that machine, which costs one effect,
-never user work. The action is trivial to add later, since the sources are
-embedded anyway; it is left out to keep the interface for what is frequent.
-
-## 5. What disappears, what stays
-
-Disappears:
-
-- `builtins/mod.rs`, `EffectKind`, the reserved-id refusal, the refused
-  deletion, the memory-only swatches, the duplicated Rust manifests;
-- copy-on-open in the editor (`renameInSource` for built-ins, "copie de X");
-- the `intégrés` / `à vous` split in the gallery.
-
-Stays, for every effect:
-
-- **Duplicate**: a new `uid`, the name suffixed, the source otherwise identical;
-- delete, which stops the loops running it and forgets its settings;
-- edit in place, since the source is the user's.
-
-## 6. Names and labels in two languages
-
-`AGENTS.md` currently says built-in names come from the i18n catalogs. With no
-built-ins, that rule has nothing left to apply to. Instead, **manifest text
-fields accept a string or a map of languages**:
-
 ```ts
-name: { en: 'Radial wave', fr: 'Onde radiale' },
-params: {
-  speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, … },
-}
+import { defineEffect, hsv } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: { en: 'A hue wave spreading in circles', fr: 'Une onde de teinte en cercles' },
+  kinds: ['keyboard'],
+  params: {
+    speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
+  },
+  render({ layout, time, frame, params }) { … },
+})
 ```
 
-A plain string stays valid for effects written in one language. The display
-picks the current language, then English, then the first entry. Shipped effects
-use maps; `AGENTS.md` changes accordingly once this is accepted.
+- **Text fields** — `description` and parameter `label` — accept a string or a
+  map of languages. The display picks the current language, then English, then
+  the first entry. The name is not translated: it is a file name.
+- **`kinds`** declares the device kinds the effect is meant for, as decided in
+  #44 §5 and `device-sdk.md` §2 (`['keyboard']`, `'all'`…). Shipped effects
+  declare it now. Only keyboards exist today, so a missing `kinds` is read as
+  `['keyboard']`; the obligation and the gallery filter come with the second
+  kind.
+- `author` and `version` stay as in #44 §2, optional.
+- `name` in an existing source is **ignored**. `EffectModule` keeps it as a
+  deprecated optional property, so an old source still type-checks and the
+  editor strikes it through instead of refusing to save.
+- Defaults no longer need to be literals: the manifest is read by running the
+  module (§3), not from the syntax tree.
 
-## 7. Migration of existing installations
+## 3. Compiling and the cache
 
-One pass at the first launch of the new version, idempotent:
+The Rust side cannot strip TypeScript types, and the webview already can: the
+editor loads the TypeScript compiler for Monaco. The main window is created at
+startup and closing it only hides it, so a webview is always there while candeo
+runs, tray-only use included.
 
-1. **Shipped ids** map to their fixed `uid` through a table in the code
-   (`onde-radiale`, `onde-matricielle`, `respiration`, `balayage`,
-   `degrade-fixe`).
-2. **User effects** in `effects/<id>/` get a `uid` minted and written into their
-   `source.ts`; their directory is kept.
-3. **`settings.json`**: every `activeEffects` and `effectParams` entry is
-   rewritten from id to `uid`, and a schema version is recorded.
-4. Front-end drafts stored under `candeo:brouillon:<id>` are renamed.
+1. **Rust lists the folder**: for each `.ts`, its name, the SHA-256 of its bytes,
+   and whether the cache holds a result for that hash.
+2. **The webview compiles what is stale**, with `transpileModule`, at startup
+   and on **Refresh** in the gallery. The compiler is loaded only when at
+   least one file is stale.
+3. **Rust receives the JavaScript**, loads it once in QuickJS with the time
+   budget swatch sampling already uses, reads the manifest the module declares
+   (`__candeo_manifest`), checks `apiVersion`, samples the swatch, and writes
+   `app_cache_dir()/effects/<name>.json`: hash, JavaScript, manifest, swatch.
+4. A file that fails to compile or load is cached **with its error**, for that
+   hash: it is listed with an error state, opens in the editor, and is not
+   retried until it changes.
 
-The migration is tested on a fixture of a real pre-migration data folder.
+The effects folder holds only the files people write. The engine and the tray
+run an effect only when its cache matches the file's current hash, so they
+never run code that differs from the file on disk. A file dropped in while
+candeo runs appears after Refresh; watching the folder can come later.
 
-## 8. Out of scope here
+What goes away: the manifest reader on the syntax tree (`editor/effect.ts`), the
+`source.ts` / `effect.js` / `manifest.json` / `swatch.json` directory per
+effect, and option A of the first design (generated JavaScript committed and
+checked by CI).
 
-- Import and export UI, and the edge cases of #44 §4 (newer `apiVersion`,
-  out-of-bounds writes): they build on this identity and format.
-- Device kinds and capabilities (#44 §5, #34).
-- The effects reimplemented from the OpenRGB Effects Plugin: they are written
-  directly in this format once it lands.
+## 4. Shipped effects
+
+The sources move to `packages/effects/<Name>.ts`, type-checked by `vue-tsc`, and
+are embedded in the binary. At startup they are copied into the effects folder
+**once**, and `settings.json` records what was copied:
+`shippedEffects: { "Radial wave": "<sha-256>" }`.
+
+Shipped effects are named in English: a name is a file name and is not
+translated, and English is the reference language of the interface.
+
+| State at startup | Action |
+|---|---|
+| Not recorded, no file with that name | copy it, record its hash |
+| Not recorded, a file with that name exists | leave the file; record it as not ours |
+| Recorded, file unchanged, shipped version changed | overwrite it **silently**, record the new hash |
+| Recorded, file modified | leave it |
+| Recorded, file missing (deleted or renamed) | leave it; never copied again |
+
+A deleted shipped effect comes back by downloading its file from the repository
+into the folder. The gallery's **Built-in** section lists the files whose name
+is recorded as shipped, modified or not; a renamed one becomes the user's.
+
+## 5. Library actions
+
+- **Refresh**, and **Open folder**, in the effects column.
+- **Rename** from the editor header: renames the file, moves its settings and
+  its draft. The name is edited there only; sources have no `name`.
+- **Duplicate**: a copy named `<name> (copy)`, `(copy 2)`…
+- **Delete**: stops the loops running it, removes the file and its cache,
+  forgets its settings.
+- **Missing effect**: when `activeEffects` or `effectParams` name an effect the
+  folder no longer holds, the gallery says so once — "Radial wave" is no
+  longer in the folder — with **Forget its settings**. Nothing is purged
+  automatically: putting the file back under that name restores everything.
+
+## 6. Migration from the directory layout
+
+One pass at the first launch of the new version, idempotent, recorded as
+`version: 1` in `settings.json`:
+
+1. Each `effects/<id>/` becomes `effects/<name>.ts`, `<name>` being the
+   manifest's name made valid (forbidden characters replaced by `-`, a suffix
+   ` (2)` on collision). The directory is removed once the file is written.
+2. `activeEffects` and `effectParams` are rewritten from old ids to names:
+   installed effects through step 1, shipped effects through a table
+   (`onde-radiale` → `Radial wave`, `onde-matricielle` → `Diagonal wave`,
+   `respiration` → `Breathing`, `balayage` → `Sweep`, `degrade-fixe` →
+   `Fixed gradient`).
+3. Shipped effects are then copied as in §4.
+4. Drafts stored under `candeo:brouillon:<id>` are renamed when the editor
+   opens, from the same table.
+
+Tested on a fixture shaped like a data folder of the directory layout.
+
+## 7. What disappears, what stays
+
+Disappears: `builtins/mod.rs`, `EffectKind`, reserved ids, the refused deletion,
+memory-only swatches, the Rust manifest copies and their test, copy-on-open in
+the editor, `derive_id`, per-effect directories.
+
+Stays: one engine, one API, the swatch sampled by running the effect, per-device
+settings, preview versus Apply.
+
+## 8. Out of scope
+
+- Watching the folder for changes.
+- An "update available" mark for modified shipped effects.
+- The `kinds` filter and obligation (with the second device kind, #34).
+- The OpenRGB Effects Plugin reimplementations: written directly in this format
+  once it lands.
 
 ## Order of work
 
-1. `uid` and origin in the manifest, settings keyed by `uid`, and the migration.
-2. Shipped effects as `.ts` in `packages/effects`, generated JavaScript and its
-   CI check; seeding and updates.
-3. Remove the built-in special cases (Rust and front end); Duplicate.
-4. Localized manifest text (with #73).
-5. Import and export (#44 §3–4).
-
-## Decisions taken on review
-
-1. Compiling shipped effects: **A**, generated JavaScript committed and checked
-   by CI.
-2. Updating an unmodified shipped effect: **silent**.
-3. No "Restore shipped effects" action for now: a deleted shipped effect comes
-   back through import from the repository.
+1. File-named effects, the compile pass and cache, Refresh, the migration,
+   settings keyed by name.
+2. Shipped effects as `packages/effects/*.ts`, seeding; removal of the built-in
+   special cases.
+3. Rename, Duplicate, Open folder, the missing-effect notice.
+4. Localized `description` and `label` (with #73).

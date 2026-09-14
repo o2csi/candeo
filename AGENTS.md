@@ -31,7 +31,7 @@ through the test suite, before opening a pull request.
 |---|---|
 | Identifiers, comments, test names, assertion messages | English |
 | Log messages | English |
-| Docs, commit messages, issues, pull requests | English |
+| Docs, commit messages, issues, pull requests | English, interface elements included: *Refresh*, not the French label |
 | Text shown to the user | Through the i18n catalogs, never inline |
 
 Code written before this rule still holds French identifiers, comments and log
@@ -40,8 +40,8 @@ mix both languages inside a new function or type.
 
 ## Internationalisation
 
-Introduced by #73. Until the catalogs exist, leave existing interface strings
-as they are and flag any new one in the pull request.
+Introduced by #73. Until the catalogs exist, interface strings stay inline and
+in French, new ones included; list new ones in the pull request, in English.
 
 - **Catalogs:** `apps/desktop/src/locales/en.json` is the reference, `fr.json`
   a complete translation. Missing keys fall back to English.
@@ -59,9 +59,9 @@ as they are and flag any new one in the pull request.
   or `"en"` / `"fr"`. The system locale comes from `tauri-plugin-os`; an
   unsupported locale falls back to English. Changing it re-renders the window
   and rebuilds the tray menu.
-- **Effects:** built-in effect names and parameter labels come from the
-  catalogs. User effects are shown as their author wrote them; localized
-  manifest fields are decided with #44.
+- **Effects:** an effect's name is its file name and is not translated. Its
+  `description` and parameter `label`s accept a string or a map of languages
+  (`docs/design/effects-library.md` §2); they do not go through the catalogs.
 - **Guards:** a test checks that `en.json` and `fr.json` have the same keys and
   that every key used from Rust exists.
 
@@ -73,8 +73,9 @@ as they are and flag any new one in the pull request.
   place.
 - **An error is one sentence and the action to take.** Technical detail goes to
   the log and the copied diagnostic, never raw into the window or the tray.
-- **One term per state:** *piloté*, *non ouvert*, *débranché*; the action is
-  *Piloter*. Settle a new term before using it anywhere.
+- **One term per state:** *controlled*, *not open*, *unplugged*; the action is
+  *Control* (*piloté*, *non ouvert*, *débranché*, *Piloter* in the current French
+  interface). Settle a new term before using it anywhere.
 - The copied diagnostic is for bug reports: it stays in English and does not go
   through the catalogs.
 
