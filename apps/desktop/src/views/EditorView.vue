@@ -1,47 +1,50 @@
 <script setup lang="ts">
 /**
- * Éditeur d'effets — mode plein cadre.
+ * Effect editor, as a full-window mode.
  *
- * `meta.full` fait disparaître la barre de navigation : l'éditeur est un
- * **mode**, pas un onglet (`docs/design/studio.md` §2). À gauche le code, à
- * droite le simulateur, en permanence.
+ * `meta.full` hides the navigation bar: the editor is a **mode**, not a tab
+ * (`docs/design/studio.md` §2). Code on the left, simulator on the right, at
+ * all times.
  *
- * ## Le cycle complet, en un bouton
+ * ## Saving previews, applying commits the keyboard
  *
- * « Valider et lancer » enchaîne `transpileModule()`, `install_effect` et
- * `start_effect`. C'est le seul chemin vers le disque et vers le clavier : tant
- * qu'on n'a pas validé, on modifie un texte, rien d'autre.
+ * The gallery's rule (§8), for the same reason: writing an effect must neither
+ * take over the lighting in use nor require owning a keyboard.
  *
- * Les trois étapes échouent différemment, et chacune dit pourquoi :
- * le service de langage refuse un code qui ne compile pas, le relevé du
- * manifeste refuse un nom calculé, et le Rust refuse un effet écrit pour une
- * version de l'API qu'il ne connaît pas. Ces messages sont écrits pour être
- * lus : ils sont affichés tels quels.
+ * - "Enregistrer" chains the error check, `transpileModule()` and
+ *   `install_effect`, then restarts the effect in the **preview loop**, on the
+ *   current device's layout. Not a byte reaches a keyboard.
+ * - "Appliquer sur …" starts it on the current device for real, saving first
+ *   when the code differs from the saved version, with the parameters the
+ *   gallery would use.
  *
- * ## Les deux sorties sont indépendantes
+ * The save steps fail differently, and each says why: the language service
+ * rejects code that does not compile, the manifest reader rejects a computed
+ * name, and Rust rejects an effect written for an API version it does not
+ * know. Those messages are written to be read, and shown as they are.
  *
- * Le simulateur est alimenté par le **canal d'images** du moteur, celles-là
- * mêmes qui partent vers le clavier. La bascule « envoyer au clavier » coupe
- * l'écriture HID sans rien changer à l'aperçu : c'est ce qui permet d'écrire un
- * effet sans posséder le clavier.
+ * ## What the simulator shows
  *
- * ## Quitter n'arrête pas l'effet
+ * The device's frames when the device runs exactly the saved version, the
+ * preview otherwise — `useSimulatorFeed`, shared with the gallery. Both loops
+ * load `effect.js` from disk, so the simulator never shows unsaved code.
  *
- * Fermer l'éditeur libère le canal, donc le flux d'images. La boucle, elle,
- * tourne dans un fil Rust indépendant de la fenêtre et continue d'alimenter le
- * clavier — y compris l'application fermée.
+ * ## Leaving stops the preview, not the applied effect
  *
- * ## Un effet se lance sur **un** appareil
+ * Nobody is left to watch the preview. The applied effect runs in a Rust thread
+ * independent of the window and keeps feeding the keyboard, window closed
+ * included.
  *
- * Le moteur porte une boucle par appareil : lancer, arrêter, régler et suivre
- * les images désignent tous celui qui est visé. L'éditeur prend `current`, sans
- * rien demander — un seul appareil reste le cas courant, et choisir en
- * permanence serait une cérémonie de plus. L'écran à trois colonnes (issue #27)
- * rendra le choix explicite.
+ * ## One device
+ *
+ * The engine runs one loop per device. The editor takes `current` without
+ * asking: a single device is the common case, and choosing every time would be
+ * one more ceremony. The gallery's devices column is where the choice is made.
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import type { ParamSpec } from '@candeo/effects-api'
 
 import {
   engineStatus,
@@ -49,23 +52,22 @@ import {
   installEffect,
   listEffects,
   readEffectSource,
-  setOutputToKeyboard,
   startEffect,
   stopEffect,
-  type DeviceEngineStatus,
+  type EngineReport,
 } from '../api/candeo'
 import { erreur } from '../api/journal'
-import type { DeviceRef } from '../api/types'
 import CodeEditor from '../components/CodeEditor.vue'
 import DevicePill from '../components/DevicePill.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
+import { useSettings } from '../composables/useSettings'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
 import { compile, nameInSource, renameInSource } from '../editor/effect'
 import { errors } from '../editor/monaco'
 import { NEW_EFFECT } from '../editor/template'
-import { useEngineFrames } from '../keyboard/engineFrames'
 import type { LayoutView } from '../keyboard/layout'
+import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
 /** Délai d'inactivité avant d'enregistrer le brouillon. */
 const DRAFT_DELAY = 400
@@ -74,7 +76,8 @@ const STATUS_PERIOD = 1000
 
 const route = useRoute()
 const router = useRouter()
-const { layout, current, refresh } = useDevice()
+const { devices, layout, current, refresh } = useDevice()
+const { load: loadSettings, reload: reloadSettings, valuesFor } = useSettings()
 
 /** `/editor` sans identifiant = nouvel effet ; avec = effet installé. */
 const id = computed<string | null>(() => {
@@ -88,81 +91,20 @@ const saved = ref('')
 const loading = ref(true)
 const restored = ref(false)
 const busy = ref(false)
-/** Ce qui a empêché de valider, côté fenêtre. Déjà lisible. */
+/** What stopped the last action, already readable. */
 const problem = ref<string | null>(null)
 
 /**
- * L'état du moteur, appareil par appareil — l'éditeur ne regarde que le sien.
+ * The parameters the saved version declares.
  *
- * Tout est relu d'un coup plutôt qu'appareil par appareil : c'est un seul
- * aller-retour par seconde, et l'écran à trois colonnes (issue #27) aura de
- * toute façon besoin des autres lignes.
+ * Kept from the library listing at open and from each save, so that applying
+ * an unchanged effect does not load the compiler again just to read them.
  */
-/**
- * Les **appareils** seuls. L'éditeur ne prévisualise pas : « Valider et lancer »
- * démarre l'effet pour de bon, sur l'appareil visé, et c'est le geste attendu ici
- * — on écrit un effet pour le voir tourner. La boucle d'aperçu sert la galerie,
- * où l'on parcourt sans s'engager.
- */
-const statuses = ref<DeviceEngineStatus[]>([])
-
-const status = computed(() => {
-  const device = current.value
-  if (!device) return null
-  return (
-    statuses.value.find((s) => s.device.vid === device.vid && s.device.pid === device.pid) ?? null
-  )
-})
-
-/**
- * Bascule « envoyer au clavier ». Par défaut : on envoie.
- *
- * Elle n'est pas initialisée depuis `engine_status()` sans discernement : hors
- * effet en cours, l'état rendu est celui d'un moteur vide, pas un choix de
- * l'utilisateur. On ne reprend donc l'état du moteur que s'il tourne.
- */
-const toKeyboard = ref(true)
-
-/**
- * Gabarit de repli, demandé au Rust plutôt que recopié ici : on écrit un effet
- * avant d'avoir branché quoi que ce soit, ou sans posséder le clavier.
- */
-const fallback = ref<LayoutView | null>(null)
-const board = computed<LayoutView | null>(() => layout.value ?? fallback.value)
-
-const { frame, listen, stop: stopFrames } = useEngineFrames(() => board.value)
-
-const running = computed(() => status.value?.running === true)
-
-/**
- * L'effet tourne, on veut l'envoyer, et rien n'arrive au clavier.
- *
- * Le cas se produit surtout sans périphérique connecté — et il ne se signalait
- * d'aucune façon : le simulateur s'animait, la case restait cochée, le clavier
- * gardait son image. Symptôme rapporté tel quel : « comme s'il n'y avait que la
- * première image ».
- */
-const silencieux = computed(
-  () => running.value && toKeyboard.value && status.value?.reachingKeyboard === false,
-)
+const savedSpecs = ref<Record<string, ParamSpec>>({})
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 function message(e: unknown): string {
   return typeof e === 'string' ? e : e instanceof Error ? e.message : String(e)
-}
-
-/**
- * L'appareil visé, ou un refus lisible.
- *
- * Il n'y a plus d'appareil implicite côté Rust : chaque commande du moteur en
- * désigne un. `null` ne se produit que si la liste des gabarits connus est vide,
- * donc jamais en pratique — mais le dire vaut mieux qu'un `invoke` qui échoue en
- * parlant de désérialisation.
- */
-function target(): DeviceRef {
-  const device = current.value
-  if (!device) throw new Error('aucun appareil connu : impossible de lancer un effet')
-  return device
 }
 
 // ---------------------------------------------------------------- ouverture
@@ -192,6 +134,7 @@ async function open(): Promise<void> {
 
     if (id.value !== null) {
       const entry = (await listEffects()).find((e) => e.id === id.value)
+      savedSpecs.value = entry?.params ?? {}
       if (entry?.kind === 'builtin') {
         derivedFrom.value = entry.name
         disk = await renameInSource(disk, `${entry.name} (copie)`)
@@ -270,114 +213,239 @@ watch(source, (value) => {
   }, DRAFT_DELAY)
 })
 
-// ---------------------------------------------------------------- moteur
+// ---------------------------------------------------------------- engine
+
+/** The whole engine report, re-read at once: one round trip per second. */
+const report = ref<EngineReport>({ devices: [], preview: null })
+
+const status = computed(() => {
+  const device = current.value
+  if (!device) return null
+  return (
+    report.value.devices.find((s) => s.device.vid === device.vid && s.device.pid === device.pid) ??
+    null
+  )
+})
+
+const deviceKey = computed(() =>
+  current.value ? `${current.value.vid}:${current.value.pid}` : null,
+)
+
+/** The product name, as the gallery's devices column shows it. */
+const deviceName = computed(() => {
+  const device = current.value
+  if (!device) return null
+  return devices.value.find((d) => d.vid === device.vid && d.pid === device.pid)?.name ?? null
+})
 
 async function refreshStatus(): Promise<void> {
   try {
-    statuses.value = (await engineStatus()).devices
+    report.value = await engineStatus()
   } catch (e) {
     problem.value = message(e)
   }
 }
 
 /**
- * Transpile, installe, démarre.
+ * True when "Appliquer" must save first.
  *
- * Trois refus possibles, dans cet ordre, et aucun n'exécute quoi que ce soit :
- * le service de langage refuse un code qui ne compile pas, le relevé du
- * manifeste refuse un nom ou un paramètre calculés, et `install_effect` refuse
- * un `apiVersion` que cette application ne connaît pas. Ce n'est qu'après que
- * le moteur charge le `.js` — qui doit donc être sur disque d'abord.
+ * A device loop loads `effect.js` from disk, so only installed code can run. A
+ * new effect and the copy of a built-in have nothing installed under their own
+ * id yet, even when their text still matches what was opened.
  */
-async function store(run: boolean): Promise<void> {
+const unsaved = computed(
+  () => id.value === null || derivedFrom.value !== null || source.value !== saved.value,
+)
+
+/**
+ * This effect is the one the current device runs.
+ *
+ * "Arrêter" stops whatever the device runs, so it is offered only then. The
+ * copy of a built-in is not the built-in, even though it still carries its id.
+ */
+const runsHere = computed(
+  () =>
+    id.value !== null &&
+    derivedFrom.value === null &&
+    status.value?.running === true &&
+    status.value.effectId === id.value,
+)
+
+/**
+ * The saved text the device loop was started from, as far as this screen knows.
+ *
+ * The engine reports which effect a device runs, not which version: the loop
+ * keeps the `effect.js` it loaded at start. Without this, saving an applied
+ * effect would keep showing the device's stale frames instead of the new code.
+ */
+const appliedSource = ref<{ device: string; text: string } | null>(null)
+
+const showsDevice = computed(
+  () =>
+    runsHere.value &&
+    appliedSource.value !== null &&
+    appliedSource.value.device === deviceKey.value &&
+    appliedSource.value.text === saved.value,
+)
+
+/** Nothing left to apply: the device already runs this very code. */
+const applied = computed(() => showsDevice.value && !unsaved.value)
+
+/**
+ * False until settings, devices, source and engine report are read. Previewing
+ * earlier would build a QuickJS context the report may make useless at once.
+ */
+const ready = ref(false)
+
+/**
+ * Gabarit de repli, demandé au Rust plutôt que recopié ici : on écrit un effet
+ * avant d'avoir branché quoi que ce soit, ou sans posséder le clavier.
+ */
+const fallback = ref<LayoutView | null>(null)
+const board = computed<LayoutView | null>(() => layout.value ?? fallback.value)
+
+const { frame, restartPreview } = useSimulatorFeed({
+  layout: () => board.value,
+  device: () => current.value,
+  showsDevice: () => showsDevice.value,
+  // A new effect has no `effect.js` on disk to preview until its first save.
+  previewed: () => (ready.value ? id.value : null),
+  params: () => valuesFor(current.value, id.value ?? '', savedSpecs.value),
+  onError: (e) => {
+    problem.value = message(e)
+  },
+})
+
+/** The preview's error, only while the preview is this effect's. */
+const previewError = computed<string | null>(() => {
+  const p = report.value.preview
+  return p !== null && p.effectId === id.value ? p.error : null
+})
+
+/**
+ * The error of the loop on screen. A device still running an older version can
+ * fail where the saved code does not, and the other way round: the error shown
+ * next to the code must be about what the simulator draws.
+ */
+const effectError = computed<string | null>(() =>
+  showsDevice.value ? (status.value?.error ?? null) : previewError.value,
+)
+
+/** Which source the simulator draws, as a state. */
+const simNote = computed(() => {
+  if (showsDevice.value) return `Images de ${deviceName.value ?? "l'appareil"}`
+  const p = report.value.preview
+  if (p?.running === true && p.effectId === id.value) return 'Aperçu'
+  if (previewError.value !== null) return 'Aperçu arrêté'
+  return id.value === null ? 'Aucun aperçu' : 'Aperçu en préparation…'
+})
+
+// ---------------------------------------------------------------- actions
+
+/**
+ * Checks, transpiles and installs the source, and returns the id Rust gave it.
+ *
+ * Three refusals are possible, in this order, and none runs anything: the
+ * language service rejects code that does not compile, the manifest reader
+ * rejects a computed name or parameter, and `install_effect` rejects an
+ * `apiVersion` this app does not know.
+ *
+ * The text is read once, up front: what is typed while the install is in
+ * flight was not installed and must not be marked as saved.
+ */
+async function install(): Promise<string> {
+  const text = source.value
+  const found = await errors()
+  if (found.length > 0) {
+    const first = found[0]
+    throw new Error(
+      `${found.length} erreur(s) dans l'effet — ligne ${first.line} : ${first.message}`,
+    )
+  }
+
+  const { js, manifest } = await compile(text)
+  const installedId = await installEffect(text, js, manifest)
+  clearDraft(id.value)
+  restored.value = false
+  saved.value = text
+  savedSpecs.value = manifest.params ?? {}
+  // The effect now exists in its own right: it is no longer a built-in's copy.
+  derivedFrom.value = null
+
+  // Rust derives the id from the name. Carrying it in the route is what makes
+  // reopening this screen read this effect back.
+  if (id.value !== installedId) await router.replace(`/editor/${installedId}`)
+  return installedId
+}
+
+/** Runs one action, shows what stopped it, and re-reads the engine either way. */
+async function act(task: () => Promise<void>): Promise<void> {
   busy.value = true
   problem.value = null
   try {
-    const found = await errors()
-    if (found.length > 0) {
-      const first = found[0]
-      throw new Error(
-        `${found.length} erreur(s) dans l'effet — ligne ${first.line} : ${first.message}`,
-      )
-    }
-
-    const { js, manifest, params } = await compile(source.value)
-    const installedId = await installEffect(source.value, js, manifest)
-    clearDraft(id.value)
-    restored.value = false
-    saved.value = source.value
-    // L'effet a désormais une existence propre : ce n'est plus la copie d'un
-    // intégré, c'est le sien.
-    derivedFrom.value = null
-
-    if (run) {
-      const device = target()
-      await startEffect(device, installedId, params)
-      // `start_effect` repart d'un état neuf, dont la sortie clavier est
-      // active. Sans cette ligne, « ne pas envoyer » serait oublié à chaque
-      // lancement.
-      if (!toKeyboard.value) await setOutputToKeyboard(device, false)
-      // Le canal vit dans l'état de la boucle de cet appareil : un nouveau
-      // départ, un nouvel abonnement.
-      await listen(device)
-    }
-
-    // L'identifiant est dérivé du nom par le Rust. Le porter dans la route,
-    // c'est ce qui fait que rouvrir cet écran relit bien cet effet.
-    if (id.value !== installedId) await router.replace(`/editor/${installedId}`)
+    await task()
   } catch (e) {
     problem.value = message(e)
-    // **Le seul endroit où une erreur de compilation d'effet existe.** Le
-    // transpileur vit dans la fenêtre : sans cette ligne, le refus n'apparaît
-    // qu'à l'écran, et il a disparu quand on ouvre le journal. Le nom de
-    // l'effet accompagne le message — un journal relu une heure plus tard ne
-    // sait pas ce qui était affiché.
-    erreur('éditeur', `« ${id.value ?? 'nouvel effet'} » non validé : ${problem.value}`, e)
+    // **The only place an effect compile error exists.** The transpiler lives
+    // in the window: without this line the refusal is gone from the screen by
+    // the time the log is opened. The effect id goes with it, since a log read
+    // an hour later does not know what was displayed.
+    erreur('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
   } finally {
     busy.value = false
     await refreshStatus()
   }
 }
 
-/** Enregistre sans lancer — on met de côté un effet qu'on ne veut pas voir tourner. */
-const save = () => store(false)
-
-/** Enregistre puis lance. */
-const validate = () => store(true)
+/** Installs, then shows the saved code in the preview loop. */
+const save = () =>
+  act(async () => {
+    await install()
+    // Same id, new code on disk: nothing the feed watches has changed.
+    restartPreview()
+  })
 
 /**
- * Arrête la boucle. La dernière image reste au simulateur comme elle reste sur
- * le clavier : arrêter un effet n'éteint pas les LED.
+ * Starts this effect on the current device for real, saving first when needed.
+ *
+ * Nothing subscribes here: `showsDevice` turns true once the version is
+ * recorded, and the feed opens the device channel then. Recording it only after
+ * `start_effect` returns is what matters: the channel lives in the new loop's
+ * state, and subscribing to the loop being replaced would freeze the simulator
+ * without an error.
  */
-async function halt(): Promise<void> {
-  busy.value = true
-  try {
-    await stopEffect(target())
-    stopFrames()
-  } catch (e) {
-    problem.value = message(e)
-  } finally {
-    busy.value = false
-    await refreshStatus()
-  }
-}
+const applyToDevice = () =>
+  act(async () => {
+    const device = current.value
+    if (!device) return
+    const effectId = (unsaved.value ? null : id.value) ?? (await install())
+    // The gallery's rule, through the same helper: manifest defaults overridden
+    // by what is remembered for this device. Two rules would light one effect
+    // differently depending on the screen it was applied from.
+    await startEffect(device, effectId, valuesFor(device, effectId, savedSpecs.value))
+    appliedSource.value = { device: `${device.vid}:${device.pid}`, text: saved.value }
+    // Rust has just remembered the applied effect. The gallery reads this shared
+    // state back rather than guessing it.
+    await reloadSettings()
+  })
 
-async function toggleOutput(): Promise<void> {
-  toKeyboard.value = !toKeyboard.value
-  try {
-    // Sans effet en cours sur cet appareil, le moteur n'a nulle part où poser ce
-    // choix : il sera réappliqué au prochain lancement.
-    await setOutputToKeyboard(target(), toKeyboard.value)
-  } catch (e) {
-    problem.value = message(e)
-  }
-  await refreshStatus()
-}
+/**
+ * Stops the device loop. The last frame stays on the keyboard, since stopping
+ * does not turn the LEDs off; the preview comes back once the report says so.
+ */
+const halt = () =>
+  act(async () => {
+    const device = current.value
+    if (!device) return
+    await stopEffect(device)
+    // The stop forgot the applied effect on disk, for the same reason as above.
+    await reloadSettings()
+  })
 
-// ---------------------------------------------------------------- cycle de vie
+// ---------------------------------------------------------------- lifecycle
 
 let statusTimer = 0
-/** Faux dès la destruction : l'ouverture enchaîne des allers-retours au Rust. */
+/** False once unmounted: opening chains several round trips to Rust. */
 let alive = true
 
 onMounted(async () => {
@@ -385,26 +453,25 @@ onMounted(async () => {
     fallback.value = l
   })
 
-  // L'éditeur peut être la première vue affichée — un lien direct vers
-  // `/editor/:id`. Sans cette relecture, aucun appareil ne serait désigné et
-  // « Valider et lancer » n'aurait rien à viser.
+  // First: applying and previewing start from the remembered parameters, and
+  // reading them later would let an effect start on its defaults.
+  await loadSettings()
+  // The editor may be the first view shown, through a direct link to
+  // `/editor/:id`: without this, no device would be targeted.
   await refresh()
   await open()
   await refreshStatus()
+  if (!alive) return
 
-  // Un effet peut déjà tourner sur cet appareil : lancé à la session
-  // précédente, ou depuis la galerie. On reprend alors son flux d'images et
-  // l'état réel de sa sortie.
-  const encours = status.value
-  if (encours?.running === true) {
-    toKeyboard.value = encours.toKeyboard
-    await listen(encours.device)
+  // The effect may already run on this device: started in an earlier session,
+  // from the gallery or from the tray. It loaded what is on disk, which is the
+  // saved version unless something was installed since without applying it.
+  if (runsHere.value && deviceKey.value !== null) {
+    appliedSource.value = { device: deviceKey.value, text: saved.value }
   }
+  ready.value = true
 
-  // On a pu quitter l'écran entre-temps : poser l'interrogation périodique
-  // maintenant la laisserait tourner pour personne, hors de portée du
-  // nettoyage qui a déjà eu lieu.
-  if (alive) statusTimer = window.setInterval(() => void refreshStatus(), STATUS_PERIOD)
+  statusTimer = window.setInterval(() => void refreshStatus(), STATUS_PERIOD)
 })
 
 onBeforeUnmount(() => {
@@ -448,65 +515,52 @@ onBeforeUnmount(() => {
       -->
       <DevicePill />
 
-      <!--
-        Une vraie case à cocher : elle se pilote au clavier et porte son état
-        sans qu'on ait à l'annoncer autrement.
-      -->
-      <label class="toggle">
-        <input type="checkbox" :checked="toKeyboard" @change="toggleOutput" />
-        Envoyer au clavier
-      </label>
-
-      <button class="ghost" :disabled="busy || !running" @click="halt">Arrêter</button>
-      <!-- Enregistrer sans lancer : on met de côté un effet en chantier. -->
-      <button class="ghost" :disabled="busy || loading" @click="save">Enregistrer</button>
-      <button class="solid" :disabled="busy || loading" @click="validate">
-        {{ busy ? 'Un instant…' : 'Valider et lancer' }}
+      <!-- Stops what the device runs, whichever effect it is: offered only for this one. -->
+      <button class="ghost" :disabled="busy || !runsHere" @click="halt">Arrêter</button>
+      <button
+        v-if="deviceName"
+        class="ghost"
+        :disabled="busy || loading || applied"
+        @click="applyToDevice"
+      >
+        {{ applied ? `Appliqué sur ${deviceName}` : `Appliquer sur ${deviceName}` }}
+      </button>
+      <button class="solid" :disabled="busy || loading" @click="save">
+        {{ busy ? 'Un instant…' : 'Enregistrer' }}
       </button>
     </header>
 
     <div class="split">
       <div class="pane code-pane">
+        <p v-if="runsHere && status?.deviceError" class="notice warn" role="alert">
+          Écriture vers le clavier impossible : {{ status.deviceError }}
+        </p>
+
         <!--
           Dit d'emblée ce qui vient de se passer. L'identifiant d'un effet
           intégré est réservé : sans cette copie, on découvrirait le refus à la
           validation, c'est-à-dire après le travail.
         -->
-        <!--
-          Dire que rien n'atteint le clavier, plutôt que de laisser la case
-          cochée le sous-entendre. `alert` et non `status` : c'est un écart
-          entre ce qu'on a demandé et ce qui se passe.
-        -->
-        <p v-if="silencieux" class="notice warn" role="alert">
-          L'effet tourne, mais <strong>aucune image n'atteint le clavier</strong> — il n'y en a
-          probablement aucun de connecté.
-          <button class="link" @click="router.push('/devices')">Choisir un périphérique</button>
-        </p>
-
-        <p v-if="status?.deviceError" class="notice warn" role="alert">
-          Écriture vers le clavier impossible : {{ status.deviceError }}
-        </p>
-
         <p v-if="derivedFrom" class="notice" role="status">
           Copie de « {{ derivedFrom }} » — l'original reste intact. Le nom a été changé dans le
           code ; modifiez-le à votre guise.
         </p>
 
         <p v-if="restored" class="notice" role="status">
-          Brouillon restauré — cette version n'a pas été validée.
+          Brouillon restauré — cette version n'a pas été enregistrée.
           <button class="link" @click="discard">Revenir à la version enregistrée</button>
         </p>
 
         <CodeEditor v-model="source" :disabled="loading" class="code" />
 
         <!--
-          Trois sources d'échec, une seule place pour les dire. L'erreur du
-          moteur passe en second : elle décrit un effet qui tourne, alors qu'un
-          refus de validation décrit ce qu'on vient de tenter.
+          One place for every failure. What was just attempted comes first: it
+          describes the last gesture, whereas a loop error describes something
+          that keeps running.
         -->
         <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
-        <p v-else-if="status?.error" class="failure" role="alert">
-          Erreur de l'effet, à l'image en cours : {{ status.error }}
+        <p v-else-if="effectError" class="failure" role="alert">
+          Erreur de l'effet, à l'image en cours : {{ effectError }}
         </p>
         <p v-else class="hint">
           Le code est transpilé ici, exécuté côté Rust : un effet ne voit ni le DOM, ni
@@ -518,16 +572,9 @@ onBeforeUnmount(() => {
       <div class="pane sim">
         <div class="sim-head">
           <h2>Simulateur</h2>
-          <p class="sim-note">
-            <template v-if="running">
-              Images du moteur, exactement celles qui partent vers le clavier.
-              <span v-if="!toKeyboard">Sortie clavier coupée : seul l'aperçu est alimenté.</span>
-            </template>
-            <template v-else>
-              Aucun effet en cours. Validez pour lancer — quitter cet écran n'arrêterait pas
-              l'effet, il continuerait d'alimenter le clavier.
-            </template>
-            <span v-if="!layout"> Aucun clavier connecté : dessin d'après le gabarit par défaut. </span>
+          <p class="sim-note">{{ simNote }}</p>
+          <p v-if="!layout" class="sim-note">
+            Aucun clavier connecté : dessin d'après le gabarit par défaut.
           </p>
         </div>
 
@@ -589,18 +636,6 @@ onBeforeUnmount(() => {
 
 .spacer {
   flex: 1;
-}
-
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-2);
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.toggle input {
-  accent-color: var(--accent);
 }
 
 .ghost {
