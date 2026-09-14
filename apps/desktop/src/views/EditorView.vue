@@ -262,9 +262,8 @@ async function refreshStatus(): Promise<void> {
 /**
  * True when "Appliquer" must save first.
  *
- * A device loop loads `effect.js` from disk, so only installed code can run. A
- * new effect and the copy of a built-in have nothing installed under their own
- * id yet, even when their text still matches what was opened.
+ * A device loop runs the JavaScript compiled from the saved file, so a new
+ * effect, which has no file yet, must be saved first.
  */
 const unsaved = computed(() => creating.value || source.value !== saved.value)
 
@@ -284,7 +283,7 @@ const runsHere = computed(
  * The saved text the device loop was started from, as far as this screen knows.
  *
  * The engine reports which effect a device runs, not which version: the loop
- * keeps the `effect.js` it loaded at start. Without this, saving an applied
+ * keeps the JavaScript it loaded at start. Without this, saving an applied
  * effect would keep showing the device's stale frames instead of the new code.
  */
 const appliedSource = ref<{ device: string; text: string } | null>(null)
@@ -317,7 +316,7 @@ const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
   device: () => current.value,
   showsDevice: () => showsDevice.value,
-  // A new effect has no `effect.js` on disk to preview until its first save.
+  // A new effect has no file to preview until its first save.
   previewed: () => (ready.value ? id.value : null),
   params: () => valuesFor(current.value, id.value ?? '', savedSpecs.value),
   onError: (e) => {
