@@ -1055,6 +1055,10 @@ Cannot fail because of a device: being unable to enumerate USB or read back the
 settings is exactly what a diagnostic must **say**, not what should
 interrupt it.
 
+The log folder is written with the home directory as `~`, here and in the
+"candeo starting" log line: both end up in public bug reports, and the home
+directory usually carries the user's name. Settings shows the full path.
+
 ### `log_from_webview(level, source, message)`
 
 Logs into the same file what the window sees: `app.config.errorHandler`
