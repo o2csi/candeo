@@ -45,15 +45,12 @@
 //! arguments; the Tauri commands only resolve them. That is what makes it all
 //! testable in a temporary directory, without an application.
 //!
-//! # Built-in effects are part of the library
+//! # Shipped effects are files too
 //!
-//! They have no file — they are compiled into the binary, see
-//! [`crate::builtins`] — but the caller does not need to know: listing, reading
-//! the JavaScript or the source finds them like the others.
-//!
-//! **A file cannot take a built-in's id.** A name equal to one, whatever its case,
-//! is refused when saving and skipped when listing: an entry marked `builtin` in
-//! the gallery must run the shipped code, and nothing else.
+//! The effects candeo ships are copied into the folder once, at startup, and are
+//! from then on ordinary files: listed, edited, renamed and deleted like any
+//! other. `settings.json` only remembers what was copied, to update an unchanged
+//! copy and never bring back one someone removed — see [`Store::seed_shipped`].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -64,9 +61,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager, State};
 
-use crate::builtins;
 use crate::journal::LogLevel;
 use crate::runtime::swatch::{self, Swatch};
+use crate::shipped::Shipped;
 use crate::{AppState, CmdResult, DeviceRef};
 
 /// Version of the effects API provided by this version of the application.
@@ -118,9 +115,10 @@ pub struct Manifest {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum EffectKind {
-    /// Shipped with the application, with no file on disk.
+    /// A file copied from the application and recorded as such, modified or
+    /// not. Renamed, it becomes the user's.
     Builtin,
-    /// A `.ts` file in the effects folder.
+    /// Any other file in the effects folder.
     User,
 }
 
@@ -177,6 +175,15 @@ pub struct EffectEntry {
 /// [`Store::migrate_directories`].
 #[derive(Default)]
 pub struct MigratedEffects(pub Mutex<BTreeMap<String, String>>);
+
+/// What [`Store::seed_shipped`] did, for the log.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Seeding {
+    /// Shipped effects copied for the first time.
+    pub copied: usize,
+    /// Unchanged copies replaced by a newer shipped version.
+    pub updated: usize,
+}
 
 /// Brightness of a keyboard that was just plugged in: full.
 ///
@@ -400,6 +407,13 @@ pub struct Settings {
     /// copy of the defaults that the next version of the effect would
     /// contradict.
     pub effect_params: Vec<EffectParamsRecord>,
+    /// The shipped effects copied into the folder, by name: the hash of the
+    /// version copied, or `None` when a file of that name was already there and
+    /// was left alone. See [`Store::seed_shipped`].
+    ///
+    /// An entry stays when its file is deleted or renamed: it is what keeps a
+    /// shipped effect someone removed from coming back at the next launch.
+    pub shipped_effects: BTreeMap<String, Option<String>>,
     /// The log level as an earlier version wrote it, **at the root**.
     ///
     /// Read, never written back (`skip_serializing`): [`Store::read_settings`]
@@ -419,8 +433,9 @@ pub struct Settings {
 /// Current shape of `settings.json`.
 ///
 /// - 0: effects referenced by their directory id;
-/// - 1: user effects referenced by their name.
-pub const SETTINGS_VERSION: u32 = 1;
+/// - 1: user effects referenced by their name, built-in effects by their id;
+/// - 2: every effect referenced by its name.
+pub const SETTINGS_VERSION: u32 = 2;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -430,6 +445,7 @@ impl Default for Settings {
             devices: Vec::new(),
             active_effects: Vec::new(),
             effect_params: Vec::new(),
+            shipped_effects: BTreeMap::new(),
             legacy_log_level: None,
         }
     }
@@ -793,25 +809,6 @@ pub(crate) fn validate_name(name: &str) -> CmdResult<()> {
     Ok(())
 }
 
-/// True if `name` would take a built-in effect's id, whatever its case.
-///
-/// Case is ignored because Windows ignores it: `Respiration.ts` and a built-in
-/// `respiration` would otherwise be two library entries one rename away from
-/// colliding.
-fn is_builtin_name(name: &str) -> bool {
-    builtins::ALL
-        .iter()
-        .any(|b| b.id.to_lowercase() == name.to_lowercase())
-}
-
-/// Checks an effect reference coming from the window: a built-in id or a name.
-pub(crate) fn validate_effect_ref(id: &str) -> CmdResult<()> {
-    if builtins::find(id).is_some() {
-        return Ok(());
-    }
-    validate_name(id)
-}
-
 /// A valid name made out of any text: forbidden characters become `-`, the ends
 /// are trimmed, the length is capped.
 ///
@@ -926,9 +923,9 @@ impl Store {
 
     /// The effect names in the folder, in a stable order.
     ///
-    /// A file whose name the application would refuse, or that takes a
-    /// built-in's id, is skipped rather than failing the whole list: a library of
-    /// twenty effects must not disappear because of one foreign file.
+    /// A file whose name the application would refuse is skipped rather than
+    /// failing the whole list: a library of twenty effects must not disappear
+    /// because of one foreign file.
     fn names(&self) -> CmdResult<Vec<String>> {
         // Missing folder: first launch, no effect written. This is not an error.
         let entries = match fs::read_dir(&self.effects_dir) {
@@ -957,7 +954,7 @@ impl Store {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
             };
-            if validate_name(name).is_err() || is_builtin_name(name) {
+            if validate_name(name).is_err() {
                 continue;
             }
             names.push(name.to_owned());
@@ -997,12 +994,17 @@ impl Store {
             .and_then(|raw| serde_json::from_str(&raw).ok())
     }
 
-    /// Full library: built-in effects **and** the files, each with its state.
+    /// The library: every file, with its state and whether it was shipped.
     ///
     /// Listing reads files and hashes them, and runs nothing: whatever has to run
     /// happened in [`Self::cache_effect`].
     pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
-        let mut effects = builtin_effects();
+        // Unreadable settings only lose the shipped mark, not the library.
+        let shipped = self
+            .read_settings()
+            .map(|s| s.shipped_effects)
+            .unwrap_or_default();
+        let mut effects = Vec::new();
         for name in self.names()? {
             // A file that cannot be read right now — locked by an editor, say —
             // is skipped for this listing rather than failing all of it.
@@ -1011,20 +1013,17 @@ impl Store {
             };
             let hash = sha256_hex(&bytes);
             let record = self.read_cache(&name).filter(|r| r.hash == hash);
-            effects.push(user_entry(name, hash, record));
+            let mut entry = user_entry(name, hash, record);
+            if matches!(shipped.get(&entry.id), Some(Some(_))) {
+                entry.kind = EffectKind::Builtin;
+            }
+            effects.push(entry);
         }
         Ok(effects)
     }
 
     /// An effect's source, to open it in the editor.
-    ///
-    /// A built-in effect has no `.ts`: its JavaScript **is** its source. Making it
-    /// readable from the editor is the whole point of shipping it — you start from
-    /// an effect that works, change it, and save it under another name.
     pub fn effect_source(&self, id: &str) -> CmdResult<String> {
-        if let Some(b) = builtins::find(id) {
-            return Ok(b.js.to_string());
-        }
         self.require(id)?;
         read(&self.source_path(id))
     }
@@ -1039,11 +1038,6 @@ impl Store {
     /// folder at that instant must never compile half a file.
     pub fn save_effect_source(&self, name: &str, source: &str, create: bool) -> CmdResult<String> {
         validate_name(name)?;
-        if is_builtin_name(name) {
-            return Err(format!(
-                "« {name} » est le nom d'un effet intégré : choisissez-en un autre"
-            ));
-        }
         match (self.existing(name)?, create) {
             (Some(existing), true) => {
                 return Err(format!("un effet nommé « {existing} » existe déjà"));
@@ -1090,9 +1084,6 @@ impl Store {
     /// For a file, only the JavaScript compiled from its **current** bytes: the
     /// engine and the tray never run code that differs from what is on disk.
     pub fn effect_js(&self, id: &str) -> CmdResult<String> {
-        if let Some(b) = builtins::find(id) {
-            return Ok(b.js.to_string());
-        }
         self.require(id)?;
         let hash = sha256_hex(
             &fs::read(self.source_path(id))
@@ -1116,11 +1107,6 @@ impl Store {
     pub fn rename_effect(&self, from: &str, to: &str) -> CmdResult<()> {
         self.require(from)?;
         validate_name(to)?;
-        if is_builtin_name(to) {
-            return Err(format!(
-                "« {to} » est le nom d'un effet intégré : choisissez-en un autre"
-            ));
-        }
         if let Some(existing) = self.existing(to)? {
             // The same file under another case is a rename too: `Onde` → `onde`.
             if existing != from {
@@ -1143,13 +1129,8 @@ impl Store {
     ///
     /// Separate from [`Self::delete_effect`] because the command stops the loops
     /// **between** the refusal and the erasure: refusing afterwards would make a
-    /// running built-in effect pay for a stop it was not owed.
+    /// running effect pay for a stop it was not owed.
     pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
-        if builtins::find(id).is_some() {
-            return Err(format!(
-                "« {id} » est un effet intégré : il est livré avec l'application et ne peut pas être supprimé"
-            ));
-        }
         self.require(id)
     }
 
@@ -1205,7 +1186,6 @@ impl Store {
         dirs.sort();
 
         let mut taken: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
-        taken.extend(builtins::ALL.iter().map(|b| b.id.to_lowercase()));
         let mut plan = Vec::with_capacity(dirs.len());
         for (id, dir) in dirs {
             let wanted = fs::read_to_string(dir.join(LEGACY_MANIFEST_FILE))
@@ -1245,6 +1225,94 @@ impl Store {
                 .map_err(|e| format!("suppression de {} impossible : {e}", dir.display()))?;
         }
         Ok(renames)
+    }
+
+    /// Moves the references to effects that were compiled into the binary from
+    /// their ids to the names of their files, **once**. Returns the ids it
+    /// renamed, and the names they became.
+    ///
+    /// Only the table in [`crate::shipped`] knows those ids: nothing on disk
+    /// holds them any more.
+    pub fn migrate_former_ids(&self, shipped: &[Shipped]) -> CmdResult<BTreeMap<String, String>> {
+        let renames: BTreeMap<String, String> = shipped
+            .iter()
+            .map(|s| (s.former_id.to_owned(), s.name.to_owned()))
+            .collect();
+        let mut settings = self.read_settings()?;
+        if settings.version >= 2 {
+            return Ok(BTreeMap::new());
+        }
+        settings.rename_effects(&renames);
+        settings.version = 2;
+        self.write_settings(&settings)?;
+        Ok(renames)
+    }
+
+    /// Copies the shipped effects into the folder, once each, and updates the
+    /// copies nobody changed.
+    ///
+    /// | State | Action |
+    /// |---|---|
+    /// | not recorded, no file of that name | copy it, record its hash |
+    /// | not recorded, a file of that name exists | leave the file, record it as not ours |
+    /// | recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
+    /// | recorded, file modified | leave it |
+    /// | recorded, file missing (deleted or renamed) | leave it: never copied again |
+    ///
+    /// "Unchanged" means the file still has the hash recorded when it was copied:
+    /// an update never overwrites a line someone wrote.
+    pub fn seed_shipped(&self, shipped: &[Shipped]) -> CmdResult<Seeding> {
+        let before = self.read_settings()?;
+        let mut settings = before.clone();
+        let mut seeding = Seeding::default();
+
+        for effect in shipped {
+            let hash = sha256_hex(effect.source.as_bytes());
+            let recorded = settings.shipped_effects.get(effect.name).cloned();
+            let on_disk = self.existing(effect.name)?;
+
+            let record = match (recorded, on_disk) {
+                (None, Some(_)) => None,
+                (None, None) => {
+                    create_dir(&self.effects_dir)?;
+                    write_atomically(&self.source_path(effect.name), effect.source)?;
+                    seeding.copied += 1;
+                    Some(hash)
+                }
+                (Some(Some(recorded)), Some(existing))
+                    if recorded != hash
+                        && existing == effect.name
+                        && fs::read(self.source_path(effect.name))
+                            .is_ok_and(|bytes| sha256_hex(&bytes) == recorded) =>
+                {
+                    write_atomically(&self.source_path(effect.name), effect.source)?;
+                    seeding.updated += 1;
+                    Some(hash)
+                }
+                (Some(record), _) => record,
+            };
+            settings
+                .shipped_effects
+                .insert(effect.name.to_owned(), record);
+        }
+
+        if settings != before {
+            self.write_settings(&settings)?;
+        }
+        Ok(seeding)
+    }
+
+    /// Every startup step that brings the library up to date, in order, and the
+    /// old effect ids with the names they became, for the window's drafts.
+    ///
+    /// Directories first, since their migration assumes version 0 settings; then
+    /// the former built-in ids; then the copies, which record themselves in the
+    /// settings the first two steps wrote.
+    pub fn migrate(&self, shipped: &[Shipped]) -> CmdResult<(BTreeMap<String, String>, Seeding)> {
+        let mut renames = self.migrate_directories()?;
+        renames.extend(self.migrate_former_ids(shipped)?);
+        let seeding = self.seed_shipped(shipped)?;
+        Ok((renames, seeding))
     }
 
     /// Reads `settings.json`, or returns the default values if it does not exist.
@@ -1333,36 +1401,6 @@ impl Store {
 const LEGACY_SOURCE_FILE: &str = "source.ts";
 /// Its manifest, which held the name the file is given.
 const LEGACY_MANIFEST_FILE: &str = "manifest.json";
-
-/// Effects compiled into the binary, in the shape the gallery expects.
-///
-/// The manifest is rebuilt on every call rather than kept: five small JSON
-/// objects, against a lazy initialization and its lock. Invalid parameter JSON
-/// would give a manifest without parameters here, which a test in
-/// [`crate::builtins`] forbids — better a failing test than a panic at
-/// application startup.
-fn builtin_effects() -> Vec<EffectEntry> {
-    builtins::ALL
-        .iter()
-        .zip(builtins::swatches())
-        .map(|(b, swatch)| EffectEntry {
-            id: b.id.to_string(),
-            kind: EffectKind::Builtin,
-            state: EffectState::Ready,
-            error: None,
-            hash: None,
-            // Built-ins have no file: their swatch lives in memory, computed
-            // once per run. The why is in [`builtins::swatches`].
-            swatch: swatch.clone(),
-            manifest: Manifest {
-                name: b.name.to_string(),
-                description: b.description.to_string(),
-                params: serde_json::from_str(b.params).unwrap_or_default(),
-                api_version: EFFECTS_API_VERSION,
-            },
-        })
-        .collect()
-}
 
 /// The library entry of a file, from what its cache holds for its current hash.
 fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> EffectEntry {
@@ -1519,7 +1557,7 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     Ok(Store::new(&data, &config, &cache))
 }
 
-/// Built-in effects and the files, each with its state.
+/// The library: every file, with its state and whether it was shipped.
 #[tauri::command]
 pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
@@ -1587,8 +1625,8 @@ pub fn rename_effect(
 ///
 /// # Three steps, in this order
 ///
-/// 1. **the refusal**, before everything else: a built-in effect or a name that
-///    designates nothing gets a no without anything having been stopped;
+/// 1. **the refusal**, before everything else: a name that designates nothing
+///    gets a no without anything having been stopped;
 /// 2. **stopping the loops**, on every device where the effect runs, and before
 ///    the erasure: the engine runs JavaScript loaded at start and kept in memory,
 ///    so it would carry on with no visible error on a file that is gone;
@@ -1611,8 +1649,7 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     Ok(())
 }
 
-/// Returns an effect's source, to open it in the editor. A built-in effect
-/// returns its JavaScript, which is its source.
+/// Returns an effect's source, to open it in the editor.
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
     store(&app)?.effect_source(&id)
@@ -1698,7 +1735,7 @@ pub fn remember_effect_params(
     effect: String,
     params: serde_json::Map<String, serde_json::Value>,
 ) -> CmdResult<()> {
-    validate_effect_ref(&effect)?;
+    validate_name(&effect)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
 
@@ -1745,8 +1782,7 @@ mod tests {
             .join(format!("{name}.json"))
     }
 
-    /// The files of the library. Built-ins are always there: these tests are
-    /// about the others.
+    /// The effects of the library that were not recorded as shipped.
     fn user_effects(store: &Store) -> Vec<EffectEntry> {
         store
             .list_effects()
@@ -1925,31 +1961,6 @@ mod tests {
         assert_eq!(user_effects(&store).len(), 1);
     }
 
-    /// A file cannot take a built-in's id, whatever its case: neither by saving,
-    /// nor by being dropped in the folder.
-    #[test]
-    fn an_effect_cannot_take_a_builtin_id() {
-        let (tmp, store) = temp_store();
-        let id = builtins::ALL[0].id;
-
-        for name in [id.to_owned(), id.to_uppercase()] {
-            let err = store.save_effect_source(&name, "x", true).unwrap_err();
-            assert!(err.contains("effet intégré"), "\"{name}\": {err}");
-        }
-
-        fs::create_dir_all(effects_dir(&tmp)).unwrap();
-        fs::write(effects_dir(&tmp).join(format!("{id}.ts")), "x").unwrap();
-        assert!(user_effects(&store).is_empty());
-        let matching: Vec<_> = store
-            .list_effects()
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.id == id)
-            .collect();
-        assert_eq!(matching.len(), 1);
-        assert_eq!(matching[0].kind, EffectKind::Builtin);
-    }
-
     /// Only `.ts` files with an acceptable name make the library: a temporary
     /// file, a directory or a foreign file do not.
     #[test]
@@ -1984,44 +1995,9 @@ mod tests {
     }
 
     #[test]
-    fn library_holds_only_builtins_before_any_effect() {
+    fn the_library_is_empty_before_any_effect() {
         let (_tmp, store) = temp_store();
-        let effects = store.list_effects().unwrap();
-
-        assert_eq!(effects.len(), builtins::ALL.len());
-        // The gallery is never empty on first launch: that is the whole point
-        // of shipped effects.
-        assert!(!effects.is_empty());
-
-        for (entry, b) in effects.iter().zip(&builtins::ALL) {
-            assert_eq!(entry.id, b.id);
-            assert_eq!(entry.kind, EffectKind::Builtin);
-            assert_eq!(entry.state, EffectState::Ready);
-            assert_eq!(entry.manifest.name, b.name);
-            assert_eq!(entry.manifest.api_version, EFFECTS_API_VERSION);
-            assert!(
-                !entry.manifest.params.is_empty(),
-                "\"{}\": parameters lost while reading the JSON",
-                b.id
-            );
-            // Built-ins have no file, but they do have a swatch: it is computed
-            // in memory, the first time the library is read.
-            assert!(!entry.swatch.is_empty(), "\"{}\": no color swatch", b.id);
-        }
-    }
-
-    /// The engine asks for the JavaScript by id: built-ins must therefore resolve
-    /// without a file, otherwise they would never start.
-    #[test]
-    fn a_builtin_effect_reads_without_a_file() {
-        let (_tmp, store) = temp_store();
-
-        for b in &builtins::ALL {
-            assert_eq!(store.effect_js(b.id).unwrap(), b.js);
-            // The source too: a shipped effect is there to be read and modified,
-            // and its JavaScript *is* its source.
-            assert_eq!(store.effect_source(b.id).unwrap(), b.js);
-        }
+        assert!(store.list_effects().unwrap().is_empty());
     }
 
     // ------------------------------------------------------------ names
@@ -2163,8 +2139,6 @@ mod tests {
 
         let err = store.delete_effect("Onde").unwrap_err();
         assert!(err.contains("aucun effet"), "message: {err}");
-        let err = store.check_deletable(builtins::ALL[0].id).unwrap_err();
-        assert!(err.contains("effet intégré"), "message: {err}");
     }
 
     // ------------------------------------------------------------ migration
@@ -2248,12 +2222,12 @@ mod tests {
         }
 
         let settings = store.read_settings().unwrap();
-        assert_eq!(settings.version, SETTINGS_VERSION);
+        assert_eq!(settings.version, 1);
         assert_eq!(
             settings.active_effect(VID, PID),
             Some("Onde circulaire (2)")
         );
-        // Built-ins keep their ids: they are not files yet.
+        // Former built-in ids are the next step's: see `migrate_former_ids`.
         assert_eq!(settings.active_effect(VID, PID + 1), Some("respiration"));
         assert_eq!(
             settings.effect_params(VID, PID, "Onde - Vague - v2"),
@@ -2310,6 +2284,196 @@ mod tests {
         assert!(!tmp.path().join("config").join("settings.json").exists());
     }
 
+    // ------------------------------------------------------------ shipped effects
+
+    /// Two versions of a shipped effect, to watch an update happen.
+    fn shipped_v1() -> [Shipped; 1] {
+        [Shipped {
+            name: "Livré",
+            former_id: "livre",
+            source: "export default { render() {} } // v1",
+        }]
+    }
+
+    fn shipped_v2() -> [Shipped; 1] {
+        [Shipped {
+            name: "Livré",
+            former_id: "livre",
+            source: "export default { render() {} } // v2",
+        }]
+    }
+
+    #[test]
+    fn a_first_launch_copies_every_shipped_effect() {
+        let (tmp, store) = temp_store();
+
+        let seeding = store.seed_shipped(&crate::shipped::ALL).unwrap();
+        assert_eq!(seeding.copied, crate::shipped::ALL.len());
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.version, SETTINGS_VERSION);
+        for s in &crate::shipped::ALL {
+            assert_eq!(
+                fs::read_to_string(effects_dir(&tmp).join(format!("{}.ts", s.name))).unwrap(),
+                s.source
+            );
+            assert_eq!(
+                settings.shipped_effects.get(s.name),
+                Some(&Some(sha256_hex(s.source.as_bytes())))
+            );
+        }
+        let library = store.list_effects().unwrap();
+        assert_eq!(library.len(), crate::shipped::ALL.len());
+        assert!(library.iter().all(|e| e.kind == EffectKind::Builtin));
+        // Copied, not compiled: the window compiles them at startup.
+        assert!(library.iter().all(|e| e.state == EffectState::Stale));
+
+        // And the next launch finds nothing to do.
+        assert_eq!(
+            store.seed_shipped(&crate::shipped::ALL).unwrap(),
+            Seeding::default()
+        );
+    }
+
+    /// An update never overwrites a line someone wrote: only a copy that still
+    /// has the hash recorded when it was copied is replaced.
+    #[test]
+    fn an_unchanged_copy_is_updated_and_a_modified_one_is_not() {
+        let (tmp, store) = temp_store();
+        let file = effects_dir(&tmp).join("Livré.ts");
+
+        store.seed_shipped(&shipped_v1()).unwrap();
+        let seeding = store.seed_shipped(&shipped_v2()).unwrap();
+        assert_eq!(seeding.updated, 1);
+        assert_eq!(fs::read_to_string(&file).unwrap(), shipped_v2()[0].source);
+
+        fs::write(&file, "export default { render() {} } // mine").unwrap();
+        let seeding = store
+            .seed_shipped(&[Shipped {
+                name: "Livré",
+                former_id: "livre",
+                source: "export default { render() {} } // v3",
+            }])
+            .unwrap();
+        assert_eq!(seeding, Seeding::default());
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "export default { render() {} } // mine"
+        );
+        // Modified, it is still the shipped one.
+        assert_eq!(user_effects(&store).len(), 0);
+    }
+
+    /// A shipped effect someone deleted or renamed does not come back.
+    #[test]
+    fn a_deleted_or_renamed_copy_never_comes_back() {
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        store.delete_effect("Livré").unwrap();
+        assert_eq!(
+            store.seed_shipped(&shipped_v2()).unwrap(),
+            Seeding::default()
+        );
+        assert!(!effects_dir(&tmp).join("Livré.ts").exists());
+
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        store.rename_effect("Livré", "Le mien").unwrap();
+        assert_eq!(
+            store.seed_shipped(&shipped_v2()).unwrap(),
+            Seeding::default()
+        );
+        assert!(!effects_dir(&tmp).join("Livré.ts").exists());
+        // Renamed, it is the user's.
+        assert_eq!(user_effect(&store, "Le mien").kind, EffectKind::User);
+    }
+
+    /// A file already holding a shipped effect's name is someone's own: it is left
+    /// alone, and recorded so that the question is not asked again.
+    #[test]
+    fn a_users_file_with_a_shipped_name_is_left_alone() {
+        let (tmp, store) = temp_store();
+        store.save_effect_source("livré", "mine", true).unwrap();
+
+        assert_eq!(
+            store.seed_shipped(&shipped_v1()).unwrap(),
+            Seeding::default()
+        );
+        assert_eq!(
+            fs::read_to_string(effects_dir(&tmp).join("livré.ts")).unwrap(),
+            "mine"
+        );
+        assert_eq!(
+            store.read_settings().unwrap().shipped_effects.get("Livré"),
+            Some(&None)
+        );
+        assert_eq!(user_effect(&store, "livré").kind, EffectKind::User);
+    }
+
+    #[test]
+    fn former_builtin_ids_move_to_names_once() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{
+              "version": 1,
+              "activeEffects": [{ "vid": 5426, "pid": 658, "effect": "onde-matricielle" }],
+              "effectParams": [
+                { "vid": 5426, "pid": 658, "effect": "respiration", "values": { "period": 7 } },
+                { "vid": 5426, "pid": 658, "effect": "Mon effet", "values": { "speed": 1 } }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let renames = store.migrate_former_ids(&crate::shipped::ALL).unwrap();
+        assert_eq!(
+            renames.get("respiration").map(String::as_str),
+            Some("Breathing")
+        );
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.version, 2);
+        assert_eq!(settings.active_effect(VID, PID), Some("Diagonal wave"));
+        assert!(settings.effect_params(VID, PID, "Breathing").is_some());
+        assert!(settings.effect_params(VID, PID, "Mon effet").is_some());
+
+        assert!(store
+            .migrate_former_ids(&crate::shipped::ALL)
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Every step together, on a folder of the directory layout: the library the
+    /// application starts with afterwards.
+    #[test]
+    fn an_old_installation_is_brought_up_to_date() {
+        let (tmp, store) = temp_store();
+        plant_directory_layout(&tmp);
+
+        let (renames, seeding) = store.migrate(&crate::shipped::ALL).unwrap();
+        assert_eq!(
+            renames.get("onde-circulaire").map(String::as_str),
+            Some("Onde circulaire")
+        );
+        assert_eq!(
+            renames.get("respiration").map(String::as_str),
+            Some("Breathing")
+        );
+        assert_eq!(seeding.copied, crate::shipped::ALL.len());
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.version, SETTINGS_VERSION);
+        assert_eq!(settings.active_effect(VID, PID + 1), Some("Breathing"));
+        assert_eq!(
+            store.list_effects().unwrap().len(),
+            3 + crate::shipped::ALL.len()
+        );
+        assert_eq!(user_effects(&store).len(), 3);
+    }
+
     /// A file written before the version field reads as version 0 — not as the
     /// current version the defaults carry, which would skip the migration.
     #[test]
@@ -2355,6 +2519,10 @@ mod tests {
                 effect: "respiration".into(),
                 values: to_map(&[("period", serde_json::json!(12.5))]),
             }],
+            shipped_effects: BTreeMap::from([
+                ("Breathing".to_owned(), Some("abc".to_owned())),
+                ("Sweep".to_owned(), None),
+            ]),
             legacy_log_level: None,
         };
 

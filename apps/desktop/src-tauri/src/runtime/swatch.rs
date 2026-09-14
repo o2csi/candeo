@@ -235,15 +235,15 @@ mod tests {
     }
 
     /// Every shipped effect must produce a complete swatch: that is the promise
-    /// of the gallery, and a built-in without a swatch would show at first
+    /// of the gallery, and a shipped effect without a swatch would show at first
     /// launch.
     #[test]
-    fn every_builtin_effect_produces_a_swatch() {
-        for b in &crate::builtins::ALL {
-            let swatch = sample(b.js, layout());
-            assert_eq!(swatch.len(), SAMPLES, "\"{}\": incomplete swatch", b.id);
+    fn every_shipped_effect_produces_a_swatch() {
+        for s in &crate::shipped::ALL {
+            let swatch = sample(s.source, layout());
+            assert_eq!(swatch.len(), SAMPLES, "\"{}\": incomplete swatch", s.name);
             for c in &swatch {
-                assert!(is_rrggbb(c), "\"{}\": color \"{c}\"", b.id);
+                assert!(is_rrggbb(c), "\"{}\": color \"{c}\"", s.name);
             }
         }
     }
@@ -343,15 +343,9 @@ mod tests {
     /// Two visually distinct shipped effects give distinct swatches. This is the
     /// same property as above, checked on what we ship.
     #[test]
-    fn two_distinct_builtin_effects_have_distinct_swatches() {
-        let breathing = sample(
-            crate::builtins::find("respiration").expect("built-in").js,
-            layout(),
-        );
-        let fixed_gradient = sample(
-            crate::builtins::find("degrade-fixe").expect("built-in").js,
-            layout(),
-        );
+    fn two_distinct_shipped_effects_have_distinct_swatches() {
+        let breathing = sample(crate::shipped::source("Breathing"), layout());
+        let fixed_gradient = sample(crate::shipped::source("Fixed gradient"), layout());
         assert_ne!(breathing, fixed_gradient);
     }
 
@@ -360,7 +354,7 @@ mod tests {
     /// thumbnail.
     #[test]
     fn the_same_effect_always_gives_the_same_swatch() {
-        let js = crate::builtins::find("onde-radiale").expect("built-in").js;
+        let js = crate::shipped::source("Radial wave");
         assert_eq!(sample(js, layout()), sample(js, layout()));
     }
 

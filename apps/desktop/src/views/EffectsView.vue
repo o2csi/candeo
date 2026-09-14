@@ -615,14 +615,13 @@ async function halt(): Promise<void> {
 // ------------------------------------------------------------- suppression
 
 /**
- * Un effet **écrit** se supprime ; un intégré ou un effet matériel, non.
+ * Every effect that is a file can be deleted, shipped ones included; a hardware
+ * effect lives in the firmware and has nothing to remove.
  *
- * Les premiers vivent dans le binaire, les seconds dans le micrologiciel : il
- * n'y a rien à retirer dans un cas comme dans l'autre. Le geste n'est donc pas
- * proposé, plutôt que proposé puis refusé — un bouton qui échoue toujours
- * apprend au mieux que le bouton n'aurait pas dû être là.
+ * A deleted shipped effect does not come back at the next launch: getting it
+ * back means saving its file from the repository into the effects folder.
  */
-const removable = computed(() => selectedEffect.value?.nature === 'user')
+const removable = computed(() => selectedEffect.value?.nature !== 'hardware')
 
 /**
  * Reads the effects folder again, compiling what changed: effects saved there
@@ -1204,9 +1203,7 @@ onBeforeUnmount(() => {
           </button>
 
           <!--
-            Proposé aux seuls effets écrits. Un intégré vit dans le binaire, un
-            effet matériel dans le micrologiciel : leur offrir le bouton ne
-            promettrait qu'un refus.
+            Offered for files only: a hardware effect lives in the firmware.
 
             Il reste en place et actif pendant que la question est posée : le
             masquer ou le désactiver retirerait le focus du clavier au moment

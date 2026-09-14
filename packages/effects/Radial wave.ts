@@ -6,15 +6,14 @@
 // take several cells — it takes one. Matrix holes no longer count as distance,
 // since they take no space.
 //
-// The wave that counts cells is "Onde diagonale", and it is a different
-// effect: it leaves a corner in diagonals. The two follow each other in the
-// gallery.
+// The wave that counts cells is "Diagonal wave", and it is a different effect:
+// it leaves a corner in diagonals. The two follow each other in the gallery.
 
 import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
-  name: 'Onde radiale',
   description: 'Une onde de teinte se propage en cercles, à la distance physique des touches',
+  kinds: ['keyboard'],
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
     scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },

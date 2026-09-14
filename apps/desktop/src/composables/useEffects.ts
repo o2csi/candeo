@@ -39,19 +39,19 @@ const WAVE_SPEED = 0x28
  */
 export const hardwareEffects: readonly HardwareEffect[] = [
   {
-    id: 'spectrumCycle',
+    id: 'hardware:spectrumCycle',
     name: 'Spectrum Cycle',
     summary: 'Tout le clavier change de teinte ensemble, sans fin.',
     effect: { kind: 'spectrumCycle' },
   },
   {
-    id: 'wave',
+    id: 'hardware:wave',
     name: 'Wave',
     summary: 'Un dégradé traverse le clavier de part en part.',
     effect: { kind: 'wave', direction: WAVE_DIRECTION, speed: WAVE_SPEED },
   },
   {
-    id: 'off',
+    id: 'hardware:off',
     name: 'Éteint',
     summary: 'Rétroéclairage coupé, sans débrancher quoi que ce soit.',
     effect: { kind: 'off' },

@@ -112,7 +112,10 @@ checked by CI).
 ## 4. Shipped effects
 
 The sources move to `packages/effects/<Name>.ts`, type-checked by `vue-tsc`, and
-are embedded in the binary. At startup they are copied into the effects folder
+are embedded in the binary. They carry **no type annotations**: `defineEffect`
+already infers what `render` receives, and the Rust tests run them as they are,
+without a TypeScript compiler, to check the waves' geometry and the swatches. A
+test fails the day one of them would need its types stripped. At startup they are copied into the effects folder
 **once**, and `settings.json` records what was copied:
 `shippedEffects: { "Radial wave": "<sha-256>" }`.
 
@@ -165,9 +168,13 @@ Tested on a fixture shaped like a data folder of the directory layout.
 
 ## 7. What disappears, what stays
 
-Disappears: `builtins/mod.rs`, `EffectKind`, reserved ids, the refused deletion,
-memory-only swatches, the Rust manifest copies and their test, copy-on-open in
-the editor, `derive_id`, per-effect directories.
+Disappears: `builtins/mod.rs`, reserved ids, the refused deletion, memory-only
+swatches, the Rust manifest copies and their test, copy-on-open in the editor,
+`derive_id`, per-effect directories.
+
+`EffectKind` stays, with another meaning: `builtin` marks a file recorded as
+shipped, which is what the gallery's Built-in section lists. It decides nothing
+else.
 
 Stays: one engine, one API, the swatch sampled by running the effect, per-device
 settings, preview versus Apply.

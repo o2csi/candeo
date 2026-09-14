@@ -7,7 +7,7 @@
 //
 // It starts from a corner, not from the center, on purpose. On a keyboard 22
 // cells wide and 6 high, any wave measured from the center turns into
-// near-vertical bands, whatever its shape: it looked like "Onde radiale". A
+// near-vertical bands, whatever its shape: it looked like "Radial wave". A
 // corner changes the motion itself, and the two can be told apart at a glance.
 //
 // It reads neither `x` nor `y`: of the two waves, it is the only one that runs
@@ -16,8 +16,8 @@
 import { defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
-  name: 'Onde diagonale',
   description: 'Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale',
+  kinds: ['keyboard'],
   params: {
     speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
     scale: { kind: 'number', label: 'Échelle', min: 1, max: 60, default: 18 },

@@ -21,7 +21,7 @@ someone who just wants to change color.
 
 | Kind | Origin | Cost | Survives closing |
 |---|---|---|---|
-| **Built-in** | Rust, shipped with the app | host loop | no |
+| **Built-in** | shipped with the app, copied into the effects folder | host loop | yes, via the service |
 | **Yours** | written in the editor, saved | host loop | yes, via the service |
 | **Hardware** | keyboard firmware | **none** | **yes, always** |
 
@@ -698,10 +698,10 @@ in the library, on the effect you are looking at, one per effect.
 
 ### What is offered, and to what
 
-**Only written effects.** A built-in lives in the binary, a hardware effect
-in the firmware: there is nothing to remove. The button does not appear for
-them, rather than appearing and failing — a button that always fails
-teaches only its own uselessness.
+**Every effect that is a file**, shipped ones included. A hardware effect lives
+in the firmware: there is nothing to remove, and the button does not appear for
+it, rather than appearing and failing — a button that always fails teaches only
+its own uselessness.
 
 ### Both ask for confirmation, and the confirmation says what goes
 

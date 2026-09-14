@@ -1,0 +1,115 @@
+//! Effects shipped with the application.
+//!
+//! They are ordinary effects: `.ts` files in `packages/effects/`, written against
+//! the same API as the user's, copied into the effects folder at startup and
+//! from then on listed, edited, renamed and deleted like any other. What the
+//! application keeps of them is only what it needs to copy them once and update
+//! them while nobody changed them — see [`crate::storage::Store::seed_shipped`]
+//! and `docs/design/effects-library.md` §4.
+//!
+//! They are embedded with `include_str!`: the first launch happens with the
+//! window closed and possibly offline.
+//!
+//! # No type annotations
+//!
+//! The Rust tests run these sources as they are, without a TypeScript compiler:
+//! they check the geometry of the waves and the swatches on real effects. So
+//! they declare no types — `defineEffect` already infers the parameters of
+//! `render` — and [`tests::every_shipped_source_runs_as_it_is`] fails the day
+//! one of them would need stripping.
+
+/// An effect shipped with the application.
+pub struct Shipped {
+    /// Its name, and so its file name.
+    pub name: &'static str,
+    /// The id it had when effects were compiled into the binary, still found in
+    /// settings written by earlier versions.
+    pub former_id: &'static str,
+    pub source: &'static str,
+}
+
+/// The shipped effects, in the order they are copied.
+///
+/// Named in English: a name is a file name and is not translated, and English
+/// is the reference language of the interface.
+pub static ALL: [Shipped; 5] = [
+    Shipped {
+        name: "Radial wave",
+        former_id: "onde-radiale",
+        source: include_str!("../../../../packages/effects/Radial wave.ts"),
+    },
+    Shipped {
+        name: "Diagonal wave",
+        former_id: "onde-matricielle",
+        source: include_str!("../../../../packages/effects/Diagonal wave.ts"),
+    },
+    Shipped {
+        name: "Breathing",
+        former_id: "respiration",
+        source: include_str!("../../../../packages/effects/Breathing.ts"),
+    },
+    Shipped {
+        name: "Sweep",
+        former_id: "balayage",
+        source: include_str!("../../../../packages/effects/Sweep.ts"),
+    },
+    Shipped {
+        name: "Fixed gradient",
+        former_id: "degrade-fixe",
+        source: include_str!("../../../../packages/effects/Fixed gradient.ts"),
+    },
+];
+
+/// The source of the shipped effect with this name: a readable handle for tests.
+#[cfg(test)]
+pub fn source(name: &str) -> &'static str {
+    ALL.iter()
+        .find(|s| s.name == name)
+        .unwrap_or_else(|| panic!("\"{name}\" is not shipped"))
+        .source
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipped_names_are_valid_and_unique() {
+        for (i, s) in ALL.iter().enumerate() {
+            crate::storage::validate_name(s.name).unwrap_or_else(|e| panic!("\"{}\": {e}", s.name));
+            assert!(
+                ALL[i + 1..].iter().all(|o| {
+                    o.name.to_lowercase() != s.name.to_lowercase() && o.former_id != s.former_id
+                }),
+                "\"{}\" is shipped twice",
+                s.name
+            );
+        }
+    }
+
+    /// **What keeps the Rust tests honest.** They run these sources without a
+    /// compiler; a type annotation would make them fail to load here while the
+    /// window, which strips types, still ran them.
+    #[test]
+    fn every_shipped_source_runs_as_it_is() {
+        for s in &ALL {
+            let declared = crate::runtime::declared_manifest(s.source)
+                .unwrap_or_else(|e| panic!("\"{}\" does not load as JavaScript: {e}", s.name));
+            let declared: serde_json::Value = serde_json::from_str(&declared).unwrap();
+            assert!(
+                declared["params"]
+                    .as_object()
+                    .is_some_and(|p| !p.is_empty()),
+                "\"{}\" declares no parameters",
+                s.name
+            );
+            assert!(
+                declared["description"]
+                    .as_str()
+                    .is_some_and(|d| !d.is_empty()),
+                "\"{}\" has no description",
+                s.name
+            );
+        }
+    }
+}

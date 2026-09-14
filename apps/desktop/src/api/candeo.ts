@@ -391,8 +391,14 @@ export interface EffectParamsRecord {
  * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
  */
 export interface Settings {
-  /** Shape of the file: 1 since user effects are referenced by name. */
+  /** Shape of the file: 2 since every effect is referenced by its name. */
   version: number
+  /**
+   * The shipped effects copied into the folder: the hash of the version copied,
+   * or `null` when a file of that name was already there. Kept when the file is
+   * deleted or renamed, so that it is not copied again.
+   */
+  shippedEffects: Record<string, string | null>
   preferences: Preferences
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]

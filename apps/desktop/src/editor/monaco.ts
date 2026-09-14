@@ -202,11 +202,10 @@ export interface EffectError {
  */
 export async function errors(): Promise<EffectError[]> {
   const uri = EFFECT_URI.toString()
-  const worker = await (await typescriptWorker())(EFFECT_URI)
-  const [syntactic, semantic] = await Promise.all([
-    worker.getSyntacticDiagnostics(uri),
-    worker.getSemanticDiagnostics(uri),
-  ])
+  const [syntactic, semantic] = await whenReady(async () => {
+    const worker = await (await getTypeScriptWorker())(EFFECT_URI)
+    return Promise.all([worker.getSyntacticDiagnostics(uri), worker.getSemanticDiagnostics(uri)])
+  })
 
   const model = monaco.editor.getModel(EFFECT_URI)
   return [...syntactic, ...semantic].map((d) => ({
@@ -217,17 +216,18 @@ export async function errors(): Promise<EffectError[]> {
 }
 
 /**
- * The TypeScript worker factory, once Monaco has registered it.
+ * Runs `ask` until the TypeScript worker can answer it, for five seconds at most.
  *
- * Monaco sets the TypeScript mode up lazily, after a TypeScript model exists,
- * and asking earlier throws "TypeScript not registered!". A save clicked right
- * after the editor opens must wait for it, not fail.
+ * Monaco sets the TypeScript mode up lazily, then hands the worker the model a
+ * moment later: asking in between throws "TypeScript not registered!", then
+ * "Could not find source file". A save clicked right after the editor opens must
+ * wait for both, not fail.
  */
-async function typescriptWorker(): Promise<Awaited<ReturnType<typeof getTypeScriptWorker>>> {
+async function whenReady<T>(ask: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + 5000
   for (;;) {
     try {
-      return await getTypeScriptWorker()
+      return await ask()
     } catch (e) {
       if (Date.now() >= deadline) throw e
       await new Promise((resolve) => window.setTimeout(resolve, 100))
