@@ -26,6 +26,37 @@ effect switching, all with no third-party software running.
 
 ---
 
+## Install
+
+Each [release](https://github.com/oorabona/candeo/releases) carries the
+installers and a `SHA256SUMS` file.
+
+**Windows (x64)**
+
+- `candeo_<version>_x64-setup.exe` installs for the current account, without
+  administrator rights. The one to pick.
+- `candeo_<version>_x64_en-US.msi` installs for every account, and needs
+  administrator rights.
+- The installers are not signed yet: on first run, SmartScreen warns about an
+  unknown publisher. **More info**, then **Run anyway**.
+
+**Linux (x86_64)**
+
+- Debian, Ubuntu: `sudo apt install ./candeo_<version>_amd64.deb`
+- Fedora: `sudo dnf install ./candeo-<version>-1.x86_64.rpm`
+- Both packages install the [udev rule](#udev-rule) that gives the signed-in
+  user access to the keyboard: plug it in again after installing. There is no
+  AppImage, which cannot install that rule.
+
+**Checking a download**: `sha256sum -c SHA256SUMS --ignore-missing` on Linux;
+on Windows, `Get-FileHash <file>` in PowerShell, compared with its line in
+`SHA256SUMS`.
+
+Updating means installing the next release over the current one: settings and
+effects are kept.
+
+---
+
 ## Protocol origin
 
 The protocol was established **by observing the hardware**: Windows PnP

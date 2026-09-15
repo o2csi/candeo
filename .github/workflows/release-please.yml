@@ -1,0 +1,45 @@
+name: Release Please
+
+# Keeps a release pull request open with the next version and its changelog, from
+# the Conventional Commits merged into main. Merging it bumps every version file,
+# tags the commit, opens a draft release, and calls release.yml, which builds the
+# installers and publishes the draft. See docs/releasing.md.
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# Two merges close together must not race on the same release pull request.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      # The `autorelease: pending` label is created and set through the issues API.
+      issues: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  release:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+      # The commit this push merged, which release-please just tagged.
+      ref: ${{ github.sha }}
