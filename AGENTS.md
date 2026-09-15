@@ -129,6 +129,11 @@ the serial itself. Test fixtures use made-up values such as `XY24ABCDEFG0001`.
   request, not in the commit.
 - **Pull requests:** English, with *What changed*, *Tests* and *Not verified*
   sections, and `Fixes #N` when they close an issue. Re-read the published text.
+- **Pull request titles in plain language**, not as a Conventional Commit:
+  *Release pipeline with release-please*, not `ci: release pipeline`. The merge
+  commit carries the title, and release-please would list the change a second
+  time in the changelog. The release pull request is titled
+  `Go release vX.Y.Z 🚀`.
 - CI skips pull requests limited to Markdown, `docs/` and the licence; on `main`
   everything always runs. The Linux packaging job runs on `main` and on demand
   only.
