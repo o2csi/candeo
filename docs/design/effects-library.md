@@ -4,6 +4,11 @@ Status: **implemented**. Replaces the uid-based version accepted in #83, which w
 set aside during implementation review for a simpler model. Covers the shipped
 effects and the identity and format of #44.
 
+> **Accepted change, not implemented** (#125): shipped effects stay in this
+> folder, the user's move to `Documents`, and an effect's key becomes
+> `<source>:<name>`. See [`effects-sources.md`](effects-sources.md), which
+> changes §1, §4, §5 and §6 below.
+
 ## Why
 
 candeo ships five effects as JavaScript compiled into the binary, and treats
