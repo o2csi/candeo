@@ -33,11 +33,13 @@ import { erreur, message } from '../api/journal'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
+import { useTheme } from '../composables/useTheme'
 import { showIn, t } from '../i18n'
 
 const { busy, refresh } = useDevice()
 const { dropAll } = useSettings()
 const { forgetPosed } = useEffects()
+const { load: loadTheme } = useTheme()
 
 // ---------------------------------------------------------------- language
 
@@ -226,6 +228,7 @@ async function reset(): Promise<void> {
     await readJournal()
     await readLanguage()
     await readResume()
+    await loadTheme()
     if (language.value) showIn(language.value.language)
   }
 }

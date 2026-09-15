@@ -24,10 +24,10 @@
 //! promise at the very place where it has just been kept.
 //!
 //! The cost is real — the application no longer has an obvious exit — and it is
-//! paid twice: "Quitter candeo" (Quit candeo) is **the only** clean exit, isolated
-//! at the bottom of the menu by its own separator, and the window says so in so
-//! many words (see `App.vue`). An application you cannot figure out how to quit
-//! is an application you uninstall.
+//! paid twice: "Quit candeo" is **the only** clean exit, isolated at the bottom of
+//! the menu by its own separator, and the first close after each launch says so
+//! in a system notification ([`tell_still_running`]). An application you cannot
+//! figure out how to quit is an application you uninstall.
 //!
 //! # What quitting does not do: turn the keyboard off
 //!
@@ -62,6 +62,7 @@ use tauri::menu::{
 };
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Wry};
+use tauri_plugin_notification::NotificationExt;
 
 use candeo_device::{Inspection, Layout};
 
@@ -108,6 +109,36 @@ static LAST_FAILURE: Mutex<Option<String>> = Mutex::new(None);
 /// True if the icon is there, hence if the application outlives its windows.
 pub(crate) fn installed() -> bool {
     INSTALLED.load(Ordering::Relaxed)
+}
+
+/// Set once [`tell_still_running`] has spoken in this launch.
+static TOLD: AtomicBool = AtomicBool::new(false);
+
+/// Says, on the first close after each launch, that candeo still runs and how to
+/// quit (#110), as applications that keep running do.
+///
+/// Once per launch: whoever knows does not need it repeated at every close. A
+/// notification denied or with no daemon to show it changes nothing: the plugin
+/// shows it in the background and drops its failure.
+pub(crate) fn tell_still_running(app: &AppHandle) {
+    if TOLD.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let language = crate::language::current(app);
+    let quit = i18n::text(language, "tray.quit");
+    let shown = app
+        .notification()
+        .builder()
+        .title(i18n::text(language, "tray.stillRunningTitle"))
+        .body(i18n::t(
+            language,
+            "tray.stillRunningBody",
+            &BTreeMap::from([("quit", quit)]),
+        ))
+        .show();
+    if let Err(e) = shown {
+        tracing::warn!("notification not shown: {e}");
+    }
 }
 
 /// Tells the window that the state changed without it.

@@ -1171,6 +1171,7 @@ pub fn run() {
         // [`single_instance`].
         .plugin(single_instance::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // **First of all**, and before the store is resolved: a failure to
             // resolve the configuration folder is exactly what we want to see,
@@ -1250,6 +1251,7 @@ pub fn run() {
                     if let Err(e) = window.hide() {
                         tracing::warn!("window not hidden: {e}");
                     }
+                    tray::tell_still_running(window.app_handle());
                 }
             }
         })
@@ -1302,6 +1304,7 @@ pub fn run() {
             journal::set_log_files_kept,
             language::get_language,
             language::set_language,
+            storage::set_theme,
             journal::open_log_dir,
             journal::diagnostic,
             journal::log_from_webview,

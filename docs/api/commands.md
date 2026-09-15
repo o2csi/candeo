@@ -674,7 +674,8 @@ finished by the next startup without duplicating an effect.
     logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
     language?: 'en' | 'fr',       // absent : la langue du système
     resumeEffects?: false,        // absent: a device that opens resumes its applied effect
-    logFilesKept?: number         // absent: 7; 0 keeps every log file
+    logFilesKept?: number,        // absent: 7; 0 keeps every log file
+    theme?: 'light' | 'dark'      // absent: the system's
   },
   devices: {
     vid: number,
@@ -1052,6 +1053,14 @@ elsewhere, and English for any language the interface is not written in.
 `get_language` never fails: with unreadable settings it gives the system's
 language, since the window must still be able to say what went wrong. The window
 reads it before mounting, so that it does not show English for a moment.
+
+### `set_theme(theme)`
+
+`'system' | 'light' | 'dark'`, chosen in the top bar (#110). Only `light` and
+`dark` are written. Rust only saves it: the window sets `data-theme` on the
+document, and `tokens.css` follows the system's setting live when there is none.
+The window reads it before mounting, like the language, so that it does not show
+the other theme for a moment.
 
 ### `open_log_dir()`
 
