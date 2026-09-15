@@ -1105,9 +1105,12 @@ Cannot fail because of a device: being unable to enumerate USB or read back the
 settings is exactly what a diagnostic must **say**, not what should
 interrupt it.
 
-The log folder is written with the home directory as `~`, here and in the
-"candeo starting" log line: both end up in public bug reports, and the home
-directory usually carries the user's name. Settings shows the full path.
+Every path candeo writes as text — here, in the "candeo starting" log line, in
+error messages — has the home directory as `~` (`src-tauri/src/paths.rs`): the
+log and the diagnostic end up in public bug reports, and the home directory
+usually carries the user's name. What follows `~` still says where the file is.
+Code that opens a folder keeps the real path, and Settings shows the full path
+of the log folder.
 
 ### `log_from_webview(level, source, message)`
 

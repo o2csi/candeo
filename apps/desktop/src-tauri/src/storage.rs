@@ -1095,7 +1095,7 @@ impl Store {
             Err(e) => {
                 return Err(Failure::unexpected(format!(
                     "cannot read {}: {e}",
-                    dir.display()
+                    crate::paths::shown(dir)
                 )))
             }
         };
@@ -1300,8 +1300,12 @@ impl Store {
             return Ok(target);
         }
         let (source, path) = (self.source_path(from), self.source_path(&target));
-        fs::rename(&source, &path)
-            .map_err(|e| Failure::unexpected(format!("cannot rename {}: {e}", source.display())))?;
+        fs::rename(&source, &path).map_err(|e| {
+            Failure::unexpected(format!(
+                "cannot rename {}: {e}",
+                crate::paths::shown(&source)
+            ))
+        })?;
         // A cache that does not follow only costs a compilation at the next
         // Refresh: not a reason to undo a rename that succeeded.
         let _ = fs::rename(self.cache_path(from), self.cache_path(&target));
@@ -1376,8 +1380,9 @@ impl Store {
         // reported.
         self.check_deletable(key)?;
         let path = self.source_path(key);
-        fs::remove_file(&path)
-            .map_err(|e| Failure::unexpected(format!("cannot delete {}: {e}", path.display())))?;
+        fs::remove_file(&path).map_err(|e| {
+            Failure::unexpected(format!("cannot delete {}: {e}", crate::paths::shown(&path)))
+        })?;
         let _ = fs::remove_file(self.cache_path(key));
         Ok(())
     }
@@ -1406,7 +1411,7 @@ impl Store {
             Err(e) => {
                 return Err(Failure::unexpected(format!(
                     "cannot read {}: {e}",
-                    self.shipped_dir.display()
+                    crate::paths::shown(&self.shipped_dir)
                 )))
             }
         };
@@ -1465,7 +1470,7 @@ impl Store {
         for (_, dir, name, source) in &plan {
             write_atomically(&self.source_path(&EffectKey::shipped(name)), source)?;
             fs::remove_dir_all(dir).map_err(|e| {
-                Failure::unexpected(format!("cannot delete {}: {e}", dir.display()))
+                Failure::unexpected(format!("cannot delete {}: {e}", crate::paths::shown(dir)))
             })?;
         }
         Ok(renames)
@@ -1634,7 +1639,10 @@ impl Store {
             let moved = create_dir(&self.user_dir).and_then(|()| {
                 if target.exists() {
                     fs::remove_file(&source).map_err(|e| {
-                        Failure::unexpected(format!("cannot delete {}: {e}", source.display()))
+                        Failure::unexpected(format!(
+                            "cannot delete {}: {e}",
+                            crate::paths::shown(&source)
+                        ))
                     })
                 } else {
                     move_file(&source, &target)
@@ -1749,13 +1757,13 @@ impl Store {
             Err(e) => {
                 return Err(Failure::unexpected(format!(
                     "cannot read {}: {e}",
-                    self.settings_file.display()
+                    crate::paths::shown(&self.settings_file)
                 )))
             }
         };
         let mut settings: Settings = serde_json::from_str(&raw).map_err(|e| {
             Failure::new("settingsUnreadable")
-                .with("path", self.settings_file.display())
+                .with("path", crate::paths::shown(&self.settings_file))
                 .with("detail", e)
         })?;
         // Here and nowhere else: this is the only path by which a file enters the
@@ -1798,7 +1806,7 @@ impl Store {
         fs::rename(&tmp, &self.settings_file).map_err(|e| {
             Failure::unexpected(format!(
                 "cannot write {}: {e}",
-                self.settings_file.display()
+                crate::paths::shown(&self.settings_file)
             ))
         })
     }
@@ -2004,18 +2012,20 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
 }
 
 fn create_dir(path: &Path) -> CmdResult<()> {
-    fs::create_dir_all(path)
-        .map_err(|e| Failure::unexpected(format!("cannot create {}: {e}", path.display())))
+    fs::create_dir_all(path).map_err(|e| {
+        Failure::unexpected(format!("cannot create {}: {e}", crate::paths::shown(path)))
+    })
 }
 
 fn read(path: &Path) -> CmdResult<String> {
     fs::read_to_string(path)
-        .map_err(|e| Failure::unexpected(format!("cannot read {}: {e}", path.display())))
+        .map_err(|e| Failure::unexpected(format!("cannot read {}: {e}", crate::paths::shown(path))))
 }
 
 fn write(path: &Path, contents: &str) -> CmdResult<()> {
-    fs::write(path, contents)
-        .map_err(|e| Failure::unexpected(format!("cannot write {}: {e}", path.display())))
+    fs::write(path, contents).map_err(|e| {
+        Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(path)))
+    })
 }
 
 /// Moves a file, across volumes too: `Documents` is often on another drive, or
@@ -2024,10 +2034,12 @@ fn move_file(from: &Path, to: &Path) -> CmdResult<()> {
     if fs::rename(from, to).is_ok() {
         return Ok(());
     }
-    fs::copy(from, to)
-        .map_err(|e| Failure::unexpected(format!("cannot copy {}: {e}", from.display())))?;
-    fs::remove_file(from)
-        .map_err(|e| Failure::unexpected(format!("cannot delete {}: {e}", from.display())))
+    fs::copy(from, to).map_err(|e| {
+        Failure::unexpected(format!("cannot copy {}: {e}", crate::paths::shown(from)))
+    })?;
+    fs::remove_file(from).map_err(|e| {
+        Failure::unexpected(format!("cannot delete {}: {e}", crate::paths::shown(from)))
+    })
 }
 
 /// Writes through a temporary file and a rename, so that a reader never sees
@@ -2039,8 +2051,9 @@ fn write_atomically(path: &Path, contents: &str) -> CmdResult<()> {
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     write(&tmp, contents)?;
-    fs::rename(&tmp, path)
-        .map_err(|e| Failure::unexpected(format!("cannot write {}: {e}", path.display())))
+    fs::rename(&tmp, path).map_err(|e| {
+        Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(path)))
+    })
 }
 
 // ---------------------------------------------------------------- commands
@@ -2210,7 +2223,7 @@ pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let dir = store.user_effects_dir()?;
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
+        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(dir))))
 }
 
 /// Forgets what `settings.json` keeps about an effect the folder no longer holds:
@@ -3536,6 +3549,24 @@ mod tests {
     fn without_a_file_settings_are_the_default() {
         let (_tmp, store) = temp_store();
         assert_eq!(store.read_settings().unwrap(), Settings::default());
+    }
+
+    /// An error names the file it is about, without the home directory: it is
+    /// logged, and the log goes into bug reports. The temporary folder sits in
+    /// the home directory on Windows.
+    #[test]
+    fn an_error_names_its_file_without_the_home_directory() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join("settings.json"), "{ not json").unwrap();
+
+        let message = store.read_settings().unwrap_err().to_string();
+        assert!(message.contains("settings.json"), "{message}");
+        let home = std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+        if let Some(home) = home.ok().filter(|h| !h.is_empty()) {
+            assert!(!message.contains(&home), "{message}");
+        }
     }
 
     #[test]
