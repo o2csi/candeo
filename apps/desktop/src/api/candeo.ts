@@ -246,8 +246,9 @@ export function deleteEffect(id: string): Promise<void> {
 }
 
 /**
- * Copies an effect into the user's folder — `<name> (copie)`, `(copie 2)`… —
- * and returns the copy's key. The copy is ready at once, and it is the user's.
+ * Copies an effect into the user's folder — under its own name when that folder
+ * holds none, then `<name> (2)`, `(3)`… — and returns the copy's key. The copy
+ * is ready at once, and it is the user's.
  */
 export function duplicateEffect(id: string): Promise<string> {
   return invoke('duplicate_effect', { id })

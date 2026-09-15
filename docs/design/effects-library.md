@@ -172,10 +172,11 @@ file manager is dealt with below, not prevented.
 - **Refresh**, and **Open folder**, in the effects column.
 - **Rename** from the editor header: renames the file, moves its settings and
   its draft. The name is edited there only; sources have no `name`.
-- **Duplicate**: a copy named with a copy suffix in the interface language —
-  `<name> (copie)`, `(copie 2)`… while the interface is French — ready at once,
-  since its cache is copied too, and the user's even when the original was
-  shipped.
+- **Duplicate**: a copy in the user's folder, under the original's name when that
+  folder holds none — a built-in's first copy — and otherwise numbered,
+  `<name> (2)`, `(3)`…, the way every name made free is. A file name does not
+  change with the interface language. Ready at once, since its cache is copied
+  too, and the user's even when the original was shipped.
 - **Delete**, the user's effects only: stops the loops running it, removes the
   file and its cache, forgets its settings.
 - **Missing effect**: when `activeEffects` or `effectParams` name an effect the

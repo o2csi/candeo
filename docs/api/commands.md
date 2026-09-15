@@ -604,11 +604,12 @@ back.
 
 ### `duplicate_effect(id) -> string`
 
-Copies the file into the user's folder under the first free name among
-`<name> (copy)`, `(copy 2)`…, and returns its key. The suffix is interface text,
-in the interface language (`effects.copy`). The cache is copied with the file —
-same bytes, same hash — so the copy is `ready` at once. A copy of a built-in is a
-new effect, the user's.
+Copies the file into the user's folder under the first free name among `<name>`,
+`<name> (2)`, `(3)`…, and returns its key: a built-in's first copy keeps its name,
+under `user:`. Numbered rather than suffixed with a word, so a file name does not
+depend on the interface language. The cache is copied with the file — same bytes,
+same hash — so the copy is `ready` at once. A copy of a built-in is a new effect,
+the user's.
 
 ### `open_effects_dir()`
 
