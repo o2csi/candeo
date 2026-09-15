@@ -132,3 +132,5 @@ the serial itself. Test fixtures use made-up values such as `XY24ABCDEFG0001`.
 - CI skips pull requests limited to Markdown, `docs/` and the licence; on `main`
   everything always runs. The Linux packaging job runs on `main` and on demand
   only.
+- **Releases** come from release-please: never bump a version or tag by hand.
+  See [`docs/releasing.md`](docs/releasing.md).
