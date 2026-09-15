@@ -1,8 +1,8 @@
 # Effect sources — shipped effects in the application, yours in Documents
 
-Status: **accepted, not implemented** (#125). Changes §1, §4, §5 and §6 of
-[`effects-library.md`](effects-library.md), which describes what is implemented
-today: every effect in one folder, keyed by its name.
+Status: **implemented** (#125). Changes §1, §4, §5 and §6 of
+[`effects-library.md`](effects-library.md), which described every effect in one
+folder, keyed by its name.
 
 ## Why
 
@@ -54,8 +54,9 @@ shared a folder.
 - **The key is unambiguous:** allowed names exclude `:` (§1 of
   `effects-library.md`), so the source is everything before the first `:`.
 - **Shown:** the file name without `.ts`, as today, in the section of its source.
-  The tray menu lists effects in the same groups as the gallery, so two effects
-  of the same name are never side by side unlabelled.
+  The tray menu lists effects in the same groups as the gallery, under a
+  **Built-in** and a **Yours** heading when both have effects, so two effects of
+  the same name are never side by side unlabelled.
 - **A shipped effect and a user effect may share a name.** They are two effects
   with two keys, and there is no conflict to report. Within one source, the file
   system keeps names unique, and names that differ only by case stay refused.
@@ -100,7 +101,8 @@ three changes:
 
 ## 5. Migration
 
-One pass at startup, idempotent, recorded as `version: 2` in `settings.json`:
+One pass at startup, idempotent, recorded as `version: 3` in `settings.json`
+(version 2 was the move from former built-in ids to names):
 
 1. **User folder:** created.
 2. **User files:** every `.ts` in `app_data_dir()/effects/` not recorded as
@@ -117,9 +119,18 @@ One pass at startup, idempotent, recorded as `version: 2` in `settings.json`:
    folder is new, so a move renamed by a collision needs a folder someone made by
    hand; that file's draft is then left under its old name.
 
-A file that cannot be moved stays where it is, with its references, and is logged.
-The pass retries at the next launch, and is written as a pure function tested on a
-fixture shaped like today's folder.
+**Order and failures.** As in the earlier migrations, moves are planned from what
+is on disk, `settings.json` is rewritten, then files move. A file that cannot be
+moved stays where it is and the failure is logged; the other files still move,
+and the next launch plans the same move again. A copy already made with the same
+bytes is recognized, not copied twice. A move across volumes (`Documents` on
+another drive, or in OneDrive) copies then deletes.
+
+**Every launch.** The move of files candeo did not put in the shipped folder runs
+at every startup, after seeding: a file dropped among the shipped effects, or one
+this version no longer ships, moves then. Until it has moved, such a file is not
+listed. Seeding runs again after the move, so a shipped effect whose name a moved
+file held is copied in the same launch.
 
 ## 6. OneDrive and sync
 

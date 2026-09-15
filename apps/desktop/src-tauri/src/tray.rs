@@ -68,7 +68,7 @@ use candeo_device::{Inspection, Layout};
 
 use crate::language::Language;
 use crate::runtime::DeviceEngineStatus;
-use crate::storage::{self, DeviceState, EffectEntry, EffectState};
+use crate::storage::{self, DeviceState, EffectEntry, EffectKind, EffectState};
 use crate::{i18n, journal, single_instance, AppState, DeviceRef};
 
 /// The tray's own failures are only logged: English sentences, never shown.
@@ -504,17 +504,36 @@ fn device_submenu(
     }
     // Only what can start: a file not compiled yet, or that does not load, would
     // be a menu item whose click fails with a message the tray cannot show.
-    for entry in library.iter().filter(|e| e.state == EffectState::Ready) {
-        items.push(Box::new(check_item(
-            app,
-            &Action::Start {
-                device: controlled.device,
-                effet: entry.id.clone(),
-            },
-            &entry.manifest.name,
-            view.effects,
-            running_effect == Some(entry.id.as_str()),
-        )?));
+    let ready: Vec<&EffectEntry> = library
+        .iter()
+        .filter(|e| e.state == EffectState::Ready)
+        .collect();
+    // Grouped like the gallery, under a heading when both groups have effects:
+    // a built-in and one of the user's may share a name.
+    let both = ready.iter().any(|e| e.kind == EffectKind::Builtin)
+        && ready.iter().any(|e| e.kind == EffectKind::User);
+    for (kind, heading) in [
+        (EffectKind::Builtin, "tray.builtinEffects"),
+        (EffectKind::User, "tray.userEffects"),
+    ] {
+        if both {
+            if kind == EffectKind::User {
+                items.push(Box::new(separator_item(app)?));
+            }
+            items.push(Box::new(inert_item(app, &i18n::text(language, heading))?));
+        }
+        for entry in ready.iter().filter(|e| e.kind == kind) {
+            items.push(Box::new(check_item(
+                app,
+                &Action::Start {
+                    device: controlled.device,
+                    effet: entry.id.clone(),
+                },
+                &entry.manifest.name,
+                view.effects,
+                running_effect == Some(entry.id.as_str()),
+            )?));
+        }
     }
 
     items.push(Box::new(separator_item(app)?));

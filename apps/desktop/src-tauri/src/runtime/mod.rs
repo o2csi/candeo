@@ -1535,7 +1535,7 @@ pub fn start_effect(
     params: serde_json::Value,
 ) -> CmdResult<()> {
     let layout = crate::find_layout(device)?;
-    let js = crate::storage::store(&app)?.effect_js(&id)?;
+    let js = crate::storage::store(&app)?.effect_js(&crate::storage::EffectKey::parse(&id)?)?;
 
     let params = serialised(&params)?;
 
@@ -1711,7 +1711,7 @@ pub fn start_preview(
         Some(d) => crate::find_layout(d)?,
         None => crate::default_layout(),
     };
-    let js = crate::storage::store(&app)?.effect_js(&id)?;
+    let js = crate::storage::store(&app)?.effect_js(&crate::storage::EffectKey::parse(&id)?)?;
     let params = serialised(&params)?;
 
     state

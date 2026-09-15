@@ -187,14 +187,16 @@ export interface EffectManifest {
 }
 
 /**
- * Writes an effect's source to `<name>.ts` and returns its SHA-256, to hand back
- * to {@link cacheEffect} with the JavaScript compiled from it.
+ * Writes one of the user's effects, `user:<name>`, to `<name>.ts` in the user's
+ * folder, and returns its SHA-256, to hand back to {@link cacheEffect} with the
+ * JavaScript compiled from it.
  *
  * `create` says which gesture this is: creating never overwrites an effect of
- * that name, in any case, and saving again never creates one.
+ * that name, in any case, and saving again never creates one. A built-in is
+ * refused.
  */
-export function saveEffectSource(name: string, source: string, create: boolean): Promise<string> {
-  return invoke('save_effect_source', { name, source, create })
+export function saveEffectSource(key: string, source: string, create: boolean): Promise<string> {
+  return invoke('save_effect_source', { key, source, create })
 }
 
 /**
@@ -204,21 +206,21 @@ export function saveEffectSource(name: string, source: string, create: boolean):
  * A module that does not load comes back `broken`, with its error; a file that
  * changed since `hash` is refused.
  */
-export function cacheEffect(name: string, hash: string, js: string): Promise<EffectEntry> {
-  return invoke('cache_effect', { name, hash, js })
+export function cacheEffect(key: string, hash: string, js: string): Promise<EffectEntry> {
+  return invoke('cache_effect', { key, hash, js })
 }
 
 /**
- * Renames an effect's file, and moves its settings. A running effect keeps
- * running under its new name.
+ * Renames one of the user's effects to the name `to`, moves its settings, and
+ * returns its new key. A running effect keeps running under it.
  */
-export function renameEffect(from: string, to: string): Promise<void> {
+export function renameEffect(from: string, to: string): Promise<string> {
   return invoke('rename_effect', { from, to })
 }
 
 /**
- * Effect ids from the directory layout and the names they became, when this run
- * of the application migrated some. Only for renaming the editor's drafts.
+ * What the effects were called before this run's migration, and the keys they
+ * became, when it migrated some. Only for renaming the editor's drafts.
  */
 export function legacyEffectIds(): Promise<Record<string, string>> {
   return invoke('legacy_effect_ids')
@@ -244,32 +246,31 @@ export function deleteEffect(id: string): Promise<void> {
 }
 
 /**
- * Copies an effect under a new name — `<name> (copie)`, `(copie 2)`… — and
- * returns that name. The copy is ready at once, and it is the user's.
+ * Copies an effect into the user's folder — `<name> (copie)`, `(copie 2)`… —
+ * and returns the copy's key. The copy is ready at once, and it is the user's.
  */
 export function duplicateEffect(id: string): Promise<string> {
   return invoke('duplicate_effect', { id })
 }
 
-/** The shipped effects the folder no longer holds, to offer them back. */
+/** The names of the shipped effects their folder no longer holds, to offer them back. */
 export function missingBuiltins(): Promise<string[]> {
   return invoke('missing_builtins')
 }
 
 /**
- * Writes a shipped effect's file again: a missing one comes back, a modified one
- * is overwritten, and it receives updates again.
+ * Writes a shipped effect's file again, by name: a missing one comes back, a
+ * modified one is overwritten, and it receives updates again.
  *
  * The application does not delete, rename or save over a built-in: an edited
  * copy would stop receiving updates, a renamed or deleted one would never come
- * back. Duplicating makes an editable copy. Refused when an effect of the user's
- * holds the name.
+ * back. Duplicating makes an editable copy, in the user's folder.
  */
 export function restoreBuiltin(name: string): Promise<void> {
   return invoke('restore_builtin', { name })
 }
 
-/** Opens the effects folder in the system file manager. */
+/** Opens the user's effects folder in the system file manager. */
 export function openEffectsDir(): Promise<void> {
   return invoke('open_effects_dir')
 }
@@ -294,11 +295,11 @@ export type EffectState = 'ready' | 'stale' | 'broken'
 /**
  * A library effect: its manifest, plus what is not part of it.
  *
- * Every effect is a file; `builtin` marks one recorded as shipped, which the
+ * Every effect is a file; `builtin` marks one of the shipped folder, which the
  * application does not delete, rename or save over.
  */
 export interface EffectEntry extends EffectManifest {
-  /** The built-in's id, or the effect's name, which is its file name. */
+  /** The effect's key, `shipped:<name>` or `user:<name>`: see `effectKey.ts`. */
   id: string
   kind: 'builtin' | 'user'
   state: EffectState
@@ -489,7 +490,7 @@ export interface EffectParamsRecord {
  * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
  */
 export interface Settings {
-  /** Shape of the file: 2 since every effect is referenced by its name. */
+  /** Shape of the file: 3 since every effect is referenced by its key, `<source>:<name>`. */
   version: number
   /**
    * The shipped effects copied into the folder: the hash of the version copied,

@@ -159,6 +159,8 @@
     "stillRunningTitle": "candeo is still running",
     "stillRunningBody": "Effects keep running. To quit, right-click the candeo icon in the notification area, then “{quit}”.",
     "sendToKeyboard": "Send to keyboard",
+    "builtinEffects": "Built-in",
+    "userEffects": "Yours",
     "turnOff": "Turn off",
     "notOpenTitle": "{name} — not open",
     "notOpenReason": "Plugged in but not open — see the window",
