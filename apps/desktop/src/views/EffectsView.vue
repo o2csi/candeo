@@ -58,7 +58,7 @@ const shut = { devices: ref(false), effects: ref(false) }
  * §3).
  */
 
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
@@ -85,6 +85,7 @@ import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
+import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -284,9 +285,10 @@ const choices = computed<Choice[]>(() => [
  * Hardware comes first: it costs no processor time and survives everything,
  * which often makes it the right choice (`docs/design/studio.md` §1).
  *
- * The order is for display only. The fallback selection still takes the first
- * entry of `choices`, a built-in: a hardware effect would open the screen on a
- * simulator with nothing to animate.
+ * The order is for display only. When the selected device has no effect to
+ * select (`followDevice`), the fallback still takes the first entry of
+ * `choices`, a built-in: a hardware effect would open the screen on a simulator
+ * with nothing to animate.
  */
 const GROUPS: readonly Nature[] = ['hardware', 'builtin', 'user']
 
@@ -350,9 +352,49 @@ function cost(nature: Nature): string {
 
 const chosenEffect = ref<string | null>(null)
 
-const selectedEffect = computed<Choice | null>(
-  () => choices.value.find((c) => c.id === chosenEffect.value) ?? choices.value[0] ?? null,
+/**
+ * False until the library and the engine status were read once. Selecting
+ * before would show the first effect, and start its preview, for the time it
+ * takes to learn which one the device runs.
+ */
+const loaded = ref(false)
+
+const selectedEffect = computed<Choice | null>(() =>
+  loaded.value
+    ? (choices.value.find((c) => c.id === chosenEffect.value) ?? choices.value[0] ?? null)
+    : null,
 )
+
+/** The effects column's body, to bring the selected entry into view. */
+const effectsList = ref<HTMLElement | null>(null)
+
+/**
+ * Selects the selected device's effect: the one running on it, else the one it
+ * remembers (#118).
+ *
+ * Only when the screen opens and when another device is chosen, never on the
+ * engine refresh: an effect clicked since stays selected.
+ */
+async function followDevice(): Promise<void> {
+  const d = selectedDevice.value
+  chosenEffect.value = deviceEffect(
+    runningOn(d),
+    lastAppliedOn(d),
+    choices.value.map((c) => c.id),
+  )
+  const c = selectedEffect.value
+  if (!c) return
+  // Unfolded for this visit only: the fold the viewer saved stays theirs.
+  foldedSections.value[c.nature] = false
+  await nextTick()
+  effectsList.value
+    ?.querySelector(`[data-effect="${CSS.escape(c.id)}"]`)
+    ?.scrollIntoView({ block: 'nearest' })
+}
+
+watch(deviceKey, () => {
+  if (loaded.value) void followDevice()
+})
 
 // ---------------------------------------------------------------- moteur
 
@@ -957,6 +999,9 @@ onMounted(async () => {
 
   await refreshStatus()
 
+  loaded.value = true
+  void followDevice()
+
   // On a pu quitter l'écran entre-temps : poser l'interrogation périodique
   // maintenant la laisserait tourner pour personne.
   if (alive) statusTimer = window.setInterval(() => void refreshStatus(), STATUS_PERIOD)
@@ -1102,7 +1147,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div id="col-effects" class="col-body">
+      <div id="col-effects" ref="effectsList" class="col-body">
         <template v-for="g in grouped" :key="g.nature">
           <!--
             The title attribute names the button once the column is collapsed
@@ -1154,6 +1199,7 @@ onBeforeUnmount(() => {
               :key="c.id"
               class="entry"
               type="button"
+              :data-effect="c.id"
               :aria-pressed="selectedEffect?.id === c.id"
               :aria-label="activeId === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name"
               :title="c.name"
