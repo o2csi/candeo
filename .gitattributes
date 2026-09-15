@@ -1,0 +1,4 @@
+# Shipped effects are embedded in the binary and recognized by the hash of their
+# bytes: the same bytes on every build machine, whatever its Git settings. A
+# Windows runner checks out with CRLF, and every built-in then read as updated.
+packages/** text eol=lf
