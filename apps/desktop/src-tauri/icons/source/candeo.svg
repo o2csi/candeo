@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26242f"/>
+      <stop offset="1" stop-color="#121118"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffb347" stop-opacity="0.95"/>
+      <stop offset="0.4" stop-color="#f2a33c" stop-opacity="0.55"/>
+      <stop offset="0.75" stop-color="#e0741c" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e0741c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2a33c" stop-opacity="0.12"/>
+      <stop offset="0.55" stop-color="#f2a33c" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffd083"/>
+    </linearGradient>
+    <linearGradient id="lit" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.45" stop-color="#f2a33c" stop-opacity="0"/>
+      <stop offset="1" stop-color="#f2a33c" stop-opacity="0.22"/>
+    </linearGradient>
+    <clipPath id="inside">
+      <rect x="8" y="8" width="240" height="240" rx="56"/>
+    </clipPath>
+    <filter id="wide" x="-50%" y="-100%" width="200%" height="300%">
+      <feGaussianBlur stdDeviation="11"/>
+    </filter>
+    <filter id="near" x="-50%" y="-100%" width="200%" height="300%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#tile)"/>
+
+  <!-- The backlight: a halo over the tile, then the band spilling from under the key. -->
+  <g clip-path="url(#inside)">
+    <ellipse cx="128" cy="184" rx="124" ry="66" fill="url(#halo)"/>
+    <rect x="46" y="156" width="164" height="40" rx="20" fill="#f2a33c" filter="url(#wide)"/>
+  </g>
+  <rect x="60" y="166" width="136" height="18" rx="9" fill="#ffc46b" filter="url(#near)"/>
+
+  <!-- The keycap, lit from below. -->
+  <rect x="60" y="44" width="136" height="128" rx="26" fill="#2b2a38"/>
+  <rect x="60" y="44" width="136" height="128" rx="26" fill="url(#lit)"/>
+  <rect x="60" y="44" width="136" height="128" rx="26" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <rect x="78" y="56" width="100" height="88" rx="17" fill="#3a384e"/>
+
+  <!-- Where the light escapes. -->
+  <rect x="72" y="170" width="112" height="7" rx="3.5" fill="#fff1d6"/>
+</svg>
