@@ -748,6 +748,30 @@ hidden. Nothing starts when the effect already runs there. An effect that cannot
 start keeps its `activeEffects` entry and is logged; one edited outside candeo
 waits for the window to compile it, and `cache_effect` resumes it then.
 
+### `get_launch_at_login() -> LaunchAtLogin` · `set_launch_at_login(on) -> LaunchAtLogin`
+
+```ts
+{
+  enabled: boolean,
+  available: boolean   // false in a development build, and on macOS
+}
+```
+
+Launch at login, hidden in the notification area (#103). **The system's entry is
+the only record**, not `settings.json`: the `Run` value under
+`HKEY_CURRENT_USER` on Windows, `autostart/candeo.desktop` in the XDG configuration
+folder on Linux, pointing at the AppImage itself when there is one. The system's
+own tools change the same entry, so `enabled` reads it back: an entry Task Manager
+turned off (`StartupApproved`) or a desktop marked `Hidden=true` is off. Turning
+it on from candeo clears Task Manager's "off".
+
+The entry passes `--hidden`. The window is declared `create: false` and built at
+the end of `setup`; launched with `--hidden`, it is built only when someone opens
+it from the tray or launches candeo again. Without a tray icon it opens anyway,
+being the only way in.
+
+A development build writes no entry: it would register a binary under `target/`.
+
 ### `reset_settings()`
 
 Rewrites `settings.json` with the **default values**, and resets the devices.

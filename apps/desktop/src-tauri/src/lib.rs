@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use failure::Failure;
 use storage::{DeviceState, Settings};
 
+mod autostart;
 mod failure;
 mod hotplug;
 mod i18n;
@@ -1207,6 +1208,16 @@ pub fn run() {
             tray::install(app.handle());
             // Last: a replug reconciles through everything above.
             hotplug::watch(app.handle());
+
+            // The window is declared `create: false`, and built here once the
+            // state it reads is managed. Launched at login, no window is built
+            // until someone opens it from the tray (#103); without a tray icon,
+            // the window is the only way in, so it opens anyway.
+            if !(autostart::launched_hidden() && tray::installed()) {
+                if let Err(e) = single_instance::reveal(app.handle()) {
+                    tracing::error!("window not opened: {e}");
+                }
+            }
             Ok(())
         })
         // The close button **hides**, it does not quit — as long as there is a
@@ -1282,6 +1293,8 @@ pub fn run() {
             storage::get_settings,
             storage::set_settings,
             storage::set_resume_effects,
+            autostart::get_launch_at_login,
+            autostart::set_launch_at_login,
             storage::reset_settings,
             storage::remember_effect_params,
             journal::get_journal,

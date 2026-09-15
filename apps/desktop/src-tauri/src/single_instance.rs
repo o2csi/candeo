@@ -119,10 +119,9 @@ pub(crate) fn reveal<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 /// depend on it.
 ///
 /// Today the close button **hides** the window instead of destroying it, so
-/// most of the time [`reveal`] finds it and never gets here. What remains is
-/// the case that justifies writing this: a window declared `create: false` — a
-/// hidden start, which nothing prevents configuring — does not exist yet when
-/// someone asks to see it.
+/// once built, [`reveal`] finds it and never gets here. The window is declared
+/// `create: false`: this is how it is built at startup, and, launched at login
+/// ([`crate::autostart`]), the first time someone asks to see it.
 fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
     let config = app
         .config()

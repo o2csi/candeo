@@ -412,6 +412,22 @@ export function setResumeEffects(on: boolean): Promise<void> {
   return invoke('set_resume_effects', { on })
 }
 
+/** Whether candeo launches at login, and whether this build can change it. */
+export interface LaunchAtLogin {
+  enabled: boolean
+  /** False in a development build, and on a system candeo writes no entry for. */
+  available: boolean
+}
+
+export function getLaunchAtLogin(): Promise<LaunchAtLogin> {
+  return invoke('get_launch_at_login')
+}
+
+/** Writes or removes the system's login entry, hidden in the notification area. */
+export function setLaunchAtLogin(on: boolean): Promise<LaunchAtLogin> {
+  return invoke('set_launch_at_login', { on })
+}
+
 /** What someone chose for the interface language. */
 export type LanguageSetting = 'system' | 'en' | 'fr'
 

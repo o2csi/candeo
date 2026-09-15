@@ -239,7 +239,10 @@
     "startup": {
       "title": "Startup",
       "resume": "Resume applied effects",
-      "resumeDetail": "When candeo starts or a keyboard is plugged back in, the effect applied on it starts again."
+      "resumeDetail": "When candeo starts or a keyboard is plugged back in, the effect applied on it starts again.",
+      "login": "Launch at login",
+      "loginDetail": "candeo starts hidden in the notification area, with no window.",
+      "loginUnavailable": "Only in the installed application."
     },
     "log": {
       "title": "Log",

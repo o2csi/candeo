@@ -239,7 +239,10 @@
     "startup": {
       "title": "Démarrage",
       "resume": "Relancer les effets appliqués",
-      "resumeDetail": "Au démarrage de candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart."
+      "resumeDetail": "Au démarrage de candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart.",
+      "login": "Lancer à l'ouverture de session",
+      "loginDetail": "candeo démarre replié dans la zone de notification, sans fenêtre.",
+      "loginUnavailable": "Seulement dans l'application installée."
     },
     "log": {
       "title": "Journal",

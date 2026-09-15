@@ -14,16 +14,19 @@ import {
   diagnostic,
   getJournal,
   getLanguage,
+  getLaunchAtLogin,
   getSettings,
   openLogDir,
   resetSettings,
   setLanguage,
+  setLaunchAtLogin,
   setLogFilesKept,
   setLogLevel,
   setResumeEffects,
   type JournalStatus,
   type LanguageSetting,
   type LanguageStatus,
+  type LaunchAtLogin,
   type LogLevel,
 } from '../api/candeo'
 import { erreur, message } from '../api/journal'
@@ -82,6 +85,27 @@ async function chooseResume(event: Event): Promise<void> {
   } catch (e) {
     startupProblem.value = message(e)
     await readResume()
+  }
+}
+
+/** The system's login entry; `null` until read. Not in `settings.json`: see `autostart.rs`. */
+const login = ref<LaunchAtLogin | null>(null)
+
+async function readLogin(): Promise<void> {
+  try {
+    login.value = await getLaunchAtLogin()
+  } catch (e) {
+    startupProblem.value = message(e)
+  }
+}
+
+async function chooseLogin(event: Event): Promise<void> {
+  startupProblem.value = null
+  try {
+    login.value = await setLaunchAtLogin((event.target as HTMLInputElement).checked)
+  } catch (e) {
+    startupProblem.value = message(e)
+    await readLogin()
   }
 }
 
@@ -209,6 +233,7 @@ async function reset(): Promise<void> {
 onMounted(() => {
   void readLanguage()
   void readResume()
+  void readLogin()
   void readJournal()
 })
 </script>
@@ -251,6 +276,22 @@ onMounted(() => {
         {{ t('settings.startup.resume') }}
       </label>
       <p class="note">{{ t('settings.startup.resumeDetail') }}</p>
+
+      <template v-if="login">
+        <label class="level">
+          <input
+            id="launch-at-login"
+            type="checkbox"
+            :checked="login.enabled"
+            :disabled="!login.available"
+            @change="chooseLogin"
+          />
+          {{ t('settings.startup.login') }}
+        </label>
+        <p class="note">
+          {{ login.available ? t('settings.startup.loginDetail') : t('settings.startup.loginUnavailable') }}
+        </p>
+      </template>
     </section>
 
     <section v-if="journal" class="block" aria-labelledby="journal-title">
