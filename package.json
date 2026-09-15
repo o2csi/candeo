@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "Controle de l'eclairage clavier, par acces HID direct",
   "packageManager": "pnpm@12.4.1",
-  "engines": { "node": ">=22.12" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "dev": "pnpm --filter @candeo/desktop dev",
     "build": "pnpm --filter @candeo/desktop build",
