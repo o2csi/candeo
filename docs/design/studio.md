@@ -424,10 +424,16 @@ and the slider goes with the rest.
 ### The effects column
 
 Three sections, in this order: **Hardware**, **Built-in**, **Yours**. Hardware comes first: it costs no processor
-time and survives everything, which often makes it the right choice (§1). The
-order is for display only: on opening, the selection still falls on the first
-built-in effect, since a hardware effect would give the simulator nothing to
-animate.
+time and survives everything, which often makes it the right choice (§1).
+
+**The selection follows the selected device** (#118): when the screen opens and
+when another device is chosen, it becomes the effect running on that device,
+else the one it remembers, and its entry is brought into view, unfolding its
+section for the visit. The engine refresh never moves it: an effect clicked
+since stays selected. The screen selects nothing until the library and the
+engine status are read, rather than flash the first effect and start its
+preview. A device with no effect falls back to the first built-in effect, since
+a hardware effect would give the simulator nothing to animate.
 
 Each section header is a button that folds its section. Sections are expanded
 by default, and the choice is remembered per viewer in the webview storage;
