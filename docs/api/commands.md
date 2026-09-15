@@ -377,7 +377,7 @@ hard-coded: Tauri's API resolves every folder.
 
 ```
 app_data_dir()/effects/<name>.ts                 the shipped effects
-document_dir()/Candeo/effects/<name>.ts          the user's effects
+document_dir()/candeo/effects/<name>.ts          the user's effects
 app_cache_dir()/effects/<source>/<name>.json     JavaScript, manifest and swatch compiled from one version of a file
 app_config_dir()/settings.json
 ```

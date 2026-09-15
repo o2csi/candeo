@@ -888,7 +888,7 @@ pub enum Source {
     /// `app_data_dir()/effects/`: the effects Candeo ships, seeded and updated
     /// by it.
     Shipped,
-    /// `Documents/Candeo/effects/`: the effects people write, duplicate or drop
+    /// `Documents/candeo/effects/`: the effects people write, duplicate or drop
     /// in. Outside `AppData`, so a packaged build neither hides nor removes them.
     User,
 }
@@ -2076,11 +2076,11 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
     Ok(Store::new(&data, &user_dir(app, &data), &config, &cache))
 }
 
-/// The user's effects folder: `Documents/Candeo/effects`, or, where the system
+/// The user's effects folder: `Documents/candeo/effects`, or, where the system
 /// names no documents folder, `app_data_dir()/user-effects`.
 fn user_dir(app: &AppHandle, data: &Path) -> PathBuf {
     match app.path().document_dir() {
-        Ok(documents) => documents.join("Candeo").join("effects"),
+        Ok(documents) => documents.join("candeo").join("effects"),
         Err(e) => {
             static SAID: std::sync::Once = std::sync::Once::new();
             SAID.call_once(|| {
@@ -2391,7 +2391,7 @@ mod tests {
 
     /// The user's effects folder.
     fn effects_dir(tmp: &tempfile::TempDir) -> PathBuf {
-        tmp.path().join("documents").join("Candeo").join("effects")
+        tmp.path().join("documents").join("candeo").join("effects")
     }
 
     fn shipped_dir(tmp: &tempfile::TempDir) -> PathBuf {
@@ -2797,7 +2797,7 @@ mod tests {
     #[test]
     fn dangerous_names_never_reach_the_disk() {
         let (tmp, store) = temp_store();
-        let sibling = tmp.path().join("documents").join("Candeo").join("secrets");
+        let sibling = tmp.path().join("documents").join("candeo").join("secrets");
         fs::create_dir_all(&sibling).unwrap();
         fs::write(sibling.join("x.ts"), "secret").unwrap();
 

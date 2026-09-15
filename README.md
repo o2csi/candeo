@@ -33,17 +33,17 @@ installers and a `SHA256SUMS` file.
 
 **Windows (x64)**
 
-- `Candeo_<version>_x64-setup.exe` installs for the current account, without
+- `candeo_<version>_x64-setup.exe` installs for the current account, without
   administrator rights. The one to pick.
-- `Candeo_<version>_x64_en-US.msi` installs for every account, and needs
+- `candeo_<version>_x64_en-US.msi` installs for every account, and needs
   administrator rights.
 - The installers are not signed yet: on first run, SmartScreen warns about an
   unknown publisher. **More info**, then **Run anyway**.
 
 **Linux (x86_64)**
 
-- Debian, Ubuntu: `sudo apt install ./Candeo_<version>_amd64.deb`
-- Fedora: `sudo dnf install ./Candeo-<version>-1.x86_64.rpm`
+- Debian, Ubuntu: `sudo apt install ./candeo_<version>_amd64.deb`
+- Fedora: `sudo dnf install ./candeo-<version>-1.x86_64.rpm`
 - Both packages install the [udev rule](#udev-rule) that gives the signed-in
   user access to the keyboard: plug it in again after installing. There is no
   AppImage, which cannot install that rule.
@@ -160,7 +160,7 @@ Hence the distinction this section keeps: what is **compiled** and what remains
 - **Paths.** No path is hard-coded: Tauri's API applies the system's convention.
   Shipped effects go in `app_data_dir()`
   (`%APPDATA%\com.o2csi.candeo` or `~/.local/share/…`), the user's in
-  `Documents/Candeo/effects`, settings in `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
+  `Documents/candeo/effects`, settings in `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
   account, and shared by all accounts.
 
 ### Assumed, for lack of Linux hardware

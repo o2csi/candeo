@@ -31,7 +31,7 @@ shared a folder.
 | Source | Folder | Holds | Written by |
 |---|---|---|---|
 | `shipped` | `app_data_dir()/effects/` | the effects Candeo ships | Candeo, at startup and on **Restore** |
-| `user` | `document_dir()/Candeo/effects/` | the effects people write, duplicate or drop in | people and the editor |
+| `user` | `document_dir()/candeo/effects/` | the effects people write, duplicate or drop in | people and the editor |
 
 - **Same layout on every system**, through Tauri's `document_dir()`: `Documents`
   on Windows, the XDG documents directory on Linux. The user folder is created
