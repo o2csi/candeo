@@ -8,8 +8,8 @@ For maintainers. Installing is in the README.
    Commits already: before 1.0, `feat` and breaking changes bump the minor
    version, `fix` the patch.
 2. **release-please keeps a release pull request open** (`release-please.yml`),
-   with the next version and its `CHANGELOG.md` section, and updates it at every
-   merge.
+   titled `Go release vX.Y.Z 🚀`, with the next version and its `CHANGELOG.md`
+   section, and updates it at every merge.
 3. **Merging that pull request releases.** release-please bumps the version,
    tags the merge commit `vX.Y.Z`, opens a **draft** release carrying the
    changelog, and calls `release.yml`.
@@ -48,6 +48,10 @@ when one disagrees with the tag.
 - **Repository setting:** *Settings → Actions → General → Allow GitHub Actions to
   create and approve pull requests* must be on, or release-please cannot open its
   pull request.
+- **Pull request titles are plain language.** GitHub puts the title in every
+  merge commit, as its body or its subject, and no setting leaves it out.
+  Written as a Conventional Commit, it would appear in the changelog next to the
+  commits it merges; 0.1.0 needed that duplicate removed by hand.
 - **The first release** is 0.1.0: the commit adding this pipeline carries a
   `Release-As: 0.1.0` footer, and `bootstrap-sha` starts the changelog there.
 

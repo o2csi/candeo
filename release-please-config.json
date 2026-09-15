@@ -11,6 +11,7 @@
       "force-tag-creation": true,
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
+      "pull-request-title-pattern": "Go release v${version} 🚀",
       "extra-files": [
         { "type": "json", "path": "apps/desktop/package.json", "jsonpath": "$.version" },
         { "type": "json", "path": "packages/effects-api/package.json", "jsonpath": "$.version" },
