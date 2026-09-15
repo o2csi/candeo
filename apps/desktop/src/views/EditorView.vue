@@ -74,6 +74,7 @@ import {
   stopEffect,
   type EngineReport,
 } from '../api/candeo'
+import { effectName, userKey } from '../api/effectKey'
 import { erreur, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
@@ -131,7 +132,7 @@ const builtin = ref(false)
 /** Opens the effect in place; a built-in opens read-only. */
 async function open(): Promise<void> {
   loading.value = true
-  name.value = id.value ?? ''
+  name.value = id.value === null ? '' : effectName(id.value)
   builtin.value = false
   await migrateDrafts(legacyEffectIds)
   const draft = readDraft(id.value)
@@ -191,20 +192,21 @@ async function rename(): Promise<void> {
     name.value = wanted
     return
   }
-  if (wanted === current) return
+  if (wanted === effectName(current)) return
   if (wanted === '') {
-    name.value = current
+    name.value = effectName(current)
     return
   }
   await act(async () => {
+    let renamed: string
     try {
-      await renameEffect(current, wanted)
+      renamed = await renameEffect(current, wanted)
     } catch (e) {
-      name.value = current
+      name.value = effectName(current)
       throw e
     }
-    moveDraft(current, wanted)
-    await router.replace({ name: 'editor', params: { id: wanted } })
+    moveDraft(current, renamed)
+    await router.replace({ name: 'editor', params: { id: renamed } })
     // The settings moved on disk: the gallery reads them back rather than guess.
     await reloadSettings()
   })
@@ -361,8 +363,8 @@ const simNote = computed(() => {
 // ---------------------------------------------------------------- actions
 
 /**
- * Checks the source, writes its file, compiles it and records the result, and
- * returns the effect's name.
+ * Checks the source, writes its file in the user's folder, compiles it and
+ * records the result, and returns the effect's key.
  *
  * Refusals come in this order: the language service rejects code that does not
  * compile, Rust rejects a name that cannot be a file name or that is taken. A
@@ -389,20 +391,21 @@ async function install(): Promise<string> {
     )
   }
 
-  const hash = await saveEffectSource(target, text, creating.value)
+  const key = userKey(target)
+  const hash = await saveEffectSource(key, text, creating.value)
   clearDraft(id.value)
   restored.value = false
   saved.value = text
-  // Carrying the name in the route is what makes reopening this screen read this
+  // Carrying the key in the route is what makes reopening this screen read this
   // effect back, and what the preview follows.
-  if (id.value !== target) await router.replace({ name: 'editor', params: { id: target } })
+  if (id.value !== key) await router.replace({ name: 'editor', params: { id: key } })
 
-  const entry = await cacheEffect(target, hash, await transpile(text))
+  const entry = await cacheEffect(key, hash, await transpile(text))
   savedSpecs.value = entry.params ?? {}
   if (entry.state === 'broken') {
     throw new Error(entry.error ?? t('editor.savedButBroken'))
   }
-  return target
+  return key
 }
 
 /** Runs one action, shows what stopped it, and re-reads the engine either way. */

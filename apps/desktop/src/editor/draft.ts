@@ -77,8 +77,9 @@ export function moveDraft(from: string, to: string): void {
 let migration: Promise<void> | null = null
 
 /**
- * Moves drafts saved under an effect id of the directory layout to the name that
- * effect became. Once per window load, and again after a failure.
+ * Moves drafts saved under what an effect was called before this run's
+ * migration — a directory id, a name — to the key it became. Once per window
+ * load, and again after a failure.
  */
 export function migrateDrafts(renames: () => Promise<Record<string, string>>): Promise<void> {
   migration ??= renames()

@@ -122,14 +122,14 @@ pub struct Manifest {
     pub reads_keys: bool,
 }
 
-/// Kind of effect: written by the user, or compiled into the binary.
+/// Kind of effect: shipped with the application, or the user's.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum EffectKind {
-    /// A file copied from the application and recorded as such, modified or
-    /// not. Renamed, it becomes the user's.
+    /// A file of the shipped folder, copied by the application and recorded as
+    /// such, modified or not.
     Builtin,
-    /// Any other file in the effects folder.
+    /// A file of the user's folder.
     User,
 }
 
@@ -152,7 +152,7 @@ pub enum EffectState {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectEntry {
-    /// The built-in's id, or the file name.
+    /// The effect's key, `<source>:<name>`: see [`EffectKey`].
     pub id: String,
     pub kind: EffectKind,
     pub state: EffectState,
@@ -499,8 +499,9 @@ pub struct Settings {
 ///
 /// - 0: effects referenced by their directory id;
 /// - 1: user effects referenced by their name, built-in effects by their id;
-/// - 2: every effect referenced by its name.
-pub const SETTINGS_VERSION: u32 = 2;
+/// - 2: every effect referenced by its name;
+/// - 3: every effect referenced by its key, `<source>:<name>`.
+pub const SETTINGS_VERSION: u32 = 3;
 
 impl Default for Settings {
     fn default() -> Self {
@@ -764,6 +765,17 @@ impl Settings {
         *self != before
     }
 
+    /// Every effect this file refers to, once each.
+    fn effect_references(&self) -> Vec<String> {
+        let references: BTreeSet<&str> = self
+            .active_effects
+            .iter()
+            .map(|r| r.effect.as_str())
+            .chain(self.effect_params.iter().map(|r| r.effect.as_str()))
+            .collect();
+        references.into_iter().map(str::to_owned).collect()
+    }
+
     /// Rewrites every effect reference found in `renames`.
     ///
     /// A reference that is not in the table stays as it is: it names an effect
@@ -869,6 +881,77 @@ pub(crate) fn validate_name(name: &str) -> CmdResult<()> {
         return Err(Failure::new("nameReserved").with("name", name));
     }
     Ok(())
+}
+
+/// Where an effect's file lives. See `docs/design/effects-sources.md`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Source {
+    /// `app_data_dir()/effects/`: the effects candeo ships, seeded and updated
+    /// by it.
+    Shipped,
+    /// `Documents/candeo/effects/`: the effects people write, duplicate or drop
+    /// in. Outside `AppData`, so a packaged build neither hides nor removes them.
+    User,
+}
+
+impl Source {
+    const ALL: [Source; 2] = [Source::Shipped, Source::User];
+
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Shipped => "shipped",
+            Self::User => "user",
+        }
+    }
+}
+
+/// An effect's key, written `<source>:<name>`: `shipped:Breathing`, `user:Rain`.
+///
+/// What refers to an effect holds it: `settings.json`, the engine, the tray menu,
+/// editor drafts. Relative to its source's folder, never an absolute path: a
+/// path carries the user name into logs and settings, and breaks when the folder
+/// moves. Unambiguous, since names exclude `:`.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EffectKey {
+    pub source: Source,
+    pub name: String,
+}
+
+impl EffectKey {
+    pub fn shipped(name: &str) -> Self {
+        Self {
+            source: Source::Shipped,
+            name: name.to_owned(),
+        }
+    }
+
+    pub fn user(name: &str) -> Self {
+        Self {
+            source: Source::User,
+            name: name.to_owned(),
+        }
+    }
+
+    /// The key a string holds, refused like a name that designates nothing.
+    pub fn parse(key: &str) -> CmdResult<Self> {
+        let not_found = || Failure::new("effectNotFound").with("name", key);
+        let (prefix, name) = key.split_once(':').ok_or_else(not_found)?;
+        let source = Source::ALL
+            .into_iter()
+            .find(|s| s.prefix() == prefix)
+            .ok_or_else(not_found)?;
+        validate_name(name)?;
+        Ok(Self {
+            source,
+            name: name.to_owned(),
+        })
+    }
+}
+
+impl std::fmt::Display for EffectKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.source.prefix(), self.name)
+    }
 }
 
 /// A valid name made out of any text: forbidden characters become `-`, the ends
@@ -988,44 +1071,59 @@ struct CacheRecord {
 /// The base paths come from outside: nothing here knows about Tauri, which makes
 /// the whole thing testable in a temporary directory.
 pub struct Store {
-    effects_dir: PathBuf,
+    shipped_dir: PathBuf,
+    user_dir: PathBuf,
     cache_dir: PathBuf,
     settings_file: PathBuf,
 }
 
 impl Store {
-    /// `data_dir` holds the content, `config_dir` the configuration, `cache_dir`
-    /// what can be rebuilt.
-    pub fn new(data_dir: &Path, config_dir: &Path, cache_dir: &Path) -> Self {
+    /// `data_dir` holds the shipped effects, `user_dir` is the user's effects
+    /// folder itself, `config_dir` holds the configuration, `cache_dir` what can
+    /// be rebuilt.
+    pub fn new(data_dir: &Path, user_dir: &Path, config_dir: &Path, cache_dir: &Path) -> Self {
         Self {
-            effects_dir: data_dir.join("effects"),
+            shipped_dir: data_dir.join("effects"),
+            user_dir: user_dir.to_owned(),
             cache_dir: cache_dir.join("effects"),
             settings_file: config_dir.join("settings.json"),
         }
     }
 
-    fn source_path(&self, name: &str) -> PathBuf {
-        self.effects_dir.join(format!("{name}.{SOURCE_EXTENSION}"))
+    fn dir(&self, source: Source) -> &Path {
+        match source {
+            Source::Shipped => &self.shipped_dir,
+            Source::User => &self.user_dir,
+        }
     }
 
-    fn cache_path(&self, name: &str) -> PathBuf {
-        self.cache_dir.join(format!("{name}.json"))
+    fn source_path(&self, key: &EffectKey) -> PathBuf {
+        self.dir(key.source)
+            .join(format!("{}.{SOURCE_EXTENSION}", key.name))
     }
 
-    /// The effect names in the folder, in a stable order.
+    /// One cache tree per source: a shipped and a user effect may share a name.
+    fn cache_path(&self, key: &EffectKey) -> PathBuf {
+        self.cache_dir
+            .join(key.source.prefix())
+            .join(format!("{}.json", key.name))
+    }
+
+    /// The effect names in a source's folder, in a stable order.
     ///
     /// A file whose name the application would refuse is skipped rather than
     /// failing the whole list: a library of twenty effects must not disappear
     /// because of one foreign file.
-    fn names(&self) -> CmdResult<Vec<String>> {
+    fn names(&self, source: Source) -> CmdResult<Vec<String>> {
+        let dir = self.dir(source);
         // Missing folder: first launch, no effect written. This is not an error.
-        let entries = match fs::read_dir(&self.effects_dir) {
+        let entries = match fs::read_dir(dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => {
                 return Err(Failure::unexpected(format!(
                     "cannot read {}: {e}",
-                    self.effects_dir.display()
+                    dir.display()
                 )))
             }
         };
@@ -1061,54 +1159,64 @@ impl Store {
         Ok(names)
     }
 
-    /// The name as it is on disk, for a name given in any case.
-    fn existing(&self, name: &str) -> CmdResult<Option<String>> {
+    /// The name as it is on disk in a source's folder, for a name given in any
+    /// case.
+    fn existing(&self, source: Source, name: &str) -> CmdResult<Option<String>> {
         let wanted = name.to_lowercase();
         Ok(self
-            .names()?
+            .names(source)?
             .into_iter()
             .find(|n| n.to_lowercase() == wanted))
     }
 
-    /// Fails unless an effect has exactly this name.
-    fn require(&self, name: &str) -> CmdResult<()> {
-        validate_name(name)?;
-        match self.existing(name)? {
-            Some(existing) if existing == name => Ok(()),
-            _ => Err(Failure::new("effectNotFound").with("name", name)),
+    /// Fails unless an effect has exactly this key.
+    fn require(&self, key: &EffectKey) -> CmdResult<()> {
+        validate_name(&key.name)?;
+        match self.existing(key.source, &key.name)? {
+            Some(existing) if existing == key.name => Ok(()),
+            _ => Err(Failure::new("effectNotFound").with("name", &key.name)),
         }
     }
 
-    fn read_cache(&self, name: &str) -> Option<CacheRecord> {
-        fs::read_to_string(self.cache_path(name))
+    fn read_cache(&self, key: &EffectKey) -> Option<CacheRecord> {
+        fs::read_to_string(self.cache_path(key))
             .ok()
             .and_then(|raw| serde_json::from_str(&raw).ok())
     }
 
-    /// The library: every file, with its state and whether it was shipped.
+    /// The library: every file of both sources, with its state.
     ///
     /// Listing reads files and hashes them, and runs nothing: whatever has to run
     /// happened in [`Self::cache_effect`].
     pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
         let shipped = self.shipped_records();
         let mut effects = Vec::new();
-        for name in self.names()? {
-            // A file that cannot be read right now — locked by an editor, say —
-            // is skipped for this listing rather than failing all of it.
-            let Ok(bytes) = fs::read(self.source_path(&name)) else {
-                continue;
-            };
-            let hash = sha256_hex(&bytes);
-            let record = self.read_cache(&name).filter(|r| r.hash == hash);
-            effects.push(mark_shipped(user_entry(name, hash, record), &shipped));
+        for source in Source::ALL {
+            for name in self.names(source)? {
+                // A file candeo did not put in the shipped folder is not a
+                // built-in: the next startup moves it to the user's folder
+                // ([`Self::migrate_sources`]).
+                if source == Source::Shipped && !matches!(shipped.get(&name), Some(Some(_))) {
+                    continue;
+                }
+                let key = EffectKey { source, name };
+                // A file that cannot be read right now — locked by an editor,
+                // say — is skipped for this listing rather than failing all of it.
+                let Ok(bytes) = fs::read(self.source_path(&key)) else {
+                    continue;
+                };
+                let hash = sha256_hex(&bytes);
+                let record = self.read_cache(&key).filter(|r| r.hash == hash);
+                effects.push(library_entry(key, hash, record, &shipped));
+            }
         }
         Ok(effects)
     }
 
     /// An effect's source, to open it in the editor.
-    pub fn effect_source(&self, id: &str) -> CmdResult<String> {
-        self.require(id)?;
-        read(&self.source_path(id))
+    pub fn effect_source(&self, key: &EffectKey) -> CmdResult<String> {
+        self.require(key)?;
+        read(&self.source_path(key))
     }
 
     /// Writes an effect's source and returns its hash.
@@ -1120,23 +1228,28 @@ impl Store {
     /// Written through a temporary file and a rename: a Refresh reading the
     /// folder at that instant must never compile half a file.
     ///
-    /// A built-in is not saved over: see [`Store::restore_shipped`] for why.
-    pub fn save_effect_source(&self, name: &str, source: &str, create: bool) -> CmdResult<String> {
-        validate_name(name)?;
-        match (self.existing(name)?, create) {
+    /// Only the user's effects are written: a built-in is not saved over, see
+    /// [`Store::restore_shipped`] for why, and nothing is created among them.
+    pub fn save_effect_source(
+        &self,
+        key: &EffectKey,
+        source: &str,
+        create: bool,
+    ) -> CmdResult<String> {
+        validate_name(&key.name)?;
+        if key.source == Source::Shipped {
+            return Err(Failure::new("builtinNotSaved").with("name", &key.name));
+        }
+        match (self.existing(Source::User, &key.name)?, create) {
             (Some(existing), true) => {
                 return Err(Failure::new("effectExists").with("name", existing));
             }
-            (Some(existing), false) if existing == name => {
-                if self.is_builtin(name) {
-                    return Err(Failure::new("builtinNotSaved").with("name", name));
-                }
-            }
-            (_, false) => return Err(Failure::new("effectNotFound").with("name", name)),
-            (None, true) => self.take_shipped_name(name)?,
+            (Some(existing), false) if existing == key.name => {}
+            (_, false) => return Err(Failure::new("effectNotFound").with("name", &key.name)),
+            (None, true) => {}
         }
-        create_dir(&self.effects_dir)?;
-        write_atomically(&self.source_path(name), source)?;
+        create_dir(&self.user_dir)?;
+        write_atomically(&self.source_path(key), source)?;
         Ok(sha256_hex(source.as_bytes()))
     }
 
@@ -1148,23 +1261,26 @@ impl Store {
     ///
     /// Refused when the file no longer has `hash`: it changed while the window
     /// was compiling, and recording would pair this JavaScript with other code.
-    pub fn cache_effect(&self, name: &str, hash: &str, js: &str) -> CmdResult<EffectEntry> {
-        self.require(name)?;
+    pub fn cache_effect(&self, key: &EffectKey, hash: &str, js: &str) -> CmdResult<EffectEntry> {
+        self.require(key)?;
         let current = sha256_hex(
-            &fs::read(self.source_path(name))
-                .map_err(|e| Failure::unexpected(format!("cannot read “{name}”: {e}")))?,
+            &fs::read(self.source_path(key))
+                .map_err(|e| Failure::unexpected(format!("cannot read “{key}”: {e}")))?,
         );
         if current != hash {
-            return Err(Failure::new("effectChanged").with("name", name));
+            return Err(Failure::new("effectChanged").with("name", &key.name));
         }
 
         let record = compile_record(hash, js);
-        create_dir(&self.cache_dir)?;
+        let path = self.cache_path(key);
+        create_dir(path.parent().unwrap_or(&self.cache_dir))?;
         let json = serde_json::to_string(&record)
             .map_err(|e| Failure::unexpected(format!("cache record not serialisable: {e}")))?;
-        write_atomically(&self.cache_path(name), &json)?;
-        Ok(mark_shipped(
-            user_entry(name.to_owned(), hash.to_owned(), Some(record)),
+        write_atomically(&path, &json)?;
+        Ok(library_entry(
+            key.clone(),
+            hash.to_owned(),
+            Some(record),
             &self.shipped_records(),
         ))
     }
@@ -1173,50 +1289,51 @@ impl Store {
     ///
     /// For a file, only the JavaScript compiled from its **current** bytes: the
     /// engine and the tray never run code that differs from what is on disk.
-    pub fn effect_js(&self, id: &str) -> CmdResult<String> {
-        self.require(id)?;
+    pub fn effect_js(&self, key: &EffectKey) -> CmdResult<String> {
+        self.require(key)?;
         let hash = sha256_hex(
-            &fs::read(self.source_path(id))
-                .map_err(|e| Failure::unexpected(format!("cannot read “{id}”: {e}")))?,
+            &fs::read(self.source_path(key))
+                .map_err(|e| Failure::unexpected(format!("cannot read “{key}”: {e}")))?,
         );
-        match self.read_cache(id).filter(|r| r.hash == hash) {
+        match self.read_cache(key).filter(|r| r.hash == hash) {
             Some(CacheRecord {
                 error: Some(error), ..
             }) => Err(Failure::new("effectBroken")
-                .with("name", id)
+                .with("name", &key.name)
                 .with("error", error)),
             Some(record) => Ok(record.js),
-            None => Err(Failure::new("effectNotCompiled").with("name", id)),
+            None => Err(Failure::new("effectNotCompiled").with("name", &key.name)),
         }
     }
 
-    /// Renames an effect's file, and its cache with it.
+    /// Renames one of the user's effects, and its cache with it, and returns its
+    /// new key.
     ///
     /// The references in `settings.json` and in the engine are the command's
     /// business: see [`rename_effect`].
-    pub fn rename_effect(&self, from: &str, to: &str) -> CmdResult<()> {
+    pub fn rename_effect(&self, from: &EffectKey, to: &str) -> CmdResult<EffectKey> {
         self.require(from)?;
-        if self.is_builtin(from) {
-            return Err(Failure::new("builtinNotRenamed").with("name", from));
+        if from.source == Source::Shipped {
+            return Err(Failure::new("builtinNotRenamed").with("name", &from.name));
         }
         validate_name(to)?;
-        if let Some(existing) = self.existing(to)? {
+        if let Some(existing) = self.existing(Source::User, to)? {
             // The same file under another case is a rename too: `Onde` → `onde`.
-            if existing != from {
+            if existing != from.name {
                 return Err(Failure::new("effectExists").with("name", existing));
             }
         }
-        if from == to {
-            return Ok(());
+        let target = EffectKey::user(to);
+        if *from == target {
+            return Ok(target);
         }
-        self.take_shipped_name(to)?;
-        let (source, target) = (self.source_path(from), self.source_path(to));
-        fs::rename(&source, &target)
+        let (source, path) = (self.source_path(from), self.source_path(&target));
+        fs::rename(&source, &path)
             .map_err(|e| Failure::unexpected(format!("cannot rename {}: {e}", source.display())))?;
         // A cache that does not follow only costs a compilation at the next
         // Refresh: not a reason to undo a rename that succeeded.
-        let _ = fs::rename(self.cache_path(from), self.cache_path(to));
-        Ok(())
+        let _ = fs::rename(self.cache_path(from), self.cache_path(&target));
+        Ok(target)
     }
 
     /// Tells whether this effect can be deleted, **without deleting anything**.
@@ -1224,10 +1341,10 @@ impl Store {
     /// Separate from [`Self::delete_effect`] because the command stops the loops
     /// **between** the refusal and the erasure: refusing afterwards would make a
     /// running effect pay for a stop it was not owed.
-    pub fn check_deletable(&self, id: &str) -> CmdResult<()> {
-        self.require(id)?;
-        if self.is_builtin(id) {
-            return Err(Failure::new("builtinNotDeleted").with("name", id));
+    pub fn check_deletable(&self, key: &EffectKey) -> CmdResult<()> {
+        self.require(key)?;
+        if key.source == Source::Shipped {
+            return Err(Failure::new("builtinNotDeleted").with("name", &key.name));
         }
         Ok(())
     }
@@ -1240,63 +1357,51 @@ impl Store {
             .unwrap_or_default()
     }
 
-    /// True for a file recorded as shipped: see [`EffectKind::Builtin`].
-    fn is_builtin(&self, name: &str) -> bool {
-        matches!(self.shipped_records().get(name), Some(Some(_)))
-    }
-
-    /// A user effect takes the name of a shipped effect whose file is gone: the
-    /// name is the user's from now on, as when the file was there before the
-    /// first copy, and restoring the shipped one is refused until it is free.
-    fn take_shipped_name(&self, name: &str) -> CmdResult<()> {
-        let mut settings = self.read_settings()?;
-        if let Some(record) = settings.shipped_effects.get_mut(name) {
-            if record.take().is_some() {
-                return self.write_settings(&settings);
-            }
-        }
-        Ok(())
-    }
-
-    /// Copies an effect under a new name and returns it: `<name> (copy)`, then
-    /// `(copy 2)`, `(copy 3)`…
+    /// Copies an effect into the user's folder and returns the copy's key:
+    /// `<name> (copy)`, then `(copy 2)`, `(copy 3)`…
     ///
     /// The cache is copied too: same bytes, same hash, so the copy is ready
-    /// without a compilation. The copy is not recorded as shipped, even when the
-    /// original is: it is a new effect, the user's.
-    pub fn duplicate_effect(&self, id: &str, language: Language) -> CmdResult<String> {
-        self.require(id)?;
-        let source = read(&self.source_path(id))?;
-        let taken: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
-        let name = copy_name(id, &taken, language);
+    /// without a compilation. A copy of a built-in is the user's.
+    pub fn duplicate_effect(&self, key: &EffectKey, language: Language) -> CmdResult<EffectKey> {
+        self.require(key)?;
+        let source = read(&self.source_path(key))?;
+        let taken: BTreeSet<String> = self
+            .names(Source::User)?
+            .iter()
+            .map(|n| n.to_lowercase())
+            .collect();
+        let copy = EffectKey::user(&copy_name(&key.name, &taken, language));
 
-        write_atomically(&self.source_path(&name), &source)?;
-        if let Ok(record) = fs::read_to_string(self.cache_path(id)) {
+        create_dir(&self.user_dir)?;
+        write_atomically(&self.source_path(&copy), &source)?;
+        if let Ok(record) = fs::read_to_string(self.cache_path(key)) {
             // A cache that does not follow only costs a compilation at the next
             // Refresh.
-            let _ = write_atomically(&self.cache_path(&name), &record);
+            let path = self.cache_path(&copy);
+            let _ = create_dir(path.parent().unwrap_or(&self.cache_dir))
+                .and_then(|()| write_atomically(&path, &record));
         }
-        Ok(name)
+        Ok(copy)
     }
 
-    /// The effects folder, created if it does not exist yet: opening it must work
-    /// on a first launch too, since saving a file there is how an effect is
-    /// added.
-    pub fn effects_dir(&self) -> CmdResult<&Path> {
-        create_dir(&self.effects_dir)?;
-        Ok(&self.effects_dir)
+    /// The user's effects folder, created if it does not exist yet: opening it
+    /// must work on a first launch too, since saving a file there is how an
+    /// effect is added.
+    pub fn user_effects_dir(&self) -> CmdResult<&Path> {
+        create_dir(&self.user_dir)?;
+        Ok(&self.user_dir)
     }
 
-    /// Deletes an effect's file and its cache.
-    pub fn delete_effect(&self, id: &str) -> CmdResult<()> {
+    /// Deletes one of the user's effects, and its cache.
+    pub fn delete_effect(&self, key: &EffectKey) -> CmdResult<()> {
         // Checked again rather than assumed: between the command's refusal and
         // this call, the file may have disappeared — and this is where it is
         // reported.
-        self.check_deletable(id)?;
-        let path = self.source_path(id);
+        self.check_deletable(key)?;
+        let path = self.source_path(key);
         fs::remove_file(&path)
             .map_err(|e| Failure::unexpected(format!("cannot delete {}: {e}", path.display())))?;
-        let _ = fs::remove_file(self.cache_path(id));
+        let _ = fs::remove_file(self.cache_path(key));
         Ok(())
     }
 
@@ -1318,13 +1423,13 @@ impl Store {
     /// The directory is removed only once its file is written: the source is the
     /// one thing that cannot be rebuilt.
     pub fn migrate_directories(&self) -> CmdResult<BTreeMap<String, String>> {
-        let entries = match fs::read_dir(&self.effects_dir) {
+        let entries = match fs::read_dir(&self.shipped_dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
             Err(e) => {
                 return Err(Failure::unexpected(format!(
                     "cannot read {}: {e}",
-                    self.effects_dir.display()
+                    self.shipped_dir.display()
                 )))
             }
         };
@@ -1338,7 +1443,13 @@ impl Store {
         }
         dirs.sort();
 
-        let mut taken: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
+        // Written in the folder the directories were in, which is now the shipped
+        // one: [`Self::migrate_sources`] moves them to the user's next.
+        let mut taken: BTreeSet<String> = self
+            .names(Source::Shipped)?
+            .iter()
+            .map(|n| n.to_lowercase())
+            .collect();
         let mut plan = Vec::with_capacity(dirs.len());
         for (id, dir) in dirs {
             let wanted = fs::read_to_string(dir.join(LEGACY_MANIFEST_FILE))
@@ -1351,7 +1462,9 @@ impl Store {
             // A file already holding this very source was written by a run
             // interrupted before it removed the directory: it is this effect,
             // not a name to avoid.
-            let name = if fs::read_to_string(self.source_path(&base)).is_ok_and(|s| s == source) {
+            let name = if fs::read_to_string(self.source_path(&EffectKey::shipped(&base)))
+                .is_ok_and(|s| s == source)
+            {
                 base
             } else {
                 free_name(&base, &taken)
@@ -1371,9 +1484,9 @@ impl Store {
             self.write_settings(&settings)?;
         }
 
-        create_dir(&self.effects_dir)?;
+        create_dir(&self.shipped_dir)?;
         for (_, dir, name, source) in &plan {
-            write_atomically(&self.source_path(name), source)?;
+            write_atomically(&self.source_path(&EffectKey::shipped(name)), source)?;
             fs::remove_dir_all(dir).map_err(|e| {
                 Failure::unexpected(format!("cannot delete {}: {e}", dir.display()))
             })?;
@@ -1402,8 +1515,8 @@ impl Store {
         Ok(renames)
     }
 
-    /// Copies the shipped effects into the folder, once each, and updates the
-    /// copies nobody changed.
+    /// Copies the shipped effects into the shipped folder, once each, and updates
+    /// the copies nobody changed.
     ///
     /// | State | Action |
     /// |---|---|
@@ -1412,10 +1525,12 @@ impl Store {
     /// | recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
     /// | recorded, file modified | leave it |
     /// | recorded, file missing (deleted or renamed) | leave it: never copied again |
-    /// | recorded, no longer shipped | forget the record: the file is the user's |
+    /// | recorded, no longer shipped | forget the record |
     ///
     /// "Unchanged" means the file still has the hash recorded when it was copied:
-    /// an update never overwrites a line someone wrote.
+    /// an update never overwrites a line someone wrote. A file left without a
+    /// record is not candeo's: [`Self::migrate_sources`] moves it to the user's
+    /// folder.
     pub fn seed_shipped(&self, shipped: &[Shipped]) -> CmdResult<Seeding> {
         let before = self.read_settings()?;
         let mut settings = before.clone();
@@ -1424,23 +1539,23 @@ impl Store {
         for effect in shipped {
             let hash = sha256_hex(effect.source.as_bytes());
             let recorded = settings.shipped_effects.get(effect.name).cloned();
-            let on_disk = self.existing(effect.name)?;
+            let on_disk = self.existing(Source::Shipped, effect.name)?;
+            let path = self.source_path(&EffectKey::shipped(effect.name));
 
             let record = match (recorded, on_disk) {
                 (None, Some(_)) => None,
                 (None, None) => {
-                    create_dir(&self.effects_dir)?;
-                    write_atomically(&self.source_path(effect.name), effect.source)?;
+                    create_dir(&self.shipped_dir)?;
+                    write_atomically(&path, effect.source)?;
                     seeding.copied += 1;
                     Some(hash)
                 }
                 (Some(Some(recorded)), Some(existing))
                     if recorded != hash
                         && existing == effect.name
-                        && fs::read(self.source_path(effect.name))
-                            .is_ok_and(|bytes| sha256_hex(&bytes) == recorded) =>
+                        && fs::read(&path).is_ok_and(|bytes| sha256_hex(&bytes) == recorded) =>
                 {
-                    write_atomically(&self.source_path(effect.name), effect.source)?;
+                    write_atomically(&path, effect.source)?;
                     seeding.updated += 1;
                     Some(hash)
                 }
@@ -1463,9 +1578,123 @@ impl Store {
         Ok(seeding)
     }
 
+    /// Moves to the user's folder every file of the shipped folder candeo did not
+    /// put there, rewriting the references to it, and brings `settings.json` to
+    /// effect keys once. Returns, when it did so, each name of that time with the
+    /// key it became, for the window's drafts.
+    ///
+    /// Runs at every startup: a file dropped among the shipped effects, or one
+    /// this version no longer ships, moves at the next launch. See
+    /// `docs/design/effects-sources.md` §5.
+    ///
+    /// # The order
+    ///
+    /// As in [`Self::migrate_directories`]: names are planned from what is on
+    /// disk, `settings.json` is rewritten, then files move. A run interrupted in
+    /// between plans the same moves again, and a file already copied with the
+    /// same bytes is recognized rather than copied twice.
+    pub fn migrate_sources(&self) -> CmdResult<BTreeMap<String, String>> {
+        let before = self.read_settings()?;
+        let mut settings = before.clone();
+        let recorded = |name: &str| matches!(before.shipped_effects.get(name), Some(Some(_)));
+
+        let mut taken: BTreeSet<String> = self
+            .names(Source::User)?
+            .iter()
+            .map(|n| n.to_lowercase())
+            .collect();
+        let mut keys = BTreeMap::new();
+        let mut moves = Vec::new();
+        for name in self.names(Source::Shipped)? {
+            if recorded(&name) {
+                keys.insert(name.clone(), EffectKey::shipped(&name).to_string());
+                continue;
+            }
+            let from = EffectKey::shipped(&name);
+            let same = EffectKey::user(&name);
+            let already_copied = fs::read(self.source_path(&same))
+                .is_ok_and(|bytes| fs::read(self.source_path(&from)).is_ok_and(|b| b == bytes));
+            let to = if already_copied {
+                same
+            } else {
+                EffectKey::user(&free_name(&name, &taken))
+            };
+            taken.insert(to.name.to_lowercase());
+            keys.insert(name, to.to_string());
+            moves.push((from, to));
+        }
+
+        let mut renames: BTreeMap<String, String> = moves
+            .iter()
+            .map(|(from, to)| (from.to_string(), to.to_string()))
+            .collect();
+        let migrating = settings.version < 3;
+        if migrating {
+            // Names, as version 2 wrote them. One that names no file is the
+            // user's: it stays a missing effect, as it was.
+            for name in settings.effect_references() {
+                if !name.contains(':') {
+                    let key = keys
+                        .get(&name)
+                        .cloned()
+                        .unwrap_or_else(|| EffectKey::user(&name).to_string());
+                    renames.insert(name, key);
+                }
+            }
+            settings.version = 3;
+        }
+        settings.rename_effects(&renames);
+        settings
+            .shipped_effects
+            .retain(|_, record| record.is_some());
+        if settings != before {
+            self.write_settings(&settings)?;
+        }
+
+        let mut failure = None;
+        for (from, to) in &moves {
+            let (source, target) = (self.source_path(from), self.source_path(to));
+            let moved = create_dir(&self.user_dir).and_then(|()| {
+                if target.exists() {
+                    fs::remove_file(&source).map_err(|e| {
+                        Failure::unexpected(format!("cannot delete {}: {e}", source.display()))
+                    })
+                } else {
+                    move_file(&source, &target)
+                }
+            });
+            match moved {
+                // Compiled again from its new place.
+                Ok(()) => {
+                    let _ = fs::remove_file(self.cache_path(from));
+                }
+                // The others still move; the next launch retries this one.
+                Err(e) => failure = failure.or(Some(e)),
+            }
+        }
+        if migrating {
+            // The cache of version 2 was one flat folder: compiled again.
+            if let Ok(entries) = fs::read_dir(&self.cache_dir) {
+                for entry in entries.filter_map(Result::ok) {
+                    if entry.path().is_file() {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+        match failure {
+            Some(e) => Err(e),
+            None => Ok(if migrating { keys } else { BTreeMap::new() }),
+        }
+    }
+
     /// The shipped effects with no file of their name, to offer them back.
     pub fn missing_shipped(&self, shipped: &[Shipped]) -> CmdResult<Vec<String>> {
-        let names: BTreeSet<String> = self.names()?.iter().map(|n| n.to_lowercase()).collect();
+        let names: BTreeSet<String> = self
+            .names(Source::Shipped)?
+            .iter()
+            .map(|n| n.to_lowercase())
+            .collect();
         Ok(shipped
             .iter()
             .filter(|s| !names.contains(&s.name.to_lowercase()))
@@ -1482,39 +1711,54 @@ impl Store {
     /// how a built-in becomes someone's own. The folder stays theirs, though, and
     /// this is what repairs what was done there.
     ///
-    /// Refused when an effect of the user's holds the name: restoring never
-    /// overwrites a line written in an effect of one's own.
+    /// Refused when a file candeo did not put there holds the name in the shipped
+    /// folder: restoring never overwrites a line of someone's own.
     pub fn restore_shipped(&self, shipped: &[Shipped], name: &str) -> CmdResult<()> {
         let effect = shipped
             .iter()
             .find(|s| s.name == name)
             .ok_or_else(|| Failure::new("notBuiltin").with("name", name))?;
-        if let Some(existing) = self.existing(name)? {
-            if existing != name || !self.is_builtin(name) {
+        let mut settings = self.read_settings()?;
+        if let Some(existing) = self.existing(Source::Shipped, name)? {
+            let recorded = matches!(settings.shipped_effects.get(name), Some(Some(_)));
+            if existing != name || !recorded {
                 return Err(Failure::new("builtinNameTaken").with("name", existing));
             }
         }
         // Recorded first: a file that then fails to be written is simply still
         // missing, and offered again.
-        let mut settings = self.read_settings()?;
         settings
             .shipped_effects
             .insert(name.to_owned(), Some(sha256_hex(effect.source.as_bytes())));
         self.write_settings(&settings)?;
-        create_dir(&self.effects_dir)?;
-        write_atomically(&self.source_path(name), effect.source)
+        create_dir(&self.shipped_dir)?;
+        write_atomically(&self.source_path(&EffectKey::shipped(name)), effect.source)
     }
 
     /// Every startup step that brings the library up to date, in order, and the
-    /// old effect ids with the names they became, for the window's drafts.
+    /// old effect ids with the keys they became, for the window's drafts.
     ///
     /// Directories first, since their migration assumes version 0 settings; then
     /// the former built-in ids; then the copies, which record themselves in the
-    /// settings the first two steps wrote.
+    /// settings the first two steps wrote; then the move of what is not candeo's
+    /// to the user's folder, which reads those records. Seeding runs once more:
+    /// a shipped effect whose name a moved file held can be copied now.
     pub fn migrate(&self, shipped: &[Shipped]) -> CmdResult<(BTreeMap<String, String>, Seeding)> {
         let mut renames = self.migrate_directories()?;
         renames.extend(self.migrate_former_ids(shipped)?);
-        let seeding = self.seed_shipped(shipped)?;
+        let mut seeding = self.seed_shipped(shipped)?;
+        let keys = self.migrate_sources()?;
+        let again = self.seed_shipped(shipped)?;
+        seeding.copied += again.copied;
+        seeding.updated += again.updated;
+
+        // A draft kept under a directory id went through a name to a key.
+        for target in renames.values_mut() {
+            if let Some(key) = keys.get(target.as_str()) {
+                target.clone_from(key);
+            }
+        }
+        renames.extend(keys);
         Ok((renames, seeding))
     }
 
@@ -1611,18 +1855,16 @@ const LEGACY_SOURCE_FILE: &str = "source.ts";
 /// Its manifest, which held the name the file is given.
 const LEGACY_MANIFEST_FILE: &str = "manifest.json";
 
-/// Marks an entry built-in when its name is recorded as shipped, and modified
-/// when its file no longer has the hash recorded.
-fn mark_shipped(mut entry: EffectEntry, shipped: &BTreeMap<String, Option<String>>) -> EffectEntry {
-    if let Some(Some(recorded)) = shipped.get(&entry.id) {
-        entry.kind = EffectKind::Builtin;
-        entry.modified = entry.hash.as_ref() != Some(recorded);
-    }
-    entry
-}
-
 /// The library entry of a file, from what its cache holds for its current hash.
-fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> EffectEntry {
+///
+/// A shipped effect is modified when its file no longer has the hash recorded
+/// when it was copied.
+fn library_entry(
+    key: EffectKey,
+    hash: String,
+    record: Option<CacheRecord>,
+    shipped: &BTreeMap<String, Option<String>>,
+) -> EffectEntry {
     let (state, error, swatch, declared) = match record {
         None => (EffectState::Stale, None, Swatch::new(), Declared::nothing()),
         Some(r) if r.error.is_some() => (
@@ -1643,16 +1885,23 @@ fn user_entry(name: String, hash: String, record: Option<CacheRecord>) -> Effect
             },
         ),
     };
+    let (kind, modified) = match key.source {
+        Source::Shipped => (
+            EffectKind::Builtin,
+            !matches!(shipped.get(&key.name), Some(Some(recorded)) if *recorded == hash),
+        ),
+        Source::User => (EffectKind::User, false),
+    };
     EffectEntry {
-        id: name.clone(),
-        kind: EffectKind::User,
+        id: key.to_string(),
+        kind,
         state,
         error,
         hash: Some(hash),
-        modified: false,
+        modified,
         swatch,
         manifest: Manifest {
-            name,
+            name: key.name,
             description: declared.description,
             params: declared.params,
             api_version: declared.api_version,
@@ -1792,6 +2041,18 @@ fn write(path: &Path, contents: &str) -> CmdResult<()> {
         .map_err(|e| Failure::unexpected(format!("cannot write {}: {e}", path.display())))
 }
 
+/// Moves a file, across volumes too: `Documents` is often on another drive, or
+/// redirected to OneDrive, where a rename fails.
+fn move_file(from: &Path, to: &Path) -> CmdResult<()> {
+    if fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    fs::copy(from, to)
+        .map_err(|e| Failure::unexpected(format!("cannot copy {}: {e}", from.display())))?;
+    fs::remove_file(from)
+        .map_err(|e| Failure::unexpected(format!("cannot delete {}: {e}", from.display())))
+}
+
 /// Writes through a temporary file and a rename, so that a reader never sees
 /// half a file.
 ///
@@ -1822,25 +2083,40 @@ pub(crate) fn store(app: &AppHandle) -> CmdResult<Store> {
         .path()
         .app_cache_dir()
         .map_err(|e| Failure::unexpected(format!("no cache folder: {e}")))?;
-    Ok(Store::new(&data, &config, &cache))
+    Ok(Store::new(&data, &user_dir(app, &data), &config, &cache))
 }
 
-/// The library: every file, with its state and whether it was shipped.
+/// The user's effects folder: `Documents/candeo/effects`, or, where the system
+/// names no documents folder, `app_data_dir()/user-effects`.
+fn user_dir(app: &AppHandle, data: &Path) -> PathBuf {
+    match app.path().document_dir() {
+        Ok(documents) => documents.join("candeo").join("effects"),
+        Err(e) => {
+            static SAID: std::sync::Once = std::sync::Once::new();
+            SAID.call_once(|| {
+                tracing::warn!("no documents folder, user effects kept with the application: {e}");
+            });
+            data.join("user-effects")
+        }
+    }
+}
+
+/// The library: every file of both sources, with its state.
 #[tauri::command]
 pub fn list_effects(app: AppHandle) -> CmdResult<Vec<EffectEntry>> {
     store(&app)?.list_effects()
 }
 
-/// Writes an effect's source, and returns its hash. See
+/// Writes one of the user's effects, and returns its hash. See
 /// [`Store::save_effect_source`].
 #[tauri::command]
 pub fn save_effect_source(
     app: AppHandle,
-    name: String,
+    key: String,
     source: String,
     create: bool,
 ) -> CmdResult<String> {
-    store(&app)?.save_effect_source(&name, &source, create)
+    store(&app)?.save_effect_source(&EffectKey::parse(&key)?, &source, create)
 }
 
 /// Records the JavaScript compiled from this version of an effect. See
@@ -1848,19 +2124,19 @@ pub fn save_effect_source(
 #[tauri::command]
 pub fn cache_effect(
     app: AppHandle,
-    name: String,
+    key: String,
     hash: String,
     js: String,
 ) -> CmdResult<EffectEntry> {
-    let entry = store(&app)?.cache_effect(&name, &hash, &js)?;
+    let entry = store(&app)?.cache_effect(&EffectKey::parse(&key)?, &hash, &js)?;
     // An applied effect edited outside candeo waits for this compilation to
     // resume: see [`crate::runtime::resume_applied`].
-    crate::runtime::resume_waiting(&app, &name);
+    crate::runtime::resume_waiting(&app, &key);
     Ok(entry)
 }
 
-/// Renames an effect, **and everything that refers to it**: its settings on every
-/// device, and the loops running it.
+/// Renames one of the user's effects, **and everything that refers to it**: its
+/// settings on every device, and the loops running it. Returns its new key.
 ///
 /// A running effect keeps running: the loops keep the code they loaded, only
 /// the id they report changes. Stopping them would turn a rename into a gesture
@@ -1871,16 +2147,18 @@ pub fn rename_effect(
     state: State<'_, AppState>,
     from: String,
     to: String,
-) -> CmdResult<()> {
+) -> CmdResult<String> {
     let store = store(&app)?;
-    store.rename_effect(&from, &to)?;
-    state.engine.rename_everywhere(&from, &to);
+    let target = store
+        .rename_effect(&EffectKey::parse(&from)?, &to)?
+        .to_string();
+    state.engine.rename_everywhere(&from, &target);
 
     let mut settings = store.read_settings()?;
-    if settings.rename_effect(&from, &to) {
+    if settings.rename_effect(&from, &target) {
         store.write_settings(&settings)?;
     }
-    Ok(())
+    Ok(target)
 }
 
 /// Deletes an effect, **and everything `settings.json` kept about it**: its
@@ -1909,10 +2187,11 @@ pub fn rename_effect(
 /// effect — only holds if it holds everywhere.
 #[tauri::command]
 pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> CmdResult<()> {
+    let key = EffectKey::parse(&id)?;
     let store = store(&app)?;
-    store.check_deletable(&id)?;
+    store.check_deletable(&key)?;
     state.engine.stop_everywhere(&id);
-    store.delete_effect(&id)?;
+    store.delete_effect(&key)?;
 
     let mut settings = store.read_settings()?;
     if settings.forget_effect(&id) {
@@ -1921,11 +2200,13 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     Ok(())
 }
 
-/// Copies an effect under a new name, and returns that name. See
+/// Copies an effect into the user's folder, and returns the copy's key. See
 /// [`Store::duplicate_effect`].
 #[tauri::command]
 pub fn duplicate_effect(app: AppHandle, id: String) -> CmdResult<String> {
-    store(&app)?.duplicate_effect(&id, crate::language::current(&app))
+    let copy =
+        store(&app)?.duplicate_effect(&EffectKey::parse(&id)?, crate::language::current(&app))?;
+    Ok(copy.to_string())
 }
 
 /// The shipped effects the folder no longer holds. See [`Store::missing_shipped`].
@@ -1943,14 +2224,14 @@ pub fn restore_builtin(app: AppHandle, name: String) -> CmdResult<()> {
     store(&app)?.restore_shipped(&crate::shipped::ALL, &name)
 }
 
-/// Opens the effects folder in the system file manager.
+/// Opens the user's effects folder in the system file manager.
 ///
 /// Adding an effect is saving a `.ts` file there: the folder has to be one click
 /// away, not a path to look up.
 #[tauri::command]
 pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let store = store(&app)?;
-    let dir = store.effects_dir()?;
+    let dir = store.user_effects_dir()?;
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
         .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
@@ -1963,7 +2244,7 @@ pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
 /// long as nobody asked to forget.
 #[tauri::command]
 pub fn forget_effect_settings(app: AppHandle, id: String) -> CmdResult<()> {
-    validate_name(&id)?;
+    EffectKey::parse(&id)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
     if settings.forget_effect(&id) {
@@ -1975,16 +2256,15 @@ pub fn forget_effect_settings(app: AppHandle, id: String) -> CmdResult<()> {
 /// Returns an effect's source, to open it in the editor.
 #[tauri::command]
 pub fn read_effect_source(app: AppHandle, id: String) -> CmdResult<String> {
-    store(&app)?.effect_source(&id)
+    store(&app)?.effect_source(&EffectKey::parse(&id)?)
 }
 
-/// Effect ids from the directory layout and the names they became, when this
-/// run migrated some.
+/// What the effects were called before this run's migration, and the keys they
+/// became, when it migrated some.
 ///
-/// For the editor's drafts, keyed by effect id in the web view's storage, which
-/// the migration cannot reach. Empty on every later run: the drafts were renamed
-/// by the window of the run that migrated. To remove once no installation older
-/// than named files is around.
+/// For the editor's drafts, kept in the web view's storage, which the migration
+/// cannot reach. Empty on every later run: the drafts were renamed by the window
+/// of the run that migrated.
 #[tauri::command]
 pub fn legacy_effect_ids(migrated: State<'_, MigratedEffects>) -> BTreeMap<String, String> {
     migrated.0.lock().unwrap().clone()
@@ -2083,7 +2363,7 @@ pub fn remember_effect_params(
     effect: String,
     params: serde_json::Map<String, serde_json::Value>,
 ) -> CmdResult<()> {
-    validate_name(&effect)?;
+    EffectKey::parse(&effect)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
 
@@ -2107,30 +2387,46 @@ mod tests {
 
     use super::*;
 
-    /// Three separate directories, as on Linux: a test that merged them would let
-    /// a data / configuration / cache mix-up slip through.
+    /// Separate directories, as on Linux: a test that merged them would let a
+    /// data / documents / configuration / cache mix-up slip through.
     fn temp_store() -> (tempfile::TempDir, Store) {
         let tmp = tempfile::tempdir().expect("temp dir");
         let store = Store::new(
             &tmp.path().join("data"),
+            &effects_dir(&tmp),
             &tmp.path().join("config"),
             &tmp.path().join("cache"),
         );
         (tmp, store)
     }
 
+    /// The user's effects folder.
     fn effects_dir(tmp: &tempfile::TempDir) -> PathBuf {
+        tmp.path().join("documents").join("candeo").join("effects")
+    }
+
+    fn shipped_dir(tmp: &tempfile::TempDir) -> PathBuf {
         tmp.path().join("data").join("effects")
     }
 
+    /// A user effect's cache file.
     fn cache_file(tmp: &tempfile::TempDir, name: &str) -> PathBuf {
         tmp.path()
             .join("cache")
             .join("effects")
+            .join("user")
             .join(format!("{name}.json"))
     }
 
-    /// The effects of the library that were not recorded as shipped.
+    fn user(name: &str) -> EffectKey {
+        EffectKey::user(name)
+    }
+
+    fn shipped(name: &str) -> EffectKey {
+        EffectKey::shipped(name)
+    }
+
+    /// The user's effects in the library.
     fn user_effects(store: &Store) -> Vec<EffectEntry> {
         store
             .list_effects()
@@ -2143,8 +2439,15 @@ mod tests {
     fn user_effect(store: &Store, name: &str) -> EffectEntry {
         user_effects(store)
             .into_iter()
-            .find(|e| e.id == name)
+            .find(|e| e.id == user(name).to_string())
             .unwrap_or_else(|| panic!("\"{name}\" is not listed"))
+    }
+
+    fn user_names(store: &Store) -> Vec<String> {
+        user_effects(store)
+            .into_iter()
+            .map(|e| e.manifest.name)
+            .collect()
     }
 
     /// A module that loads, declares a parameter and paints one color. It is
@@ -2164,8 +2467,8 @@ mod tests {
 
     /// Creates then compiles, as the window does.
     fn create_and_cache(store: &Store, name: &str, js: &str) -> EffectEntry {
-        let hash = store.save_effect_source(name, js, true).unwrap();
-        store.cache_effect(name, &hash, js).unwrap()
+        let hash = store.save_effect_source(&user(name), js, true).unwrap();
+        store.cache_effect(&user(name), &hash, js).unwrap()
     }
 
     /// What the gallery marks: an effect declaring keys, and only that one.
@@ -2194,9 +2497,8 @@ mod tests {
         let (tmp, store) = temp_store();
         let js = solid_effect("00ff00");
 
-        let hash = store
-            .save_effect_source("Onde circulaire", &js, true)
-            .unwrap();
+        let key = user("Onde circulaire");
+        let hash = store.save_effect_source(&key, &js, true).unwrap();
         assert_eq!(
             fs::read_to_string(effects_dir(&tmp).join("Onde circulaire.ts")).unwrap(),
             js
@@ -2207,10 +2509,11 @@ mod tests {
         let stale = user_effect(&store, "Onde circulaire");
         assert_eq!(stale.state, EffectState::Stale);
         assert_eq!(stale.hash.as_deref(), Some(hash.as_str()));
-        assert!(store.effect_js("Onde circulaire").is_err());
+        assert!(store.effect_js(&key).is_err());
 
-        let entry = store.cache_effect("Onde circulaire", &hash, &js).unwrap();
+        let entry = store.cache_effect(&key, &hash, &js).unwrap();
         assert_eq!(entry.state, EffectState::Ready);
+        assert_eq!(entry.id, "user:Onde circulaire");
         assert_eq!(entry.manifest.name, "Onde circulaire");
         assert_eq!(entry.manifest.description, serde_json::json!("Uni"));
         assert!(entry.manifest.params.contains_key("speed"));
@@ -2218,8 +2521,8 @@ mod tests {
         assert_eq!(entry.swatch, vec!["#00ff00"; 4]);
 
         assert_eq!(user_effect(&store, "Onde circulaire"), entry);
-        assert_eq!(store.effect_js("Onde circulaire").unwrap(), js);
-        assert_eq!(store.effect_source("Onde circulaire").unwrap(), js);
+        assert_eq!(store.effect_js(&key).unwrap(), js);
+        assert_eq!(store.effect_source(&key).unwrap(), js);
     }
 
     /// **The engine never runs code that differs from the file.** A file changed
@@ -2232,7 +2535,7 @@ mod tests {
         fs::write(effects_dir(&tmp).join("Onde.ts"), solid_effect("ff0000")).unwrap();
 
         assert_eq!(user_effect(&store, "Onde").state, EffectState::Stale);
-        let err = store.effect_js("Onde").unwrap_err();
+        let err = store.effect_js(&user("Onde")).unwrap_err();
         assert_eq!(err.code, "effectNotCompiled");
     }
 
@@ -2242,12 +2545,12 @@ mod tests {
     fn caching_refuses_code_compiled_from_another_version() {
         let (tmp, store) = temp_store();
         let hash = store
-            .save_effect_source("Onde", &solid_effect("00ff00"), true)
+            .save_effect_source(&user("Onde"), &solid_effect("00ff00"), true)
             .unwrap();
         fs::write(effects_dir(&tmp).join("Onde.ts"), solid_effect("ff0000")).unwrap();
 
         let err = store
-            .cache_effect("Onde", &hash, &solid_effect("00ff00"))
+            .cache_effect(&user("Onde"), &hash, &solid_effect("00ff00"))
             .unwrap_err();
         assert_eq!(err.code, "effectChanged");
         assert!(!cache_file(&tmp, "Onde").exists());
@@ -2267,10 +2570,10 @@ mod tests {
         assert_eq!(entry.state, EffectState::Broken);
         assert!(entry.error.as_deref().is_some_and(|e| !e.is_empty()));
         assert_eq!(user_effect(&store, "Cassé").state, EffectState::Broken);
-        let err = store.effect_js("Cassé").unwrap_err();
+        let err = store.effect_js(&user("Cassé")).unwrap_err();
         assert_eq!(err.code, "effectBroken");
         assert_eq!(
-            store.effect_source("Cassé").unwrap(),
+            store.effect_source(&user("Cassé")).unwrap(),
             "export default { description: 'sans render' }"
         );
 
@@ -2288,7 +2591,7 @@ mod tests {
 
         assert_eq!(entry.state, EffectState::Ready);
         assert!(entry.swatch.is_empty());
-        assert_eq!(store.effect_js("Instable").unwrap(), js);
+        assert_eq!(store.effect_js(&user("Instable")).unwrap(), js);
     }
 
     #[test]
@@ -2356,21 +2659,69 @@ mod tests {
     fn creating_never_overwrites_and_saving_again_never_creates() {
         let (_tmp, store) = temp_store();
         store
-            .save_effect_source("Onde", &solid_effect("00ff00"), true)
+            .save_effect_source(&user("Onde"), &solid_effect("00ff00"), true)
             .unwrap();
 
         for name in ["Onde", "onde", "ONDE"] {
-            let err = store.save_effect_source(name, "x", true).unwrap_err();
+            let err = store
+                .save_effect_source(&user(name), "x", true)
+                .unwrap_err();
             assert_eq!(err.code, "effectExists", "\"{name}\"");
         }
-        let err = store.save_effect_source("Absent", "x", false).unwrap_err();
+        let err = store
+            .save_effect_source(&user("Absent"), "x", false)
+            .unwrap_err();
         assert_eq!(err.code, "effectNotFound");
         // Saving again under another case is not this effect.
-        assert!(store.save_effect_source("onde", "x", false).is_err());
+        assert!(store.save_effect_source(&user("onde"), "x", false).is_err());
 
-        store.save_effect_source("Onde", "v2", false).unwrap();
-        assert_eq!(store.effect_source("Onde").unwrap(), "v2");
+        store
+            .save_effect_source(&user("Onde"), "v2", false)
+            .unwrap();
+        assert_eq!(store.effect_source(&user("Onde")).unwrap(), "v2");
         assert_eq!(user_effects(&store).len(), 1);
+    }
+
+    /// A key names its source, and nothing else is a key.
+    #[test]
+    fn a_key_is_a_source_and_a_valid_name() {
+        assert_eq!(EffectKey::parse("user:Rain").unwrap(), user("Rain"));
+        assert_eq!(EffectKey::parse("shipped:Rain").unwrap(), shipped("Rain"));
+        assert_eq!(user("Rain").to_string(), "user:Rain");
+        for bad in [
+            "Rain",
+            "hardware:wave",
+            "user:",
+            "user:a/b",
+            ":Rain",
+            "user:a:b",
+        ] {
+            assert!(EffectKey::parse(bad).is_err(), "\"{bad}\" was accepted");
+        }
+    }
+
+    /// A built-in and one of the user's may share a name: two effects, two keys.
+    #[test]
+    fn a_shipped_and_a_user_effect_may_share_a_name() {
+        let (_tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        create_and_cache(&store, "Livré", &solid_effect("00ff00"));
+
+        let ids: Vec<String> = store
+            .list_effects()
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, ["shipped:Livré", "user:Livré"]);
+        assert_eq!(
+            store.effect_source(&shipped("Livré")).unwrap(),
+            shipped_v1()[0].source
+        );
+        assert_eq!(
+            store.effect_js(&user("Livré")).unwrap(),
+            solid_effect("00ff00")
+        );
     }
 
     /// Only `.ts` files with an acceptable name make the library: a temporary
@@ -2385,8 +2736,7 @@ mod tests {
         fs::write(dir.join(" espace.ts"), "x").unwrap();
         fs::write(dir.join("Vague.ts"), "x").unwrap();
 
-        let names: Vec<String> = user_effects(&store).into_iter().map(|e| e.id).collect();
-        assert_eq!(names, ["Vague"]);
+        assert_eq!(user_names(&store), ["Vague"]);
     }
 
     /// Two names differing only by case can sit side by side on Linux; they are
@@ -2401,8 +2751,7 @@ mod tests {
 
         // A case-insensitive file system already made them one file.
         if fs::read_dir(&dir).unwrap().count() == 2 {
-            let names: Vec<String> = user_effects(&store).into_iter().map(|e| e.id).collect();
-            assert_eq!(names, ["Onde"]);
+            assert_eq!(user_names(&store), ["Onde"]);
         }
     }
 
@@ -2459,7 +2808,7 @@ mod tests {
     #[test]
     fn dangerous_names_never_reach_the_disk() {
         let (tmp, store) = temp_store();
-        let sibling = tmp.path().join("data").join("secrets");
+        let sibling = tmp.path().join("documents").join("candeo").join("secrets");
         fs::create_dir_all(&sibling).unwrap();
         fs::write(sibling.join("x.ts"), "secret").unwrap();
 
@@ -2472,9 +2821,11 @@ mod tests {
             "a/b",
         ] {
             for err in [
-                store.delete_effect(name).unwrap_err(),
-                store.effect_source(name).unwrap_err(),
-                store.save_effect_source(name, "x", true).unwrap_err(),
+                store.delete_effect(&user(name)).unwrap_err(),
+                store.effect_source(&user(name)).unwrap_err(),
+                store
+                    .save_effect_source(&user(name), "x", true)
+                    .unwrap_err(),
             ] {
                 assert!(
                     !["effectNotFound", "unexpected"].contains(&err.code),
@@ -2517,20 +2868,23 @@ mod tests {
         create_and_cache(&store, "Onde", &js);
         create_and_cache(&store, "Autre", &solid_effect("ff0000"));
 
-        store.rename_effect("Onde", "Vague").unwrap();
+        assert_eq!(
+            store.rename_effect(&user("Onde"), "Vague").unwrap(),
+            user("Vague")
+        );
         assert!(!effects_dir(&tmp).join("Onde.ts").exists());
         assert!(!cache_file(&tmp, "Onde").exists());
         let entry = user_effect(&store, "Vague");
         assert_eq!(entry.state, EffectState::Ready);
-        assert_eq!(store.effect_js("Vague").unwrap(), js);
+        assert_eq!(store.effect_js(&user("Vague")).unwrap(), js);
 
-        let err = store.rename_effect("Vague", "autre").unwrap_err();
+        let err = store.rename_effect(&user("Vague"), "autre").unwrap_err();
         assert_eq!(err.code, "effectExists");
-        assert!(store.rename_effect("Absent", "Nouveau").is_err());
-        assert!(store.rename_effect("Vague", "a:b").is_err());
+        assert!(store.rename_effect(&user("Absent"), "Nouveau").is_err());
+        assert!(store.rename_effect(&user("Vague"), "a:b").is_err());
 
         // Only the case changes: the same file, renamed.
-        store.rename_effect("Vague", "vague").unwrap();
+        store.rename_effect(&user("Vague"), "vague").unwrap();
         assert_eq!(user_effect(&store, "vague").state, EffectState::Ready);
     }
 
@@ -2539,17 +2893,17 @@ mod tests {
         let (tmp, store) = temp_store();
         create_and_cache(&store, "Onde", &solid_effect("00ff00"));
 
-        store.check_deletable("Onde").unwrap();
+        store.check_deletable(&user("Onde")).unwrap();
         assert!(
             effects_dir(&tmp).join("Onde.ts").is_file(),
             "the check took the file away"
         );
-        store.delete_effect("Onde").unwrap();
+        store.delete_effect(&user("Onde")).unwrap();
         assert!(!effects_dir(&tmp).join("Onde.ts").exists());
         assert!(!cache_file(&tmp, "Onde").exists());
         assert!(user_effects(&store).is_empty());
 
-        let err = store.delete_effect("Onde").unwrap_err();
+        let err = store.delete_effect(&user("Onde")).unwrap_err();
         assert_eq!(err.code, "effectNotFound");
     }
 
@@ -2561,24 +2915,28 @@ mod tests {
         let js = solid_effect("00ff00");
         create_and_cache(&store, "Onde", &js);
 
-        let duplicate = |id| store.duplicate_effect(id, Language::En).unwrap();
-        assert_eq!(duplicate("Onde"), "Onde (copy)");
-        assert_eq!(duplicate("Onde"), "Onde (copy 2)");
-        assert_eq!(duplicate("Onde (copy)"), "Onde (copy) (copy)");
+        let duplicate = |key: EffectKey| store.duplicate_effect(&key, Language::En).unwrap();
+        assert_eq!(duplicate(user("Onde")), user("Onde (copy)"));
+        assert_eq!(duplicate(user("Onde")), user("Onde (copy 2)"));
+        assert_eq!(duplicate(user("Onde (copy)")), user("Onde (copy) (copy)"));
         assert_eq!(
-            store.duplicate_effect("Onde", Language::Fr).unwrap(),
-            "Onde (copie)"
+            store.duplicate_effect(&user("Onde"), Language::Fr).unwrap(),
+            user("Onde (copie)")
         );
 
         let copy = user_effect(&store, "Onde (copy)");
         assert_eq!(copy.state, EffectState::Ready);
-        assert_eq!(store.effect_js("Onde (copy)").unwrap(), js);
+        assert_eq!(store.effect_js(&user("Onde (copy)")).unwrap(), js);
         assert!(effects_dir(&tmp).join("Onde (copy 2).ts").is_file());
-        assert!(store.duplicate_effect("Absent", Language::En).is_err());
+        assert!(store
+            .duplicate_effect(&user("Absent"), Language::En)
+            .is_err());
 
+        // A copy of a built-in is the user's, in the user's folder.
         store.seed_shipped(&shipped_v1()).unwrap();
-        let name = duplicate("Livré");
-        assert_eq!(user_effect(&store, &name).kind, EffectKind::User);
+        let copy = duplicate(shipped("Livré"));
+        assert_eq!(copy, user("Livré (copy)"));
+        assert_eq!(user_effect(&store, &copy.name).kind, EffectKind::User);
     }
 
     #[test]
@@ -2600,7 +2958,7 @@ mod tests {
             ("onde-vague-v2", "Onde / Vague : v2", "source vague"),
             ("onde-circulaire-bis", "Onde circulaire", "source bis"),
         ] {
-            let dir = effects_dir(tmp).join(id);
+            let dir = shipped_dir(tmp).join(id);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("source.ts"), source).unwrap();
             fs::write(dir.join("effect.js"), "compiled").unwrap();
@@ -2653,7 +3011,8 @@ mod tests {
             ])
         );
 
-        let dir = effects_dir(&tmp);
+        // In the folder the directories were in: `migrate_sources` moves them next.
+        let dir = shipped_dir(&tmp);
         for (name, source) in [
             ("Onde circulaire", "source circulaire"),
             ("Onde circulaire (2)", "source bis"),
@@ -2663,7 +3022,6 @@ mod tests {
                 fs::read_to_string(dir.join(format!("{name}.ts"))).unwrap(),
                 source
             );
-            assert_eq!(user_effect(&store, name).state, EffectState::Stale);
         }
         for id in renames.keys() {
             assert!(!dir.join(id).exists(), "\"{id}\" was not removed");
@@ -2694,7 +3052,7 @@ mod tests {
         let settings = fs::read_to_string(tmp.path().join("config").join("settings.json")).unwrap();
 
         assert!(store.migrate_directories().unwrap().is_empty());
-        assert_eq!(user_effects(&store).len(), 3);
+        assert_eq!(store.names(Source::Shipped).unwrap().len(), 3);
         assert_eq!(
             fs::read_to_string(tmp.path().join("config").join("settings.json")).unwrap(),
             settings
@@ -2708,13 +3066,13 @@ mod tests {
         let (tmp, store) = temp_store();
         plant_directory_layout(&tmp);
         fs::write(
-            effects_dir(&tmp).join("Onde circulaire.ts"),
+            shipped_dir(&tmp).join("Onde circulaire.ts"),
             "source circulaire",
         )
         .unwrap();
 
         store.migrate_directories().unwrap();
-        let names: Vec<String> = user_effects(&store).into_iter().map(|e| e.id).collect();
+        let names = store.names(Source::Shipped).unwrap();
         assert_eq!(
             names,
             [
@@ -2762,7 +3120,7 @@ mod tests {
         assert_eq!(settings.version, SETTINGS_VERSION);
         for s in &crate::shipped::ALL {
             assert_eq!(
-                fs::read_to_string(effects_dir(&tmp).join(format!("{}.ts", s.name))).unwrap(),
+                fs::read_to_string(shipped_dir(&tmp).join(format!("{}.ts", s.name))).unwrap(),
                 s.source
             );
             assert_eq!(
@@ -2773,6 +3131,8 @@ mod tests {
         let library = store.list_effects().unwrap();
         assert_eq!(library.len(), crate::shipped::ALL.len());
         assert!(library.iter().all(|e| e.kind == EffectKind::Builtin));
+        assert!(library.iter().all(|e| e.id.starts_with("shipped:")));
+        assert!(!effects_dir(&tmp).exists(), "the user's folder was created");
         // Copied, not compiled: the window compiles them at startup.
         assert!(library.iter().all(|e| e.state == EffectState::Stale));
 
@@ -2788,7 +3148,7 @@ mod tests {
     #[test]
     fn an_unchanged_copy_is_updated_and_a_modified_one_is_not() {
         let (tmp, store) = temp_store();
-        let file = effects_dir(&tmp).join("Livré.ts");
+        let file = shipped_dir(&tmp).join("Livré.ts");
 
         store.seed_shipped(&shipped_v1()).unwrap();
         let seeding = store.seed_shipped(&shipped_v2()).unwrap();
@@ -2812,55 +3172,54 @@ mod tests {
         assert_eq!(user_effects(&store).len(), 0);
     }
 
-    /// A shipped effect someone deleted or renamed in the folder does not come
-    /// back by itself.
+    /// A shipped effect someone deleted in the folder does not come back by
+    /// itself; renamed there, it is not candeo's any more, and moves to the
+    /// user's folder.
     #[test]
     fn a_deleted_or_renamed_copy_never_comes_back() {
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
+        fs::remove_file(shipped_dir(&tmp).join("Livré.ts")).unwrap();
         assert_eq!(
             store.seed_shipped(&shipped_v2()).unwrap(),
             Seeding::default()
         );
-        assert!(!effects_dir(&tmp).join("Livré.ts").exists());
+        assert!(!shipped_dir(&tmp).join("Livré.ts").exists());
 
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
         fs::rename(
-            effects_dir(&tmp).join("Livré.ts"),
-            effects_dir(&tmp).join("Le mien.ts"),
+            shipped_dir(&tmp).join("Livré.ts"),
+            shipped_dir(&tmp).join("Le mien.ts"),
         )
         .unwrap();
-        assert_eq!(
-            store.seed_shipped(&shipped_v2()).unwrap(),
-            Seeding::default()
-        );
-        assert!(!effects_dir(&tmp).join("Livré.ts").exists());
-        // Renamed, it is the user's.
+        let (_, seeding) = store.migrate(&shipped_v2()).unwrap();
+        assert_eq!(seeding, Seeding::default());
+        assert!(!shipped_dir(&tmp).join("Livré.ts").exists());
+        assert!(effects_dir(&tmp).join("Le mien.ts").is_file());
         assert_eq!(user_effect(&store, "Le mien").kind, EffectKind::User);
     }
 
-    /// A file already holding a shipped effect's name is someone's own: it is left
-    /// alone, and recorded so that the question is not asked again.
+    /// A file of the user's among the shipped effects, under a shipped effect's
+    /// name, moves to the user's folder, and the shipped effect is copied then.
     #[test]
-    fn a_users_file_with_a_shipped_name_is_left_alone() {
+    fn a_users_file_with_a_shipped_name_moves_to_the_users_folder() {
         let (tmp, store) = temp_store();
-        store.save_effect_source("livré", "mine", true).unwrap();
+        fs::create_dir_all(shipped_dir(&tmp)).unwrap();
+        fs::write(shipped_dir(&tmp).join("Livré.ts"), "mine").unwrap();
 
+        let (_, seeding) = store.migrate(&shipped_v1()).unwrap();
+        assert_eq!(seeding.copied, 1);
         assert_eq!(
-            store.seed_shipped(&shipped_v1()).unwrap(),
-            Seeding::default()
-        );
-        assert_eq!(
-            fs::read_to_string(effects_dir(&tmp).join("livré.ts")).unwrap(),
+            fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
             "mine"
         );
         assert_eq!(
-            store.read_settings().unwrap().shipped_effects.get("Livré"),
-            Some(&None)
+            fs::read_to_string(shipped_dir(&tmp).join("Livré.ts")).unwrap(),
+            shipped_v1()[0].source
         );
-        assert_eq!(user_effect(&store, "livré").kind, EffectKind::User);
+        builtin(&store, "Livré");
+        assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
     }
 
     fn builtin(store: &Store, name: &str) -> EffectEntry {
@@ -2868,7 +3227,7 @@ mod tests {
             .list_effects()
             .unwrap()
             .into_iter()
-            .find(|e| e.id == name && e.kind == EffectKind::Builtin)
+            .find(|e| e.id == shipped(name).to_string() && e.kind == EffectKind::Builtin)
             .unwrap_or_else(|| panic!("\"{name}\" is not a listed built-in"))
     }
 
@@ -2876,12 +3235,13 @@ mod tests {
     fn a_builtin_is_not_deleted_renamed_or_saved_over() {
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
+        let livre = shipped("Livré");
 
         let codes = [
-            store.delete_effect("Livré").unwrap_err().code,
-            store.rename_effect("Livré", "Le mien").unwrap_err().code,
+            store.delete_effect(&livre).unwrap_err().code,
+            store.rename_effect(&livre, "Le mien").unwrap_err().code,
             store
-                .save_effect_source("Livré", "mine", false)
+                .save_effect_source(&livre, "mine", false)
                 .unwrap_err()
                 .code,
         ];
@@ -2890,21 +3250,21 @@ mod tests {
             ["builtinNotDeleted", "builtinNotRenamed", "builtinNotSaved"]
         );
         assert_eq!(
-            fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
+            fs::read_to_string(shipped_dir(&tmp).join("Livré.ts")).unwrap(),
             shipped_v1()[0].source
         );
 
         // Duplicating is how it becomes someone's own.
-        let copy = store.duplicate_effect("Livré", Language::En).unwrap();
+        let copy = store.duplicate_effect(&livre, Language::En).unwrap();
         store.save_effect_source(&copy, "mine", false).unwrap();
-        store.rename_effect(&copy, "Le mien").unwrap();
-        store.delete_effect("Le mien").unwrap();
+        let renamed = store.rename_effect(&copy, "Le mien").unwrap();
+        store.delete_effect(&renamed).unwrap();
     }
 
     #[test]
     fn a_builtin_edited_in_the_folder_is_marked_and_restored() {
         let (tmp, store) = temp_store();
-        let file = effects_dir(&tmp).join("Livré.ts");
+        let file = shipped_dir(&tmp).join("Livré.ts");
         store.seed_shipped(&shipped_v1()).unwrap();
         assert!(!builtin(&store, "Livré").modified);
 
@@ -2922,7 +3282,7 @@ mod tests {
         store.seed_shipped(&shipped_v1()).unwrap();
         assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
 
-        fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
+        fs::remove_file(shipped_dir(&tmp).join("Livré.ts")).unwrap();
         assert_eq!(store.missing_shipped(&shipped_v1()).unwrap(), ["Livré"]);
 
         store.restore_shipped(&shipped_v1(), "Livré").unwrap();
@@ -2931,32 +3291,24 @@ mod tests {
         assert_eq!(store.seed_shipped(&shipped_v2()).unwrap().updated, 1);
     }
 
-    /// Restoring never overwrites an effect of the user's, whichever gesture gave
-    /// it a shipped effect's name.
+    /// An effect of the user's named after a missing built-in lives in another
+    /// folder: the built-in stays missing, and restoring it touches neither.
     #[test]
-    fn a_users_effect_named_after_a_missing_builtin_is_not_restored_over() {
-        for rename in [false, true] {
-            let (tmp, store) = temp_store();
-            store.seed_shipped(&shipped_v1()).unwrap();
-            fs::remove_file(effects_dir(&tmp).join("Livré.ts")).unwrap();
+    fn a_users_effect_named_after_a_missing_builtin_does_not_hide_it() {
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&shipped_v1()).unwrap();
+        fs::remove_file(shipped_dir(&tmp).join("Livré.ts")).unwrap();
+        store
+            .save_effect_source(&user("Livré"), "mine", true)
+            .unwrap();
 
-            if rename {
-                store.save_effect_source("Autre", "mine", true).unwrap();
-                store.rename_effect("Autre", "Livré").unwrap();
-            } else {
-                store.save_effect_source("Livré", "mine", true).unwrap();
-            }
-
-            assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
-            assert!(store.missing_shipped(&shipped_v1()).unwrap().is_empty());
-            let err = store.restore_shipped(&shipped_v1(), "Livré").unwrap_err();
-            assert_eq!(err.code, "builtinNameTaken");
-            assert_eq!(
-                fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
-                "mine"
-            );
-            store.delete_effect("Livré").unwrap();
-        }
+        assert_eq!(store.missing_shipped(&shipped_v1()).unwrap(), ["Livré"]);
+        store.restore_shipped(&shipped_v1(), "Livré").unwrap();
+        assert_eq!(
+            fs::read_to_string(effects_dir(&tmp).join("Livré.ts")).unwrap(),
+            "mine"
+        );
+        assert!(!builtin(&store, "Livré").modified);
     }
 
     #[test]
@@ -2966,16 +3318,23 @@ mod tests {
         assert_eq!(err.code, "notBuiltin");
     }
 
+    /// No longer shipped, it moves to the user's folder, with what refers to it.
     #[test]
     fn an_effect_no_longer_shipped_becomes_the_users() {
-        let (_tmp, store) = temp_store();
-        store.seed_shipped(&shipped_v1()).unwrap();
+        let (tmp, store) = temp_store();
+        store.migrate(&shipped_v1()).unwrap();
+        let mut settings = store.read_settings().unwrap();
+        settings.set_active_effect(VID, PID, Some("shipped:Livré"));
+        store.write_settings(&settings).unwrap();
 
-        store.seed_shipped(&[]).unwrap();
+        store.migrate(&[]).unwrap();
 
-        assert!(store.read_settings().unwrap().shipped_effects.is_empty());
+        let settings = store.read_settings().unwrap();
+        assert!(settings.shipped_effects.is_empty());
+        assert_eq!(settings.active_effect(VID, PID), Some("user:Livré"));
+        assert!(!shipped_dir(&tmp).join("Livré.ts").exists());
         assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
-        store.delete_effect("Livré").unwrap();
+        store.delete_effect(&user("Livré")).unwrap();
     }
 
     #[test]
@@ -2985,10 +3344,11 @@ mod tests {
         let hash = sha256_hex(shipped_v1()[0].source.as_bytes());
 
         let entry = store
-            .cache_effect("Livré", &hash, &solid_effect("00ff00"))
+            .cache_effect(&shipped("Livré"), &hash, &solid_effect("00ff00"))
             .unwrap();
 
         assert_eq!(entry.kind, EffectKind::Builtin);
+        assert_eq!(entry.id, "shipped:Livré");
     }
 
     #[test]
@@ -3049,24 +3409,131 @@ mod tests {
         plant_directory_layout(&tmp);
 
         let (renames, seeding) = store.migrate(&crate::shipped::ALL).unwrap();
+        // Directory ids and names, each to the key it became, for the drafts.
         assert_eq!(
             renames.get("onde-circulaire").map(String::as_str),
-            Some("Onde circulaire")
+            Some("user:Onde circulaire")
         );
         assert_eq!(
             renames.get("respiration").map(String::as_str),
-            Some("Breathing")
+            Some("shipped:Breathing")
+        );
+        assert_eq!(
+            renames.get("Onde circulaire").map(String::as_str),
+            Some("user:Onde circulaire")
         );
         assert_eq!(seeding.copied, crate::shipped::ALL.len());
 
         let settings = store.read_settings().unwrap();
         assert_eq!(settings.version, SETTINGS_VERSION);
-        assert_eq!(settings.active_effect(VID, PID + 1), Some("Breathing"));
+        assert_eq!(
+            settings.active_effect(VID, PID),
+            Some("user:Onde circulaire (2)")
+        );
+        assert_eq!(
+            settings.active_effect(VID, PID + 1),
+            Some("shipped:Breathing")
+        );
+        // A name that designated nothing stays missing, as one of the user's.
+        assert!(settings.effect_params(VID, PID, "user:disparu").is_some());
         assert_eq!(
             store.list_effects().unwrap().len(),
             3 + crate::shipped::ALL.len()
         );
-        assert_eq!(user_effects(&store).len(), 3);
+        assert_eq!(
+            user_names(&store),
+            [
+                "Onde - Vague - v2",
+                "Onde circulaire",
+                "Onde circulaire (2)"
+            ]
+        );
+        // Nothing but candeo's files stays among the shipped effects.
+        assert_eq!(
+            store.names(Source::Shipped).unwrap().len(),
+            crate::shipped::ALL.len()
+        );
+
+        // And the next launch finds nothing to do.
+        let settings = store.read_settings().unwrap();
+        let (renames, seeding) = store.migrate(&crate::shipped::ALL).unwrap();
+        assert!(renames.is_empty());
+        assert_eq!(seeding, Seeding::default());
+        assert_eq!(store.read_settings().unwrap(), settings);
+    }
+
+    /// Version 2 of an installation: every effect in one folder, referenced by
+    /// its name, with a compiled cache.
+    #[test]
+    fn a_version_2_folder_is_split_by_source() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(shipped_dir(&tmp)).unwrap();
+        let livre = shipped_v1()[0].source;
+        fs::write(shipped_dir(&tmp).join("Livré.ts"), livre).unwrap();
+        fs::write(shipped_dir(&tmp).join("Mon effet.ts"), "mine").unwrap();
+        let old_cache = tmp.path().join("cache").join("effects");
+        fs::create_dir_all(&old_cache).unwrap();
+        fs::write(old_cache.join("Mon effet.json"), "{}").unwrap();
+        fs::write(
+            config.join("settings.json"),
+            format!(
+                r#"{{
+                  "version": 2,
+                  "activeEffects": [
+                    {{ "vid": 5426, "pid": 658, "effect": "Mon effet" }},
+                    {{ "vid": 5426, "pid": 659, "effect": "Livré" }}
+                  ],
+                  "effectParams": [{{ "vid": 5426, "pid": 658, "effect": "Livré", "values": {{ "speed": 2 }} }}],
+                  "shippedEffects": {{ "Livré": "{}" }}
+                }}"#,
+                sha256_hex(livre.as_bytes())
+            ),
+        )
+        .unwrap();
+
+        let (renames, _) = store.migrate(&shipped_v1()).unwrap();
+        assert_eq!(
+            renames,
+            BTreeMap::from([
+                ("Livré".to_owned(), "shipped:Livré".to_owned()),
+                ("Mon effet".to_owned(), "user:Mon effet".to_owned()),
+            ])
+        );
+
+        assert_eq!(
+            fs::read_to_string(effects_dir(&tmp).join("Mon effet.ts")).unwrap(),
+            "mine"
+        );
+        assert!(!shipped_dir(&tmp).join("Mon effet.ts").exists());
+        assert!(
+            !old_cache.join("Mon effet.json").exists(),
+            "the flat cache was kept"
+        );
+        let settings = store.read_settings().unwrap();
+        assert_eq!(settings.version, 3);
+        assert_eq!(settings.active_effect(VID, PID), Some("user:Mon effet"));
+        assert_eq!(settings.active_effect(VID, PID + 1), Some("shipped:Livré"));
+        assert!(settings.effect_params(VID, PID, "shipped:Livré").is_some());
+        builtin(&store, "Livré");
+        assert_eq!(user_effect(&store, "Mon effet").state, EffectState::Stale);
+    }
+
+    /// A run interrupted after copying a file to the user's folder, before
+    /// removing it from the shipped one: the next run recognizes the copy.
+    #[test]
+    fn an_interrupted_move_does_not_duplicate_an_effect() {
+        let (tmp, store) = temp_store();
+        fs::create_dir_all(shipped_dir(&tmp)).unwrap();
+        fs::create_dir_all(effects_dir(&tmp)).unwrap();
+        fs::write(shipped_dir(&tmp).join("Mon effet.ts"), "mine").unwrap();
+        fs::write(effects_dir(&tmp).join("Mon effet.ts"), "mine").unwrap();
+
+        store.migrate_sources().unwrap();
+
+        assert_eq!(user_names(&store), ["Mon effet"]);
+        assert!(!shipped_dir(&tmp).join("Mon effet.ts").exists());
     }
 
     /// A file written before the version field reads as version 0 — not as the
@@ -3402,8 +3869,8 @@ mod tests {
         // And the library is intact, source included: that is what cannot be
         // reinstalled.
         assert_eq!(user_effects(&store).len(), 1);
-        assert_eq!(store.effect_source(&id).unwrap(), js);
-        assert_eq!(store.effect_js(&id).unwrap(), js);
+        assert_eq!(store.effect_source(&user("Onde")).unwrap(), js);
+        assert_eq!(store.effect_js(&user("Onde")).unwrap(), js);
     }
 
     // ------------------------------------------------------- adoption

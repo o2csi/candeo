@@ -159,6 +159,8 @@
     "stillRunningTitle": "candeo tourne toujours",
     "stillRunningBody": "Les effets continuent. Pour quitter, clic droit sur l'icône candeo dans la zone de notification, puis « {quit} ».",
     "sendToKeyboard": "Envoyer au clavier",
+    "builtinEffects": "Intégrés",
+    "userEffects": "À vous",
     "turnOff": "Éteindre",
     "notOpenTitle": "{name} — non ouvert",
     "notOpenReason": "Branché mais non ouvert — voir la fenêtre",

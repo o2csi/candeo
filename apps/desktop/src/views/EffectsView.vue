@@ -78,6 +78,7 @@ import {
   type EffectState,
   type EngineReport,
 } from '../api/candeo'
+import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
@@ -432,7 +433,7 @@ function runningOn(d: { vid: number; pid: number } | null): string | null {
 
 function effectName(id: string | null): string | null {
   if (id === null) return null
-  return choices.value.find((c) => c.id === id)?.name ?? id
+  return choices.value.find((c) => c.id === id)?.name ?? nameOfKey(id)
 }
 
 /**
@@ -704,7 +705,7 @@ const pendingRestore = ref<string | null>(null)
 async function restoreOriginal(): Promise<void> {
   const id = pendingRestore.value
   if (id === null) return
-  await restore([id])
+  await restore([nameOfKey(id)])
   if (problem.value === null) pendingRestore.value = null
 }
 
@@ -1282,18 +1283,18 @@ onBeforeUnmount(() => {
         tourne quand même — sur le gabarit par défaut, sans rien écrire nulle
         part. Mais l'écran dit ce qui manque et où aller.
       -->
-      <p v-for="name in missingEffects" :key="name" class="notice warn" role="status">
-        {{ t('effects.missing', { name }) }}
+      <p v-for="key in missingEffects" :key="key" class="notice warn" role="status">
+        {{ t('effects.missing', { name: nameOfKey(key) }) }}
         <button
-          v-if="missingBuiltinNames.includes(name)"
+          v-if="isShippedKey(key) && missingBuiltinNames.includes(nameOfKey(key))"
           class="link"
           type="button"
           :disabled="working"
-          @click="restore([name])"
+          @click="restore([nameOfKey(key)])"
         >
           {{ t('effects.restore') }}
         </button>
-        <button class="link" type="button" @click="forgetMissing(name)">
+        <button class="link" type="button" @click="forgetMissing(key)">
           {{ t('effects.forgetSettings') }}
         </button>
       </p>

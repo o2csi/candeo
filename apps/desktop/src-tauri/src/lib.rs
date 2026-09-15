@@ -489,7 +489,7 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
     match storage::store(app).and_then(|store| store.migrate(&shipped::ALL)) {
         Ok((renames, seeding)) => {
             if !renames.is_empty() {
-                tracing::info!(effects = renames.len(), "effect references moved to names");
+                tracing::info!(effects = renames.len(), "effect references moved to keys");
             }
             if seeding != storage::Seeding::default() {
                 tracing::info!(

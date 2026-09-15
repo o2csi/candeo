@@ -371,22 +371,29 @@ which thus avoid resending all 132 positions.
 ## Effect library
 
 The model is fixed in
-[`../design/effects-library.md`](../design/effects-library.md). No path is
-hard-coded: `app_data_dir()` holds the content, `app_cache_dir()` what can be
-rebuilt, `app_config_dir()` the configuration.
+[`../design/effects-library.md`](../design/effects-library.md) and
+[`../design/effects-sources.md`](../design/effects-sources.md). No path is
+hard-coded: Tauri's API resolves every folder.
 
 ```
-app_data_dir()/effects/<name>.ts      one file per effect, named after it
-app_cache_dir()/effects/<name>.json   JavaScript, manifest and swatch compiled from one version of that file
+app_data_dir()/effects/<name>.ts                 the shipped effects
+document_dir()/candeo/effects/<name>.ts          the user's effects
+app_cache_dir()/effects/<source>/<name>.json     JavaScript, manifest and swatch compiled from one version of a file
 app_config_dir()/settings.json
 ```
 
-**An effect is a file, and its name is the file name.** Adding an effect is saving
-a `.ts` file in the folder; its name is the key of everything that refers to it —
-`settings.json`, the engine, the tray menu. Names follow the Windows rules on
-every system: no `< > : " / \ | ? *` or control characters, no leading or
-trailing space or dot, not a reserved device name (`CON`, `NUL`, `COM1`…), at most
-64 characters. Two names that differ only by case are one effect.
+**An effect is a file, and its key is its source and its name**:
+`shipped:Breathing`, `user:My effect`. Adding an effect is saving a `.ts` file in
+the user's folder. The key is what everything that refers to an effect holds —
+`settings.json`, the engine, the tray menu, editor drafts — and the name, its
+file name, is what the interface shows. A shipped effect and a user effect may
+share a name. Where the system names no documents folder, the user's folder is
+`app_data_dir()/user-effects/`.
+
+Names follow the Windows rules on every system: no `< > : " / \ | ? *` or control
+characters, no leading or trailing space or dot, not a reserved device name
+(`CON`, `NUL`, `COM1`…), at most 64 characters. Two names that differ only by case
+are one effect.
 
 **Rust cannot strip TypeScript types, the window can.** Listing reports each
 file with the hash of its bytes and whether the cache holds a result for that
@@ -398,8 +405,8 @@ JavaScript compiled from a file's **current** bytes.
 
 ```ts
 {
-  id: string,                     // le nom du fichier
-  kind: 'builtin' | 'user',       // `builtin` : un fichier livré avec l'application
+  id: string,                     // the key, `shipped:<name>` or `user:<name>`
+  kind: 'builtin' | 'user',       // `builtin`: a file of the shipped folder
   state: 'ready' | 'stale' | 'broken',
   error?: string,                 // pourquoi un effet `broken` ne se charge pas
   hash: string,                   // SHA-256 du fichier
@@ -413,11 +420,13 @@ JavaScript compiled from a file's **current** bytes.
 }
 ```
 
-Every file in the effects folder, sorted by name regardless of case. `kind` is
-`builtin` for a file copied from the application and recorded as such — modified
-or not — and `user` for the others. A built-in is listed in its own gallery
-section, and is not deleted, renamed or saved over (§The shipped effects).
-`modified` is true for a built-in whose file no longer has the recorded hash.
+The shipped effects, then the user's, each sorted by name regardless of case.
+`kind` is `builtin` for a file of the shipped folder recorded as copied by the
+application — modified or not — and `user` for a file of the user's folder. A file
+of the shipped folder candeo did not put there is not listed: the next startup
+moves it to the user's folder. A built-in is listed in its own gallery section,
+and is not deleted, renamed or saved over (§The shipped effects). `modified` is
+true for a built-in whose file no longer has the recorded hash.
 
 | `state` | Meaning |
 |---|---|
@@ -429,17 +438,16 @@ Listing reads and hashes files, and **runs nothing**. A file that cannot be read
 or whose name the application would refuse, is skipped rather than failing the
 whole list. The swatch travels with the entry, not behind a second call.
 
-### `save_effect_source(name, source, create) -> string`
+### `save_effect_source(key, source, create) -> string`
 
-Writes `effects/<name>.ts` and returns the SHA-256 of what was written. `create`
-names the gesture, so that neither can do the other's job by accident: creating
-refuses a name an effect already has, in any case; saving again refuses a name no
-effect has. Saving over a built-in is refused. Creating a file under the name of
-a shipped effect whose file is gone records that name as not ours. The file is
-written through a temporary file and a rename, so that a Refresh never compiles
-half a file.
+Writes `<name>.ts` in the user's folder, for a `user:<name>` key, and returns the
+SHA-256 of what was written. `create` names the gesture, so that neither can do
+the other's job by accident: creating refuses a name one of the user's effects
+already has, in any case; saving again refuses a name none has. A `shipped:` key
+is refused: a built-in is not saved over. The file is written through a temporary
+file and a rename, so that a Refresh never compiles half a file.
 
-### `cache_effect(name, hash, js) -> EffectEntry`
+### `cache_effect(key, hash, js) -> EffectEntry`
 
 Records the JavaScript the window compiled from the version of the file that has
 `hash`, and returns the entry. Refused when the file no longer has that hash: it
@@ -519,18 +527,21 @@ failure: its swatch is black, and that is the truth about what it does.
 
 Fourteen are shipped, written in **TypeScript against the same API** as the user's
 effects, in [`packages/effects/`](../../packages/effects/), and embedded in the
-binary. At startup each one is copied into the effects folder **once**, and
-`settings.json` records it under `shippedEffects`: the hash of the copied version,
-or `null` when a file of that name was already there and was left alone.
+binary. At startup each one is copied into the shipped folder **once**, and
+`settings.json` records it under `shippedEffects`, by name: the hash of the copied
+version.
 
 | State at startup | Action |
 |---|---|
 | not recorded, no file of that name | copy it, record its hash |
-| not recorded, a file of that name exists | leave the file, record it as not ours |
+| not recorded, a file of that name exists | the file is not ours: it moves to the user's folder, and the shipped effect is copied |
 | recorded, file unchanged, shipped version changed | overwrite it, record the new hash |
 | recorded, file modified | leave it |
 | recorded, file missing (deleted or renamed) | leave it: never copied again |
-| recorded, no longer shipped by this version | forget the record: the file is the user's |
+| recorded, no longer shipped by this version | forget the record; the file moves to the user's folder, and its references from `shipped:` to `user:` |
+
+A file moving to the user's folder takes a ` (2)` suffix on a name already taken
+there.
 
 **The application does not delete, rename or save over a built-in**: an edited
 copy stops receiving updates without a word, and a renamed or deleted one never
@@ -566,40 +577,42 @@ migration below moves the settings that still use them.
 
 ### `missing_builtins() -> string[]`
 
-The shipped effects with no file of their name, regardless of case.
+The names of the shipped effects with no file in the shipped folder, regardless of
+case. A user effect of the same name does not hide one.
 
 ### `restore_builtin(name)`
 
 Records the shipped effect's hash, then writes its file: a missing one comes back,
 a modified one is overwritten, and both receive updates again. Loops running a
 modified version keep the code they loaded until the effect is applied again.
-Refused for a name this version does not ship, and when an effect of the user's
-holds the name, so that restoring never overwrites code of one's own.
+Refused for a name this version does not ship. The user's effects live in another
+folder, so restoring never touches them.
 
-### `rename_effect(from, to)`
+### `rename_effect(from, to) -> string`
 
-Renames the file and its cache, then moves every reference: the settings on all
-devices, and the loops running the effect, preview included. A running effect
-**keeps running**: the loops keep the code they loaded, only the id they report
-changes. Refused when `to` is not a valid name or is already an effect's name —
-except the same effect under another case, and for a built-in. Renaming onto the
-name of a shipped effect whose file is gone records that name as not ours.
+Renames one of the user's effects, `from` being its key and `to` its new name, and
+returns its new key. Renames the file and its cache, then moves every reference:
+the settings on all devices, and the loops running the effect, preview included.
+A running effect **keeps running**: the loops keep the code they loaded, only the
+id they report changes. Refused for a built-in, and when `to` is not a valid name
+or is already the name of one of the user's effects — except the same effect under
+another case.
 
-Renaming the file outside the application makes a new effect: the old name's
+Renaming the file outside the application makes a new effect: the old key's
 settings stay in `settings.json`, unused, and come back if the file gets its name
 back.
 
 ### `duplicate_effect(id) -> string`
 
-Copies the file under the first free name among `<name> (copy)`, `(copy 2)`…,
-and returns it. The suffix is interface text, in the interface language
-(`effects.copy`). The cache is copied with the file — same bytes, same hash — so the copy is
-`ready` at once. It is not recorded as shipped, even when the original was: it is
-a new effect, the user's.
+Copies the file into the user's folder under the first free name among
+`<name> (copy)`, `(copy 2)`…, and returns its key. The suffix is interface text,
+in the interface language (`effects.copy`). The cache is copied with the file —
+same bytes, same hash — so the copy is `ready` at once. A copy of a built-in is a
+new effect, the user's.
 
 ### `open_effects_dir()`
 
-Opens the effects folder in the system file manager, creating it on a first
+Opens the user's effects folder in the system file manager, creating it on a first
 launch. Adding an effect is saving a `.ts` file there.
 
 ### `forget_effect_settings(id)`
@@ -645,10 +658,9 @@ The source, to open it in the editor.
 
 ### `legacy_effect_ids() -> Record<string, string>`
 
-The effect ids of the directory layout and the names they became, when **this
-run** migrated some — empty on every later run. Only for the editor's drafts,
-stored under the effect id in the web view's storage, which the migration cannot
-reach.
+What effects were called before **this run's** migration — directory ids, names —
+and the keys they became; empty on every later run. Only for the editor's drafts,
+stored in the web view's storage, which the migration cannot reach.
 
 ### Migration from the directory layout
 
@@ -658,9 +670,13 @@ its manifest's name made valid (forbidden characters replaced by `-`, ` (2)` on 
 collision). `activeEffects` and `effectParams` are rewritten from the old ids to
 the names, and `settings.json` records `version: 1` so that this happens once.
 Then the former ids of the shipped effects move to their names, recorded as
-`version: 2`, and the shipped effects are copied. Settings are rewritten **before** files are moved, and
-a directory is removed only once its file is written: an interrupted run is
-finished by the next startup without duplicating an effect.
+`version: 2`, and the shipped effects are copied. Last, every file of that folder
+candeo did not copy moves to the user's folder, and every reference becomes a key
+— `shipped:` for a recorded shipped effect, `user:` otherwise — recorded as
+`version: 3`; the flat cache of version 2 is deleted and compiled again. Settings
+are rewritten **before** files are moved, and a directory or file is removed only
+once its copy is written: an interrupted run is finished by the next startup
+without duplicating an effect.
 
 ---
 

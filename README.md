@@ -158,9 +158,9 @@ Hence the distinction this section keeps: what is **compiled** and what remains
 - **Protocol.** `candeo-protocol` has no system dependencies: it builds bytes,
   and its tests run everywhere.
 - **Paths.** No path is hard-coded: Tauri's API applies the system's convention.
-  Effects go in `app_data_dir()`
-  (`%APPDATA%\com.o2csi.candeo` or `~/.local/share/…`), settings in
-  `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
+  Shipped effects go in `app_data_dir()`
+  (`%APPDATA%\com.o2csi.candeo` or `~/.local/share/…`), the user's in
+  `Documents/candeo/effects`, settings in `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
   account, and shared by all accounts.
 
 ### Assumed, for lack of Linux hardware
