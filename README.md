@@ -1,3 +1,5 @@
+<img src="apps/desktop/src-tauri/icons/128x128@2x.png" alt="" width="96" height="96">
+
 # candeo
 
 > *candeo*, Latin verb — "I shine, I glow". The root of *candela*,
