@@ -65,9 +65,8 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::failure::Failure;
-use crate::i18n;
 use crate::journal::LogLevel;
-use crate::language::{Language, LanguageSetting};
+use crate::language::LanguageSetting;
 use crate::runtime::swatch::{self, Swatch};
 use crate::shipped::Shipped;
 use crate::{AppState, CmdResult, DeviceRef};
@@ -1003,33 +1002,6 @@ fn free_name(base: &str, taken: &BTreeSet<String>) -> String {
         .expect("an unbounded range always has a free name")
 }
 
-/// `<name> (copy)`, `<name> (copy 2)`… — the first one `taken` does not hold.
-///
-/// The suffix is interface text, in `language`. The name is shortened to leave
-/// room for it.
-fn copy_name(name: &str, taken: &BTreeSet<String>, language: Language) -> String {
-    (1..)
-        .map(|n| {
-            let copy = if n == 1 {
-                i18n::text(language, "effects.copy")
-            } else {
-                i18n::t(
-                    language,
-                    "effects.copyN",
-                    &BTreeMap::from([("n", n.to_string())]),
-                )
-            };
-            let suffix = format!(" ({copy})");
-            let stem: String = name
-                .chars()
-                .take(MAX_NAME_LEN - suffix.chars().count())
-                .collect();
-            format!("{}{suffix}", stem.trim_end_matches([' ', '.']))
-        })
-        .find(|candidate| !taken.contains(&candidate.to_lowercase()))
-        .expect("an unbounded range always has a free name")
-}
-
 /// SHA-256 of a source, in lowercase hexadecimal.
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -1357,12 +1329,17 @@ impl Store {
             .unwrap_or_default()
     }
 
-    /// Copies an effect into the user's folder and returns the copy's key:
-    /// `<name> (copy)`, then `(copy 2)`, `(copy 3)`…
+    /// Copies an effect into the user's folder and returns the copy's key: its
+    /// own name when the user's folder has none of that name — a built-in's
+    /// first copy keeps its name, under `user:` — then `<name> (2)`, `(3)`…
+    ///
+    /// Numbered like every other name made free ([`free_name`]), rather than a
+    /// word in the interface language: a file name does not change with the
+    /// language, and a folder shared between two languages stays consistent.
     ///
     /// The cache is copied too: same bytes, same hash, so the copy is ready
     /// without a compilation. A copy of a built-in is the user's.
-    pub fn duplicate_effect(&self, key: &EffectKey, language: Language) -> CmdResult<EffectKey> {
+    pub fn duplicate_effect(&self, key: &EffectKey) -> CmdResult<EffectKey> {
         self.require(key)?;
         let source = read(&self.source_path(key))?;
         let taken: BTreeSet<String> = self
@@ -1370,7 +1347,7 @@ impl Store {
             .iter()
             .map(|n| n.to_lowercase())
             .collect();
-        let copy = EffectKey::user(&copy_name(&key.name, &taken, language));
+        let copy = EffectKey::user(&free_name(&key.name, &taken));
 
         create_dir(&self.user_dir)?;
         write_atomically(&self.source_path(&copy), &source)?;
@@ -2204,8 +2181,7 @@ pub fn delete_effect(app: AppHandle, state: State<'_, AppState>, id: String) -> 
 /// [`Store::duplicate_effect`].
 #[tauri::command]
 pub fn duplicate_effect(app: AppHandle, id: String) -> CmdResult<String> {
-    let copy =
-        store(&app)?.duplicate_effect(&EffectKey::parse(&id)?, crate::language::current(&app))?;
+    let copy = store(&app)?.duplicate_effect(&EffectKey::parse(&id)?)?;
     Ok(copy.to_string())
 }
 
@@ -2907,44 +2883,51 @@ mod tests {
         assert_eq!(err.code, "effectNotFound");
     }
 
-    /// A copy is a new effect: its own name, the same source, already compiled,
-    /// and not shipped even when the original is.
+    /// A copy is a new effect: the same source, already compiled, numbered only
+    /// when the user's folder already holds its name.
     #[test]
     fn duplicating_makes_a_ready_copy_under_a_free_name() {
         let (tmp, store) = temp_store();
         let js = solid_effect("00ff00");
         create_and_cache(&store, "Onde", &js);
 
-        let duplicate = |key: EffectKey| store.duplicate_effect(&key, Language::En).unwrap();
-        assert_eq!(duplicate(user("Onde")), user("Onde (copy)"));
-        assert_eq!(duplicate(user("Onde")), user("Onde (copy 2)"));
-        assert_eq!(duplicate(user("Onde (copy)")), user("Onde (copy) (copy)"));
-        assert_eq!(
-            store.duplicate_effect(&user("Onde"), Language::Fr).unwrap(),
-            user("Onde (copie)")
-        );
+        let duplicate = |key: EffectKey| store.duplicate_effect(&key).unwrap();
+        assert_eq!(duplicate(user("Onde")), user("Onde (2)"));
+        assert_eq!(duplicate(user("Onde")), user("Onde (3)"));
+        assert_eq!(duplicate(user("Onde (2)")), user("Onde (2) (2)"));
 
-        let copy = user_effect(&store, "Onde (copy)");
+        let copy = user_effect(&store, "Onde (2)");
         assert_eq!(copy.state, EffectState::Ready);
-        assert_eq!(store.effect_js(&user("Onde (copy)")).unwrap(), js);
-        assert!(effects_dir(&tmp).join("Onde (copy 2).ts").is_file());
-        assert!(store
-            .duplicate_effect(&user("Absent"), Language::En)
-            .is_err());
+        assert_eq!(store.effect_js(&user("Onde (2)")).unwrap(), js);
+        assert!(effects_dir(&tmp).join("Onde (3).ts").is_file());
+        assert!(store.duplicate_effect(&user("Absent")).is_err());
+    }
 
-        // A copy of a built-in is the user's, in the user's folder.
+    /// A built-in's first copy keeps its name, under `user:`: nothing of that
+    /// name is the user's yet. The next ones are numbered.
+    #[test]
+    fn a_builtins_first_copy_keeps_its_name() {
+        let (_tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        let copy = duplicate(shipped("Livré"));
-        assert_eq!(copy, user("Livré (copy)"));
-        assert_eq!(user_effect(&store, &copy.name).kind, EffectKind::User);
+
+        let first = store.duplicate_effect(&shipped("Livré")).unwrap();
+        assert_eq!(first, user("Livré"));
+        assert_eq!(user_effect(&store, "Livré").kind, EffectKind::User);
+        builtin(&store, "Livré");
+
+        assert_eq!(
+            store.duplicate_effect(&shipped("Livré")).unwrap(),
+            user("Livré (2)")
+        );
     }
 
     #[test]
-    fn a_copy_name_stays_valid() {
+    fn a_numbered_name_stays_valid() {
         let long = "a".repeat(MAX_NAME_LEN);
-        let name = copy_name(&long, &BTreeSet::new(), Language::Fr);
+        let taken = BTreeSet::from([long.clone()]);
+        let name = free_name(&long, &taken);
         validate_name(&name).unwrap_or_else(|e| panic!("\"{name}\": {e}"));
-        assert!(name.ends_with(" (copie)"), "name: {name}");
+        assert!(name.ends_with(" (2)"), "name: {name}");
     }
 
     // ------------------------------------------------------------ migration
@@ -3255,7 +3238,7 @@ mod tests {
         );
 
         // Duplicating is how it becomes someone's own.
-        let copy = store.duplicate_effect(&livre, Language::En).unwrap();
+        let copy = store.duplicate_effect(&livre).unwrap();
         store.save_effect_source(&copy, "mine", false).unwrap();
         let renamed = store.rename_effect(&copy, "Le mien").unwrap();
         store.delete_effect(&renamed).unwrap();

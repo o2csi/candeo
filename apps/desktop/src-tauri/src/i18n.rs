@@ -89,7 +89,7 @@ mod tests {
         };
         let mut keys = vec!["errors.unexpected".to_owned()];
         for source in sources {
-            for prefix in ["\"tray.", "\"devices.warnings.", "\"effects.copy"] {
+            for prefix in ["\"tray.", "\"devices.warnings."] {
                 keys.extend(source.match_indices(prefix).map(|(i, _)| quoted(source, i)));
             }
             keys.extend(
