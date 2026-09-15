@@ -6,8 +6,12 @@
       "devices": "Devices",
       "settings": "Settings"
     },
-    "closeHides": "Closing hides to the notification area",
-    "closeHidesDetail": "Closing the window does not stop candeo: the effect keeps running on the keyboard, and the notification area icon keeps control of it. To quit, right-click that icon, then “Quit candeo”."
+    "theme": {
+      "label": "Theme",
+      "system": "System theme",
+      "light": "Light theme",
+      "dark": "Dark theme"
+    }
   },
   "effects": {
     "columns": {
@@ -152,6 +156,8 @@
     "devicesUnavailable": "Devices unavailable",
     "openWindow": "Open window",
     "quit": "Quit candeo",
+    "stillRunningTitle": "candeo is still running",
+    "stillRunningBody": "Effects keep running. To quit, right-click the candeo icon in the notification area, then “{quit}”.",
     "sendToKeyboard": "Send to keyboard",
     "turnOff": "Turn off",
     "notOpenTitle": "{name} — not open",
@@ -239,7 +245,10 @@
     "startup": {
       "title": "Startup",
       "resume": "Resume applied effects",
-      "resumeDetail": "When candeo starts or a keyboard is plugged back in, the effect applied on it starts again."
+      "resumeDetail": "When candeo starts or a keyboard is plugged back in, the effect applied on it starts again.",
+      "login": "Launch at login",
+      "loginDetail": "candeo starts hidden in the notification area, with no window.",
+      "loginUnavailable": "Only in the installed application."
     },
     "log": {
       "title": "Log",

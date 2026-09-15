@@ -6,8 +6,12 @@
       "devices": "Périphériques",
       "settings": "Réglages"
     },
-    "closeHides": "Fermer replie dans la zone de notification",
-    "closeHidesDetail": "Fermer la fenêtre n'arrête pas candeo : l'effet continue de tourner sur le clavier, et l'icône de la zone de notification garde la main dessus. Pour quitter vraiment, clic droit sur cette icône, puis « Quitter candeo »."
+    "theme": {
+      "label": "Thème",
+      "system": "Thème du système",
+      "light": "Thème clair",
+      "dark": "Thème sombre"
+    }
   },
   "effects": {
     "columns": {
@@ -152,6 +156,8 @@
     "devicesUnavailable": "Appareils indisponibles",
     "openWindow": "Ouvrir la fenêtre",
     "quit": "Quitter candeo",
+    "stillRunningTitle": "candeo tourne toujours",
+    "stillRunningBody": "Les effets continuent. Pour quitter, clic droit sur l'icône candeo dans la zone de notification, puis « {quit} ».",
     "sendToKeyboard": "Envoyer au clavier",
     "turnOff": "Éteindre",
     "notOpenTitle": "{name} — non ouvert",
@@ -239,7 +245,10 @@
     "startup": {
       "title": "Démarrage",
       "resume": "Relancer les effets appliqués",
-      "resumeDetail": "Au démarrage de candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart."
+      "resumeDetail": "Au démarrage de candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart.",
+      "login": "Lancer à l'ouverture de session",
+      "loginDetail": "candeo démarre replié dans la zone de notification, sans fenêtre.",
+      "loginUnavailable": "Seulement dans l'application installée."
     },
     "log": {
       "title": "Journal",

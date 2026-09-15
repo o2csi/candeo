@@ -674,7 +674,8 @@ finished by the next startup without duplicating an effect.
     logLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace',
     language?: 'en' | 'fr',       // absent : la langue du système
     resumeEffects?: false,        // absent: a device that opens resumes its applied effect
-    logFilesKept?: number         // absent: 7; 0 keeps every log file
+    logFilesKept?: number,        // absent: 7; 0 keeps every log file
+    theme?: 'light' | 'dark'      // absent: the system's
   },
   devices: {
     vid: number,
@@ -747,6 +748,30 @@ with the settings saved for it on that device, so it works with the window
 hidden. Nothing starts when the effect already runs there. An effect that cannot
 start keeps its `activeEffects` entry and is logged; one edited outside candeo
 waits for the window to compile it, and `cache_effect` resumes it then.
+
+### `get_launch_at_login() -> LaunchAtLogin` · `set_launch_at_login(on) -> LaunchAtLogin`
+
+```ts
+{
+  enabled: boolean,
+  available: boolean   // false in a development build, and on macOS
+}
+```
+
+Launch at login, hidden in the notification area (#103). **The system's entry is
+the only record**, not `settings.json`: the `Run` value under
+`HKEY_CURRENT_USER` on Windows, `autostart/candeo.desktop` in the XDG configuration
+folder on Linux, pointing at the AppImage itself when there is one. The system's
+own tools change the same entry, so `enabled` reads it back: an entry Task Manager
+turned off (`StartupApproved`) or a desktop marked `Hidden=true` is off. Turning
+it on from candeo clears Task Manager's "off".
+
+The entry passes `--hidden`. The window is declared `create: false` and built at
+the end of `setup`; launched with `--hidden`, it is built only when someone opens
+it from the tray or launches candeo again. Without a tray icon it opens anyway,
+being the only way in.
+
+A development build writes no entry: it would register a binary under `target/`.
 
 ### `reset_settings()`
 
@@ -1028,6 +1053,14 @@ elsewhere, and English for any language the interface is not written in.
 `get_language` never fails: with unreadable settings it gives the system's
 language, since the window must still be able to say what went wrong. The window
 reads it before mounting, so that it does not show English for a moment.
+
+### `set_theme(theme)`
+
+`'system' | 'light' | 'dark'`, chosen in the top bar (#110). Only `light` and
+`dark` are written. Rust only saves it: the window sets `data-theme` on the
+document, and `tokens.css` follows the system's setting live when there is none.
+The window reads it before mounting, like the language, so that it does not show
+the other theme for a moment.
 
 ### `open_log_dir()`
 

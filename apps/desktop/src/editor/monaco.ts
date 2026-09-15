@@ -162,6 +162,11 @@ export function setupMonaco(): void {
 
   applyTheme()
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme)
+  // The theme chosen in the top bar (#110) changes `data-theme`, not the media query.
+  new MutationObserver(applyTheme).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
+  })
 }
 
 /**

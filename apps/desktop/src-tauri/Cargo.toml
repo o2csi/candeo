@@ -34,6 +34,9 @@ serde_json = "1"
 # ni l'autre ne s'entend mieux avec un voisin d'une autre version.
 tauri-plugin-single-instance = "2"
 
+# The system notification saying that closing hid the window (`src/tray.rs`).
+tauri-plugin-notification = "2"
+
 # Moteur d'effets. `loader` sert à résoudre `@candeo/effects-api` vers un
 # module interne, sans bundler ni `node_modules`.
 rquickjs = { version = "0.13", features = ["loader"] }

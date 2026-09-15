@@ -14,6 +14,7 @@ import './styles/base.css'
 import { getLanguage } from './api/candeo'
 import { erreur, message } from './api/journal'
 import App from './App.vue'
+import { useTheme } from './composables/useTheme'
 import { i18n, showIn } from './i18n'
 import { router } from './router'
 
@@ -39,9 +40,12 @@ app.config.errorHandler = (e, _instance, info) => {
   erreur('vue', `${info}: ${message(e, 'en')}`, e)
 }
 
-// The language first, so that the window does not show English for a moment
-// before switching. If Rust cannot answer, English: the window must still open.
-getLanguage()
-  .then((status) => showIn(status.language))
-  .catch((e: unknown) => erreur('i18n', `interface language not read: ${message(e, 'en')}`, e))
-  .finally(() => app.use(i18n).use(router).mount('#app'))
+// The language and the theme first, so that the window does not show English or
+// the other theme for a moment before switching. If Rust cannot answer, English
+// and the system's theme: the window must still open.
+void Promise.all([
+  getLanguage()
+    .then((status) => showIn(status.language))
+    .catch((e: unknown) => erreur('i18n', `interface language not read: ${message(e, 'en')}`, e)),
+  useTheme().load(),
+]).finally(() => app.use(i18n).use(router).mount('#app'))

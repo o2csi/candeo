@@ -394,6 +394,9 @@ pub struct Preferences {
     /// from [`crate::journal::DEFAULT_FILES_KEPT`].
     #[serde(skip_serializing_if = "is_default_files_kept")]
     pub log_files_kept: u32,
+    /// Light or dark interface. `system`, the default, is not written.
+    #[serde(skip_serializing_if = "Theme::is_system")]
+    pub theme: Theme,
 }
 
 impl Default for Preferences {
@@ -403,7 +406,25 @@ impl Default for Preferences {
             language: LanguageSetting::default(),
             resume_effects: true,
             log_files_kept: crate::journal::DEFAULT_FILES_KEPT,
+            theme: Theme::default(),
         }
+    }
+}
+
+/// The interface theme. Only the window reads it: it sets `data-theme` on the
+/// document, and `system` leaves the system's setting to decide.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    fn is_system(&self) -> bool {
+        *self == Self::System
     }
 }
 
@@ -1992,6 +2013,18 @@ pub fn set_resume_effects(app: AppHandle, on: bool) -> CmdResult<()> {
     store.write_settings(&settings)
 }
 
+/// Saves the interface theme; the window applies it itself.
+#[tauri::command]
+pub fn set_theme(app: AppHandle, theme: Theme) -> CmdResult<()> {
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.preferences.theme == theme {
+        return Ok(());
+    }
+    settings.preferences.theme = theme;
+    store.write_settings(&settings)
+}
+
 /// Resets the configuration to the default, and releases the devices.
 ///
 /// # What it does not do
@@ -3065,6 +3098,7 @@ mod tests {
                 language: LanguageSetting::Fr,
                 resume_effects: false,
                 log_files_kept: 30,
+                theme: Theme::Light,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3852,6 +3886,7 @@ mod tests {
             language: LanguageSetting::En,
             resume_effects: false,
             log_files_kept: 0,
+            theme: Theme::Dark,
         };
         mirror("Preferences", &preferences);
         mirror(

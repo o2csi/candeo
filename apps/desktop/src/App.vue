@@ -8,12 +8,18 @@ import { alerte, message } from './api/journal'
 import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
+import { useTheme } from './composables/useTheme'
+import type { ThemeSetting } from './api/candeo'
 import { refreshLibrary } from './editor/library'
 import { t } from './i18n'
 
 const route = useRoute()
 const { devices, error, restore } = useDevice()
 const { reload } = useSettings()
+const { theme, choose: chooseTheme } = useTheme()
+
+/** In the order a switch reads: follow the system, or force one side. */
+const THEMES: readonly ThemeSetting[] = ['system', 'light', 'dark']
 
 /**
  * The controlled-device count lives in the window title, not in the window:
@@ -80,13 +86,45 @@ onMounted(() => {
       <span class="spacer" />
 
       <!--
-        What the close button does, said at all times: closing no longer quits,
-        which lets an effect run on, and makes quitting less obvious. Permanent,
-        not a message to dismiss, since the gesture is always available. It gives
-        way before the tabs when the window narrows; the tooltip keeps the detail,
-        and the README explains it in full.
+        The theme, reachable from every screen. What the close button does is
+        said by a system notification on the first close instead (#110).
       -->
-      <span class="repli" :title="t('app.closeHidesDetail')">{{ t('app.closeHides') }}</span>
+      <div class="theme" role="group" :aria-label="t('app.theme.label')">
+        <button
+          v-for="option in THEMES"
+          :key="option"
+          type="button"
+          class="theme-option"
+          :aria-pressed="theme === option"
+          :aria-label="t(`app.theme.${option}`)"
+          :title="t(`app.theme.${option}`)"
+          @click="chooseTheme(option)"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            width="14"
+            height="14"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <template v-if="option === 'system'">
+              <rect x="1.75" y="2.5" width="12.5" height="8.5" rx="1.25" />
+              <path d="M5.5 13.75h5M8 11v2.75" />
+            </template>
+            <template v-else-if="option === 'light'">
+              <circle cx="8" cy="8" r="2.75" />
+              <path
+                d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.06 1.06M11.54 11.54l1.06 1.06M3.4 12.6l1.06-1.06M11.54 4.46l1.06-1.06"
+              />
+            </template>
+            <path v-else d="M13.25 9.75A5.5 5.5 0 0 1 6.25 2.75a5.5 5.5 0 1 0 7 7Z" />
+          </svg>
+        </button>
+      </div>
     </nav>
 
     <main class="body">
@@ -144,18 +182,32 @@ onMounted(() => {
   flex: 1;
 }
 
-.repli {
-  /* Il cède la place avant tout le reste : les onglets sont la navigation, ceci
-     est un rappel. `min-width: 0` est ce qui autorise l'ellipse dans un flex. */
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  margin-right: var(--gap-3);
+.theme {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.theme-option {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border-radius: calc(var(--r-md) - 2px);
   color: var(--text-muted);
-  font-size: 12px;
-  cursor: default;
+}
+
+.theme-option:hover {
+  color: var(--text);
+  background: var(--raised-2);
+}
+
+.theme-option[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .body {

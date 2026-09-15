@@ -13,6 +13,7 @@
     "windows": [
       {
         "title": "candeo",
+        "create": false,
         "width": 1024,
         "height": 720,
         "minWidth": 640,
