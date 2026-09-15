@@ -337,9 +337,7 @@ pub fn init(app: &AppHandle) {
         version = app.package_info().version.to_string(),
         os = std::env::consts::OS,
         architecture = std::env::consts::ARCH,
-        log = dir
-            .as_deref()
-            .map(|d| without_home(d, app.path().home_dir().ok().as_deref())),
+        log = dir.as_deref().map(crate::paths::shown),
         "candeo starting"
     );
     if let Some(e) = file_error {
@@ -350,18 +348,6 @@ pub fn init(app: &AppHandle) {
     }
     if let Some(level) = resolution.level {
         warn_if_verbose(level);
-    }
-}
-
-/// `path` with the home directory written `~`.
-///
-/// The log and the diagnostic end up pasted into public bug reports, and the home
-/// directory usually carries the user's name. What follows it is what tells
-/// where the files are.
-fn without_home(path: &Path, home: Option<&Path>) -> String {
-    match home.and_then(|home| path.strip_prefix(home).ok()) {
-        Some(rest) => Path::new("~").join(rest).display().to_string(),
-        None => path.display().to_string(),
     }
 }
 
@@ -481,14 +467,15 @@ fn rolling_appender_in(
 ) -> Result<tracing_appender::rolling::RollingFileAppender, String> {
     // Created here rather than on the first write: a directory that cannot be
     // created is reported now, not at the first failure we wanted to record.
-    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    std::fs::create_dir_all(dir)
+        .map_err(|e| format!("cannot create {}: {e}", crate::paths::shown(dir)))?;
 
     tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix(FILE_PREFIX)
         .filename_suffix(FILE_SUFFIX)
         .build(dir)
-        .map_err(|e| format!("log not opened in {}: {e}", dir.display()))
+        .map_err(|e| format!("log not opened in {}: {e}", crate::paths::shown(dir)))
 }
 
 /// Reads the level saved in `settings.json` back and applies it.
@@ -767,7 +754,7 @@ pub fn open_log_dir(app: AppHandle) -> CmdResult<()> {
 
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", dir.display())))
+        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&dir))))
 }
 
 /// The system's version as a bug report needs it: the release and build on
@@ -895,7 +882,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     let log_dir = COLLECTOR
         .get()
         .and_then(|c| c.dir.as_deref())
-        .map(|d| without_home(d, app.path().home_dir().ok().as_deref()));
+        .map(crate::paths::shown);
     line(
         &mut out,
         "log",
@@ -1408,23 +1395,6 @@ mod tests {
     }
 
     // -------------------------------------------------------- transitions
-
-    #[test]
-    fn the_home_directory_is_not_shown() {
-        let home = Path::new("home").join("someone");
-        let logs = home.join("logs");
-        assert_eq!(
-            without_home(&logs, Some(&home)),
-            Path::new("~").join("logs").display().to_string()
-        );
-        // A name that only starts like the home directory is another directory.
-        let other = Path::new("home").join("someone-else").join("logs");
-        assert_eq!(
-            without_home(&other, Some(&home)),
-            other.display().to_string()
-        );
-        assert_eq!(without_home(&logs, None), logs.display().to_string());
-    }
 
     #[test]
     fn the_distribution_is_read_from_os_release() {
