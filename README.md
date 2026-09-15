@@ -1,4 +1,4 @@
-# candeo
+# Candeo
 
 > *candeo*, Latin verb — "I shine, I glow". The root of *candela*,
 > the SI unit of luminous intensity.
@@ -33,17 +33,17 @@ installers and a `SHA256SUMS` file.
 
 **Windows (x64)**
 
-- `candeo_<version>_x64-setup.exe` installs for the current account, without
+- `Candeo_<version>_x64-setup.exe` installs for the current account, without
   administrator rights. The one to pick.
-- `candeo_<version>_x64_en-US.msi` installs for every account, and needs
+- `Candeo_<version>_x64_en-US.msi` installs for every account, and needs
   administrator rights.
 - The installers are not signed yet: on first run, SmartScreen warns about an
   unknown publisher. **More info**, then **Run anyway**.
 
 **Linux (x86_64)**
 
-- Debian, Ubuntu: `sudo apt install ./candeo_<version>_amd64.deb`
-- Fedora: `sudo dnf install ./candeo-<version>-1.x86_64.rpm`
+- Debian, Ubuntu: `sudo apt install ./Candeo_<version>_amd64.deb`
+- Fedora: `sudo dnf install ./Candeo-<version>-1.x86_64.rpm`
 - Both packages install the [udev rule](#udev-rule) that gives the signed-in
   user access to the keyboard: plug it in again after installing. There is no
   AppImage, which cannot install that rule.
@@ -117,13 +117,13 @@ The three design choices that structure everything else:
   source and receives the frames. The preview therefore **is** production, and
   an effect keeps running with the window closed. The motive was never
   performance — 132 LEDs × 30 fps = 3,960 colors/s, trivial.
-- **Closing the window tucks candeo into the system tray.** This is the second
+- **Closing the window tucks Candeo into the system tray.** This is the second
   half of the previous sentence, and it did not hold until issue #46: a thread
   independent of the window does not outlive the process, and the process exited
   with its last window. The tray icon keeps it alive — it intercepts
   `RunEvent::ExitRequested` — and provides what is needed to control things
   without the window: current effect and library per controlled device, sending
-  to the keyboard as a toggle, lights off. **"Quitter candeo" (Quit candeo) is
+  to the keyboard as a toggle, lights off. **"Quit Candeo" is
   the only real exit there**, and quitting leaves the lighting as it is. See
   [`src/tray.rs`](apps/desktop/src-tauri/src/tray.rs).
 - **The simulator draws the real keyboard**, full-size ISO layout. The device
@@ -160,7 +160,7 @@ Hence the distinction this section keeps: what is **compiled** and what remains
 - **Paths.** No path is hard-coded: Tauri's API applies the system's convention.
   Shipped effects go in `app_data_dir()`
   (`%APPDATA%\com.o2csi.candeo` or `~/.local/share/…`), the user's in
-  `Documents/candeo/effects`, settings in `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
+  `Documents/Candeo/effects`, settings in `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
   account, and shared by all accounts.
 
 ### Assumed, for lack of Linux hardware

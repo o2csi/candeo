@@ -181,8 +181,8 @@ jobs:
         run: |
           set -euo pipefail
           files=(
-            "target/release/bundle/nsis/candeo_${VERSION}_x64-setup.exe"
-            "target/release/bundle/msi/candeo_${VERSION}_x64_en-US.msi"
+            "target/release/bundle/nsis/Candeo_${VERSION}_x64-setup.exe"
+            "target/release/bundle/msi/Candeo_${VERSION}_x64_en-US.msi"
           )
           for f in "${files[@]}"; do
             if [ ! -f "$f" ]; then
@@ -227,8 +227,8 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          deb="target/release/bundle/deb/candeo_${VERSION}_amd64.deb"
-          rpm="target/release/bundle/rpm/candeo-${VERSION}-1.x86_64.rpm"
+          deb="target/release/bundle/deb/Candeo_${VERSION}_amd64.deb"
+          rpm="target/release/bundle/rpm/Candeo-${VERSION}-1.x86_64.rpm"
           for f in "$deb" "$rpm"; do
             if [ ! -f "$f" ]; then
               echo "::error::$f was not built"
@@ -257,10 +257,10 @@ jobs:
         run: |
           set -euo pipefail
           expected=(
-            "candeo_${VERSION}_x64-setup.exe"
-            "candeo_${VERSION}_x64_en-US.msi"
-            "candeo_${VERSION}_amd64.deb"
-            "candeo-${VERSION}-1.x86_64.rpm"
+            "Candeo_${VERSION}_x64-setup.exe"
+            "Candeo_${VERSION}_x64_en-US.msi"
+            "Candeo_${VERSION}_amd64.deb"
+            "Candeo-${VERSION}-1.x86_64.rpm"
           )
           mkdir -p installers
           cd installers
