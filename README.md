@@ -128,7 +128,7 @@ Hence the distinction this section keeps: what is **compiled** and what remains
   and its tests run everywhere.
 - **Paths.** No path is hard-coded: Tauri's API applies the system's convention.
   Effects go in `app_data_dir()`
-  (`%APPDATA%\com.oorabona.candeo` or `~/.local/share/…`), settings in
+  (`%APPDATA%\com.o2csi.candeo` or `~/.local/share/…`), settings in
   `app_config_dir()`. **Never in `Program Files`** — read-only for a standard
   account, and shared by all accounts.
 

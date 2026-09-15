@@ -76,8 +76,8 @@ convention.
 
 | Tauri call | Windows | Linux | macOS |
 |---|---|---|---|
-| `app_data_dir()` | `%APPDATA%\com.oorabona.candeo` | `~/.local/share/com.oorabona.candeo` | `~/Library/Application Support/…` |
-| `app_config_dir()` | `%APPDATA%\com.oorabona.candeo` | `~/.config/com.oorabona.candeo` | `~/Library/Application Support/…` |
+| `app_data_dir()` | `%APPDATA%\com.o2csi.candeo` | `~/.local/share/com.o2csi.candeo` | `~/Library/Application Support/…` |
+| `app_config_dir()` | `%APPDATA%\com.o2csi.candeo` | `~/.config/com.o2csi.candeo` | `~/Library/Application Support/…` |
 
 On Windows the two coincide; on Linux they do not, hence the point of going
 through the API rather than a constant.
@@ -321,7 +321,7 @@ Linux machine fitted with the keyboard:
   fails. The hidraw backend reads the `bInterfaceNumber` attribute of the USB parent, which
   should give the same value — *should*;
 - that `app_data_dir()` and `app_config_dir()` do land in
-  `~/.local/share/com.oorabona.candeo` and `~/.config/com.oorabona.candeo`. That is
+  `~/.local/share/com.o2csi.candeo` and `~/.config/com.o2csi.candeo`. That is
   what Tauri documents, and the code builds no path itself (§3),
   but nothing here has observed it.
 
