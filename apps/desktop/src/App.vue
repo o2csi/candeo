@@ -77,8 +77,6 @@ onMounted(() => {
 <template>
   <div class="app" :class="{ full }">
     <nav v-if="!full" class="rail">
-      <span class="brand" aria-hidden="true">◈</span>
-
       <RouterLink to="/" class="tab">{{ t('app.tabs.effects') }}</RouterLink>
       <RouterLink to="/devices" class="tab">{{ t('app.tabs.devices') }}</RouterLink>
       <RouterLink to="/settings" class="tab">{{ t('app.tabs.settings') }}</RouterLink>
@@ -153,12 +151,6 @@ onMounted(() => {
   background: var(--raised);
   border-bottom: 1px solid var(--line);
   height: 48px;
-}
-
-.brand {
-  color: var(--accent);
-  font-size: 15px;
-  margin-right: var(--gap-2);
 }
 
 .tab {
