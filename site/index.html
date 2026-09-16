@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Candeo — keyboard lighting, by talking to the keyboard</title>
+    <title>Candeo — lighting control, by talking to the device</title>
     <meta
       name="description"
-      content="Candeo controls a keyboard's lighting through direct HID access: no vendor runtime, no service, no account. Effects are written in TypeScript and keep running with the window closed."
+      content="Candeo lights the devices on your desk by talking to them over USB: no vendor runtime, no service, no account. Effects are written in TypeScript and keep running with the window closed."
     />
     <link rel="icon" href="assets/icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -22,7 +22,7 @@
       <img src="assets/icon.png" alt="" width="96" height="96" />
       <div>
         <h1>Candeo</h1>
-        <p class="tagline">Keyboard lighting, by talking to the keyboard.</p>
+        <p class="tagline">Lighting control, by talking to the device.</p>
         <p class="latin"><em>candeo</em>, Latin — “I shine, I glow”. The root of <em>candela</em>.</p>
       </div>
     </header>
@@ -30,9 +30,10 @@
     <main>
       <section>
         <p class="lead">
-          No vendor runtime, no background service, no account. Candeo writes to the keyboard over
-          the HID interface Windows already exposes, and the effects you write run inside the
-          application — so they keep running with the window closed.
+          No vendor runtime, no background service, no account. Candeo writes to the device over the
+          HID interface the system already exposes, and the effects you write run inside the
+          application — so they keep running with the window closed. Today it lights keyboards;
+          the same engine is what will light the rest.
         </p>
 
         <figure>
@@ -48,12 +49,31 @@
           </figcaption>
         </figure>
 
-        <h3>Supported hardware</h3>
+      </section>
+
+      <section>
+        <h2>Devices</h2>
         <p>
-          The <strong>Razer DeathStalker V2 Pro (wired)</strong>, and that is the whole list. Its
-          protocol was established by watching the hardware, and every fact is written down with the
-          firmware version it was checked against. Without one of these keyboards, Candeo starts,
-          lists no device and lights nothing.
+          Candeo is built for <strong>lit devices that speak HID over USB</strong> — keyboards,
+          mice, mousepads, headsets. A device declares what it is and where its lights sit, and an
+          effect is written against that, not against a model: an effect written for a mousepad's
+          grid runs on a keyboard, and one written for a keyboard runs on the next one to be
+          surveyed.
+        </p>
+
+        <h3>Supported so far</h3>
+        <ul>
+          <li>
+            <strong>Razer DeathStalker V2 Pro</strong> (wired) — full matrix, 132 addressable
+            positions, firmware effects included.
+          </li>
+        </ul>
+        <p class="note">
+          Each device here is a protocol somebody established by watching the hardware, wrote down
+          with the firmware version it was checked against, and verified by reading its writes back
+          — which is why the list grows one device at a time, and why what is on it works. Getting
+          the next one on it is
+          <a href="https://github.com/o2csi/candeo/issues/34">#34</a>.
         </p>
       </section>
 
@@ -78,7 +98,7 @@
             <h3>Linux</h3>
             <p>
               <code>.deb</code> and <code>.rpm</code>, each carrying the udev rule that gives you
-              access to the keyboard.
+              access to the device.
             </p>
             <a class="download" href="{{releaseUrl}}">All downloads</a>
           </div>
@@ -94,7 +114,8 @@
         <h2>An effect is a file you can read</h2>
         <p>
           Effects are TypeScript, compiled and run by the application on the Rust side. They receive
-          the keyboard's geometry and the time, and return colours. Yours live in
+          the device's layout and the time, and return colours — the effect below runs on any
+          keyboard, whatever its size. Yours live in
           <code>Documents\candeo\effects</code>: ordinary files, editable here or in the editor you
           already use.
         </p>
@@ -142,6 +163,37 @@ export default defineEffect({
           <li>
             <strong>One engine runs the effects</strong>, in a thread that outlives the window, so
             closing it changes nothing.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>What comes next</h2>
+        <p>
+          Each of these is an issue with the thinking already written down, not a wish:
+        </p>
+        <ul>
+          <li>
+            <a href="https://github.com/o2csi/candeo/issues/34">More devices, contributed</a> — what
+            a protocol contribution has to carry to be reviewable by someone without the hardware.
+          </li>
+          <li>
+            <a href="https://github.com/o2csi/candeo/issues/105">The time on the keyboard</a>, and
+            <a href="https://github.com/o2csi/candeo/issues/106">rules that interrupt an effect</a> —
+            show the clock on the hour, turn the lighting off at night.
+          </li>
+          <li>
+            <a href="https://github.com/o2csi/candeo/issues/107">Effects that react to sound</a> —
+            what the computer plays, analysed on the Rust side, never recorded.
+          </li>
+          <li>
+            <a href="https://github.com/o2csi/candeo/issues/108">Signals from other software</a> — a
+            local API and a command line, so a CI job or Home Assistant can light the keyboard.
+          </li>
+          <li>
+            <a href="https://github.com/o2csi/candeo/issues/126">The Microsoft Store</a> and
+            <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing without the
+            warning an unsigned installer earns.
           </li>
         </ul>
       </section>
