@@ -248,7 +248,9 @@
       "resumeDetail": "Au démarrage de Candeo ou quand un clavier est rebranché, l'effet qui y était appliqué repart.",
       "login": "Lancer à l'ouverture de session",
       "loginDetail": "Candeo démarre replié dans la zone de notification, sans fenêtre.",
-      "loginUnavailable": "Seulement dans l'application installée."
+      "loginUnavailable": "Seulement dans l'application installée.",
+      "loginPackaged": "Pas encore dans la version du Microsoft Store.",
+      "loginUnsupported": "Pas sur ce système."
     },
     "log": {
       "title": "Journal",

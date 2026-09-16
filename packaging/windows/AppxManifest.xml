@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MSIX manifest, filled in by `packaging/windows/msix.mjs`: every name in
+  double braces below comes from the configuration, or from the identity the
+  package is built for. See `docs/design/msix.md`.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <!-- Name and Publisher are what Partner Center reserves; a package whose
+       identity differs from the reservation is refused at submission. -->
+  <Identity
+    Name="{{identityName}}"
+    Publisher="{{publisher}}"
+    Version="{{version}}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Candeo</DisplayName>
+    <PublisherDisplayName>{{publisherDisplayName}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Keyboard lighting control, through direct HID access.</Description>
+  </Properties>
+
+  <Dependencies>
+    <!-- 19041 is the first build where the user folder outside AppData behaves
+         as this application expects, and the floor Tauri itself sets. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="fr-fr" />
+  </Resources>
+
+  <Applications>
+    <Application Id="Candeo" Executable="candeo.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Candeo"
+        Description="Keyboard lighting control, through direct HID access."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <!-- No 310x310 tile: Windows then asks for a 310x150 one as well, and a
+             wide logo is a drawing of its own, not this square icon stretched. -->
+        <uap:DefaultTile Square71x71Logo="Assets\Square71x71Logo.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- A desktop application, which writes to the keyboard through the HID API
+         as it does outside a package. `runFullTrust` is what carries that; no
+         restricted capability is asked for, and none is needed, since the
+         effects people write live in Documents (`docs/design/effects-sources.md`). -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

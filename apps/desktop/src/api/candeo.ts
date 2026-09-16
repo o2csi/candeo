@@ -417,10 +417,18 @@ export function setResumeEffects(on: boolean): Promise<void> {
 }
 
 /** Whether Candeo launches at login, and whether this build can change it. */
+/** Why no entry can be written: see `autostart.rs`. */
+export type LoginRefused = 'development' | 'packaged' | 'unsupported'
+
 export interface LaunchAtLogin {
   enabled: boolean
-  /** False in a development build, and on a system Candeo writes no entry for. */
+  /**
+   * False in a development build, from an MSIX package, and on a system Candeo
+   * writes no entry for.
+   */
   available: boolean
+  /** What `available: false` is about; null when it is true. */
+  refused: LoginRefused | null
 }
 
 export function getLaunchAtLogin(): Promise<LaunchAtLogin> {

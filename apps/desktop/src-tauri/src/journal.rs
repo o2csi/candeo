@@ -868,6 +868,12 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         "webview",
         &tauri::webview_version().unwrap_or_else(|e| format!("not read ({e})")),
     );
+    // Only when it is one: a package redirects what the application writes and
+    // takes over updating it, which changes what a report means (#126). Saying
+    // "packaged: no" on every other line would be noise.
+    if crate::msix::packaged() {
+        line(&mut out, "packaged", "MSIX");
+    }
     // Settings and HID are gathered separately, and neither is unwrapped: being
     // unable to enumerate USB or read `settings.json` back is exactly what a
     // diagnostic must **say**, not what must interrupt it.

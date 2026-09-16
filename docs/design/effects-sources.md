@@ -12,14 +12,18 @@ seeds and updates, and the ones people write, duplicate or drop in.
 - **Uninstalling can delete people's work.** The NSIS uninstaller offers to
   delete the application data. An MSIX package, the Microsoft Store listing of
   #126, removes it without asking.
-- **An MSIX package splits the library.** Files and folders a packaged app
-  creates under `AppData` go to a location private to the package. The app sees
-  them merged with the real `AppData`; no other process does. The effects Candeo
-  seeds, duplicates or saves from its editor would be invisible to the file
-  manager and to other editors, while files dropped in from outside stay
-  visible. **Open folder** would show part of the library.
-- Turning that redirection off takes the `unvirtualizedResources` restricted
-  capability, which Microsoft reserves for narrow cases and reviews separately.
+- **An MSIX package may split the library.** Files and folders a packaged app
+  creates under `AppData` can go to a location private to the package: the app
+  sees them merged with the real `AppData`, no other process does. The effects
+  Candeo seeds, duplicates or saves from its editor would be invisible to the
+  file manager and to other editors, while files dropped in from outside stay
+  visible — **Open folder** would show part of the library. Turning that
+  redirection off takes the `unvirtualizedResources` restricted capability,
+  which Microsoft reserves for narrow cases and reviews separately.
+
+  Measured since, on the package of #126 and Windows 11 build 26100, this
+  redirection **did not happen**: see `msix.md` §2. It is a floor, not a
+  promise, and the reasons below stand on their own.
 - `Documents` is where people look for what they made, back it up and sync it.
 
 The two kinds were already told apart: the gallery's **Built-in** and **Yours**
@@ -40,8 +44,9 @@ shared a folder.
   `app_data_dir()/user-effects/`, and the log says so once.
 - **Cache:** `app_cache_dir()/effects/<source>/<name>.json`, one tree per source.
 - **Under MSIX:** the shipped folder, the cache, `settings.json` and the logs stay
-  in `AppData`, private to the package and removed with it, which suits what
-  only Candeo reads. The user folder is outside `AppData`: visible to every
+  in `AppData`, which suits what only Candeo reads — private to the package
+  where the system redirects them, the ordinary files where it does not
+  (`msix.md` §2). The user folder is outside `AppData`: visible to every
   program, and kept on uninstall. No restricted capability.
 
 ## 2. Identity: source and name

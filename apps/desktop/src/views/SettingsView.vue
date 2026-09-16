@@ -101,6 +101,21 @@ async function readLogin(): Promise<void> {
   }
 }
 
+/** What the note under the setting says, and why no entry can be written. */
+function loginNote(status: LaunchAtLogin): string {
+  if (status.available) {
+    return t('settings.startup.loginDetail')
+  }
+  switch (status.refused) {
+    case 'packaged':
+      return t('settings.startup.loginPackaged')
+    case 'unsupported':
+      return t('settings.startup.loginUnsupported')
+    default:
+      return t('settings.startup.loginUnavailable')
+  }
+}
+
 async function chooseLogin(event: Event): Promise<void> {
   startupProblem.value = null
   try {
@@ -292,7 +307,7 @@ onMounted(() => {
           {{ t('settings.startup.login') }}
         </label>
         <p class="note">
-          {{ login.available ? t('settings.startup.loginDetail') : t('settings.startup.loginUnavailable') }}
+          {{ loginNote(login) }}
         </p>
       </template>
     </section>

@@ -248,7 +248,9 @@
       "resumeDetail": "When Candeo starts or a keyboard is plugged back in, the effect applied on it starts again.",
       "login": "Launch at login",
       "loginDetail": "Candeo starts hidden in the notification area, with no window.",
-      "loginUnavailable": "Only in the installed application."
+      "loginUnavailable": "Only in the installed application.",
+      "loginPackaged": "Not in the Microsoft Store version yet.",
+      "loginUnsupported": "Not on this system."
     },
     "log": {
       "title": "Log",

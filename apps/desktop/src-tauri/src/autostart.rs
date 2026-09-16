@@ -35,9 +35,41 @@ pub fn launched_hidden() -> bool {
     std::env::args().skip(1).any(|arg| arg == HIDDEN)
 }
 
+/// Why no entry can be written, when none can.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Refused {
+    /// A development build: the entry would name a binary under `target/`.
+    Development,
+    /// An MSIX package: what it writes to the registry stays inside the package,
+    /// so an entry there would start nothing. The Store version turns this on
+    /// elsewhere (#126).
+    Packaged,
+    /// A system Candeo writes no entry for.
+    Unsupported,
+}
+
+/// Why an entry cannot be written here, or `None` when it can.
+fn refused(development: bool, supported: bool, packaged: bool) -> Option<Refused> {
+    match (development, supported, packaged) {
+        (true, _, _) => Some(Refused::Development),
+        (_, false, _) => Some(Refused::Unsupported),
+        (_, _, true) => Some(Refused::Packaged),
+        _ => None,
+    }
+}
+
+fn why() -> Option<Refused> {
+    refused(
+        cfg!(debug_assertions),
+        cfg!(any(windows, target_os = "linux")),
+        crate::msix::packaged(),
+    )
+}
+
 /// Whether this build may write an entry.
 fn available() -> bool {
-    !cfg!(debug_assertions) && cfg!(any(windows, target_os = "linux"))
+    why().is_none()
 }
 
 /// The entry's state, as Settings reads it.
@@ -45,14 +77,18 @@ fn available() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchAtLogin {
     pub enabled: bool,
-    /// False in a development build, and on a system Candeo writes no entry for.
+    /// False in a development build, from an MSIX package, and on a system
+    /// Candeo writes no entry for.
     pub available: bool,
+    /// What `available: false` is about; `None` when it is true.
+    pub refused: Option<Refused>,
 }
 
 fn status() -> LaunchAtLogin {
     LaunchAtLogin {
         enabled: platform::enabled(),
         available: available(),
+        refused: why(),
     }
 }
 
@@ -436,6 +472,19 @@ mod tests {
             entry.contains(r#"Exec="/home/someone/\\$bin/candeo" --hidden"#),
             "{entry}"
         );
+    }
+
+    #[test]
+    fn what_refuses_an_entry_is_told_apart() {
+        // A development build first: it is why nothing is written, whatever the
+        // rest says.
+        assert_eq!(refused(true, true, false), Some(Refused::Development));
+        assert_eq!(refused(true, false, true), Some(Refused::Development));
+        // Then the system, then the package.
+        assert_eq!(refused(false, false, false), Some(Refused::Unsupported));
+        assert_eq!(refused(false, true, true), Some(Refused::Packaged));
+        // An installed build, on a system with an entry, outside a package.
+        assert_eq!(refused(false, true, false), None);
     }
 
     #[test]
