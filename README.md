@@ -345,6 +345,12 @@ documentation lead to the right place. A pull request appears here as a closed
 issue, labeled `PR archivée` (archived PR), that links to its commit in the
 history of `main`.
 
+## Privacy
+
+Candeo collects nothing, sends nothing, and has no accounts: see
+[`PRIVACY.md`](PRIVACY.md). The one request it can make is asking GitHub whether
+a newer version exists, which Settings turns off.
+
 ## License
 
 Distributed under the terms of the GNU General Public License, **version 3
