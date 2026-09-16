@@ -14,7 +14,11 @@
     "test:rust": "cargo test --workspace",
     "test:web": "pnpm --filter @candeo/desktop test",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "site": "node site/build.mjs",
     "fmt:rust": "cargo fmt --all",
     "check": "pnpm lint:rust && pnpm test:rust"
+  },
+  "devDependencies": {
+    "marked": "^18.0.13"
   }
 }
