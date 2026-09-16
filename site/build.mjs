@@ -56,33 +56,42 @@ async function latest(repo) {
  */
 const devices = JSON.parse(readFileSync(join(here, 'devices.json'), 'utf8'))
 
-const head = (device) =>
-  `<h3>${device.name} <span class="state">${device.state}</span></h3>`
-
-function detailed(device, repo) {
-  const specs = Object.entries(device.specs)
-    .map(([label, value]) => `        <div><dt>${label}</dt><dd>${value}</dd></div>`)
+/**
+ * The supported devices, as a table. Every column is a fact; what a row cannot
+ * hold is in the survey it links to, which is the document that has to stay
+ * right anyway.
+ */
+function table(repo) {
+  const rows = devices.supported
+    .map(
+      (device) => `            <tr>
+              <td>${device.maker}</td>
+              <td>${device.model}</td>
+              <td>${device.kind}</td>
+              <td>${device.connection}</td>
+              <td>${device.lights}</td>
+              <td><a href="${repo}/blob/main/${device.protocol}">${device.surveyed}</a></td>
+            </tr>`,
+    )
     .join('\n')
-  const notes = device.notes.map((note) => `      <p class="note">${note}</p>`).join('\n')
-  return `    <article class="device">
-      ${head(device)}
-      <p class="kind">${device.kind}</p>
-      <dl class="specs">
-${specs}
-      </dl>
-${notes}
-      <p class="note">
-        <a href="${repo}/blob/main/${device.protocol}">The protocol, as it was surveyed</a>
-      </p>
-    </article>`
+  return `        <div class="scroller">
+          <table class="devices">
+            <thead>
+              <tr>
+                <th>Maker</th>
+                <th>Model</th>
+                <th>Kind</th>
+                <th>Connection</th>
+                <th>Lights</th>
+                <th>Protocol</th>
+              </tr>
+            </thead>
+            <tbody>
+${rows}
+            </tbody>
+          </table>
+        </div>`
 }
-
-// No state on this one: the heading above it already says "supported so far".
-const brief = (device) => `        <article class="device">
-          <h3>${device.name}</h3>
-          <p class="kind">${device.kind} · ${device.specs.Connection}</p>
-          <p class="short">${device.short}</p>
-        </article>`
 
 const repo = repository()
 const version = await latest(repo)
@@ -95,8 +104,7 @@ const values = {
     ? `${releases}/download/v${version}/candeo_${version}_x64-setup.exe`
     : `${releases}/latest`,
   repository: repo,
-  devices: devices.supported.map((device) => detailed(device, repo)).join('\n'),
-  deviceCards: devices.supported.map(brief).join('\n'),
+  devices: table(repo),
 }
 
 rmSync(out, { recursive: true, force: true })

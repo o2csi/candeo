@@ -277,29 +277,45 @@ pre {
 
 /* ---------------------------------------------------------------- devices */
 
-.device {
-  background: var(--raised);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 18px 20px;
-  margin-bottom: 16px;
+/* The table is the list: a row a device, a column a fact. A narrow screen
+   scrolls it rather than folding the columns into an unreadable stack. */
+.scroller {
+  overflow-x: auto;
+  margin-bottom: 14px;
 }
 
-.device h3 {
-  margin: 0;
-  font-size: 17px;
-}
-
-.device h3 .state {
-  margin-left: 8px;
-  vertical-align: 2px;
-  font-weight: 400;
-}
-
-.device .short {
-  margin: 10px 0 0;
+.devices {
+  border-collapse: collapse;
+  width: 100%;
   font-size: 14px;
-  color: var(--muted);
+}
+
+.devices th {
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+  padding: 0 20px 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.devices td {
+  padding: 12px 20px 12px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+/* The model is what someone scans for. */
+.devices td:nth-child(2) {
+  font-weight: 500;
+}
+
+.devices th:last-child,
+.devices td:last-child {
+  padding-right: 0;
 }
 
 /* A page under the landing one: same furniture, a quieter title. */
@@ -311,51 +327,6 @@ pre {
 .subpage .lead {
   color: var(--muted);
   margin-bottom: 8px;
-}
-
-.device .kind {
-  color: var(--faint);
-  font-size: 13px;
-  margin: 2px 0 0;
-}
-
-/* Label above value: the values are long enough that two columns would leave
-   one of them wrapping on every row. */
-.specs {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
-  gap: 14px 24px;
-  margin: 16px 0 0;
-}
-
-.specs > div {
-  min-width: 0;
-}
-
-.specs dt {
-  color: var(--faint);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.specs dd {
-  margin: 2px 0 0;
-  font-size: 14px;
-}
-
-.specs code {
-  font-size: 13px;
-}
-
-.state {
-  display: inline-block;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  color: var(--accent);
-  font-size: 12px;
-  padding: 1px 9px;
-  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- footer */

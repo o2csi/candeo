@@ -1,25 +1,12 @@
 {
   "supported": [
     {
-      "name": "Razer DeathStalker V2 Pro",
+      "maker": "Razer",
+      "model": "DeathStalker V2 Pro",
       "kind": "Keyboard",
-      "state": "Supported",
-      "short": "132 addressable positions, firmware effects included",
-      "specs": {
-        "Connection": "Wired, over USB",
-        "Identity": "VID <code>0x1532</code> · PID <code>0x0292</code>, lighting on interface <code>MI_03</code> of five",
-        "Matrix": "6 × 22 = 132 cells, 106 of them under a key. A frame covers all 132: writing 106 leaves the rest on their previous colour",
-        "Layout surveyed": "French ISO. The device declares the grid; the key shapes are a hand transcription of it",
-        "Firmware effects": "Off, Spectrum Cycle, Wave — animated by the device, so they outlive the application",
-        "Frames from the host": "Measured at 13.1 ms a frame, a ceiling near 76 fps",
-        "Brightness": "Set per device, read back when the device opens",
-        "Verified against": "Firmware v1.5, surveyed 11–12 September 2026, every write read back"
-      },
-      "notes": [
-        "<strong>Static</strong> and <strong>Breathing</strong> are in the protocol but not offered: where their colour sits in the read-back is not established, and rewriting something other than what is displayed is worse than offering nothing.",
-        "<strong>Reactive</strong> and <strong>Starlight</strong> are refused by this firmware.",
-        "Only the wired unit has been surveyed."
-      ],
+      "connection": "Wired",
+      "lights": "132 positions, 106 under a key",
+      "surveyed": "Firmware v1.5, 09/2026",
       "protocol": "docs/protocol/deathstalker-v2-pro.md"
     }
   ]
