@@ -60,7 +60,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 # Content hash of an effect's source, pairing it with its compiled cache.
 # Already in the tree through Tauri.
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`), key
 # presses through Raw Input (`src/runtime/presses.rs`) and the display language
