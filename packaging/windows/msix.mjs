@@ -92,11 +92,20 @@ const exe = `${config.mainBinaryName}.exe`
 copyFileSync(join(release, exe), join(layout, exe))
 for (const asset of ASSETS) copyFileSync(join(icons, asset), join(layout, 'Assets', asset))
 
+/** An attribute value, as XML reads it: `O2CS&I` is not markup. */
+function escaped(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
 const manifest = readFileSync(join(here, 'AppxManifest.xml'), 'utf8').replaceAll(
   /\{\{(\w+)\}\}/g,
   (_, key) => {
     if (!(key in identity)) throw new Error(`AppxManifest.xml asks for an unknown {{${key}}}`)
-    return identity[key]
+    return escaped(identity[key])
   },
 )
 writeFileSync(join(layout, 'AppxManifest.xml'), manifest)
