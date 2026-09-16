@@ -449,6 +449,8 @@ export interface UpdateCheck {
   available: boolean
   /** Whether the check runs once per launch. */
   enabled: boolean
+  /** Where to ask for the latest release, built from the repository this came from. */
+  latest: string
 }
 
 export function getUpdateCheck(): Promise<UpdateCheck> {

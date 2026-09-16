@@ -19,7 +19,15 @@ use tauri_plugin_opener::OpenerExt;
 use crate::{CmdResult, Failure};
 
 /// Where the releases live. A page this application opens is one of these.
-const RELEASES: &str = "https://github.com/oorabona/candeo/releases/";
+///
+/// From `repository` in `Cargo.toml`, so moving the repository — another
+/// account, another organisation — is one line there and not a hunt through
+/// the sources. GitHub redirects a repository that moved, but a redirect is
+/// not something to build on: it stops the day someone takes the old name.
+const RELEASES: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/releases/");
+
+/// The repository, as the window's request needs it.
+const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 
 /// What Settings needs to show the version and its check.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -32,6 +40,29 @@ pub struct UpdateCheck {
     /// Whether the check runs once per launch. Read from `settings.json`, and
     /// meaningless when `available` is false.
     pub enabled: bool,
+    /// What the window asks for the latest release: GitHub's API, for the
+    /// repository this build came from.
+    pub latest: String,
+}
+
+/// GitHub's address for the latest release of a repository.
+///
+/// `https://github.com/owner/name` becomes
+/// `https://api.github.com/repos/owner/name/releases/latest`. Anything that is
+/// not a GitHub repository address gives `None`, and the window then has
+/// nothing to ask — which is what a fork published elsewhere should get, rather
+/// than this repository's releases.
+fn latest_release(repository: &str) -> Option<String> {
+    let path = repository
+        .trim_end_matches('/')
+        .strip_prefix("https://github.com/")?;
+    let (owner, name) = path.split_once('/')?;
+    if owner.is_empty() || name.is_empty() || name.contains('/') {
+        return None;
+    }
+    Some(format!(
+        "https://api.github.com/repos/{owner}/{name}/releases/latest"
+    ))
 }
 
 /// Opens a release's page in the browser.
@@ -63,10 +94,14 @@ pub fn get_update_check(app: AppHandle) -> CmdResult<UpdateCheck> {
         .read_settings()?
         .preferences
         .check_for_updates;
+    let latest = latest_release(REPOSITORY);
     Ok(UpdateCheck {
         version: app.package_info().version.to_string(),
-        available: !crate::msix::packaged(),
+        // Nothing to ask, nothing to offer: a build whose repository is not on
+        // GitHub has no releases to compare against.
+        available: !crate::msix::packaged() && latest.is_some(),
         enabled,
+        latest: latest.unwrap_or_default(),
     })
 }
 
@@ -94,5 +129,41 @@ mod tests {
         assert!(!is_release_page(
             "https://github.com/oorabona/candeo/releases/tag/v1 --flag"
         ));
+    }
+
+    /// Both addresses come from `repository` in `Cargo.toml`: a repository that
+    /// moves is one line there, and the allowed pages move with it.
+    #[test]
+    fn the_addresses_follow_the_repository() {
+        assert_eq!(
+            latest_release("https://github.com/someone/candeo").as_deref(),
+            Some("https://api.github.com/repos/someone/candeo/releases/latest")
+        );
+        // A trailing slash, as a manifest may carry it.
+        assert_eq!(
+            latest_release("https://github.com/an-org/candeo/").as_deref(),
+            Some("https://api.github.com/repos/an-org/candeo/releases/latest")
+        );
+        // Not GitHub, or not a repository: nothing to ask.
+        for elsewhere in [
+            "https://gitlab.com/someone/candeo",
+            "https://github.com/someone",
+            "https://github.com/someone/candeo/tree/main",
+            "",
+        ] {
+            assert_eq!(latest_release(elsewhere), None, "{elsewhere}");
+        }
+    }
+
+    /// What this build was compiled with: the allowed pages and the address
+    /// asked belong to the same repository, whichever it is.
+    #[test]
+    fn this_build_asks_about_its_own_repository() {
+        let latest = latest_release(REPOSITORY).expect("a GitHub repository");
+        let path = RELEASES
+            .strip_prefix("https://github.com/")
+            .and_then(|rest| rest.strip_suffix("/releases/"))
+            .expect("the releases of a GitHub repository");
+        assert!(latest.contains(&format!("/repos/{path}/")), "{latest}");
     }
 }
