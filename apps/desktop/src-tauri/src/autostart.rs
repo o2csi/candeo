@@ -53,7 +53,8 @@ pub enum Refused {
 pub enum Trouble {
     /// Windows holds the answer: someone turned the startup task off in Task
     /// Manager, or a policy did, and only they can turn it back on. Carries the
-    /// code the catalogs translate.
+    /// code the catalogs translate. Only a package has a startup task.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Held(&'static str),
     /// Anything else, in English, for the log and the copied diagnostic.
     Unexpected(String),
@@ -66,6 +67,9 @@ impl From<String> for Trouble {
 }
 
 /// What a startup task's state means for the setting.
+///
+/// Only a package has a startup task, so only Windows reads this.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Meaning {
     /// It runs at login.
@@ -82,6 +86,7 @@ pub enum Meaning {
 ///
 /// The values are the WinRT enumeration's, and they are read rather than
 /// trusted: anything unknown is treated as off, never as running.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn meaning(state: i32) -> Meaning {
     match state {
         // Disabled
