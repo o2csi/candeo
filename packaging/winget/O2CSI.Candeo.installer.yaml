@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
+# Rendered by `packaging/winget/winget.mjs`: {{version}} is the release, and the
+# checksums come from the SHA256SUMS published with it.
+
+PackageIdentifier: O2CSI.Candeo
+PackageVersion: {{version}}
+Platform:
+- Windows.Desktop
+# The floor the MSIX package sets, and nothing here asks for less.
+MinimumOSVersion: 10.0.19041.0
+UpgradeBehavior: install
+ReleaseDate: {{date}}
+Installers:
+# The one to pick: it installs for the current account and needs no
+# administrator. Windows Package Manager knows Nullsoft's silent switches.
+- Architecture: x64
+  InstallerType: nullsoft
+  Scope: user
+  InstallerUrl: {{repository}}/releases/download/v{{version}}/candeo_{{version}}_x64-setup.exe
+  InstallerSha256: {{sha256_setup}}
+# For every account, which takes administrator. Its upgrade code is pinned, so
+# each version replaces the one before rather than sitting beside it.
+- Architecture: x64
+  InstallerType: wix
+  Scope: machine
+  ElevationRequirement: elevatesSelf
+  InstallerUrl: {{repository}}/releases/download/v{{version}}/candeo_{{version}}_x64_en-US.msi
+  InstallerSha256: {{sha256_msi}}
+  AppsAndFeaturesEntries:
+  - UpgradeCode: '{063517D8-1EE6-5EB0-877C-D8C0DA6C6EDD}'
+ManifestType: installer
+ManifestVersion: 1.12.0

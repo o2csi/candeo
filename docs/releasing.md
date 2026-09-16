@@ -73,9 +73,26 @@ The draft stays a draft; nothing is public.
   command above. A run that published and then reported a failure has finished:
   check its assets rather than re-running.
 
+## After publishing: Windows Package Manager
+
+A release is what winget installs, so the manifests are written once it is
+published (#138):
+
+```powershell
+node packaging/winget/winget.mjs X.Y.Z
+winget validate --manifest target\winget\manifests\o\O2CSI\Candeo\X.Y.Z
+```
+
+The checksums come from the `SHA256SUMS` of the release itself, never from a
+file downloaded and hashed again. Submitting is copying that folder into a fork
+of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) and opening
+a pull request there; its checks run the same validation, and a release that is
+not published yet has nothing to point at.
+
 ## Not yet
 
-- **Authenticode signing:** Windows warns about an unknown publisher. It is also
-  what a Microsoft Store listing of the MSI or EXE requires.
-- **An updater** (`tauri-plugin-updater`): until then, updating is installing the
-  next release.
+- **Authenticode signing** (#145): Windows warns about an unknown publisher on
+  the files published here. The Microsoft Store signs the package it distributes
+  (#126), and that signature covers the package, not these files.
+- **Submitting to winget from the workflow**: by hand for now, which is also how
+  the first submission of a package has to go.
