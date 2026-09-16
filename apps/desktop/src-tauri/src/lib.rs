@@ -22,6 +22,7 @@ mod i18n;
 mod journal;
 mod keys;
 mod language;
+mod msix;
 mod paths;
 mod runtime;
 mod shipped;

@@ -76,6 +76,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_LibraryLoader",
   # The Windows build in the copied diagnostic (`src/journal.rs`).
   "Win32_System_Registry",
+  # Whether this process runs from an MSIX package (`src/msix.rs`).
+  "Win32_Storage_Packaging_Appx",
   "Win32_UI_Input",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
