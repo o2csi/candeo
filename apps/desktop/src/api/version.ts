@@ -6,9 +6,6 @@
  * reported, no counting — and nothing is downloaded or installed.
  */
 
-/** Where the releases are published. */
-const LATEST = 'https://api.github.com/repos/oorabona/candeo/releases/latest'
-
 /** A published release, as far as this is concerned. */
 export interface Release {
   /** Its version, without the tag's `v`. */
@@ -50,9 +47,14 @@ export function isNewer(current: string, latest: string): boolean | null {
   return false
 }
 
-/** Asks GitHub for the latest release. Throws when it cannot be read. */
-export async function latestRelease(): Promise<Release> {
-  const answer = await fetch(LATEST, { headers: { Accept: 'application/vnd.github+json' } })
+/**
+ * Asks GitHub for the latest release. Throws when it cannot be read.
+ *
+ * The address comes from the Rust side, which builds it from `repository` in
+ * `Cargo.toml`: a repository that moves is one line there.
+ */
+export async function latestRelease(url: string): Promise<Release> {
+  const answer = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } })
   if (!answer.ok) {
     throw new Error(`GitHub answered ${answer.status}`)
   }

@@ -33,7 +33,7 @@ async function ask(): Promise<void> {
   asking.value = true
   found.value = null
   try {
-    const release = await latestRelease()
+    const release = await latestRelease(status.value?.latest ?? '')
     const newer = isNewer(status.value?.version ?? '', release.version)
     found.value =
       newer === null

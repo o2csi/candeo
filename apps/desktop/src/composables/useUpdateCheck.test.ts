@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { UpdateCheck } from '../api/candeo'
 import { forgetUpdateCheck, useUpdateCheck } from './useUpdateCheck'
 
 const getUpdateCheck = vi.fn()
@@ -18,6 +19,17 @@ vi.mock('../api/version', async () => {
 
 const RELEASE = { version: '0.5.0', url: 'https://example.invalid/v0.5.0' }
 
+/** What the Rust side answers; `latest` is built there from the repository. */
+function answer(changes: Partial<UpdateCheck>): UpdateCheck {
+  return {
+    version: '0.4.0',
+    available: true,
+    enabled: true,
+    latest: 'https://api.invalid/releases/latest',
+    ...changes,
+  }
+}
+
 beforeEach(() => {
   forgetUpdateCheck()
   vi.clearAllMocks()
@@ -26,7 +38,7 @@ beforeEach(() => {
 
 describe('useUpdateCheck', () => {
   it('asks nothing when the setting is off', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: false })
+    getUpdateCheck.mockResolvedValue(answer({ enabled: false }))
     const { start, found } = useUpdateCheck()
 
     await start()
@@ -36,7 +48,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('asks nothing in the Store version, whatever the setting says', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: false, enabled: true })
+    getUpdateCheck.mockResolvedValue(answer({ available: false }))
     const { start } = useUpdateCheck()
 
     await start()
@@ -45,7 +57,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('asks once per window, not once per screen opened', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: true })
+    getUpdateCheck.mockResolvedValue(answer({}))
     const { start, found } = useUpdateCheck()
 
     await start()
@@ -56,7 +68,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('says it could not check rather than up to date', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: true })
+    getUpdateCheck.mockResolvedValue(answer({}))
     latestRelease.mockRejectedValue(new Error('no network'))
     const { start, found } = useUpdateCheck()
 
@@ -66,7 +78,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('the button asks even when the setting is off', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: false })
+    getUpdateCheck.mockResolvedValue(answer({ enabled: false }))
     const { start, checkNow, found } = useUpdateCheck()
     await start()
 
@@ -77,7 +89,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('turning the setting on writes it and asks', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: false })
+    getUpdateCheck.mockResolvedValue(answer({ enabled: false }))
     const { start, choose, status } = useUpdateCheck()
     await start()
 
@@ -89,7 +101,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('turning it off forgets what was found', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: true })
+    getUpdateCheck.mockResolvedValue(answer({}))
     const { start, choose, found } = useUpdateCheck()
     await start()
     expect(found.value).not.toBeNull()
@@ -101,7 +113,7 @@ describe('useUpdateCheck', () => {
   })
 
   it('does not compare a version it cannot read', async () => {
-    getUpdateCheck.mockResolvedValue({ version: '0.4.0', available: true, enabled: true })
+    getUpdateCheck.mockResolvedValue(answer({}))
     latestRelease.mockResolvedValue({ version: '0.5.0-rc.1', url: RELEASE.url })
     const { start, found } = useUpdateCheck()
 
@@ -113,3 +125,5 @@ describe('useUpdateCheck', () => {
     })
   })
 })
+
+
