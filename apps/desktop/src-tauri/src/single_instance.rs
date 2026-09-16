@@ -136,9 +136,15 @@ fn reopen<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
         .cloned()
         .ok_or_else(|| format!("no “{MAIN_WINDOW}” window declared in tauri.conf.json"))?;
 
-    WebviewWindowBuilder::from_config(app, &config)
+    let window = WebviewWindowBuilder::from_config(app, &config)
         .and_then(|builder| builder.build())
-        .map_err(|e| format!("window “{MAIN_WINDOW}” not reopened: {e}"))
+        .map_err(|e| format!("window “{MAIN_WINDOW}” not reopened: {e}"))?;
+
+    // Every window this application shows is built here, so the taskbar icon is
+    // given here too — see [`crate::taskbar`].
+    crate::taskbar::place(&window);
+
+    Ok(window)
 }
 
 // ---------------------------------------------------------------- tests

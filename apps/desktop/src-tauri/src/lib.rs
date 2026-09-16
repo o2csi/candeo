@@ -30,6 +30,7 @@ mod single_instance;
 #[cfg(test)]
 mod sonde;
 mod storage;
+mod taskbar;
 mod tray;
 
 /// Known layouts. Only one for now.
