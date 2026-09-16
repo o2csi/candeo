@@ -73,9 +73,21 @@ const named = (name) => {
   return hash
 }
 
+/**
+ * The project's page, which the repository decides: `owner/name` on GitHub is
+ * served at `owner.github.io/name`. The manifest points at it rather than at the
+ * code, since that is the page someone lands on.
+ */
+function site() {
+  const path = repository().replace('https://github.com/', '')
+  const [owner, name] = path.split('/')
+  return `https://${owner.toLowerCase()}.github.io/${name}/`
+}
+
 const values = {
   version,
   repository: repository(),
+  site: site(),
   date: await releaseDate(version),
   sha256_setup: named(`candeo_${version}_x64-setup.exe`),
   sha256_msi: named(`candeo_${version}_x64_en-US.msi`),
