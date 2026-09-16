@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/oorabona/candeo/compare/v0.3.0...v0.4.0) (2026-09-16)
+
+
+### Features
+
+* name the executable candeo ([93ee21b](https://github.com/oorabona/candeo/commit/93ee21bdb7b78c0ffeadfbb120a1a81589a385f0))
+
+
+### Bug Fixes
+
+* give the window the icon the taskbar reads ([e73cc8e](https://github.com/oorabona/candeo/commit/e73cc8ef3ad21e978f2d1d5986fa10b3ee6e89de))
+* show the application icon on the installer ([cc6a1a1](https://github.com/oorabona/candeo/commit/cc6a1a1278cdc92857a21d0b98d3456055039519))
+
 ## [0.3.0](https://github.com/oorabona/candeo/compare/v0.2.0...v0.3.0) (2026-09-15)
 
 
