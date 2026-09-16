@@ -30,7 +30,7 @@ effect switching, all with no third-party software running.
 
 ## Install
 
-Each [release](https://github.com/oorabona/candeo/releases) carries the
+Each [release](https://github.com/o2csi/candeo/releases) carries the
 installers and a `SHA256SUMS` file.
 
 **Windows (x64)**

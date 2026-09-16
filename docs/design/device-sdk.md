@@ -780,7 +780,7 @@ The survey remains to be done by someone who owns the device. No vocabulary
 creates knowledge: it only prevents it from being lost for lack of a place
 to put it, and from being wrong for lack of having been dated.
 
-[#34]: https://github.com/oorabona/candeo/issues/34
-[#35]: https://github.com/oorabona/candeo/issues/35
-[#44]: https://github.com/oorabona/candeo/issues/44
-[#60]: https://github.com/oorabona/candeo/issues/60
+[#34]: https://github.com/o2csi/candeo/issues/34
+[#35]: https://github.com/o2csi/candeo/issues/35
+[#44]: https://github.com/o2csi/candeo/issues/44
+[#60]: https://github.com/o2csi/candeo/issues/60

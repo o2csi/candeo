@@ -111,24 +111,24 @@ mod tests {
 
     /// The address is checked, not trusted: it comes back from GitHub, through
     /// the window, and this command is the one thing that opens a browser.
+    ///
+    /// Every case is built from the repository this crate declares, so moving it
+    /// — as it moved to an organisation — leaves nothing here to update.
     #[test]
     fn only_a_release_page_of_this_repository_opens() {
-        assert!(is_release_page(
-            "https://github.com/oorabona/candeo/releases/tag/v0.5.0"
-        ));
+        assert!(is_release_page(&format!("{RELEASES}tag/v0.5.0")));
         for elsewhere in [
-            "https://github.com/someone/else/releases/tag/v1",
-            "http://github.com/oorabona/candeo/releases/tag/v1",
-            "https://github.com/oorabona/candeo/issues/139",
-            "file:///C:/Windows/System32/cmd.exe",
-            "",
+            "https://github.com/someone/else/releases/tag/v1".to_string(),
+            // The same repository, without the encryption that makes it that one.
+            format!("{}tag/v1", RELEASES.replacen("https://", "http://", 1)),
+            format!("{REPOSITORY}/issues/139"),
+            "file:///C:/Windows/System32/cmd.exe".to_string(),
+            String::new(),
+            // Nothing that could carry a second argument along.
+            format!("{RELEASES}tag/v1 --flag"),
         ] {
-            assert!(!is_release_page(elsewhere), "{elsewhere}");
+            assert!(!is_release_page(&elsewhere), "{elsewhere}");
         }
-        // Nothing that could carry a second argument along.
-        assert!(!is_release_page(
-            "https://github.com/oorabona/candeo/releases/tag/v1 --flag"
-        ));
     }
 
     /// Both addresses come from `repository` in `Cargo.toml`: a repository that
