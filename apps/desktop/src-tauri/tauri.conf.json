@@ -37,7 +37,9 @@
     ],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
       },
       "wix": {
         "upgradeCode": "063517D8-1EE6-5EB0-877C-D8C0DA6C6EDD"
