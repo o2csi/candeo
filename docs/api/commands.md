@@ -790,6 +790,12 @@ being the only way in.
 
 A development build writes no entry: it would register a binary under `target/`.
 
+**An entry naming a file that is gone is rewritten at startup** (#143). The entry
+records a full path, and the file's name changed once; without this, such an
+entry starts nothing while the setting still reads on. An entry naming another
+file that does exist is left alone: two installations on one account is a
+decision.
+
 ### `reset_settings()`
 
 Rewrites `settings.json` with the **default values**, and resets the devices.

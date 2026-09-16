@@ -1221,6 +1221,10 @@ pub fn run() {
                     tracing::error!("window not opened: {e}");
                 }
             }
+
+            // An update can rename or move the file the login entry starts, and
+            // an entry naming a file that is gone starts nothing (#143).
+            autostart::repair();
             Ok(())
         })
         // The close button **hides**, it does not quit — as long as there is a

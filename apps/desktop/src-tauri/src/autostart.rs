@@ -82,6 +82,44 @@ pub fn set_launch_at_login(on: bool) -> CmdResult<LaunchAtLogin> {
     Ok(status())
 }
 
+/// Rewrites the entry when the file it starts is gone.
+///
+/// The entry records a full path, and the file's name changed once (#143): an
+/// entry written by an earlier version names a file that no longer exists, so
+/// nothing starts at login while the setting still reads *on*. A copy moved
+/// elsewhere leaves the same entry behind.
+///
+/// An entry naming another file that **does** exist is left alone: two
+/// installations on one account is a decision, not a mistake.
+pub fn repair() {
+    if !available() || !platform::enabled() {
+        return;
+    }
+    let Some(recorded) = platform::command().as_deref().and_then(starts) else {
+        return;
+    };
+    if PathBuf::from(&recorded).exists() {
+        return;
+    }
+    let written = executable().and_then(|exe| platform::enable(&exe));
+    match written {
+        Ok(()) => tracing::info!(
+            gone = %crate::paths::shown(&PathBuf::from(recorded)),
+            "launch at login named a file that is gone, rewritten"
+        ),
+        Err(e) => tracing::warn!("launch at login not rewritten: {e}"),
+    }
+}
+
+/// The file a recorded command starts, quoted or not.
+fn starts(command: &str) -> Option<String> {
+    let path = match command.strip_prefix('"') {
+        Some(rest) => rest.split('"').next()?,
+        None => command.split_whitespace().next()?,
+    };
+    (!path.is_empty()).then(|| path.to_string())
+}
+
 /// The file the entry starts.
 ///
 /// An AppImage runs from a mount that changes at every launch: the entry must
@@ -153,6 +191,50 @@ mod platform {
         status != 0 || super::approved(&flags[..size as usize])
     }
 
+    /// The command the entry runs, as the registry holds it.
+    pub fn command() -> Option<String> {
+        let (run, name) = (wide(RUN), wide(NAME));
+        let mut size = 0u32;
+        // SAFETY: both strings end in NUL; a null buffer only asks for the size,
+        // in bytes.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                run.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut size,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+
+        let mut buffer = vec![0u16; size as usize / 2 + 1];
+        let mut read = (buffer.len() * 2) as u32;
+        // SAFETY: `read` is the buffer's size in bytes, and the call writes at
+        // most that much into it.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                run.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut read,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        // The value ends in NUL, which is not part of the command.
+        let end = (read as usize / 2).saturating_sub(1).min(buffer.len());
+        Some(String::from_utf16_lossy(&buffer[..end]))
+    }
+
     pub fn enable(exe: &Path) -> Result<(), String> {
         let command = wide(&format!("\"{}\" {HIDDEN}", exe.display()));
         let (run, name) = (wide(RUN), wide(NAME));
@@ -213,6 +295,12 @@ mod platform {
             .is_some_and(|content| !super::entry_turned_off(&content))
     }
 
+    /// The command the entry runs, as its `Exec` line holds it.
+    pub fn command() -> Option<String> {
+        let content = std::fs::read_to_string(entry()?).ok()?;
+        super::exec_value(&content)
+    }
+
     pub fn enable(exe: &Path) -> Result<(), String> {
         let path = entry().ok_or("no configuration folder: neither XDG_CONFIG_HOME nor HOME")?;
         if let Some(dir) = path.parent() {
@@ -240,6 +328,10 @@ mod platform {
 
     pub fn enabled() -> bool {
         false
+    }
+
+    pub fn command() -> Option<String> {
+        None
     }
 
     pub fn enable(_exe: &Path) -> Result<(), String> {
@@ -276,6 +368,32 @@ fn desktop_entry(exe: &str) -> String {
     format!(
         "[Desktop Entry]\nType=Application\nName={NAME}\nExec={exec} {HIDDEN}\nX-GNOME-Autostart-enabled=true\n"
     )
+}
+
+/// The `Exec` value of an entry, as [`desktop_entry`] wrote it.
+///
+/// Twice unescaped, since the escaping is applied twice: once inside the
+/// quotes, once for the string value that carries them.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn exec_value(content: &str) -> Option<String> {
+    let line = content
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Exec="))?;
+    Some(unescape(&unescape(line)))
+}
+
+/// Drops one backslash before the character it escapes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn unescape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// An entry a desktop's session settings turned off without deleting it.
@@ -318,6 +436,33 @@ mod tests {
             entry.contains(r#"Exec="/home/someone/\\$bin/candeo" --hidden"#),
             "{entry}"
         );
+    }
+
+    #[test]
+    fn the_file_a_recorded_command_starts_is_read() {
+        // What Windows holds: the path quoted, the argument outside.
+        assert_eq!(
+            starts(r#""C:\Program Files\Candeo\candeo.exe" --hidden"#).as_deref(),
+            Some(r"C:\Program Files\Candeo\candeo.exe")
+        );
+        // Unquoted, as someone may have written it by hand.
+        assert_eq!(
+            starts("/usr/bin/candeo --hidden").as_deref(),
+            Some("/usr/bin/candeo")
+        );
+        assert_eq!(starts(""), None);
+    }
+
+    #[test]
+    fn the_file_an_autostart_entry_starts_is_read_back() {
+        for exe in [
+            "/opt/can deo/candeo",
+            "/home/someone/$bin/candeo",
+            r"/home/someone/back\slash/candeo",
+        ] {
+            let read = exec_value(&desktop_entry(exe)).and_then(|exec| starts(&exec));
+            assert_eq!(read.as_deref(), Some(exe));
+        }
     }
 
     #[test]
