@@ -2,9 +2,9 @@
 
 **Candeo collects nothing, sends nothing, and has no accounts.**
 
-Published by O2CSI. This policy covers the Candeo desktop application, however
-it was installed: from the Microsoft Store, from a release of this repository,
-or through a package manager.
+Published by [O2CSI](https://www.o2csi.com). This policy covers the Candeo
+desktop application, however it was installed: from the Microsoft Store, from a
+release of this repository, or through a package manager.
 
 ## What stays on the computer
 
