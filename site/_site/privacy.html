@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — privacy policy</title>
+    <meta name="description" content="Candeo collects nothing, sends nothing, and has no accounts." />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="policy">
+      <a class="back" href="./">← Candeo</a>
+<h1>Privacy policy</h1>
+<p><strong>Candeo collects nothing, sends nothing, and has no accounts.</strong></p>
+<p>Published by <a href="https://www.o2csi.com">O2CSI</a>. This policy covers the Candeo
+desktop application, however it was installed: from the Microsoft Store, from a
+release of this repository, or through a package manager.</p>
+<h2>What stays on the computer</h2>
+<p>Everything the application writes stays on the computer it runs on:</p>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Settings, including which keyboards you chose to control</td>
+<td><code>settings.json</code>, in the application&#39;s configuration folder</td>
+</tr>
+<tr>
+<td>The effects you write, duplicate or drop in</td>
+<td><code>Documents\candeo\effects</code>, yours to open, move or delete</td>
+</tr>
+<tr>
+<td>The effects the application ships, and their compiled form</td>
+<td>the application&#39;s data and cache folders</td>
+</tr>
+<tr>
+<td>The log</td>
+<td>the application&#39;s log folder, one file a day, the last seven kept</td>
+</tr>
+</tbody></table>
+<p>None of it is sent anywhere. There is no account to create, no identifier
+assigned, and no telemetry: the application does not count launches, does not
+report which effects run, and does not measure anything about the computer.</p>
+<p><strong>A keyboard&#39;s serial number is never written down.</strong> The log identifies a unit
+by a fingerprint derived from it, so two keyboards of the same model can be told
+apart in a bug report without the serial itself appearing.</p>
+<p><strong>Key presses are not read</strong>, except by an effect that declares it reacts to
+typing — and then only as key positions and times, in memory, for the effect
+being drawn. Nothing is written to the log or to disk, and nothing leaves the
+computer.</p>
+<h2>The one request the application can make</h2>
+<p>Settings offers <em>Check for new versions</em>. When it is on, the application asks
+<code>api.github.com</code> whether a newer version of Candeo is published, once per
+launch. The request carries no identifier and no information about the computer;
+the answer is the public list of this repository&#39;s releases, and the comparison
+happens on the computer.</p>
+<ul>
+<li>It is a setting: <strong>off, no request is ever made.</strong></li>
+<li><strong>In the Microsoft Store version it never runs</strong>, since the Store updates the
+application.</li>
+<li>GitHub sees such a request the way it sees any visit to a public page,
+including the address it came from. GitHub&#39;s own
+<a href="https://docs.github.com/site-policy/privacy-policies/github-privacy-statement">privacy statement</a>
+covers what it does with that.</li>
+</ul>
+<p>Nothing is downloaded or installed by that check: it shows a version and a link.</p>
+<h2>What you send, if you choose to</h2>
+<p><strong>Copy the diagnostic</strong>, in Settings, puts on the clipboard what a bug report
+needs: versions, the system, the state of the devices and of the engine. It is
+written to be read before it is sent, and paths in it are shortened so the
+account name does not appear. Nothing sends it: you decide where it goes.</p>
+<h2>Children</h2>
+<p>The application is a tool for controlling keyboard lighting. It is not directed
+at children, and it collects no data from anyone.</p>
+<h2>Changes</h2>
+<p>This policy is versioned with the application, in this repository. A change to
+it is a commit, visible in the history like any other.</p>
+<h2>Contact</h2>
+<p>Questions about this policy, or about what the application does with anything:
+open an issue at <a href="https://github.com/o2csi/candeo/issues">https://github.com/o2csi/candeo/issues</a>.</p>
+
+    </main>
+  </body>
+</html>

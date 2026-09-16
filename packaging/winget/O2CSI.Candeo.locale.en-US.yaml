@@ -5,11 +5,12 @@ PackageIdentifier: O2CSI.Candeo
 PackageVersion: {{version}}
 PackageLocale: en-US
 Publisher: O2CSI
-PublisherUrl: {{repository}}
+PublisherUrl: https://www.o2csi.com
 PublisherSupportUrl: {{repository}}/issues
+PrivacyUrl: {{site}}privacy.html
 Author: O2CSI
 PackageName: Candeo
-PackageUrl: {{repository}}
+PackageUrl: {{site}}
 License: GPL-3.0-only
 LicenseUrl: {{repository}}/blob/main/LICENSE
 Copyright: Copyright (c) O2CSI
