@@ -82,11 +82,13 @@ What follows for the application:
 - **The effects people write are already outside**, in `Documents/candeo/effects`
   (#125): visible to every program, kept on uninstall. That decision was taken
   for this package.
-- **Launch at login cannot be written**: the `Run` value would go to the
-  package's own registry store, where nothing reads it at login. The setting
-  says so rather than pretending (`autostart::Refused::Packaged`), and Windows'
-  own startup task, which would replace it, is a separate step — it starts the
-  application without `--hidden`, which the design forbids.
+- **Launch at login goes through a startup task** (#146): the `Run` value would
+  go to the package's own registry store, where nothing reads it at login, so the
+  package declares a `windows.startupTask`, off until someone turns the setting
+  on, and the setting drives it through `Windows.ApplicationModel.StartupTask`.
+  Windows keeps the last word — a task turned off in Task Manager cannot be
+  turned back on from here, and the window says so. The task passes no argument,
+  so `--hidden` never arrives: the application asks Windows what activated it.
 - **An updater would have nothing to replace**: the files are read only and the
   package is signed. A check must be skipped when packaged (#139), which
   `msix::packaged()` answers.

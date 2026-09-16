@@ -205,6 +205,8 @@
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
+    "startupHeldByUser": "Launch at login was turned off in Task Manager. Turn it back on there, under Startup apps.",
+    "startupHeldByPolicy": "A policy on this computer keeps Candeo from starting at login.",
     "nameEmpty": "An effect needs a name.",
     "nameTooLong": "An effect name is {max} characters at most.",
     "nameForbiddenCharacter": "“{name}”: an effect name cannot contain {characters}",
@@ -249,7 +251,6 @@
       "login": "Launch at login",
       "loginDetail": "Candeo starts hidden in the notification area, with no window.",
       "loginUnavailable": "Only in the installed application.",
-      "loginPackaged": "Not in the Microsoft Store version yet.",
       "loginUnsupported": "Not on this system."
     },
     "log": {

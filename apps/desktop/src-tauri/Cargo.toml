@@ -83,6 +83,14 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Launch at login inside an MSIX package (`src/autostart.rs`): there the `Run`
+# value goes to a store nothing reads at login, and Windows offers `StartupTask`
+# instead. WinRT, which `windows-sys` does not carry. Already in the tree through
+# Tauri.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation"]
+
 # Kernel uevents for devices plugged in and unplugged (`src/hotplug.rs`). Already
 # in the tree.
 [target.'cfg(target_os = "linux")'.dependencies]

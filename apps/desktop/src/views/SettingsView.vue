@@ -107,8 +107,6 @@ function loginNote(status: LaunchAtLogin): string {
     return t('settings.startup.loginDetail')
   }
   switch (status.refused) {
-    case 'packaged':
-      return t('settings.startup.loginPackaged')
     case 'unsupported':
       return t('settings.startup.loginUnsupported')
     default:

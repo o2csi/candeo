@@ -205,6 +205,8 @@
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",
+    "startupHeldByUser": "Le lancement à l'ouverture de session a été désactivé dans le gestionnaire des tâches. Réactivez-le là, sous Applications de démarrage.",
+    "startupHeldByPolicy": "Une stratégie de cet ordinateur empêche Candeo de démarrer à l'ouverture de session.",
     "nameEmpty": "Un effet doit avoir un nom.",
     "nameTooLong": "Un nom d'effet compte {max} caractères au plus.",
     "nameForbiddenCharacter": "« {name} » : un nom d'effet ne peut pas contenir {characters}",
@@ -249,7 +251,6 @@
       "login": "Lancer à l'ouverture de session",
       "loginDetail": "Candeo démarre replié dans la zone de notification, sans fenêtre.",
       "loginUnavailable": "Seulement dans l'application installée.",
-      "loginPackaged": "Pas encore dans la version du Microsoft Store.",
       "loginUnsupported": "Pas sur ce système."
     },
     "log": {
