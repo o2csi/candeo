@@ -7,8 +7,9 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap rescap">
+  IgnorableNamespaces="uap uap5 rescap">
 
   <!-- Name and Publisher are what Partner Center reserves; a package whose
        identity differs from the reservation is refused at submission. -->
@@ -48,6 +49,18 @@
              wide logo is a drawing of its own, not this square icon stretched. -->
         <uap:DefaultTile Square71x71Logo="Assets\Square71x71Logo.png" />
       </uap:VisualElements>
+      <Extensions>
+        <!-- Launch at login inside a package: the Run value would be written to
+             a store nothing reads at login. Disabled until someone turns the
+             setting on, as anywhere else — and Windows keeps the last word, in
+             Task Manager's Startup tab. -->
+        <uap5:Extension
+          Category="windows.startupTask"
+          Executable="candeo.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="CandeoStartup" Enabled="false" DisplayName="Candeo" />
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
 

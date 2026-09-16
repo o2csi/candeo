@@ -418,7 +418,7 @@ export function setResumeEffects(on: boolean): Promise<void> {
 
 /** Whether Candeo launches at login, and whether this build can change it. */
 /** Why no entry can be written: see `autostart.rs`. */
-export type LoginRefused = 'development' | 'packaged' | 'unsupported'
+export type LoginRefused = 'development' | 'unsupported'
 
 export interface LaunchAtLogin {
   enabled: boolean

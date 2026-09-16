@@ -31,8 +31,12 @@ pub const HIDDEN: &str = "--hidden";
 const NAME: &str = "candeo";
 
 /// True when this process was launched by the entry.
+///
+/// The `Run` value and the XDG entry pass [`HIDDEN`]. A packaged application's
+/// startup task passes **nothing** — the extension takes no arguments — so
+/// there the question is asked of Windows: what activated this process.
 pub fn launched_hidden() -> bool {
-    std::env::args().skip(1).any(|arg| arg == HIDDEN)
+    std::env::args().skip(1).any(|arg| arg == HIDDEN) || platform::started_at_login()
 }
 
 /// Why no entry can be written, when none can.
@@ -41,20 +45,62 @@ pub fn launched_hidden() -> bool {
 pub enum Refused {
     /// A development build: the entry would name a binary under `target/`.
     Development,
-    /// An MSIX package: what it writes to the registry stays inside the package,
-    /// so an entry there would start nothing. The Store version turns this on
-    /// elsewhere (#126).
-    Packaged,
     /// A system Candeo writes no entry for.
     Unsupported,
 }
 
+/// What went wrong turning the entry on.
+pub enum Trouble {
+    /// Windows holds the answer: someone turned the startup task off in Task
+    /// Manager, or a policy did, and only they can turn it back on. Carries the
+    /// code the catalogs translate.
+    Held(&'static str),
+    /// Anything else, in English, for the log and the copied diagnostic.
+    Unexpected(String),
+}
+
+impl From<String> for Trouble {
+    fn from(detail: String) -> Self {
+        Trouble::Unexpected(detail)
+    }
+}
+
+/// What a startup task's state means for the setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Meaning {
+    /// It runs at login.
+    On,
+    /// It does not, and turning it on is this application's to do.
+    Off,
+    /// Turned off in Task Manager: only the person who did it can undo it.
+    HeldByUser,
+    /// Turned off by a policy on this computer.
+    HeldByPolicy,
+}
+
+/// What Windows means by a `StartupTaskState`.
+///
+/// The values are the WinRT enumeration's, and they are read rather than
+/// trusted: anything unknown is treated as off, never as running.
+fn meaning(state: i32) -> Meaning {
+    match state {
+        // Disabled
+        0 => Meaning::Off,
+        // DisabledByUser
+        1 => Meaning::HeldByUser,
+        // Enabled, EnabledByPolicy
+        2 | 4 => Meaning::On,
+        // DisabledByPolicy
+        3 => Meaning::HeldByPolicy,
+        _ => Meaning::Off,
+    }
+}
+
 /// Why an entry cannot be written here, or `None` when it can.
-fn refused(development: bool, supported: bool, packaged: bool) -> Option<Refused> {
-    match (development, supported, packaged) {
-        (true, _, _) => Some(Refused::Development),
-        (_, false, _) => Some(Refused::Unsupported),
-        (_, _, true) => Some(Refused::Packaged),
+fn refused(development: bool, supported: bool) -> Option<Refused> {
+    match (development, supported) {
+        (true, _) => Some(Refused::Development),
+        (_, false) => Some(Refused::Unsupported),
         _ => None,
     }
 }
@@ -63,7 +109,6 @@ fn why() -> Option<Refused> {
     refused(
         cfg!(debug_assertions),
         cfg!(any(windows, target_os = "linux")),
-        crate::msix::packaged(),
     )
 }
 
@@ -106,13 +151,21 @@ pub fn set_launch_at_login(on: bool) -> CmdResult<LaunchAtLogin> {
         ));
     }
     let written = if on {
-        executable().and_then(|exe| platform::enable(&exe))
+        executable()
+            .map_err(Trouble::Unexpected)
+            .and_then(|exe| platform::enable(&exe))
     } else {
-        platform::disable()
+        platform::disable().map_err(Trouble::Unexpected)
     };
-    written.map_err(|e| {
-        tracing::warn!("launch at login not changed: {e}");
-        Failure::unexpected(e)
+    written.map_err(|trouble| match trouble {
+        Trouble::Held(code) => {
+            tracing::warn!(code, "launch at login is held by Windows");
+            Failure::new(code)
+        }
+        Trouble::Unexpected(detail) => {
+            tracing::warn!("launch at login not changed: {detail}");
+            Failure::unexpected(detail)
+        }
     })?;
     tracing::info!(on, "launch at login changed");
     Ok(status())
@@ -137,13 +190,20 @@ pub fn repair() {
     if PathBuf::from(&recorded).exists() {
         return;
     }
-    let written = executable().and_then(|exe| platform::enable(&exe));
+    let written = executable()
+        .map_err(Trouble::Unexpected)
+        .and_then(|exe| platform::enable(&exe));
     match written {
         Ok(()) => tracing::info!(
             gone = %crate::paths::shown(&PathBuf::from(recorded)),
             "launch at login named a file that is gone, rewritten"
         ),
-        Err(e) => tracing::warn!("launch at login not rewritten: {e}"),
+        Err(Trouble::Held(code)) => {
+            tracing::warn!(code, "launch at login not rewritten: Windows holds it")
+        }
+        Err(Trouble::Unexpected(detail)) => {
+            tracing::warn!("launch at login not rewritten: {detail}")
+        }
     }
 }
 
@@ -190,7 +250,52 @@ mod platform {
         s.encode_utf16().chain(Some(0)).collect()
     }
 
+    // Two ways of starting at login, and which one applies is not a preference:
+    // a packaged application's `Run` value goes to a store nothing reads at
+    // login, and only a package can declare a startup task.
+
     pub fn enabled() -> bool {
+        if crate::msix::packaged() {
+            task::enabled()
+        } else {
+            run_value_enabled()
+        }
+    }
+
+    /// The command the entry runs, when the entry records one.
+    ///
+    /// A startup task records none: it names the executable of the package it
+    /// belongs to, which no update can leave behind.
+    pub fn command() -> Option<String> {
+        if crate::msix::packaged() {
+            None
+        } else {
+            run_value_command()
+        }
+    }
+
+    pub fn enable(exe: &Path) -> Result<(), super::Trouble> {
+        if crate::msix::packaged() {
+            task::enable()
+        } else {
+            run_value_enable(exe).map_err(super::Trouble::Unexpected)
+        }
+    }
+
+    pub fn disable() -> Result<(), String> {
+        if crate::msix::packaged() {
+            task::disable()
+        } else {
+            run_value_disable()
+        }
+    }
+
+    /// Whether Windows started this process for the startup task.
+    pub fn started_at_login() -> bool {
+        crate::msix::packaged() && task::started_at_login()
+    }
+
+    fn run_value_enabled() -> bool {
         let (run, name) = (wide(RUN), wide(NAME));
         let mut size = 0u32;
         // SAFETY: both strings end in NUL; a null buffer only asks for the size.
@@ -228,7 +333,7 @@ mod platform {
     }
 
     /// The command the entry runs, as the registry holds it.
-    pub fn command() -> Option<String> {
+    fn run_value_command() -> Option<String> {
         let (run, name) = (wide(RUN), wide(NAME));
         let mut size = 0u32;
         // SAFETY: both strings end in NUL; a null buffer only asks for the size,
@@ -271,7 +376,7 @@ mod platform {
         Some(String::from_utf16_lossy(&buffer[..end]))
     }
 
-    pub fn enable(exe: &Path) -> Result<(), String> {
+    fn run_value_enable(exe: &Path) -> Result<(), String> {
         let command = wide(&format!("\"{}\" {HIDDEN}", exe.display()));
         let (run, name) = (wide(RUN), wide(NAME));
         // SAFETY: the data is `command`, NUL included, its size given in bytes.
@@ -293,9 +398,82 @@ mod platform {
         delete(APPROVED)
     }
 
-    pub fn disable() -> Result<(), String> {
+    fn run_value_disable() -> Result<(), String> {
         delete(RUN)?;
         delete(APPROVED)
+    }
+
+    /// The startup task an MSIX package declares, which Windows runs at login.
+    ///
+    /// Declared in `packaging/windows/AppxManifest.xml`, off until someone turns
+    /// the setting on. Windows keeps the last word: a task turned off in Task
+    /// Manager cannot be turned back on from here, and
+    /// [`StartupTask::RequestEnableAsync`] says so by returning the state it
+    /// left it in.
+    mod task {
+        use windows::core::HSTRING;
+        use windows::ApplicationModel::Activation::ActivationKind;
+        use windows::ApplicationModel::{AppInstance, StartupTask};
+
+        use super::super::{Meaning, Trouble};
+
+        /// The `TaskId` of the manifest's `windows.startupTask` extension.
+        const ID: &str = "CandeoStartup";
+
+        fn task() -> Result<StartupTask, String> {
+            StartupTask::GetAsync(&HSTRING::from(ID))
+                .and_then(|pending| pending.get())
+                .map_err(|e| format!("startup task not read: {e}"))
+        }
+
+        fn meaning(task: &StartupTask) -> Result<Meaning, String> {
+            task.State()
+                .map(|state| super::super::meaning(state.0))
+                .map_err(|e| format!("startup task state not read: {e}"))
+        }
+
+        pub fn enabled() -> bool {
+            task()
+                .and_then(|task| meaning(&task))
+                .is_ok_and(|meaning| meaning == Meaning::On)
+        }
+
+        pub fn enable() -> Result<(), Trouble> {
+            let task = task()?;
+            let state = task
+                .RequestEnableAsync()
+                .and_then(|pending| pending.get())
+                .map_err(|e| format!("startup task not turned on: {e}"))?;
+            match super::super::meaning(state.0) {
+                Meaning::On => Ok(()),
+                Meaning::HeldByUser => Err(Trouble::Held("startupHeldByUser")),
+                Meaning::HeldByPolicy => Err(Trouble::Held("startupHeldByPolicy")),
+                Meaning::Off => Err(Trouble::Unexpected(
+                    "the startup task stayed off, and Windows gave no reason".into(),
+                )),
+            }
+        }
+
+        pub fn disable() -> Result<(), String> {
+            task()?
+                .Disable()
+                .map_err(|e| format!("startup task not turned off: {e}"))
+        }
+
+        /// Whether Windows activated this process for the startup task.
+        ///
+        /// Asked once and remembered: the arguments come back on the **first**
+        /// call only, and they are read at startup, before the window.
+        pub fn started_at_login() -> bool {
+            use std::sync::OnceLock;
+
+            static AT_LOGIN: OnceLock<bool> = OnceLock::new();
+            *AT_LOGIN.get_or_init(|| {
+                AppInstance::GetActivatedEventArgs()
+                    .and_then(|args| args.Kind())
+                    .is_ok_and(|kind| kind == ActivationKind::StartupTask)
+            })
+        }
     }
 
     fn delete(key: &str) -> Result<(), String> {
@@ -337,7 +515,11 @@ mod platform {
         super::exec_value(&content)
     }
 
-    pub fn enable(exe: &Path) -> Result<(), String> {
+    pub fn enable(exe: &Path) -> Result<(), super::Trouble> {
+        write(exe).map_err(super::Trouble::Unexpected)
+    }
+
+    fn write(exe: &Path) -> Result<(), String> {
         let path = entry().ok_or("no configuration folder: neither XDG_CONFIG_HOME nor HOME")?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)
@@ -345,6 +527,11 @@ mod platform {
         }
         std::fs::write(&path, super::desktop_entry(&exe.to_string_lossy()))
             .map_err(|e| format!("autostart entry not written: {e}"))
+    }
+
+    /// The entry passes `--hidden`, which [`super::launched_hidden`] reads.
+    pub fn started_at_login() -> bool {
+        false
     }
 
     pub fn disable() -> Result<(), String> {
@@ -370,7 +557,11 @@ mod platform {
         None
     }
 
-    pub fn enable(_exe: &Path) -> Result<(), String> {
+    pub fn started_at_login() -> bool {
+        false
+    }
+
+    pub fn enable(_exe: &Path) -> Result<(), super::Trouble> {
         Err("launch at login is not written on this system".into())
     }
 
@@ -477,14 +668,26 @@ mod tests {
     #[test]
     fn what_refuses_an_entry_is_told_apart() {
         // A development build first: it is why nothing is written, whatever the
-        // rest says.
-        assert_eq!(refused(true, true, false), Some(Refused::Development));
-        assert_eq!(refused(true, false, true), Some(Refused::Development));
-        // Then the system, then the package.
-        assert_eq!(refused(false, false, false), Some(Refused::Unsupported));
-        assert_eq!(refused(false, true, true), Some(Refused::Packaged));
-        // An installed build, on a system with an entry, outside a package.
-        assert_eq!(refused(false, true, false), None);
+        // system says.
+        assert_eq!(refused(true, true), Some(Refused::Development));
+        assert_eq!(refused(true, false), Some(Refused::Development));
+        assert_eq!(refused(false, false), Some(Refused::Unsupported));
+        // An installed build on a system with an entry, packaged or not.
+        assert_eq!(refused(false, true), None);
+    }
+
+    /// Windows keeps the last word on a startup task, and the two states that
+    /// say so must not read as a plain "off": one asks the person to undo what
+    /// they did in Task Manager, the other says a policy decided.
+    #[test]
+    fn a_startup_task_state_says_who_holds_it() {
+        assert_eq!(meaning(2), Meaning::On);
+        assert_eq!(meaning(4), Meaning::On);
+        assert_eq!(meaning(0), Meaning::Off);
+        assert_eq!(meaning(1), Meaning::HeldByUser);
+        assert_eq!(meaning(3), Meaning::HeldByPolicy);
+        // A state this version does not know is off, never running.
+        assert_eq!(meaning(42), Meaning::Off);
     }
 
     #[test]
