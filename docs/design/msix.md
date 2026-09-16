@@ -59,6 +59,10 @@ landing in a store private to the package — did not happen. So `settings.json`
 the cache and the logs are the same files the installed application writes, they
 survive uninstalling, and an application installed both ways shares them.
 
+Removing the package took none of it: the logs, `settings.json` and the effects
+in `Documents` were all still there afterwards. What uninstalling removes is the
+package and its own store, which held nothing here.
+
 It is a floor, not a promise: a future build could redirect again, and the
 decision to keep the effects people write in `Documents` (#125) holds either
 way, for the reasons it was taken — visible to every program, kept on uninstall,
