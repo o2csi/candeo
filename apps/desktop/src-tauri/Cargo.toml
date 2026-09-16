@@ -88,7 +88,7 @@ windows-sys = { version = "0.61", features = [
 # instead. WinRT, which `windows-sys` does not carry. Already in the tree through
 # Tauri.
 [target.'cfg(windows)'.dependencies.windows]
-version = "0.61"
+version = "0.62"
 features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation"]
 
 # Kernel uevents for devices plugged in and unplugged (`src/hotplug.rs`). Already
