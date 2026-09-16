@@ -253,6 +253,19 @@
       "loginUnavailable": "Only in the installed application.",
       "loginUnsupported": "Not on this system."
     },
+    "version": {
+      "title": "Candeo {version}",
+      "check": "Check for new versions",
+      "checkDetail": "At startup, Candeo asks GitHub whether a newer version is published. Nothing is downloaded.",
+      "store": "The Microsoft Store keeps Candeo up to date.",
+      "checkNow": "Check now",
+      "asking": "Checking…",
+      "upToDate": "This is the latest version.",
+      "newer": "Version {version} is available.",
+      "unreadable": "The latest version, {version}, cannot be compared with this one.",
+      "failed": "Could not check.",
+      "openRelease": "Open the release page"
+    },
     "log": {
       "title": "Log",
       "level": "Level",

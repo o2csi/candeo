@@ -396,6 +396,12 @@ pub struct Preferences {
     /// Light or dark interface. `system`, the default, is not written.
     #[serde(skip_serializing_if = "Theme::is_system")]
     pub theme: Theme,
+    /// Whether the application asks GitHub, once per launch, if a newer version
+    /// exists (#139). On by default, and written only when turned off: off, no
+    /// request is ever made. It says nothing about installing anything — what
+    /// the answer allows is showing a version and a link.
+    #[serde(skip_serializing_if = "is_true")]
+    pub check_for_updates: bool,
 }
 
 impl Default for Preferences {
@@ -406,6 +412,7 @@ impl Default for Preferences {
             resume_effects: true,
             log_files_kept: crate::journal::DEFAULT_FILES_KEPT,
             theme: Theme::default(),
+            check_for_updates: true,
         }
     }
 }
@@ -2282,6 +2289,19 @@ pub fn set_resume_effects(app: AppHandle, on: bool) -> CmdResult<()> {
     store.write_settings(&settings)
 }
 
+/// Turns the version check on or off. Read, changed and written here, like the
+/// other preferences, so a decision taken meanwhile elsewhere in the file stays.
+#[tauri::command]
+pub fn set_check_for_updates(app: AppHandle, on: bool) -> CmdResult<()> {
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.preferences.check_for_updates == on {
+        return Ok(());
+    }
+    settings.preferences.check_for_updates = on;
+    store.write_settings(&settings)
+}
+
 /// Saves the interface theme; the window applies it itself.
 #[tauri::command]
 pub fn set_theme(app: AppHandle, theme: Theme) -> CmdResult<()> {
@@ -3580,6 +3600,7 @@ mod tests {
                 resume_effects: false,
                 log_files_kept: 30,
                 theme: Theme::Light,
+                check_for_updates: false,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -4368,6 +4389,7 @@ mod tests {
             resume_effects: false,
             log_files_kept: 0,
             theme: Theme::Dark,
+            check_for_updates: false,
         };
         mirror("Preferences", &preferences);
         mirror(

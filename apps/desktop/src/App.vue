@@ -9,6 +9,7 @@ import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
 import { useTheme } from './composables/useTheme'
+import { useUpdateCheck } from './composables/useUpdateCheck'
 import type { ThemeSetting } from './api/candeo'
 import { refreshLibrary } from './editor/library'
 import { t } from './i18n'
@@ -17,6 +18,7 @@ const route = useRoute()
 const { devices, error, restore } = useDevice()
 const { reload } = useSettings()
 const { theme, choose: chooseTheme } = useTheme()
+const { start: startUpdateCheck } = useUpdateCheck()
 
 /** In the order a switch reads: follow the system, or force one side. */
 const THEMES: readonly ThemeSetting[] = ['system', 'light', 'dark']
@@ -44,6 +46,12 @@ const full = computed(() => route.meta.full === true)
 
 onMounted(() => {
   void restore()
+  // Whether a newer version is published, asked here rather than in Settings:
+  // what it is for is telling someone who would not have gone looking (#139).
+  // It says nothing when the setting is off, and never interrupts.
+  startUpdateCheck().catch((e: unknown) =>
+    alerte('App', `version not checked: ${message(e, 'en')}`, e),
+  )
   // Effects dropped in the folder are compiled now, not when the gallery opens:
   // the tray only offers what is compiled, and it may be all someone uses.
   refreshLibrary().catch((e: unknown) =>
