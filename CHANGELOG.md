@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.5.0](https://github.com/o2csi/candeo/compare/v0.4.0...v0.5.0) (2026-09-16)
+
+
+### Features
+
+* build the MSIX package for the Store ([0e23ec2](https://github.com/o2csi/candeo/commit/0e23ec2f5942091ffb70d01f92aa187f4792f488))
+* launch at login in the Store version ([98ba2dd](https://github.com/o2csi/candeo/commit/98ba2dd73f1d4a2581bc3f8ac79299e43f17693b))
+* manifests for the Windows Package Manager ([6bb519e](https://github.com/o2csi/candeo/commit/6bb519e970988d0bca5f7f57ea1afaffcac5c26e))
+* tell people when a newer version exists ([b16cefe](https://github.com/o2csi/candeo/commit/b16cefe4815de13d3296b3d75b58a1055224701b))
+
+
+### Bug Fixes
+
+* escape the identity values written into the manifest ([4adc188](https://github.com/o2csi/candeo/commit/4adc1880141617e4023f85758ac2777e8d782883))
+* text that was too pale to read ([db314ab](https://github.com/o2csi/candeo/commit/db314abfee5b05a371931239edb0014402be4c71))
+* the startup task types are Windows only ([2a43561](https://github.com/o2csi/candeo/commit/2a435614cb01133b790e2afb970994f339058383))
+
+
+### Refactoring
+
+* take the repository from Cargo.toml ([91bbb98](https://github.com/o2csi/candeo/commit/91bbb98f3862dc57e2dba79db7ade82351213edf))
+
+
+### Documentation
+
+* AppData is not redirected in this package ([a63761c](https://github.com/o2csi/candeo/commit/a63761c2978c30b0bb1bed7bb9269a4ff632bc4b))
+* the certification kit passes on the reserved identity ([df75d80](https://github.com/o2csi/candeo/commit/df75d80ce29fe1eb363955dbea538a1cdea0ee69))
+* the package starts at login through a startup task ([19b8c74](https://github.com/o2csi/candeo/commit/19b8c7441f7fbe3cf0dbcd9f61f19f67e5ed6e3d))
+* uninstalling the package leaves the data ([3a71bf3](https://github.com/o2csi/candeo/commit/3a71bf367a175f5403d6ecb5f15d3591055cc822))
+
 ## [0.4.0](https://github.com/oorabona/candeo/compare/v0.3.0...v0.4.0) (2026-09-16)
 
 
