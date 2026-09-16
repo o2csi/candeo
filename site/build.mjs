@@ -49,6 +49,41 @@ async function latest(repo) {
   }
 }
 
+/**
+ * The devices, from the one file that lists them. The landing page shows a
+ * short form and `devices.html` the whole of it, both from here: a device
+ * described twice is a device described differently.
+ */
+const devices = JSON.parse(readFileSync(join(here, 'devices.json'), 'utf8'))
+
+const head = (device) =>
+  `<h3>${device.name} <span class="state">${device.state}</span></h3>`
+
+function detailed(device, repo) {
+  const specs = Object.entries(device.specs)
+    .map(([label, value]) => `        <div><dt>${label}</dt><dd>${value}</dd></div>`)
+    .join('\n')
+  const notes = device.notes.map((note) => `      <p class="note">${note}</p>`).join('\n')
+  return `    <article class="device">
+      ${head(device)}
+      <p class="kind">${device.kind}</p>
+      <dl class="specs">
+${specs}
+      </dl>
+${notes}
+      <p class="note">
+        <a href="${repo}/blob/main/${device.protocol}">The protocol, as it was surveyed</a>
+      </p>
+    </article>`
+}
+
+// No state on this one: the heading above it already says "supported so far".
+const brief = (device) => `        <article class="device">
+          <h3>${device.name}</h3>
+          <p class="kind">${device.kind} · ${device.specs.Connection}</p>
+          <p class="short">${device.short}</p>
+        </article>`
+
 const repo = repository()
 const version = await latest(repo)
 const releases = `${repo}/releases`
@@ -59,21 +94,27 @@ const values = {
   setupUrl: version
     ? `${releases}/download/v${version}/candeo_${version}_x64-setup.exe`
     : `${releases}/latest`,
+  repository: repo,
+  devices: devices.supported.map((device) => detailed(device, repo)).join('\n'),
+  deviceCards: devices.supported.map(brief).join('\n'),
 }
 
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 
-const page = readFileSync(join(here, 'index.html'), 'utf8').replaceAll(
-  /\{\{(\w+)\}\}/g,
-  (_, key) => {
+/** One page, with what it asks for filled in. */
+function render(name) {
+  const page = readFileSync(join(here, name), 'utf8').replaceAll(/\{\{(\w+)\}\}/g, (_, key) => {
     if (!(key in values)) {
-      throw new Error(`index.html asks for an unknown {{${key}}}`)
+      throw new Error(`${name} asks for an unknown {{${key}}}`)
     }
     return values[key]
-  },
-)
-writeFileSync(join(out, 'index.html'), page)
+  })
+  writeFileSync(join(out, name), page)
+}
+
+render('index.html')
+render('devices.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))

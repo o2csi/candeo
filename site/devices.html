@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — devices</title>
+    <meta
+      name="description"
+      content="The devices Candeo drives, what each one carries, and what a device needs before it can be on this page."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Devices</h1>
+      <p class="lead">
+        Candeo drives lit devices that speak HID over USB. A device is on this page once its
+        protocol has been surveyed on the hardware, written down with the firmware it was checked
+        against, and verified by reading the writes back — not once it has been made to light up
+        one evening.
+      </p>
+
+      <section>
+        <h2>Supported</h2>
+{{devices}}
+      </section>
+
+      <section>
+        <h2>What a device carries</h2>
+        <p>
+          A device, reduced to its essentials, is three things — and the first two are data rather
+          than code:
+        </p>
+        <ul>
+          <li>
+            <strong>An identity</strong> — the vendor and product ids, and which interface of the
+            composite device carries the lighting. Never the firmware version or the variant
+            string: the same keyboard called itself <code>v1.4 / Unkown Variant</code> in 2024 and
+            <code>v1.5 / Quartz</code> in 2026, and a binding that matches on those breaks on
+            update.
+          </li>
+          <li>
+            <strong>A layout</strong> — the matrix, and which of its cells sit under a key. An
+            effect is written against the layout, so it runs on any device that declares one.
+          </li>
+          <li>
+            <strong>Its reports</strong> — how a frame becomes bytes, and the checksum that makes
+            the device accept them. This is the part that has to be surveyed.
+          </li>
+        </ul>
+        <p>
+          A status byte says the class and the command were understood. It never says the values
+          were right, which is why every fact above was checked by reading the write back.
+        </p>
+
+        <h3>And where each fact came from</h3>
+        <p>
+          A layout carries its own provenance, so a reader can tell a measurement from a drawing:
+        </p>
+        <dl class="specs">
+          <div>
+            <dt>Firmware</dt>
+            <dd>The version, and the device command it was read by — never the USB revision, which is frozen in hardware</dd>
+          </div>
+          <div>
+            <dt>Surveyed on</dt>
+            <dd>A date, so a fact can be re-checked against the firmware of the day</dd>
+          </div>
+          <div>
+            <dt>Method</dt>
+            <dd>Seen on the bus, written and read back, or inferred from a sibling device</dd>
+          </div>
+          <div>
+            <dt>Variant</dt>
+            <dd>The locale layout: an ISO and an ANSI matrix do not carry the same keys</dd>
+          </div>
+          <div>
+            <dt>Sustained rate</dt>
+            <dd>A measurement with its date, not a claim</dd>
+          </div>
+          <div>
+            <dt>Origin, per field</dt>
+            <dd>Surveyed, convention, or inferred — an inferred value says so rather than passing for a measured one</dd>
+          </div>
+        </dl>
+        <p class="note">
+          Written down in
+          <a href="{{repository}}/blob/main/docs/design/device-sdk.md">docs/design/device-sdk.md</a>,
+          which prepares #34 rather than describing what exists today.
+        </p>
+      </section>
+
+      <section>
+        <h2>Not here yet</h2>
+        <p>
+          Everything else. Hardware coverage is what the project costs now: each device means one
+          USB capture, on that device, by someone who owns it. No interface removes that, and a
+          guessed layout is worse than none.
+        </p>
+        <p>
+          <a href="{{repository}}/issues/34">Device SDK (#34)</a> is the way out: a surface a
+          contributor implements to add a device without touching the core, and a captured frame
+          replayed in a test — so a contribution can be reviewed by someone who does not own the
+          hardware. If you own a lit device and can capture its bus, that issue is where to start;
+          <a href="{{repository}}/blob/main/docs/protocol/deathstalker-v2-pro.md">the survey method</a>
+          is written down to be repeated.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>
