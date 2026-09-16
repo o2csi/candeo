@@ -670,9 +670,12 @@ fn journal_status(setting: Option<LogLevel>, files_kept: u32) -> JournalStatus {
         setting,
         files_kept,
         forced_by_env: collector.is_some_and(|c| c.forced),
+        // The home directory as `~`, like every other path someone reads (#159):
+        // this one is on screen, and a screenshot of it carries the account name.
+        // Opening the folder uses the real path, which never leaves Rust.
         dir: collector
-            .and_then(|c| c.dir.as_ref())
-            .map(|d| d.display().to_string()),
+            .and_then(|c| c.dir.as_deref())
+            .map(crate::paths::shown),
         verbose: tracing::level_filters::LevelFilter::current() >= tracing::Level::DEBUG,
     }
 }
