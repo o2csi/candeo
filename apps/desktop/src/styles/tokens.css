@@ -23,7 +23,9 @@
 
   --text: #eceaf2;
   --text-muted: #9691a6;
-  --text-faint: #6b6778;
+  /* Read on the three surfaces this theme has, the lightest one deciding:
+     4.7:1 on `--raised-2`, 5.2:1 on `--raised`, 5.7:1 on `--ground` (#157). */
+  --text-faint: #918da0;
 
   --accent: #f2a33c;
   --accent-ink: #14131a;
@@ -65,13 +67,16 @@
 
     --text: #1a1822;
     --text-muted: #645e72;
-    --text-faint: #8b8599;
+    --text-faint: #6f6a7e;
 
-    --accent: #a7650a;
+    /* 4.8:1 over the amber tint of `--accent-soft`, which is where the active
+       tab writes it — a lighter amber reads as 4.1:1 there (#157). */
+    --accent: #985c08;
     --accent-ink: #fff;
-    --accent-soft: rgb(167 101 10 / 10%);
+    --accent-soft: rgb(152 92 8 / 10%);
 
-    --ok: #10795c;
+    /* 5.3:1 on the 14% tint of itself the badges write it on (#157). */
+    --ok: #0d6b52;
     --warn: #9a5f06;
     --bad: #c02b3a;
 
@@ -90,13 +95,13 @@
 
   --text: #1a1822;
   --text-muted: #645e72;
-  --text-faint: #8b8599;
+  --text-faint: #6f6a7e;
 
-  --accent: #a7650a;
+  --accent: #985c08;
   --accent-ink: #fff;
-  --accent-soft: rgb(167 101 10 / 10%);
+  --accent-soft: rgb(152 92 8 / 10%);
 
-  --ok: #10795c;
+  --ok: #0d6b52;
   --warn: #9a5f06;
   --bad: #c02b3a;
 

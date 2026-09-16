@@ -126,6 +126,9 @@ const savedSpecs = ref<Record<string, ParamSpec>>({})
 /** A shipped effect: read-only here, see the header comment. */
 const builtin = ref(false)
 
+/** What this screen is about: the effect being written, or that it is new. */
+const heading = computed(() => (name.value.trim() ? name.value : t('editor.new')))
+
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
 // ---------------------------------------------------------------- ouverture
 
@@ -531,6 +534,13 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="page">
+    <!--
+      The editor is a mode, not a tab: it replaces the window, and the name in
+      the header is an input, not a title. Read aloud, the screen had nothing
+      saying what it is about (#157).
+    -->
+    <h1 class="sr-only">{{ heading }}</h1>
+
     <header class="head">
       <button class="ghost" @click="router.push('/')">{{ t('editor.back') }}</button>
 

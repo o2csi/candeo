@@ -107,10 +107,14 @@ function palette(style: CSSStyleDeclaration): Record<string, string> {
  */
 function applyTheme(): void {
   const style = getComputedStyle(document.documentElement)
+  const dark = style.colorScheme.includes('dark')
   monaco.editor.defineTheme(THEME, {
-    base: style.colorScheme.includes('dark') ? 'vs-dark' : 'vs',
+    base: dark ? 'vs-dark' : 'vs',
     inherit: true,
-    rules: [],
+    // Monaco's light theme writes numbers in a green that reads at 4.4:1 on this
+    // background, just under what small text needs; the same green darkened by a
+    // shade clears it. Everything else its themes use passes (#157).
+    rules: dark ? [] : [{ token: 'number', foreground: '07734b' }],
     colors: palette(style),
   })
   monaco.editor.setTheme(THEME)
