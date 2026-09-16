@@ -36,9 +36,18 @@ system's.
 - **`Identity`** is what Partner Center reserves. `Name`, `Publisher` — the
   `CN=` string of the account, not a certificate someone picks — and
   `PublisherDisplayName` come from there, through the environment
-  (`MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY_NAME`), never
-  from this repository: they belong to an account, and a package whose identity
-  differs from the reservation is refused at submission.
+  (`MSIX_IDENTITY_NAME`, `MSIX_PUBLISHER`, `MSIX_PUBLISHER_DISPLAY_NAME`): a
+  package whose identity differs from the reservation is refused at submission.
+  For this listing, and they are public — every published package carries them:
+
+  ```
+  MSIX_IDENTITY_NAME=O2CSI.Candeo
+  MSIX_PUBLISHER=CN=3DB35F84-A90B-410A-8375-06E93C7AB6C4
+  MSIX_PUBLISHER_DISPLAY_NAME=O2CS&I
+  ```
+
+  The display name holds an `&`, which is markup in XML: what the script writes
+  into the manifest is escaped.
 - **`Version`** takes four numbers, and the Store keeps the last for itself:
   `0.4.0` is packaged as `0.4.0.0`.
 
@@ -113,7 +122,25 @@ Installing the signed package needs no administrator, and neither does removing
 it: `Get-AppxPackage *Candeo* | Remove-AppxPackage`. The certificate is for this
 machine only — the Store signs what it distributes.
 
-## 4. Out of scope
+## 4. What the certification kit says
+
+The Windows App Certification Kit, run against the package built with the
+reserved identity: **PASS**. One optional test reports what it calls blocked
+executables — `candeo.exe` naming `CreateProcessW`, `ShellExecuteW` and
+`cmd.exe`. They come from opening a folder or the log folder in the file
+manager, which is what a full-trust desktop application does; the test is marked
+optional and the overall result is not affected.
+
+```powershell
+& "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe" `
+  test -appxpackagepath target\msix\Candeo_<version>_x64.msix -reportoutputpath report.xml
+```
+
+It installs the package to test it, so it needs administrator and a trusted
+signature, and the application must not already be running — one instance at a
+time is the rule everywhere else too.
+
+## 5. Out of scope
 
 - Submitting from the release workflow: by hand for the first version.
 - The startup task that would bring launch at login back inside the package.
