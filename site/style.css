@@ -277,6 +277,34 @@ pre {
 
 /* ---------------------------------------------------------------- devices */
 
+.filter {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.filter input {
+  width: min(320px, 100%);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.filter input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.filter .note {
+  margin: 0;
+}
+
 /* The table is the list: a row a device, a column a fact. A narrow screen
    scrolls it rather than folding the columns into an unreadable stack. */
 .scroller {
