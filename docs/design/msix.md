@@ -46,10 +46,23 @@ system's.
 
 | What | Outside | Inside |
 |---|---|---|
-| `AppData` and the registry | written where they say | written to a store private to the package, merged only for the application itself |
+| The registry | written where it says | written to a store private to the package |
 | The installed files | writable | read only |
 | Updating | installing over, or an updater (#139) | the Store |
-| Uninstalling | offers to keep the data | takes the package's data with it |
+| Uninstalling | offers to keep the data | takes the package's own store with it |
+
+**`AppData` is not redirected**, measured on this package, Windows 11 build
+26100: the packaged application appended to the real
+`%LOCALAPPDATA%\com.o2csi.candeo\logs`, and the package's `LocalCache` held none
+of its files. The redirection older documents describe — every `AppData` write
+landing in a store private to the package — did not happen. So `settings.json`,
+the cache and the logs are the same files the installed application writes, they
+survive uninstalling, and an application installed both ways shares them.
+
+It is a floor, not a promise: a future build could redirect again, and the
+decision to keep the effects people write in `Documents` (#125) holds either
+way, for the reasons it was taken — visible to every program, kept on uninstall,
+backed up and synced where people expect.
 
 What follows for the application:
 
