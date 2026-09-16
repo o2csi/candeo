@@ -17,6 +17,7 @@ import {
   getLaunchAtLogin,
   getSettings,
   openLogDir,
+  openRelease,
   resetSettings,
   setLanguage,
   setLaunchAtLogin,
@@ -34,6 +35,7 @@ import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { useTheme } from '../composables/useTheme'
+import { useUpdateCheck, type Found } from '../composables/useUpdateCheck'
 import { showIn, t } from '../i18n'
 
 const { busy, refresh } = useDevice()
@@ -89,6 +91,52 @@ async function chooseResume(event: Event): Promise<void> {
     await readResume()
   }
 }
+
+// ---------------------------------------------------------------- version
+
+const {
+  status: update,
+  found,
+  // `asking` is taken in this view: it is the reset confirmation.
+  asking: checking,
+  start: startUpdateCheck,
+  checkNow,
+  choose: chooseUpdateCheck,
+} = useUpdateCheck()
+
+/** What the check found, in one line. */
+function foundNote(state: Found): string {
+  switch (state.state) {
+    case 'upToDate':
+      return t('settings.version.upToDate')
+    case 'newer':
+      return t('settings.version.newer', { version: state.release.version })
+    case 'unreadable':
+      return t('settings.version.unreadable', { version: state.release.version })
+    default:
+      return t('settings.version.failed')
+  }
+}
+
+async function chooseCheck(event: Event): Promise<void> {
+  versionProblem.value = null
+  try {
+    await chooseUpdateCheck((event.target as HTMLInputElement).checked)
+  } catch (e) {
+    versionProblem.value = message(e)
+  }
+}
+
+async function open(url: string): Promise<void> {
+  versionProblem.value = null
+  try {
+    await openRelease(url)
+  } catch (e) {
+    versionProblem.value = message(e)
+  }
+}
+
+const versionProblem = ref<string | null>(null)
 
 /** The system's login entry; `null` until read. Not in `settings.json`: see `autostart.rs`. */
 const login = ref<LaunchAtLogin | null>(null)
@@ -251,6 +299,9 @@ onMounted(() => {
   void readResume()
   void readLogin()
   void readJournal()
+  // Reads the setting again; the check itself already ran at startup, and runs
+  // once per window.
+  void startUpdateCheck()
 })
 </script>
 
@@ -306,6 +357,40 @@ onMounted(() => {
         </label>
         <p class="note">
           {{ loginNote(login) }}
+        </p>
+      </template>
+    </section>
+
+    <section v-if="update" class="block" aria-labelledby="version-title">
+      <h2 id="version-title">{{ t('settings.version.title', { version: update.version }) }}</h2>
+
+      <p v-if="versionProblem" class="err" role="alert">{{ versionProblem }}</p>
+
+      <label class="level">
+        <input
+          type="checkbox"
+          :checked="update.enabled"
+          :disabled="!update.available"
+          @change="chooseCheck"
+        />
+        {{ t('settings.version.check') }}
+      </label>
+      <p class="note">
+        {{ update.available ? t('settings.version.checkDetail') : t('settings.version.store') }}
+      </p>
+
+      <template v-if="update.available">
+        <p class="level">
+          <button type="button" class="ghost" :disabled="checking" @click="checkNow">
+            {{ t('settings.version.checkNow') }}
+          </button>
+          <span v-if="checking" class="note">{{ t('settings.version.asking') }}</span>
+          <span v-else-if="found" class="note">{{ foundNote(found) }}</span>
+        </p>
+        <p v-if="found && 'release' in found" class="note">
+          <button type="button" class="ghost" @click="open(found.release.url)">
+            {{ t('settings.version.openRelease') }}
+          </button>
         </p>
       </template>
     </section>

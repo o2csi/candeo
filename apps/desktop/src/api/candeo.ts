@@ -409,6 +409,8 @@ export interface Preferences {
   logFilesKept?: number
   /** Light or dark interface. Absent = the system's. */
   theme?: ThemeSetting
+  /** Whether Candeo asks GitHub, once per launch, for a newer version. Absent = on. */
+  checkForUpdates?: boolean
 }
 
 /** Turns resuming applied effects on or off. */
@@ -438,6 +440,29 @@ export function getLaunchAtLogin(): Promise<LaunchAtLogin> {
 /** Writes or removes the system's login entry, hidden in the notification area. */
 export function setLaunchAtLogin(on: boolean): Promise<LaunchAtLogin> {
   return invoke('set_launch_at_login', { on })
+}
+
+/** The version running, and what may be asked about newer ones. */
+export interface UpdateCheck {
+  version: string
+  /** False in the Microsoft Store version, which the Store updates. */
+  available: boolean
+  /** Whether the check runs once per launch. */
+  enabled: boolean
+}
+
+export function getUpdateCheck(): Promise<UpdateCheck> {
+  return invoke('get_update_check')
+}
+
+/** Turns the version check on or off. */
+export function setCheckForUpdates(on: boolean): Promise<void> {
+  return invoke('set_check_for_updates', { on })
+}
+
+/** Opens a release's page in the browser; refused for any other address. */
+export function openRelease(url: string): Promise<void> {
+  return invoke('open_release', { url })
 }
 
 /** What someone chose for the interface theme. */

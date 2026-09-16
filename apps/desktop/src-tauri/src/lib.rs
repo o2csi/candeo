@@ -33,6 +33,7 @@ mod sonde;
 mod storage;
 mod taskbar;
 mod tray;
+mod update;
 
 /// Known layouts. Only one for now.
 ///
@@ -1304,6 +1305,9 @@ pub fn run() {
             storage::set_resume_effects,
             autostart::get_launch_at_login,
             autostart::set_launch_at_login,
+            update::get_update_check,
+            update::open_release,
+            storage::set_check_for_updates,
             storage::reset_settings,
             storage::remember_effect_params,
             journal::get_journal,
