@@ -16,6 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     />
     <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
   </head>
   <body>
     <header>
@@ -92,7 +93,8 @@
           <div class="way">
             <h3>winget</h3>
             <p>Once the manifest is accepted.</p>
-            <div class="command">winget install O2CSI.Candeo</div>
+            <div class="command">winget install candeo</div>
+            <p class="note">The full identifier is <code>O2CSI.Candeo</code>.</p>
           </div>
           <div class="way">
             <h3>Linux</h3>
@@ -103,11 +105,12 @@
             <a class="download" href="{{releaseUrl}}">All downloads</a>
           </div>
         </div>
+        <p class="note">Every release carries a <code>SHA256SUMS</code> file. On Linux and macOS:</p>
+        <div class="command">sha256sum -c SHA256SUMS --ignore-missing</div>
         <p class="note">
-          Every release carries a <code>SHA256SUMS</code> file:
-          <code>sha256sum -c SHA256SUMS --ignore-missing</code>, or <code>Get-FileHash</code> on
-          Windows.
+          On Windows, against the line for your file in <code>SHA256SUMS</code>:
         </p>
+        <div class="command">Get-FileHash .\candeo_*_x64-setup.exe -Algorithm SHA256</div>
       </section>
 
       <section>

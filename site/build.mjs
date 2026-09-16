@@ -106,6 +106,7 @@ ${policy}
 )
 
 cpSync(join(here, 'style.css'), join(out, 'style.css'))
+cpSync(join(here, 'copy.js'), join(out, 'copy.js'))
 cpSync(join(here, 'assets'), join(out, 'assets'), { recursive: true })
 
 console.log(`${out} — ${values.version}`)
