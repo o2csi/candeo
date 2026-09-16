@@ -10,6 +10,9 @@ dist
 # Tauri
 apps/desktop/src-tauri/gen
 
+# The page, built by site/build.mjs and uploaded by the Pages workflow
+site/_site
+
 # Editeurs / OS
 .DS_Store
 Thumbs.db
