@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/o2csi/candeo/compare/v0.5.0...v0.5.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* the log folder is shown with ~, as every other path ([f14ce77](https://github.com/o2csi/candeo/commit/f14ce7747e62a7ef169289c1fc3dbe35aac9e333))
+
 ## [0.5.0](https://github.com/o2csi/candeo/compare/v0.4.0...v0.5.0) (2026-09-16)
 
 
