@@ -1370,15 +1370,19 @@ Rule = {
   enabled: boolean,                     // absent: false
   devices: { vid: number, pid: number }[],
   when: {
-    kind: 'schedule',
-    every: number,                      // seconds, 1 or more
-    aligned?: boolean,                  // absent: true when `every` divides a day
-    between?: { from: 'HH:MM', to: 'HH:MM' }   // wraps past midnight when from > to
+    kind: 'cron',
+    expr: string                        // 5 fields, or 6 with seconds first, local time
   },
   show: { effect: string, params: Record<string, ParamValue> },
   for: { seconds: number }              // absent: 10
 }
 ```
+
+An occurrence starts each time the expression matches the local clock and lasts
+`for` seconds: `0 * * * *` for 10 s is the hour, `0 22 * * *` for 32400 s the night,
+`0 9-18 * * 1-5` office hours, `*/30 * * * * *` a flash every thirty seconds.
+Expressions are read by `croner`, backwards from now, across daylight-saving
+changes.
 
 Rules live in Rust and run with the window closed. A scheduler thread decides every
 second, on the second, and at once when a rule is saved, tried, or the pause
@@ -1387,8 +1391,10 @@ goes back to what someone applied.
 
 - **Priority is the order of the list.** When two rules apply to a device at once,
   the first runs; when it ends, the next one, or the applied effect.
-- **An occurrence lasting its period or longer goes on without restarting**: every
-  second for a second is a steady display, not a flicker.
+- **Back-to-back occurrences are one run**: an occurrence starting before the last
+  one ended — every second for a second — continues it without restarting the
+  effect, and `until` is then absent from `engine_status`, since no one knows when
+  the run stops.
 - **What the device goes back to** is decided at the first interruption. If a host
   loop ran, the applied effect restarts with its saved settings, its `time` from
   zero. If none ran, the firmware drove the lighting, and its effect — read back
@@ -1396,16 +1402,17 @@ goes back to what someone applied.
   makes on opening) — is set again; one that cannot be read back gives way to
   `Off` rather than a frozen frame.
 - **A gesture always wins**: `start_effect`, `stop_effect`, `set_effect` and the
-  tray's actions end an interruption on that device. The rule comes back at its
-  next occurrence.
+  tray's actions end an interruption on that device. The run is dismissed, not the
+  rule: it comes back after a gap — the next hour, the next night.
 - `rules` stay raw JSON in `settings.json`, read one by one: a rule edited by hand
   into something unreadable costs that rule, stays as written, and does nothing.
 
 ### `set_rules(rules: Rule[])`
 
-Replaces the rules, in the order given. Each is checked first and refused with
-`ruleInvalid { name, error }` — except a broken rule already in the file and sent
-back unchanged, which passes, so it never blocks saving the others.
+Replaces the rules, in the order given. Each is checked first — its expression
+parsed — and refused with `ruleInvalid { name, error }`, except a broken rule
+already in the file and sent back unchanged, which passes, so it never blocks
+saving the others.
 
 ### `try_rule(id)`
 
@@ -1415,7 +1422,8 @@ Runs a rule once, now, for its duration — switched on or not, paused or not.
 ### `resume_device(device)`
 
 Ends the interruption on a device now and gives it back what it goes back to. The
-rule comes back at its next occurrence. Also in the tray, under the device.
+run is dismissed; the rule comes back after a gap. Also in the tray, under the
+device.
 
 ### `set_automations_paused(paused: boolean)`
 
