@@ -2,6 +2,8 @@
 
 use candeo_protocol::Firmware;
 
+use crate::lighting::{AlienwareKeys, Lighting, RazerRows};
+
 /// Matrix position without an LED.
 ///
 /// Internal: the sentinel only serves to write and read [`Layout::matrix`], and
@@ -56,14 +58,38 @@ pub struct Key {
     pub h: f32,
 }
 
+/// Which HID entry of a device carries the lighting.
+///
+/// Two makers, two habits, and picking the wrong entry gives a valid handle on
+/// which every write is lost — so the rule belongs to the layout rather than to
+/// the code that opens devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Port {
+    /// One interface of a composite device: how a peripheral separates its
+    /// lighting from its keys.
+    Interface(u8),
+    /// One collection of an interface, by usage page and usage: a laptop
+    /// keyboard puts several on the same interface, and only one of them lights.
+    Collection { usage_page: u16, usage: u16 },
+}
+
 /// Layout of a device: identification, transport and matrix.
 pub struct Layout {
     pub name: &'static str,
     pub vid: u16,
     pub pid: u16,
-    /// Interface of the USB composite device that carries the lighting.
-    pub interface: u8,
-    /// Firmware this layout was surveyed against.
+    /// Where the lighting is, in this device's HID enumeration.
+    pub port: Port,
+    /// The family whose reports it speaks — see [`crate::lighting`]. A device of
+    /// a family already written is this line and the data around it, nothing
+    /// more.
+    pub lighting: &'static dyn Lighting,
+    /// Firmware this layout was surveyed against, when the device says one.
+    ///
+    /// `None` where no command is known to read it — the Alienware keyboard, so
+    /// far. A version that cannot be read is not a version of zero: the
+    /// inspection has nothing to compare, and says nothing rather than warning
+    /// about a difference it invented.
     ///
     /// **Data, not a sentence in a `.md`**: it is what the inspection on open
     /// compares with the version it reads, and a mismatch must be reportable
@@ -74,12 +100,20 @@ pub struct Layout {
     /// Read through the device command (`0x00`/`0x81`), **never** copied from
     /// `release_number`: HID enumeration returns the `bcdDevice` there, a frozen
     /// hardware revision that looks like a version and is not one.
-    pub surveyed_firmware: Firmware,
+    pub surveyed_firmware: Option<Firmware>,
     pub rows: u8,
     pub cols: u8,
-    /// LED index per position, row by row. `u16::MAX` = no LED.
+    /// **The address the device gives each position**, row by row; `u16::MAX`
+    /// where no LED sits.
+    ///
+    /// A position is where a key is — what an effect paints and what the
+    /// simulator draws — and an address is what the protocol calls it. On the
+    /// Razer the two coincide; on the Alienware the device counts from one; a
+    /// device numbering its keys in any other order is this table and nothing
+    /// else. **Never arithmetic in a protocol module**: an offset that holds for
+    /// one model is a bug waiting for the next.
     pub matrix: &'static [u16],
-    /// Name and geometry of each occupied position, in index order.
+    /// Name and geometry of each occupied position, in position order.
     pub keys: &'static [Key],
 }
 
@@ -103,8 +137,24 @@ impl Layout {
     /// On Windows, opening the wrong entry yields a **valid** handle on which every
     /// write is lost. Requiring it to equal [`Self::interface`] is enough to rule it
     /// out, whatever shape it takes tomorrow.
-    pub fn is_lighting_interface(&self, vid: u16, pid: u16, interface: i32) -> bool {
-        vid == self.vid && pid == self.pid && interface == i32::from(self.interface)
+    pub fn is_lighting_interface(
+        &self,
+        vid: u16,
+        pid: u16,
+        interface: i32,
+        usage_page: u16,
+        usage: u16,
+    ) -> bool {
+        if vid != self.vid || pid != self.pid {
+            return false;
+        }
+        match self.port {
+            Port::Interface(number) => interface == i32::from(number),
+            Port::Collection {
+                usage_page: page,
+                usage: which,
+            } => usage_page == page && usage == which,
+        }
     }
 
     /// Number of matrix positions — **not** the number of physical LEDs.
@@ -119,22 +169,29 @@ impl Layout {
         self.matrix.iter().filter(|&&i| i != EMPTY).count()
     }
 
-    /// LED index at a given position.
+    /// The position at `row`, `col` — that is, where it sits in a frame — or
+    /// `None` when no LED does.
     pub fn at(&self, row: u8, col: u8) -> Option<u16> {
         let i = row as usize * self.cols as usize + col as usize;
-        match self.matrix.get(i) {
+        let lit = matches!(self.matrix.get(i), Some(&v) if v != EMPTY);
+        lit.then_some(i as u16)
+    }
+
+    /// What the device calls this position, for a protocol that names its keys.
+    pub fn address(&self, position: u16) -> Option<u16> {
+        match self.matrix.get(usize::from(position)) {
             Some(&v) if v != EMPTY => Some(v),
             _ => None,
         }
     }
 
-    /// Key carrying a given LED index.
+    /// Key sitting at a given position.
     ///
     /// Every lit position has one: that is the invariant the
     /// `every_lit_position_has_a_key` test checks.
-    pub fn key(&self, index: u16) -> Option<&'static Key> {
+    pub fn key(&self, position: u16) -> Option<&'static Key> {
         let keys: &'static [Key] = self.keys;
-        keys.iter().find(|k| k.index == index)
+        keys.iter().find(|k| k.index == position)
     }
 }
 
@@ -190,10 +247,11 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     name: "Razer DeathStalker V2 Pro",
     vid: 0x1532,
     pid: 0x0292,
-    interface: 3,
+    port: Port::Interface(3),
+    lighting: &RazerRows,
     // `01 05`, read back through `0x00`/`0x81` on 12/09/2026 — the version the
     // device also declares elsewhere. See §8 of the survey.
-    surveyed_firmware: Firmware { major: 1, minor: 5 },
+    surveyed_firmware: Some(Firmware { major: 1, minor: 5 }),
     rows: 6,
     cols: 22,
     #[rustfmt::skip]
@@ -277,6 +335,131 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     ],
 };
 
+/// Alienware m18 R1, the keyboard built into the laptop.
+///
+/// Its lighting is **one collection of one interface**, not an interface of its
+/// own: the same interface also carries the keys someone types. It speaks
+/// 64-byte feature reports — see `docs/protocol/alienware-m18-r1.md` and
+/// [`candeo_protocol::alienware`].
+///
+/// # The grid, and what it does not carry
+///
+/// Seven bands of twenty positions, one per row, the numeric keypad continuing
+/// each row rather than sitting in a block of its own. A frame covers the 140
+/// cells, of which 103 light.
+///
+/// **The numbers below are positions, not the device's indexes**, which start at
+/// one: the shift belongs to [`crate::lighting::AlienwareKeys`]. Here as for
+/// every other device, `matrix` and [`Key::index`] are where a key sits, which
+/// is what an effect paints.
+///
+/// The empty ones were found the only way there is: **written alone, and the
+/// keyboard looked at**. Some are the cell a wide key leaves behind — Tab is 41,
+/// the key after it 43 — and the others are spare entries of the maker's own
+/// table, which addresses indexes that light nothing, index `0` included.
+/// The L-shaped Enter has **one** LED, counted in the lower row.
+///
+/// The drawing is a transcription of the maker's layout picture, aligned by eye
+/// on the lit keyboard: 20.5 u wide, main block from 0 to 15 u, the arrows on
+/// the bottom row at 13.25 u with ↑ one row above, numeric keypad from 16.5 u.
+/// Exact as a convention, not as a survey — like the DeathStalker's.
+pub static ALIENWARE_M18_R1: Layout = Layout {
+    name: "Alienware m18 R1",
+    vid: 0x0d62,
+    pid: 0xaab0,
+    port: Port::Collection {
+        usage_page: 0xff89,
+        usage: 0x00cc,
+    },
+    lighting: &AlienwareKeys,
+    // No command is known to read a version from this device yet.
+    surveyed_firmware: None,
+    rows: 7,
+    cols: 20,
+    #[rustfmt::skip]
+    matrix: &[
+        // The device's own numbering, which starts at one — positions are where
+        // these sit, and the two must not be confused.
+        //     0      1      2      3      4      5      6      7      8      9     10     11     12     13     14     15     16     17     18     19
+               1,     2,     3,     4,     5,     6,     7,     8,     9,    10,    11,    12,    13,    14,    15,    16,    17,    18,    19,    20,
+              21,    22,    23,    24,    25,    26,    27,    28,    29,    30,    31,    32,    33,    34, EMPTY, EMPTY,    37,    38,    39,    40,
+              41, EMPTY,    43,    44,    45,    46,    47,    48,    49,    50,    51,    52,    53,    54, EMPTY, EMPTY,    57,    58,    59, EMPTY,
+           EMPTY,    62,    63,    64,    65,    66,    67,    68,    69,    70,    71,    72,    73,    74,    75, EMPTY,    77,    78,    79,    80,
+           EMPTY,    82,    83,    84,    85,    86,    87,    88,    89,    90,    91,    92,    93, EMPTY,    95, EMPTY,    97,    98,    99, EMPTY,
+             101,   102, EMPTY,   104,   105, EMPTY, EMPTY,   108, EMPTY,   110, EMPTY,   112,   113, EMPTY,   115, EMPTY, EMPTY,   118,   119,   120,
+           EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY,   134,   135,   136, EMPTY, EMPTY, EMPTY, EMPTY,
+    ],
+    #[rustfmt::skip]
+    keys: &[
+        // Row 0 — Esc, F1–F12, Print Screen, End, Delete; the four media keys
+        // above the keypad. (20)
+        k(  0, 0x01,    0.0,  0.0),
+        k(  1, 0x3B,    1.0,  0.0), k(  2, 0x3C,  2.0, 0.0), k(  3, 0x3D,  3.0, 0.0),
+        k(  4, 0x3E,    4.0,  0.0), k(  5, 0x3F,  5.0, 0.0), k(  6, 0x40,  6.0, 0.0),
+        k(  7, 0x41,    7.0,  0.0), k(  8, 0x42,  8.0, 0.0), k(  9, 0x43,  9.0, 0.0),
+        k( 10, 0x44,   10.0,  0.0), k( 11, 0x57, 11.0, 0.0), k( 12, 0x58, 12.0, 0.0),
+        k( 13, 0xE037, 13.0,  0.0), k( 14, 0xE04F, 14.0, 0.0), k( 15, 0xE053, 15.0, 0.0),
+        k( 16, 0xE020, 16.5,  0.0), k( 17, 0xE02E, 17.5, 0.0), k( 18, 0xE030, 18.5, 0.0),
+        k( 19, NO_SCANCODE, 19.5, 0.0),
+
+        // Row 1 — the key left of 1, the digits, 2 u Backspace; Num Lock and the
+        // keypad's / * −. (18)
+        k( 20, 0x29,    0.0,  1.0), k( 21, 0x02,  1.0, 1.0), k( 22, 0x03,  2.0, 1.0),
+        k( 23, 0x04,    3.0,  1.0), k( 24, 0x05,  4.0, 1.0), k( 25, 0x06,  5.0, 1.0),
+        k( 26, 0x07,    6.0,  1.0), k( 27, 0x08,  7.0, 1.0), k( 28, 0x09,  8.0, 1.0),
+        k( 29, 0x0A,    9.0,  1.0), k( 30, 0x0B, 10.0, 1.0), k( 31, 0x0C, 11.0, 1.0),
+        k( 32, 0x0D,   12.0,  1.0), kw(33, 0x0E, 13.0, 1.0, 2.0),
+        k( 36, 0x45,   16.5,  1.0), k( 37, 0xE035, 17.5, 1.0), k( 38, 0x37, 18.5, 1.0),
+        k( 39, 0x4A,   19.5,  1.0),
+
+        // Row 2 — 1.5 u Tab, the top letter row; keypad 7 8 9. (16)
+        kw(40, 0x0F,    0.0,  2.0, 1.5),
+        k( 42, 0x10,    1.5,  2.0), k( 43, 0x11,  2.5, 2.0), k( 44, 0x12,  3.5, 2.0),
+        k( 45, 0x13,    4.5,  2.0), k( 46, 0x14,  5.5, 2.0), k( 47, 0x15,  6.5, 2.0),
+        k( 48, 0x16,    7.5,  2.0), k( 49, 0x17,  8.5, 2.0), k( 50, 0x18,  9.5, 2.0),
+        k( 51, 0x19,   10.5,  2.0), k( 52, 0x1A, 11.5, 2.0), k( 53, 0x1B, 12.5, 2.0),
+        k( 56, 0x47,   16.5,  2.0), k( 57, 0x48, 17.5, 2.0), k( 58, 0x49, 18.5, 2.0),
+
+        // Row 3 — 1.75 u Caps Lock, the home row, the L-shaped Enter and its one
+        // LED; keypad 4 5 6 and the two-row +. (18)
+        kw(61, 0x3A,    0.0,  3.0, 1.75),
+        k( 62, 0x1E,    1.75, 3.0), k( 63, 0x1F,  2.75, 3.0), k( 64, 0x20,  3.75, 3.0),
+        k( 65, 0x21,    4.75, 3.0), k( 66, 0x22,  5.75, 3.0), k( 67, 0x23,  6.75, 3.0),
+        k( 68, 0x24,    7.75, 3.0), k( 69, 0x25,  8.75, 3.0), k( 70, 0x26,  9.75, 3.0),
+        k( 71, 0x27,   10.75, 3.0), k( 72, 0x28, 11.75, 3.0), k( 73, 0x2B, 12.75, 3.0),
+        kh(74, 0x1C,   13.75, 2.0, 1.25, 2.0),
+        k( 76, 0x4B,   16.5,  3.0), k( 77, 0x4C, 17.5, 3.0), k( 78, 0x4D, 18.5, 3.0),
+        kh(79, 0x4E,   19.5,  2.0, 1.0, 2.0),
+
+        // Row 4 — 1.25 u left Shift, the ISO key, the bottom letter row, 2.75 u
+        // right Shift; ↑; keypad 1 2 3 and the two-row Enter. (17)
+        kw(81, 0x2A,    0.0,  4.0, 1.25),
+        k( 82, 0x56,    1.25, 4.0),
+        k( 83, 0x2C,    2.25, 4.0), k( 84, 0x2D,  3.25, 4.0), k( 85, 0x2E,  4.25, 4.0),
+        k( 86, 0x2F,    5.25, 4.0), k( 87, 0x30,  6.25, 4.0), k( 88, 0x31,  7.25, 4.0),
+        k( 89, 0x32,    8.25, 4.0), k( 90, 0x33,  9.25, 4.0), k( 91, 0x34, 10.25, 4.0),
+        k( 92, 0x35,   11.25, 4.0),
+        kw(94, 0x36,   12.25, 4.0, 2.0),
+        k(114, 0xE048, 14.5, 4.0),
+        k( 96, 0x4F,   16.5,  4.0), k( 97, 0x50, 17.5, 4.0), k( 98, 0x51, 18.5, 4.0),
+        kh(119, 0xE01C, 19.5, 4.0, 1.0, 2.0),
+
+        // Row 5 — left Ctrl, Fn, Windows, Alt, 6.25 u Space, AltGr, the locked
+        // Windows key, right Ctrl; ← ↓ →; keypad 0 and its decimal point. (14)
+        kw(100, 0x1D,        0.0,  5.0, 1.25),
+        k( 101, NO_SCANCODE, 1.25, 5.0),
+        k( 103, 0xE05B,      2.25, 5.0),
+        k( 104, 0x38,        3.25, 5.0),
+        kw(107, 0x39,        4.25, 5.0, 6.25),
+        kw(109, 0xE038,     10.5,  5.0, 1.25),
+        k( 111, NO_SCANCODE, 11.75, 5.0),
+        kw(112, 0xE01D,     12.75, 5.0, 0.75),
+        k( 133, 0xE04B,     13.5,  5.0), k(134, 0xE050, 14.5, 5.0), k(135, 0xE04D, 15.5, 5.0),
+        kw(117, 0x52,       16.5,  5.0, 2.0),
+        k( 118, 0x53,       18.5,  5.0),
+    ],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,10 +491,125 @@ mod tests {
         let l = &DEATHSTALKER_V2_PRO;
         let kept: Vec<i32> = [-1, 0, 1, 2, 3]
             .into_iter()
-            .filter(|&i| l.is_lighting_interface(0x1532, 0x0292, i))
+            .filter(|&i| l.is_lighting_interface(0x1532, 0x0292, i, 0x0001, 0x0006))
             .collect();
         assert_eq!(kept, vec![3]);
-        assert!(!l.is_lighting_interface(0x1532, 0x0290, 3), "other product");
+        assert!(
+            !l.is_lighting_interface(0x1532, 0x0290, 3, 0x0001, 0x0006),
+            "other product"
+        );
+    }
+
+    /// The laptop keyboard puts four collections on one interface, and only the
+    /// one carrying report `0xcc` lights. The interface number says nothing here.
+    #[test]
+    fn a_collection_is_what_names_the_laptop_lighting() {
+        let l = &ALIENWARE_M18_R1;
+        let collections = [
+            (0x0001, 0x0006),
+            (0xff89, 0x0010),
+            (0xff89, 0x00cc),
+            (0x000c, 0x0001),
+        ];
+        let kept: Vec<(u16, u16)> = collections
+            .into_iter()
+            .filter(|&(page, usage)| l.is_lighting_interface(0x0d62, 0xaab0, 0, page, usage))
+            .collect();
+        assert_eq!(kept, vec![(0xff89, 0x00cc)]);
+        assert!(
+            !l.is_lighting_interface(0x1532, 0x0292, 0, 0xff89, 0x00cc),
+            "another device, same collection"
+        );
+    }
+
+    /// Keys the laptop grid carries.
+    const KEYS: usize = 103;
+
+    /// The grid the survey established: seven rows of twenty, and the holes
+    /// where a key is wider than a cell or where the device lights nothing.
+    #[test]
+    fn the_laptop_grid_matches_the_survey() {
+        let l = &ALIENWARE_M18_R1;
+        assert_eq!(l.matrix.len(), l.led_count());
+        assert_eq!(l.led_count(), 140);
+        assert_eq!(l.lit_count(), KEYS);
+        assert_eq!(l.keys.len(), KEYS);
+        assert_eq!(l.at(0, 0), Some(0), "Esc");
+        assert_eq!(l.at(2, 0), Some(40), "Tab");
+        assert_eq!(l.at(2, 1), None, "Tab is wider than its cell");
+        assert_eq!(l.at(2, 2), Some(42), "A");
+        assert_eq!(l.at(3, 14), Some(74), "Enter");
+        assert_eq!(l.at(5, 7), Some(107), "Space");
+        assert_eq!(l.at(5, 17), Some(117), "the keypad zero");
+    }
+
+    /// **A position is not an address.** This device counts its keys from one,
+    /// and the layout is where that is said — never an offset in a protocol
+    /// module, which would hold for this model and break on the next.
+    #[test]
+    fn the_laptop_addresses_are_the_device_s_own_numbers() {
+        let l = &ALIENWARE_M18_R1;
+        assert_eq!(l.address(0), Some(1), "Esc is the device's key 1");
+        assert_eq!(l.address(42), Some(43), "A");
+        assert_eq!(l.address(107), Some(108), "Space");
+        assert_eq!(l.address(41), None, "the cell Tab leaves behind");
+        assert_eq!(l.address(139), None, "past the last key");
+        // And where a device numbers its keys by position, the table says so too.
+        assert_eq!(DEATHSTALKER_V2_PRO.address(0), Some(0));
+        assert_eq!(DEATHSTALKER_V2_PRO.address(22), Some(22));
+    }
+
+    /// Every lit cell of the laptop grid has one key, each index appears once,
+    /// and the drawing stays inside the keyboard without two keys overlapping.
+    #[test]
+    fn the_laptop_drawing_covers_each_lit_cell_once() {
+        let l = &ALIENWARE_M18_R1;
+        let mut seen = std::collections::BTreeSet::new();
+        for key in l.keys {
+            assert!(seen.insert(key.index), "index {} twice", key.index);
+            assert!(
+                l.address(key.index).is_some(),
+                "{} is not a lit position",
+                key.index
+            );
+            assert!(
+                key.x >= 0.0 && key.x + key.w <= 20.5,
+                "{} sticks out",
+                key.index
+            );
+            assert!(
+                key.y >= 0.0 && key.y + key.h <= 7.0,
+                "{} sticks out",
+                key.index
+            );
+        }
+        assert_eq!(seen.len(), KEYS);
+        for a in l.keys {
+            for b in l.keys {
+                if a.index >= b.index {
+                    continue;
+                }
+                let apart =
+                    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+                assert!(apart, "{} and {} overlap", a.index, b.index);
+            }
+        }
+    }
+
+    /// The keys someone presses reach one LED each, as on any keyboard: the
+    /// exceptions here are the two Fn-like keys, which send nothing.
+    #[test]
+    fn the_laptop_scancodes_name_each_key_once() {
+        let mut seen = std::collections::BTreeMap::<u16, Vec<u16>>::new();
+        for key in ALIENWARE_M18_R1.keys {
+            seen.entry(key.scancode).or_default().push(key.index);
+        }
+        let shared: Vec<_> = seen
+            .iter()
+            .filter(|(code, indexes)| **code != NO_SCANCODE && indexes.len() > 1)
+            .collect();
+        assert!(shared.is_empty(), "shared scancodes: {shared:?}");
+        assert_eq!(seen.get(&NO_SCANCODE).map(Vec::len), Some(3));
     }
 
     #[test]
