@@ -4,7 +4,7 @@ The French listing for the Microsoft Store submission (#126), the translation of
 `listing-en.md`. It uses the words the French interface uses: *piloter*,
 *appareil*, *effets*, *paramètres*.
 
-Version described: **0.5.1**.
+Version described: **0.6.0**.
 
 ## Description courte (affichée dans les résultats de recherche)
 
@@ -19,6 +19,8 @@ Compatible avec le Razer DeathStalker V2 Pro (filaire) ; un appareil pris en cha
 CE QU'IL FAIT
 • Toute la matrice : couleurs unies, dégradés rangée par rangée, et les effets que le firmware de l'appareil exécute lui-même.
 • Des effets écrits en TypeScript, exécutés dans l'application : une onde qui suit votre frappe, un spectre, ce que vous écrivez.
+• Des automatisations : des règles qui prennent la main un moment, puis vous rendent votre effet — l'heure à chaque heure pile, le clavier éteint la nuit. Écrites comme une phrase, ou en expression cron.
+• Un effet Clock fait défiler l'heure sur le clavier, et les effets que vous écrivez peuvent lire l'heure eux aussi.
 • Les effets continuent fenêtre fermée — Candeo se range dans la zone de notification et l'éclairage reste.
 • Vos effets sont des fichiers ordinaires, dans Documents\candeo\effects : modifiez-les ici, ou dans l'éditeur dont vous avez l'habitude.
 • Démarrage à l'ouverture de session si vous le demandez. Thème clair et sombre. Français et anglais.
@@ -29,13 +31,12 @@ CE QU'IL NE FAIT PAS
 
 Le protocole qu'il parle a été établi en observant le matériel, et il est documenté publiquement, avec la version de firmware sur laquelle chaque fait a été vérifié. Le code source est disponible sous licence GPL-3.0.
 
-## Nouveautés de cette version (0.5.1)
+## Nouveautés de cette version (0.6.0)
 
-• L'application a sa propre icône, et le programme d'installation la porte aussi.
-• Elle peut démarrer à l'ouverture de votre session, par la tâche de démarrage de Windows.
-• Les paramètres indiquent la version que vous utilisez, et que cette version du Store est mise à jour par le Store.
-• Les textes trop pâles pour être lus ont été corrigés partout, dans les deux thèmes.
-• Les paramètres affichent le dossier des journaux avec ~ à la place du nom de votre compte.
+• Les automatisations, dans leur propre onglet : une règle interrompt l'effet d'un appareil un moment, puis le lui rend. Toutes les heures, en semaine, à une heure donnée — ou n'importe quelle expression cron, dans Avancé.
+• Essayer lance une règle une fois, tout de suite. Reprendre, sur l'appareil et dans la zone de notification, vous rend votre effet aussitôt. Mettre en pause les automatisations les suspend toutes, le temps d'une réunion ou d'une partie.
+• Clock, un nouvel effet : l'heure défile sur le clavier, avec les secondes si vous le souhaitez.
+• Les effets peuvent lire l'heure : écrivez votre propre cadran en TypeScript.
 
 ## Termes de recherche (7 au maximum, 30 caractères chacun)
 
