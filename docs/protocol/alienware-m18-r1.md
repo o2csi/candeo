@@ -2,8 +2,8 @@
 
 **Established on 2026-09-17**, on an Alienware m18 R1, by watching what Alienware
 Command Center writes on the USB bus (USBPcap, then the reports read back out of
-the capture). **Nothing was written to either device**: every fact below is an
-observation of the maker's own software.
+the capture), and then by **writing to the keyboard** to confirm what had been
+read. The AW-ELC was only ever listened to.
 
 Firmware versions are **not established yet**: neither device was asked for one.
 Until they are, treat every identifier here as true of this machine on this date,
@@ -65,8 +65,30 @@ at a time gave these anchors:
 
 They read as a walk **row by row, left to right, the numeric keypad included**,
 starting at Esc. The media keys are addressed like any other key, with no command
-of their own. The gaps are not explained yet: the full map needs a pass lighting
-one row at a time.
+of their own.
+
+### A grid of twenty
+
+Writing whole ranges of indexes, each in its own colour, and reading the keyboard
+off a photograph, gives the shape: **every row holds exactly twenty indexes**.
+
+| Indexes | Row |
+|---|---|
+| 1–20 | Esc, F1–F12, the media keys |
+| 21–40 | the digits, `²` to Backspace |
+| 41–60 | Tab, A Z E R T Y U I O P |
+| 61–80 | Q S D F G H J K L M, Enter |
+| 81–100 | W X C V B N and the punctuation |
+| 101–120 | Ctrl, Fn, Windows, Alt, Space, AltGr |
+| 121–136 | the arrows |
+
+The numeric keypad does not have a range of its own: each row runs on into it.
+
+**The gaps are wide keys.** Tab is 41 and A is 43, with 42 addressed by nobody:
+a key wider than one cell takes its cell and leaves the next empty. So the
+keyboard is a **seven by twenty matrix with empty cells**, 110 keys in 140 cells —
+the same shape as the Razer's 6 × 22 carrying 106 keys, which the application
+already models.
 
 Colours are plain `R, G, B`. When a key changes, Command Center sends it first,
 then every other key in index order.
@@ -95,15 +117,31 @@ While a rainbow animation ran, the colours went past in the clear — `ff0000`,
 `ffa500`, `ffff00`, `008000`, `00bfff`, `0000ff`, `800080` — rewritten every
 150 ms.
 
-## 3. What this leaves open
+## 3. Writing works, and what it costs
+
+The keyboard **accepts the reports above** from anything that opens its collection:
+brightness, a frame opened with `cc 94`, colours in `cc 8c 02 00`, closed with
+`cc 93`. The colours stay until someone writes again, and the device answers each
+report — `cc 94 …` after opening a frame, `cc 93 …` after closing one.
+
+**Command Center only writes when it animates.** On a fixed colour, or while
+someone edits a profile, it falls silent and what we write stays; on an animated
+effect it rewrites the whole keyboard about once a second and wins. So sharing a
+keyboard is a question of **what the other software is doing**, not of whether it
+runs — and Candeo will have to say so rather than fight for the device.
+
+Frames of 110 keys at about twelve a second were written without a refusal.
+
+## 4. What this leaves open
 
 - The **firmware version** of each device, and where to read it.
-- The **rest of the key map**: which index each remaining key holds, and what the
-  gaps are.
+- **Which key sits at each index**, one by one: the rows and the gaps are
+  established, the cell of every key is not.
 - What `cc 8c 01 01`, `cc 8c 13 00` and the three `00`/`01` maps mean.
-- Which **zones** the AW-ELC addresses, and what `02 82 00 0f` selects.
-- Whether writing works while Command Center's lighting agent runs: it rewrites
-  the whole keyboard about once a second, so it would have to be stopped.
+- Which **zones** the AW-ELC addresses, and what `02 82 00 0f` selects. Nothing
+  has been written to it.
+- What the keyboard does with a **faster stream** than twelve frames a second,
+  and whether it keeps its colours when the machine sleeps.
 
 ## Method
 
@@ -112,3 +150,8 @@ changed the lighting; the reports were then pulled out of the capture by matchin
 the `SET_REPORT` setup packet and reading the bytes that follow. Lighting one key
 at a time, with everything else off, is what turns a stream of colours into a key
 index.
+
+The grid came the other way around: **writing** ranges of indexes, each range in
+its own colour, then reading the keyboard off a photograph. Five indexes per
+colour is fine enough to count, and a wide key shows up as a dark cell inside a
+lit group.
