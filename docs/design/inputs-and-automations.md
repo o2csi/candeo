@@ -150,6 +150,11 @@ render({ signals }) // { doorbell: 'ring', ci: 'failed', volume: 0.4 }
 
 ## 3. Automations
 
+**Shipped with the `schedule` trigger** (#106): the resolver and the scheduler in
+`src-tauri/src/automations/`, `rules` in `settings.json`, the Automations tab,
+interruptions on the device card and in the tray. What the implementation had to
+decide beyond this section is written at the end of it, in §3.6.
+
 ### 3.1 The principle: one effect per device, interrupted
 
 A device still runs **exactly one effect** at a time. What changes is where that
@@ -264,6 +269,30 @@ engine:
   **Pause automations** check item sits above *Open window*.
 - **The simulator** shows what the device shows, interruption included, since it
   draws the device loop's frames.
+
+### 3.6 What the implementation decided
+
+- **The applied effect to go back to may be a firmware one.** Candeo remembers a
+  library effect in `activeEffects`, but nothing remembers a firmware effect set
+  from the gallery. So before a first interruption, a device no host loop drives
+  has its current effect read back — `0x0f`/`0x82`, the read the inspection
+  already makes on opening — and that effect is set again when the rule ends. An
+  effect that cannot be read back (Static, Breathing) gives way to *Off*: dark is
+  better than the rule's last frame, frozen.
+- **An occurrence has an identity**: when it started. Resume and a gesture dismiss
+  that occurrence, not the rule, which is how a rule comes back at its next one.
+  A rule that never stops — every second for a second, no window — has one
+  occurrence a day, from midnight; one with a window, one per window.
+- **`aligned: false` counts from when the scheduler first saw the rule enabled**,
+  kept in memory: after a restart, such a rule counts from the restart.
+- **Rules are raw JSON in the file, read one by one.** A broken rule stays as
+  written and does nothing; saving from the tab refuses a new broken rule, not one
+  already there.
+- **Local time comes from `chrono`**: the standard library has no time zones, and
+  `time`, already in the tree, refuses the local offset in a multithreaded process
+  on Linux.
+- **Pause automations** lives in `preferences`, so a "do not disturb" set for a
+  game survives a restart in the middle of it; it is in the tray and in the tab.
 
 ## 4. Order of work
 

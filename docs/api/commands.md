@@ -696,7 +696,8 @@ without duplicating an effect.
     language?: 'en' | 'fr',       // absent : la langue du système
     resumeEffects?: false,        // absent: a device that opens resumes its applied effect
     logFilesKept?: number,        // absent: 7; 0 keeps every log file
-    theme?: 'light' | 'dark'      // absent: the system's
+    theme?: 'light' | 'dark',     // absent: the system's
+    automationsPaused?: true      // absent: rules apply — see Automations
   },
   devices: {
     vid: number,
@@ -715,7 +716,8 @@ without duplicating an effect.
     pid: number,
     effect: string,              // identifiant de l'effet réglé
     values: Record<string, ParamValue>
-  }[]
+  }[],
+  rules: Rule[]                  // in their order, which is their priority — see Automations
 }
 ```
 
@@ -1287,7 +1289,13 @@ previous one, without any error saying so.
     error: string | null,
     deviceError: Failure | null,   // deviceWrite, or deviceClosed: see Errors
     reachingKeyboard: boolean,
-    toKeyboard: boolean
+    toKeyboard: boolean,
+    interruption?: {               // a rule interrupts this device: see Automations
+      rule: string,                // its id
+      name: string,                // empty when it has none
+      effect: string,              // the effect it shows
+      until?: number               // epoch ms; absent for a rule that never stops
+    }
   }[],
   preview: {
     layoutOf: { vid: number, pid: number },   // gabarit emprunté
@@ -1335,11 +1343,85 @@ tell them apart. The order is stable, sorted by VID then PID.
 Polled rather than pushed: an error that occurred while the window was closed must be
 readable on reopening, which a one-off event does not allow.
 
+`interruption` is added from the automations when the report is built; the engine
+itself knows nothing of rules. A device a firmware effect interrupts may have no
+loop, hence no line yet: it gets one, `running` false, so the window can still say
+what happens to it. While a rule interrupts a device, `effectId` is the rule's
+effect — what the LEDs show — and `activeEffects` still names the applied one.
+
 An exception in an effect **does not bring down the application**: it is
 caught per frame, exposed here, and cleared as soon as the effect recovers. After
 thirty consecutive failed frames, the loop stops — an effect that throws on
 every frame will not recover on its own. And it stops only **its own** loop:
 the other devices carry on.
+
+---
+
+## Automations
+
+Rules that interrupt the effect applied on a device for a while, then give it back
+(#106). The design, and why it is shaped this way, is
+[`inputs-and-automations.md`](../design/inputs-and-automations.md) §3.
+
+```ts
+Rule = {
+  id: string,
+  name: string,                         // may be empty
+  enabled: boolean,                     // absent: false
+  devices: { vid: number, pid: number }[],
+  when: {
+    kind: 'schedule',
+    every: number,                      // seconds, 1 or more
+    aligned?: boolean,                  // absent: true when `every` divides a day
+    between?: { from: 'HH:MM', to: 'HH:MM' }   // wraps past midnight when from > to
+  },
+  show: { effect: string, params: Record<string, ParamValue> },
+  for: { seconds: number }              // absent: 10
+}
+```
+
+Rules live in Rust and run with the window closed. A scheduler thread decides every
+second, on the second, and at once when a rule is saved, tried, or the pause
+toggled. **An interruption never writes `activeEffects`**: when it ends, the device
+goes back to what someone applied.
+
+- **Priority is the order of the list.** When two rules apply to a device at once,
+  the first runs; when it ends, the next one, or the applied effect.
+- **An occurrence lasting its period or longer goes on without restarting**: every
+  second for a second is a steady display, not a flicker.
+- **What the device goes back to** is decided at the first interruption. If a host
+  loop ran, the applied effect restarts with its saved settings, its `time` from
+  zero. If none ran, the firmware drove the lighting, and its effect — read back
+  from the keyboard before interrupting (`0x0f`/`0x82`, the read the inspection
+  makes on opening) — is set again; one that cannot be read back gives way to
+  `Off` rather than a frozen frame.
+- **A gesture always wins**: `start_effect`, `stop_effect`, `set_effect` and the
+  tray's actions end an interruption on that device. The rule comes back at its
+  next occurrence.
+- `rules` stay raw JSON in `settings.json`, read one by one: a rule edited by hand
+  into something unreadable costs that rule, stays as written, and does nothing.
+
+### `set_rules(rules: Rule[])`
+
+Replaces the rules, in the order given. Each is checked first and refused with
+`ruleInvalid { name, error }` — except a broken rule already in the file and sent
+back unchanged, which passes, so it never blocks saving the others.
+
+### `try_rule(id)`
+
+Runs a rule once, now, for its duration — switched on or not, paused or not.
+`ruleNotFound { name }` when no valid rule has that id.
+
+### `resume_device(device)`
+
+Ends the interruption on a device now and gives it back what it goes back to. The
+rule comes back at its next occurrence. Also in the tray, under the device.
+
+### `set_automations_paused(paused: boolean)`
+
+Pause automations: no scheduled rule applies until it is turned back on; a rule
+tried by hand still runs. Written in `preferences.automationsPaused`, so it survives
+a restart. Also a check item in the tray, above *Open window*, once a rule exists.
 
 ---
 
