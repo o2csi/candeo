@@ -559,11 +559,20 @@ pub fn set_automations_paused(app: AppHandle, paused: bool) -> CmdResult<()> {
 /// Replaces the rules, in the order given, which is their priority.
 ///
 /// Each is checked first: the interface builds complete rules, and one it could
-/// not is a mistake to show rather than a rule to write and ignore.
+/// not is a mistake to show rather than a rule to write and ignore. A broken
+/// rule already in the file and sent back **unchanged** passes: it stays as
+/// written, and does nothing, rather than blocking every other edit.
 #[tauri::command]
 pub fn set_rules(app: AppHandle, rules: Vec<serde_json::Value>) -> CmdResult<()> {
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    let already: HashSet<String> = settings.rules.iter().map(ToString::to_string).collect();
+
     for (raw, parsed) in rules.iter().zip(resolver::parse(&rules)) {
         if let Err(error) = parsed {
+            if already.contains(&raw.to_string()) {
+                continue;
+            }
             let name = raw
                 .get("name")
                 .and_then(|n| n.as_str())
@@ -575,8 +584,6 @@ pub fn set_rules(app: AppHandle, rules: Vec<serde_json::Value>) -> CmdResult<()>
                 .with("error", error));
         }
     }
-    let store = crate::storage::store(&app)?;
-    let mut settings = store.read_settings()?;
     settings.rules = rules;
     store.write_settings(&settings)?;
     wake(&app);
