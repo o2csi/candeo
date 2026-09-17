@@ -4,7 +4,8 @@ For the Microsoft Store submission (#126). Text is pasted into Partner Center by
 hand until #162 automates it. **What's new** is rewritten at every release; the
 rest changes only when the application does.
 
-Version described: **0.6.0**.
+Version described: **0.7.0**. Its *What's new* covers everything since 0.5.1, the
+version the Store still carries: 0.6.0 was never submitted.
 
 ## Short description (shown in search results)
 
@@ -19,7 +20,7 @@ Works with the Razer DeathStalker V2 Pro (wired); a supported device is required
 WHAT IT DOES
 • The whole matrix: solid colours, per-row gradients, and the effects the device's own firmware runs.
 • Effects written in TypeScript, running inside the application: a ripple that follows your typing, a spectrum, whatever you write.
-• Automations: rules that take over for a while, then give your effect back — the time on the hour, the keyboard dark at night. Written as a sentence, or as a cron expression.
+• Automations: rules that take over for a while, then give your effect back — the time on the hour, the keyboard dark at night or while you are away. Written as a sentence, or as a cron expression.
 • A Clock effect scrolls the time across the keyboard, and the effects you write can read the clock too.
 • Effects keep running with the window closed — Candeo folds into the notification area and the lighting stays.
 • Your effects are ordinary files in Documents\candeo\effects: edit them here, or in the editor you already use.
@@ -31,12 +32,14 @@ WHAT IT DOES NOT DO
 
 The protocol it speaks was established by observing the hardware, and is documented in the open with the firmware version each fact was checked against. The source is available under the GPL-3.0.
 
-## What's new in this version (0.6.0)
+## What's new in this version (0.7.0)
 
 • Automations, in their own tab: a rule interrupts the effect on a device for a while, then gives it back. Every hour, on weekdays, at a set time — or any cron expression under Advanced.
+• A rule can wait for you to step away instead: after 10 minutes without a key or the mouse, show Off, until someone is back.
 • Try runs a rule once, right away. Resume, on the device and in the notification area, gives your effect back at once. Pause automations holds every rule, for a meeting or a game.
 • Clock, a new effect: the time scrolls across the keyboard, with the seconds if you want them.
 • Effects can read the clock: write your own clock face in TypeScript.
+• An effect's settings appear in the order its author wrote them.
 
 ## Search terms (7 at most, 30 characters each)
 
