@@ -8,6 +8,7 @@ import {
   duration,
   editable,
   examples,
+  expression,
   moved,
   readSimple,
   ruleValues,
@@ -76,22 +77,41 @@ describe('new rules', () => {
     expect(blankRule(KEYBOARD, 'shipped:Clock').id).not.toBe(rule.id)
   })
 
+  const names = { hourly: 'Hourly clock', night: 'Night off', away: 'Off when away' }
+
   it('offers the hourly clock and the night off as disabled examples', () => {
-    const [hourly, night] = examples(KEYBOARD, { hourly: 'Hourly clock', night: 'Night off' })
-    expect(hourly.when.expr).toBe('0 * * * *')
+    const [hourly, night] = examples(KEYBOARD, names, false)
+    expect(hourly.when).toEqual({ kind: 'cron', expr: '0 * * * *' })
     expect(hourly.show.effect).toBe('shipped:Clock')
-    expect(night.when.expr).toBe('0 22 * * *')
+    expect(night.when).toEqual({ kind: 'cron', expr: '0 22 * * *' })
     expect(night.for.seconds).toBe(9 * 3600)
     expect(night.show.effect).toBe('hardware:off')
     expect([hourly.enabled, night.enabled]).toEqual([false, false])
+  })
+
+  it('adds the keyboard off when away only where the system says when that is', () => {
+    expect(examples(KEYBOARD, names, false)).toHaveLength(2)
+    const away = examples(KEYBOARD, names, true)[2]
+    expect(away.when).toEqual({ kind: 'idle', minutes: 10 })
+    expect(away.show.effect).toBe('hardware:off')
+    expect(away.enabled).toBe(false)
+  })
+})
+
+describe('expression', () => {
+  it('is the cron expression, and nothing for a rule waiting for idleness', () => {
+    expect(expression(blankRule(KEYBOARD, 'x'))).toBe('0 * * * *')
+    expect(expression({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'idle', minutes: 5 } })).toBeNull()
   })
 })
 
 describe('editable', () => {
   it('accepts a rule the tab built, and refuses what a hand edit turned into something else', () => {
     expect(editable(blankRule(KEYBOARD, 'shipped:Clock'))).toBe(true)
+    expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'idle', minutes: 10 } })).toBe(true)
     expect(editable({ id: 'odd', when: 'whenever', show: 12 })).toBe(false)
     expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'schedule', every: 60 } })).toBe(false)
+    expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'idle' } })).toBe(false)
     expect(editable(null)).toBe(false)
   })
 })

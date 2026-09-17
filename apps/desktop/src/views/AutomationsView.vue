@@ -7,7 +7,8 @@
  * DeathStalker V2 Pro, show Clock for 10 s* — and every chip opens what changes
  * it. When is a cron expression: the chips write the common ones, and the
  * advanced field takes any, with the format explained beside it. One of the two
- * holds the rule at a time; the other is shown disabled.
+ * holds the rule at a time; the other is shown disabled. Or when is "after 10 min
+ * idle" (#179), which lasts until someone is back: no days, no duration.
  *
  * Rules are saved as soon as a gesture ends: there is no Save button to forget,
  * and the scheduler, in Rust, sees the change within a second, window closed or
@@ -20,6 +21,7 @@ import type { ParamValue } from '@candeo/effects-api'
 
 import {
   getSettings,
+  idleAvailable,
   listDevices,
   listEffects,
   onStateChanged,
@@ -43,6 +45,7 @@ import {
   blankRule,
   editable,
   examples,
+  expression,
   moved,
   readSimple,
   ruleValues,
@@ -60,6 +63,8 @@ const library = ref<EffectEntry[]>([])
 const devices = ref<DeviceInfo[]>([])
 const problem = ref<string | null>(null)
 const loaded = ref(false)
+/** Whether this system says how long the computer has been idle. */
+const idleHere = ref(false)
 
 /**
  * Settings being dragged, per rule, before the gesture ends: the form streams
@@ -78,15 +83,17 @@ let unlisten: UnlistenFn | null = null
 
 async function load(): Promise<void> {
   try {
-    const [settings, effects, found] = await Promise.all([
+    const [settings, effects, found, idle] = await Promise.all([
       getSettings(),
       listEffects(),
       listDevices(),
+      idleAvailable(),
     ])
     rules.value = settings.rules
     paused.value = settings.preferences.automationsPaused ?? false
     library.value = effects
     devices.value = found.filter((d) => d.state === 'adopted')
+    idleHere.value = idle
   } catch (e) {
     problem.value = message(e)
   } finally {
@@ -169,24 +176,38 @@ function addRule(): void {
 }
 
 function addExamples(): void {
-  const names = { hourly: t('automations.hourlyClock'), night: t('automations.nightOff') }
-  void save([...rules.value, ...examples(firstDevice.value, names)])
+  const names = {
+    hourly: t('automations.hourlyClock'),
+    night: t('automations.nightOff'),
+    away: t('automations.awayOff'),
+  }
+  void save([...rules.value, ...examples(firstDevice.value, names, idleHere.value)])
 }
 
 // ---------------------------------------------------------------- when
 
-/** What the chips show for a rule: its expression, or the default they start from. */
+/**
+ * What the chips show for a rule: its expression, or the default they start from
+ * — which is also what an idle rule becomes when a time is chosen instead.
+ */
 function simple(rule: Rule): Simple {
-  return readSimple(rule.when.expr) ?? { frequency: { kind: 'hour' }, days: [...EVERY_DAY] }
+  return readSimple(expression(rule) ?? '') ?? { frequency: { kind: 'hour' }, days: [...EVERY_DAY] }
 }
 
 function advanced(rule: Rule): boolean {
-  return advancedChosen[rule.id] ?? readSimple(rule.when.expr) === null
+  const expr = expression(rule)
+  return expr !== null && (advancedChosen[rule.id] ?? readSimple(expr) === null)
 }
 
 function chooseFrequency(index: number, rule: Rule, frequency: Frequency): void {
   const expr = writeSimple({ frequency, days: simple(rule).days })
   update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
+}
+
+function chooseIdle(index: number, rule: Rule, minutes: number): void {
+  // Back to a time later, the rule opens in the chips, not in an old advanced field.
+  delete advancedChosen[rule.id]
+  update(index, (r) => ({ ...r, when: { kind: 'idle', minutes } }))
 }
 
 function chooseDays(index: number, rule: Rule, days: Days): void {
@@ -202,7 +223,7 @@ function chooseDays(index: number, rule: Rule, days: Days): void {
 function chooseAdvanced(index: number, rule: Rule, event: Event): void {
   const on = (event.target as HTMLInputElement).checked
   advancedChosen[rule.id] = on
-  if (!on && readSimple(rule.when.expr) === null) {
+  if (!on && readSimple(expression(rule) ?? '') === null) {
     const expr = writeSimple(simple(rule))
     update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
   }
@@ -330,16 +351,23 @@ function onDrop(to: number): void {
               show something the rule does not do — one inert chip says where
               "when" is written instead.
             -->
-            <span v-if="advanced(raw) && readSimple(raw.when.expr) === null" class="by-expression">
+            <span
+              v-if="advanced(raw) && readSimple(expression(raw) ?? '') === null"
+              class="by-expression"
+            >
               {{ t('automations.byExpression') }}
             </span>
             <template v-else>
               <FrequencyChip
                 :frequency="simple(raw).frequency"
                 :disabled="advanced(raw)"
+                :idle="raw.when.kind === 'idle' ? raw.when.minutes : null"
+                :idle-available="idleHere"
                 @change="(f) => chooseFrequency(index, raw, f)"
+                @idle="(m) => chooseIdle(index, raw, m)"
               />
               <DaysChip
+                v-if="raw.when.kind === 'cron'"
                 :days="simple(raw).days"
                 :disabled="advanced(raw)"
                 @change="(d) => chooseDays(index, raw, d)"
@@ -380,13 +408,16 @@ function onDrop(to: number): void {
               <option v-if="missing(raw)" :value="raw.show.effect">{{ raw.show.effect }}</option>
             </select>
 
-            <span class="word">{{ t('automations.for') }}</span>
-            <DurationChip
-              :seconds="raw.for?.seconds ?? 10"
-              :presets="FOR_PRESETS"
-              :label="t('automations.for')"
-              @change="(s) => update(index, (r) => ({ ...r, for: { seconds: s } }))"
-            />
+            <template v-if="raw.when.kind === 'cron'">
+              <span class="word">{{ t('automations.for') }}</span>
+              <DurationChip
+                :seconds="raw.for?.seconds ?? 10"
+                :presets="FOR_PRESETS"
+                :label="t('automations.for')"
+                @change="(s) => update(index, (r) => ({ ...r, for: { seconds: s } }))"
+              />
+            </template>
+            <span v-else class="word">{{ t('automations.untilBack') }}</span>
             </div>
 
             <div class="actions">
@@ -420,7 +451,7 @@ function onDrop(to: number): void {
           </div>
 
           <div class="more">
-            <div class="advanced">
+            <div v-if="raw.when.kind === 'cron'" class="advanced">
               <label class="toggle">
                 <input
                   type="checkbox"
@@ -434,7 +465,7 @@ function onDrop(to: number): void {
                 type="text"
                 spellcheck="false"
                 :aria-label="t('automations.expression')"
-                :value="raw.when.expr"
+                :value="expression(raw) ?? ''"
                 :disabled="!advanced(raw)"
                 @change="typeExpression(index, $event)"
               />
@@ -470,6 +501,9 @@ function onDrop(to: number): void {
 
           <p v-if="missing(raw)" class="warn">
             {{ t('automations.missingEffect', { effect: raw.show.effect }) }}
+          </p>
+          <p v-if="raw.when.kind === 'idle' && !idleHere" class="warn">
+            {{ t('automations.idleRuleUnavailable') }}
           </p>
         </template>
 
