@@ -1374,20 +1374,25 @@ Rule = {
   name: string,                         // may be empty
   enabled: boolean,                     // absent: false
   devices: { vid: number, pid: number }[],
-  when: {
-    kind: 'cron',
-    expr: string                        // 5 fields, or 6 with seconds first, local time
-  },
+  when:
+    | { kind: 'cron', expr: string }    // 5 fields, or 6 with seconds first, local time
+    | { kind: 'idle', minutes: number }, // nobody has used the computer for that long
   show: { effect: string, params: Record<string, ParamValue> },
-  for: { seconds: number }              // absent: 10
+  for: { seconds: number }              // absent: 10; an idle rule's applies to Try only
 }
 ```
 
-An occurrence starts each time the expression matches the local clock and lasts
+A cron occurrence starts each time the expression matches the local clock and lasts
 `for` seconds: `0 * * * *` for 10 s is the hour, `0 22 * * *` for 32400 s the night,
 `0 9-18 * * 1-5` office hours, `*/30 * * * * *` a flash every thirty seconds.
 Expressions are read by `croner`, backwards from now, across daylight-saving
 changes.
+
+An idle occurrence starts once the session has had no input — no key, no mouse —
+for `minutes`, and lasts until the next input (#179). The time comes from the
+system (`GetLastInputInfo` on Windows), never from key capture; where the system
+does not say, an idle rule does nothing (#183). Its `until` is absent from
+`engine_status`: nobody knows when someone comes back.
 
 Rules live in Rust and run with the window closed. A scheduler thread decides every
 second, on the second, and at once when a rule is saved, tried, or the pause
@@ -1424,6 +1429,11 @@ saving the others.
 
 Runs a rule once, now, for its duration — switched on or not, paused or not.
 `ruleNotFound { name }` when no valid rule has that id.
+
+### `idle_available() → boolean`
+
+Whether this system says how long the computer has been idle: `true` on Windows,
+`false` elsewhere for now. The Automations tab disables the idle choice when not.
 
 ### `resume_device(device)`
 

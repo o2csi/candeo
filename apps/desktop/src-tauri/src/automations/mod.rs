@@ -187,6 +187,8 @@ fn tick(app: &AppHandle) {
         }
     };
     let now = chrono::Local::now();
+    // Read once, for every device: idleness is the session's, not a keyboard's.
+    let idle = crate::idle::idle_ms();
     let (Some(automations), Some(state)) =
         (app.try_state::<Automations>(), app.try_state::<AppState>())
     else {
@@ -210,6 +212,7 @@ fn tick(app: &AppHandle) {
                     rules: &rules,
                     paused,
                     tried: &tables.tried,
+                    idle,
                 },
                 device,
             )
@@ -501,6 +504,7 @@ fn under_way_now(
                 rules: &rules,
                 paused,
                 tried: &tables.tried,
+                idle: crate::idle::idle_ms(),
             },
             device,
         ),
@@ -575,7 +579,7 @@ impl Running {
             rule: self.interruption.rule.clone(),
             name: self.name.clone(),
             effect: self.interruption.effect.clone(),
-            until: (!self.continued).then_some(self.interruption.until),
+            until: (!self.continued && !self.interruption.open).then_some(self.interruption.until),
         }
     }
 }
@@ -707,6 +711,7 @@ mod tests {
             params: serde_json::Map::new(),
             since,
             until,
+            open: false,
         }
     }
 
@@ -762,6 +767,23 @@ mod tests {
             ),
             Some(Change::Interrupt(_))
         ));
+    }
+
+    /// Nobody at the computer: each look finds the same stretch, known a second
+    /// ahead. It is one run, never restarted, and the card announces no end.
+    #[test]
+    fn an_idle_stretch_is_one_run_with_no_end_announced() {
+        let idle = |until| Interruption {
+            open: true,
+            ..occurrence("away", 0, until)
+        };
+        let mut current = Running {
+            interruption: idle(1_000),
+            ..running("away", 0, 1_000)
+        };
+        assert_eq!(current.status().until, None, "open from the start");
+        assert_eq!(decide(Some(&mut current), Some(idle(2_000))), None);
+        assert_eq!(current.interruption.until, 2_000);
     }
 
     /// Resume on a run of back-to-back occurrences holds while they keep coming,

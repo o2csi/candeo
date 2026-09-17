@@ -105,6 +105,14 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+/** The rule's cron expression, or `null` for a rule that waits for idleness. */
+export function expression(rule: Rule): string | null {
+  return rule.when.kind === 'cron' ? rule.when.expr : null
+}
+
+/** What the idle choice offers, in minutes; any number of minutes stays possible. */
+export const IDLE_PRESETS: readonly number[] = [1, 5, 10, 15, 30, 60]
+
 // ---------------------------------------------------------------- for
 
 /** What the "for" chip offers; any number of seconds stays possible. */
@@ -143,8 +151,8 @@ export function editable(rule: unknown): rule is Rule {
     Array.isArray(r.devices) &&
     typeof r.when === 'object' &&
     r.when !== null &&
-    r.when.kind === 'cron' &&
-    typeof r.when.expr === 'string' &&
+    ((r.when.kind === 'cron' && typeof r.when.expr === 'string') ||
+      (r.when.kind === 'idle' && typeof r.when.minutes === 'number')) &&
     typeof r.show === 'object' &&
     r.show !== null &&
     typeof r.show.effect === 'string'
@@ -172,9 +180,29 @@ export function blankRule(device: DeviceRef | null, effect: string): Rule {
   }
 }
 
-/** The examples the empty tab offers, each a disabled rule to adjust (§3.5). */
-export function examples(device: DeviceRef | null, names: { hourly: string; night: string }): Rule[] {
+/**
+ * The examples the empty tab offers, each a disabled rule to adjust (§3.5). The
+ * keyboard off when nobody is there only where the system says when that is.
+ */
+export function examples(
+  device: DeviceRef | null,
+  names: { hourly: string; night: string; away: string },
+  idle: boolean,
+): Rule[] {
   const devices = device ? [device] : []
+  const away: Rule[] = idle
+    ? [
+        {
+          id: newId(),
+          name: names.away,
+          enabled: false,
+          devices,
+          when: { kind: 'idle', minutes: 10 },
+          show: { effect: 'hardware:off', params: {} },
+          for: { seconds: 10 },
+        },
+      ]
+    : []
   return [
     {
       id: newId(),
@@ -194,6 +222,7 @@ export function examples(device: DeviceRef | null, names: { hourly: string; nigh
       show: { effect: 'hardware:off', params: {} },
       for: { seconds: 9 * 3600 },
     },
+    ...away,
   ]
 }
 
