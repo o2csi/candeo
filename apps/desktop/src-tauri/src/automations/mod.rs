@@ -8,13 +8,19 @@
 //!
 //! # Two halves
 //!
-//! - [`resolver`] decides, and is pure: what should interrupt a device at an
-//!   instant, and until when.
-//! - The scheduler here applies: a thread that asks the resolver every second,
-//!   on the second, and whenever something that changes the answer happens,
-//!   then starts or ends interruptions through the engine.
+//! - [`resolver`] decides, and is pure: which occurrences are under way on a
+//!   device at an instant.
+//! - The scheduler here applies: a thread that asks the resolver every second, on
+//!   the second, and whenever something that changes the answer happens, then
+//!   starts or ends interruptions through the engine.
 //!
 //! Rules live in Rust, not in the window: they must hold with the window closed.
+//!
+//! # Runs
+//!
+//! Occurrences of one rule that start before the previous one ended — every
+//! second for a second, every minute for a minute — are **one run**: the effect
+//! is not restarted at each, and Resume dismisses the run, not one second of it.
 //!
 //! # Locks
 //!
@@ -36,7 +42,15 @@ use tauri::{AppHandle, Manager};
 
 use crate::runtime::{DeviceEngineStatus, EngineStatus};
 use crate::{AppState, CmdResult, DeviceRef, Failure};
-use resolver::{Context, Interruption, Moment, Rule};
+use resolver::{Context, Interruption, Rule};
+
+/// How late an occurrence may start after the last one ended and still continue
+/// its run: one tick and a half. The scheduler wakes every second, and a tick
+/// that runs late must not read two touching occurrences as separate.
+const CHAIN_MS: i64 = 1500;
+
+/// Milliseconds in a day: how long a dismissal is remembered after its run.
+const DAY_MS: i64 = 86_400_000;
 
 /// What the window and the tray show of an interruption.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -48,7 +62,8 @@ pub struct InterruptionStatus {
     pub name: String,
     /// The effect it shows.
     pub effect: String,
-    /// When it ends, in epoch milliseconds; absent for a rule that never stops.
+    /// When it ends, in epoch milliseconds; absent while occurrences keep
+    /// following one another, since no one knows when that stops.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub until: Option<i64>,
 }
@@ -63,20 +78,17 @@ pub struct Automations {
 
 #[derive(Default)]
 struct Tables {
-    /// When each enabled rule was first seen enabled, epoch milliseconds: the
-    /// origin of a schedule not aligned on the clock. In memory only — after a
-    /// restart such a rule counts from the restart, which is when it was, as far
-    /// as this process knows, switched on.
-    anchors: HashMap<String, i64>,
-    /// Occurrences someone ended. See [`resolver::Context::dismissed`].
-    dismissed: HashSet<(DeviceRef, String, i64)>,
+    /// Runs someone ended — Resume, or an effect applied by hand — as the end of
+    /// the run, per device and rule. An occurrence continuing the run stays
+    /// dismissed and pushes that end further; one after a gap starts over.
+    dismissed: HashMap<(DeviceRef, String), i64>,
     /// Rules tried by hand, and when.
     tried: HashMap<String, i64>,
     /// What the scheduler put on each device.
     running: HashMap<DeviceRef, Running>,
     /// Occurrences that did not start — an effect deleted since the rule was
-    /// written, a device gone mid-write — so that one is reported once, not
-    /// once a second until it ends.
+    /// written, a device gone mid-write — so that one is reported once, not once
+    /// a second until it ends.
     failed: HashSet<(DeviceRef, String, i64)>,
 }
 
@@ -84,6 +96,8 @@ struct Running {
     interruption: Interruption,
     name: String,
     resting: Resting,
+    /// A later occurrence continued this run: its end is no longer known.
+    continued: bool,
 }
 
 /// What a device goes back to once no rule interrupts it.
@@ -147,7 +161,8 @@ fn run(app: &AppHandle, wake: &Receiver<()>) {
     tracing::info!("automations started");
     loop {
         tick(app);
-        match wake.recv_timeout(until_next_second(now())) {
+        let now = chrono::Local::now().timestamp_millis();
+        match wake.recv_timeout(until_next_second(now)) {
             Ok(()) | Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -156,20 +171,9 @@ fn run(app: &AppHandle, wake: &Receiver<()>) {
 
 /// The wait until just past the next second, so that a tick reads the second it
 /// is about — the hour, not 59 minutes 59 and a bit.
-fn until_next_second(now: Moment) -> Duration {
-    let into = now.epoch_ms.rem_euclid(1000) as u64;
+fn until_next_second(epoch_ms: i64) -> Duration {
+    let into = epoch_ms.rem_euclid(1000) as u64;
     Duration::from_millis(1000 - into + 5)
-}
-
-/// The local wall clock, as the resolver reads it.
-fn now() -> Moment {
-    use chrono::Timelike;
-    let local = chrono::Local::now();
-    Moment {
-        epoch_ms: local.timestamp_millis(),
-        day_ms: i64::from(local.num_seconds_from_midnight()) * 1000
-            + i64::from(local.timestamp_subsec_millis().min(999)),
-    }
 }
 
 /// One decision: what each open device should show, then acting on it.
@@ -186,8 +190,7 @@ fn tick(app: &AppHandle) {
         .into_iter()
         .filter_map(Result::ok)
         .collect();
-    let paused = settings.preferences.automations_paused;
-    let moment = now();
+    let now = chrono::Local::now();
     let (Some(automations), Some(state)) =
         (app.try_state::<Automations>(), app.try_state::<AppState>())
     else {
@@ -196,29 +199,29 @@ fn tick(app: &AppHandle) {
     let open = state.open_devices();
 
     let plan: Vec<(DeviceRef, Change)> = {
-        let mut tables = automations.tables.lock().unwrap();
-        tables.keep_anchors(&rules, moment.epoch_ms);
-        tables.forget_old_tries(&rules, moment.epoch_ms);
+        let mut guard = automations.tables.lock().unwrap();
+        let tables = &mut *guard;
+        tables.forget_old(&rules, now.timestamp_millis());
         // A device that closed keeps nothing. Reopened, it resumes its applied
         // effect, and the next tick interrupts it again if a rule still applies.
         tables.running.retain(|device, _| open.contains(device));
 
         let mut plan = Vec::new();
         for &device in &open {
-            let answer = resolver::resolve(
+            let under_way = resolver::active(
                 &Context {
-                    now: moment,
+                    now,
                     rules: &rules,
-                    paused,
-                    anchors: &tables.anchors,
-                    dismissed: &tables.dismissed,
+                    paused: settings.preferences.automations_paused,
                     tried: &tables.tried,
                 },
                 device,
             )
-            .filter(|a| !tables.failed.contains(&(device, a.rule.clone(), a.since)));
-            let current = tables.running.get_mut(&device);
-            if let Some(change) = decide(current, answer) {
+            .into_iter()
+            .filter(|i| !tables.failed.contains(&(device, i.rule.clone(), i.since)))
+            .collect();
+            let answer = choose(under_way, device, &mut tables.dismissed);
+            if let Some(change) = decide(tables.running.get_mut(&device), answer) {
                 plan.push((device, change));
             }
         }
@@ -238,19 +241,53 @@ fn tick(app: &AppHandle) {
     crate::tray::notify_state_changed(app);
 }
 
-/// What changes on a device, given what runs there and what the resolver says.
+/// Whether an occurrence starting at `since` continues a run that ended at
+/// `until`.
+fn continues(since: i64, until: i64) -> bool {
+    since <= until + CHAIN_MS
+}
+
+/// The occurrence that should run on a device: the first under way whose run
+/// nobody dismissed.
 ///
-/// The same occurrence of the same rule changes nothing — that is what keeps
-/// "every second for a second" from restarting its effect every second. Only its
-/// end moves, when someone edited the rule's duration meanwhile.
+/// A dismissed run follows its rule while occurrences keep touching: each pushes
+/// the dismissal's end further, so Resume on "every second for a second" holds.
+/// After a gap the rule comes back — the hour, the next hour.
+fn choose(
+    under_way: Vec<Interruption>,
+    device: DeviceRef,
+    dismissed: &mut HashMap<(DeviceRef, String), i64>,
+) -> Option<Interruption> {
+    for occurrence in under_way {
+        let key = (device, occurrence.rule.clone());
+        if let Some(until) = dismissed.get_mut(&key) {
+            if continues(occurrence.since, *until) {
+                *until = (*until).max(occurrence.until);
+                continue;
+            }
+            dismissed.remove(&key);
+        }
+        return Some(occurrence);
+    }
+    None
+}
+
+/// What changes on a device, given what runs there and what should.
+///
+/// An occurrence of the running rule that continues its run changes nothing but
+/// the run's end: that is what keeps "every second for a second" from restarting
+/// its effect every second.
 fn decide(current: Option<&mut Running>, answer: Option<Interruption>) -> Option<Change> {
     match (current, answer) {
         (None, None) => None,
         (Some(running), Some(answer))
             if running.interruption.rule == answer.rule
-                && running.interruption.since == answer.since =>
+                && continues(answer.since, running.interruption.until) =>
         {
-            running.interruption.until = answer.until;
+            if answer.since > running.interruption.since {
+                running.continued = true;
+            }
+            running.interruption.until = running.interruption.until.max(answer.until);
             None
         }
         (_, Some(answer)) => Some(Change::Interrupt(answer)),
@@ -259,28 +296,16 @@ fn decide(current: Option<&mut Running>, answer: Option<Interruption>) -> Option
 }
 
 impl Tables {
-    /// Anchors the rules that just became enabled, and forgets those that no
-    /// longer are: switched off then on again, a rule counts afresh.
-    fn keep_anchors(&mut self, rules: &[Rule], now: i64) {
-        self.anchors
-            .retain(|id, _| rules.iter().any(|r| &r.id == id && r.enabled));
-        for rule in rules.iter().filter(|r| r.enabled) {
-            self.anchors.entry(rule.id.clone()).or_insert(now);
-        }
-    }
-
     /// Tries whose occurrence is over — or whose rule is gone — are dropped, and
-    /// so is what was dismissed or failed more than a day ago: an occurrence is
-    /// never longer than a day, since a window is.
-    fn forget_old_tries(&mut self, rules: &[Rule], now: i64) {
+    /// so are dismissals and failures older than a day.
+    fn forget_old(&mut self, rules: &[Rule], now: i64) {
         self.tried.retain(|id, since| {
             rules
                 .iter()
                 .find(|r| &r.id == id)
                 .is_some_and(|r| now < *since + i64::from(r.lasts.seconds) * 1000)
         });
-        const DAY_MS: i64 = 86_400_000;
-        self.dismissed.retain(|(_, _, since)| now - since < DAY_MS);
+        self.dismissed.retain(|_, until| now - *until < DAY_MS);
         self.failed.retain(|(_, _, since)| now - since < DAY_MS);
     }
 }
@@ -310,12 +335,15 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
     else {
         return;
     };
-    let occurrence = (device, interruption.rule.clone(), interruption.since);
     let carried = {
         let tables = automations.tables.lock().unwrap();
         // Someone acted on the device between the decision and now: their
         // gesture wins.
-        if tables.dismissed.contains(&occurrence) {
+        let dismissed = tables
+            .dismissed
+            .get(&(device, interruption.rule.clone()))
+            .is_some_and(|until| continues(interruption.since, *until));
+        if dismissed {
             return;
         }
         tables.running.get(&device).map(|r| r.resting)
@@ -357,6 +385,7 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
                     interruption,
                     name,
                     resting,
+                    continued: false,
                 },
             );
         }
@@ -367,7 +396,9 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
                 effect = %interruption.effect,
                 "a rule could not interrupt the device: {e}"
             );
-            tables.failed.insert(occurrence);
+            tables
+                .failed
+                .insert((device, interruption.rule, interruption.since));
         }
     }
 }
@@ -407,25 +438,22 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
     };
 
     let restored = match running.resting {
-        Resting::Applied => {
-            let settings = crate::storage::store(app).and_then(|s| s.read_settings());
-            match settings {
-                Ok(settings) => match settings.active_effect(device.vid, device.pid) {
-                    Some(effect) => crate::runtime::run_with(
-                        app,
-                        device,
-                        effect,
-                        settings.effect_params(device.vid, device.pid, effect),
-                    ),
-                    // Stopped meanwhile from elsewhere: nothing to go back to.
-                    None => {
-                        state.engine.stop(device);
-                        Ok(())
-                    }
-                },
-                Err(e) => Err(e),
-            }
-        }
+        Resting::Applied => match crate::storage::store(app).and_then(|s| s.read_settings()) {
+            Ok(settings) => match settings.active_effect(device.vid, device.pid) {
+                Some(effect) => crate::runtime::run_with(
+                    app,
+                    device,
+                    effect,
+                    settings.effect_params(device.vid, device.pid, effect),
+                ),
+                // Stopped meanwhile from elsewhere: nothing to go back to.
+                None => {
+                    state.engine.stop(device);
+                    Ok(())
+                }
+            },
+            Err(e) => Err(e),
+        },
         Resting::Firmware(effect) => {
             state.engine.stop(device);
             crate::with_keyboard(&state, device, |kb| {
@@ -452,25 +480,34 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
     }
 }
 
+/// Marks the run under way on `device` as dismissed, and returns whether one was.
+fn dismiss_run(tables: &mut Tables, device: DeviceRef) -> bool {
+    let Some(running) = tables.running.get(&device) else {
+        return false;
+    };
+    let key = (device, running.interruption.rule.clone());
+    let until = running.interruption.until;
+    let end = tables.dismissed.entry(key).or_insert(until);
+    *end = (*end).max(until);
+    true
+}
+
 /// Ends the interruption on `device` because someone acted on it — applied an
 /// effect, stopped it, turned it off. It gives nothing back: what they did takes
-/// its place. The rule comes back at its next occurrence.
+/// its place. The rule comes back after its run.
 pub(crate) fn dismiss(app: &AppHandle, device: DeviceRef) {
     let Some(automations) = app.try_state::<Automations>() else {
         return;
     };
     let mut tables = automations.tables.lock().unwrap();
-    if let Some(running) = tables.running.remove(&device) {
-        tracing::info!(
-            device = %device,
-            rule = %running.interruption.rule,
-            "an interruption ends, someone acted on the device"
-        );
-        tables.dismissed.insert((
-            device,
-            running.interruption.rule,
-            running.interruption.since,
-        ));
+    if dismiss_run(&mut tables, device) {
+        if let Some(running) = tables.running.remove(&device) {
+            tracing::info!(
+                device = %device,
+                rule = %running.interruption.rule,
+                "an interruption ends, someone acted on the device"
+            );
+        }
     }
 }
 
@@ -493,7 +530,7 @@ impl Running {
             rule: self.interruption.rule.clone(),
             name: self.name.clone(),
             effect: self.interruption.effect.clone(),
-            until: self.interruption.until,
+            until: (!self.continued).then_some(self.interruption.until),
         }
     }
 }
@@ -523,18 +560,11 @@ pub(crate) fn annotate(app: &AppHandle, devices: &mut Vec<DeviceEngineStatus>) {
 // ---------------------------------------------------------------- commands
 
 /// Resume: ends the interruption on a device now and gives it back its resting
-/// state. The rule comes back at its next occurrence.
+/// state. The rule comes back after its run.
 #[tauri::command]
 pub fn resume_device(app: AppHandle, device: DeviceRef) {
     if let Some(automations) = app.try_state::<Automations>() {
-        let mut tables = automations.tables.lock().unwrap();
-        let occurrence = tables
-            .running
-            .get(&device)
-            .map(|r| (device, r.interruption.rule.clone(), r.interruption.since));
-        if let Some(occurrence) = occurrence {
-            tables.dismissed.insert(occurrence);
-        }
+        dismiss_run(&mut automations.tables.lock().unwrap(), device);
     }
     give_back(&app, device);
     crate::tray::refresh(&app);
@@ -559,7 +589,8 @@ pub fn set_automations_paused(app: AppHandle, paused: bool) -> CmdResult<()> {
 /// Replaces the rules, in the order given, which is their priority.
 ///
 /// Each is checked first: the interface builds complete rules, and one it could
-/// not is a mistake to show rather than a rule to write and ignore. A broken
+/// not is a mistake to show rather than a rule to write and ignore — an
+/// expression typed in the advanced field that is not cron, most of all. A broken
 /// rule already in the file and sent back **unchanged** passes: it stays as
 /// written, and does nothing, rather than blocking every other edit.
 #[tauri::command]
@@ -604,7 +635,9 @@ pub fn try_rule(app: AppHandle, id: String) -> CmdResult<()> {
     }
     if let Some(automations) = app.try_state::<Automations>() {
         let mut tables = automations.tables.lock().unwrap();
-        tables.tried.insert(id, now().epoch_ms);
+        tables
+            .tried
+            .insert(id, chrono::Local::now().timestamp_millis());
     }
     wake(&app);
     Ok(())
@@ -614,7 +647,12 @@ pub fn try_rule(app: AppHandle, id: String) -> CmdResult<()> {
 mod tests {
     use super::*;
 
-    fn interruption(rule: &str, since: i64, until: Option<i64>) -> Interruption {
+    const KEYBOARD: DeviceRef = DeviceRef {
+        vid: 0x1532,
+        pid: 0x0292,
+    };
+
+    fn occurrence(rule: &str, since: i64, until: i64) -> Interruption {
         Interruption {
             rule: rule.into(),
             effect: "shipped:Clock".into(),
@@ -624,82 +662,115 @@ mod tests {
         }
     }
 
-    fn running(rule: &str, since: i64) -> Running {
+    fn running(rule: &str, since: i64, until: i64) -> Running {
         Running {
-            interruption: interruption(rule, since, Some(since + 10_000)),
+            interruption: occurrence(rule, since, until),
             name: String::new(),
             resting: Resting::Applied,
+            continued: false,
         }
     }
 
-    /// Nothing, then a rule: interrupt. The same occurrence: nothing, even when
-    /// its end moved. Another occurrence or rule: interrupt again. No rule: give
-    /// back.
+    /// Nothing, then a rule: interrupt. Another rule: interrupt again. No rule:
+    /// give back.
     #[test]
-    fn a_tick_changes_a_device_only_when_the_answer_does() {
+    fn a_tick_changes_a_device_when_the_rule_does() {
         assert_eq!(decide(None, None), None);
         assert_eq!(
-            decide(None, Some(interruption("hourly", 0, Some(10_000)))),
-            Some(Change::Interrupt(interruption("hourly", 0, Some(10_000))))
+            decide(None, Some(occurrence("hourly", 0, 10_000))),
+            Some(Change::Interrupt(occurrence("hourly", 0, 10_000)))
         );
-
-        let mut current = running("hourly", 0);
-        assert_eq!(
-            decide(
-                Some(&mut current),
-                Some(interruption("hourly", 0, Some(20_000)))
-            ),
-            None
-        );
-        assert_eq!(current.interruption.until, Some(20_000), "the end moved");
-
         assert!(matches!(
             decide(
-                Some(&mut running("hourly", 0)),
-                Some(interruption("night", 0, None))
+                Some(&mut running("hourly", 0, 10_000)),
+                Some(occurrence("night", 0, 20_000))
             ),
             Some(Change::Interrupt(_))
         ));
         assert_eq!(
-            decide(Some(&mut running("hourly", 0)), None),
+            decide(Some(&mut running("hourly", 0, 10_000)), None),
             Some(Change::GiveBack)
         );
     }
 
-    /// A rule switched on is anchored once; switched off, it loses its anchor,
-    /// and counts afresh when switched on again.
+    /// Every second for a second: each occurrence continues the run, nothing
+    /// restarts, and the run's end is no longer announced.
     #[test]
-    fn anchors_follow_rules_switching_on_and_off() {
-        let raw = serde_json::json!({
-            "id": "every7", "enabled": true, "devices": [{ "vid": 1, "pid": 2 }],
-            "when": { "kind": "schedule", "every": 7 }, "show": { "effect": "shipped:Clock" }
-        });
-        let mut rule: Rule = serde_json::from_value(raw).unwrap();
-        let mut tables = Tables::default();
+    fn touching_occurrences_are_one_run() {
+        let mut current = running("steady", 0, 1_000);
+        assert_eq!(
+            decide(Some(&mut current), Some(occurrence("steady", 1_000, 2_000))),
+            None
+        );
+        assert_eq!(current.interruption.until, 2_000);
+        assert!(current.continued);
+        assert_eq!(current.status().until, None);
 
-        tables.keep_anchors(std::slice::from_ref(&rule), 1_000);
-        tables.keep_anchors(std::slice::from_ref(&rule), 5_000);
-        assert_eq!(tables.anchors.get("every7"), Some(&1_000));
+        // An hour later is a new run, and starts again.
+        assert!(matches!(
+            decide(
+                Some(&mut running("hourly", 0, 10_000)),
+                Some(occurrence("hourly", 3_600_000, 3_610_000))
+            ),
+            Some(Change::Interrupt(_))
+        ));
+    }
 
-        rule.enabled = false;
-        tables.keep_anchors(std::slice::from_ref(&rule), 6_000);
-        assert!(tables.anchors.is_empty());
+    /// Resume on a run of back-to-back occurrences holds while they keep coming,
+    /// and gives way to the next rule meanwhile.
+    #[test]
+    fn a_dismissed_run_stays_dismissed_while_it_continues() {
+        let mut dismissed = HashMap::from([((KEYBOARD, "steady".to_string()), 1_000)]);
 
-        rule.enabled = true;
-        tables.keep_anchors(std::slice::from_ref(&rule), 9_000);
-        assert_eq!(tables.anchors.get("every7"), Some(&9_000));
+        let answer = choose(
+            vec![
+                occurrence("steady", 1_000, 2_000),
+                occurrence("rain", 0, 30_000),
+            ],
+            KEYBOARD,
+            &mut dismissed,
+        );
+        assert_eq!(answer.map(|a| a.rule), Some("rain".into()));
+        assert_eq!(
+            dismissed[&(KEYBOARD, "steady".to_string())],
+            2_000,
+            "pushed on"
+        );
+
+        // After a gap, the rule comes back, and its dismissal is gone.
+        let answer = choose(
+            vec![occurrence("steady", 60_000, 61_000)],
+            KEYBOARD,
+            &mut dismissed,
+        );
+        assert_eq!(answer.map(|a| a.rule), Some("steady".into()));
+        assert!(dismissed.is_empty());
+    }
+
+    /// Resume on the hourly clock dismisses this hour, not the next.
+    #[test]
+    fn a_dismissed_hour_comes_back_the_next_hour() {
+        let mut dismissed = HashMap::from([((KEYBOARD, "hourly".to_string()), 10_000)]);
+        assert!(choose(
+            vec![occurrence("hourly", 0, 10_000)],
+            KEYBOARD,
+            &mut dismissed
+        )
+        .is_none());
+        assert!(choose(
+            vec![occurrence("hourly", 3_600_000, 3_610_000)],
+            KEYBOARD,
+            &mut dismissed
+        )
+        .is_some());
     }
 
     /// Past the second means just past it: a tick never lands before the second
     /// it is about.
     #[test]
     fn the_scheduler_wakes_just_past_the_next_second() {
-        let at = |epoch_ms| Moment {
-            epoch_ms,
-            day_ms: 0,
-        };
-        assert_eq!(until_next_second(at(10_000)), Duration::from_millis(1005));
-        assert_eq!(until_next_second(at(10_999)), Duration::from_millis(6));
+        assert_eq!(until_next_second(10_000), Duration::from_millis(1005));
+        assert_eq!(until_next_second(10_999), Duration::from_millis(6));
     }
 
     #[test]

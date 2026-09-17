@@ -560,25 +560,19 @@ export interface Rule {
   /** Off until someone switches it on. */
   enabled: boolean
   devices: DeviceRef[]
-  when: ScheduleTrigger
+  when: CronTrigger
   show: RuleShow
   /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
   for: RuleDuration
 }
 
-/** Every `every` seconds, aligned on the clock or not, between two times or always. */
-export interface ScheduleTrigger {
-  kind: 'schedule'
-  every: number
-  /** Absent = on when `every` divides a day. */
-  aligned?: boolean
-  between?: TimeWindow
-}
-
-/** `from` included, `to` excluded, as `HH:MM`; wraps past midnight when `from > to`. */
-export interface TimeWindow {
-  from: string
-  to: string
+/**
+ * An occurrence starts each time the expression matches the local time: five
+ * fields, `minute hour day month weekday`, or six with seconds first.
+ */
+export interface CronTrigger {
+  kind: 'cron'
+  expr: string
 }
 
 /** The effect a rule shows, with its own settings rather than the device's. */

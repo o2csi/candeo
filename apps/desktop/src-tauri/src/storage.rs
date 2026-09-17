@@ -3674,7 +3674,7 @@ mod tests {
             rules: vec![serde_json::json!({
                 "id": "hourly", "name": "Hourly clock", "enabled": true,
                 "devices": [{ "vid": 5426, "pid": 658 }],
-                "when": { "kind": "schedule", "every": 3600 },
+                "when": { "kind": "cron", "expr": "0 * * * *" },
                 "show": { "effect": "shipped:Clock", "params": {} },
                 "for": { "seconds": 10 }
             })],
@@ -3722,7 +3722,7 @@ mod tests {
               "rules": [
                 {"id": "odd", "when": "whenever", "show": 12},
                 {"id": "hourly", "enabled": true, "devices": [{"vid":5426,"pid":658}],
-                 "when": {"kind":"schedule","every":3600}, "show": {"effect":"shipped:Clock"}}
+                 "when": {"kind":"cron","expr":"0 * * * *"}, "show": {"effect":"shipped:Clock"}}
               ]
             }"#,
         )
@@ -4484,22 +4484,20 @@ mod tests {
             automations_paused: true,
         };
         mirror("Preferences", &preferences);
-        // A rule with every optional part present, window included.
+        // A rule with every part present.
         let rule: crate::automations::resolver::Rule = serde_json::from_value(serde_json::json!({
             "id": "night", "name": "Night", "enabled": true,
             "devices": [{ "vid": 5426, "pid": 658 }],
-            "when": { "kind": "schedule", "every": 1, "aligned": true,
-                      "between": { "from": "22:00", "to": "07:00" } },
+            "when": { "kind": "cron", "expr": "0 22 * * *" },
             "show": { "effect": "hardware:off", "params": {} },
-            "for": { "seconds": 1 }
+            "for": { "seconds": 32400 }
         }))
         .expect("a rule");
         mirror("Rule", &rule);
         mirror("RuleShow", &rule.show);
         mirror("RuleDuration", &rule.lasts);
         let serialized = serde_json::to_value(&rule).expect("serialization");
-        mirror("ScheduleTrigger", &serialized["when"]);
-        mirror("TimeWindow", &serialized["when"]["between"]);
+        mirror("CronTrigger", &serialized["when"]);
         mirror(
             "Settings",
             &Settings {

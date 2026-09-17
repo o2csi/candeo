@@ -67,6 +67,11 @@ sha2 = "0.11"
 # multithreaded process on Linux, which this one is; `clock` alone, for
 # `Local::now`.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# When a rule applies (`src/automations/resolver.rs`): cron expressions, five
+# fields or six with seconds, found backwards from now across daylight-saving
+# changes. One trigger that says "the hour", "weekdays at 9" and "at 22:00", rather
+# than a schedule of our own grown one option at a time.
+croner = "4"
 
 # Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`), key
 # presses through Raw Input (`src/runtime/presses.rs`) and the display language

@@ -3,13 +3,16 @@
  * Automations: rules that interrupt the effect applied on a device for a while,
  * then give it back (#106, `docs/design/inputs-and-automations.md` §3.5).
  *
- * Each rule reads as a sentence of chips — *Every 1 h on DeathStalker V2 Pro
- * show Clock for 10 s* — and every chip opens what changes it. Rules are saved
- * as soon as a gesture ends: there is no Save button to forget, and the
- * scheduler, in Rust, sees the change within a second, window closed or not.
+ * Each rule reads as a sentence of chips — *every hour on weekdays, on
+ * DeathStalker V2 Pro, show Clock for 10 s* — and every chip opens what changes
+ * it. When is a cron expression: the chips write the common ones, and the
+ * advanced field takes any, with the format explained beside it. One of the two
+ * holds the rule at a time; the other is shown disabled.
  *
- * Their order is their priority, changed by dragging a rule, or with its arrows
- * from the keyboard.
+ * Rules are saved as soon as a gesture ends: there is no Save button to forget,
+ * and the scheduler, in Rust, sees the change within a second, window closed or
+ * not. Their order is their priority, changed by dragging a rule, or with its
+ * arrows from the keyboard.
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { UnlistenFn } from '@tauri-apps/api/event'
@@ -26,22 +29,27 @@ import {
   type EffectEntry,
   type EffectParams,
   type Rule,
-  type TimeWindow,
 } from '../api/candeo'
 import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
+import DaysChip from '../components/DaysChip.vue'
 import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
-import WindowChip from '../components/WindowChip.vue'
+import FrequencyChip from '../components/FrequencyChip.vue'
 import { hardwareEffects } from '../composables/useEffects'
 import {
-  EVERY_PRESETS,
+  EVERY_DAY,
   FOR_PRESETS,
   blankRule,
   editable,
   examples,
   moved,
+  readSimple,
   ruleValues,
+  writeSimple,
+  type Days,
+  type Frequency,
+  type Simple,
 } from '../composables/rules'
 import { t } from '../i18n'
 
@@ -59,6 +67,12 @@ const loaded = ref(false)
  * writes for one gesture.
  */
 const drafts = reactive<Record<string, EffectParams>>({})
+
+/**
+ * Which rules someone switched to the advanced field, or back. Unset, a rule
+ * opens where its expression can be shown: chips when they can say it.
+ */
+const advancedChosen = reactive<Record<string, boolean>>({})
 
 let unlisten: UnlistenFn | null = null
 
@@ -82,8 +96,7 @@ async function load(): Promise<void> {
 
 onMounted(async () => {
   await load()
-  // The tray pauses automations too, and a rule can be edited nowhere else but
-  // the file meanwhile: what this screen shows follows.
+  // The tray pauses automations too: what this screen shows follows.
   unlisten = await onStateChanged(() => void load()).catch(() => null)
 })
 
@@ -99,6 +112,8 @@ async function save(next: unknown[]): Promise<void> {
   try {
     await setRules(next as Rule[])
   } catch (e) {
+    // Refused — an expression that is not cron, most often: the list goes back to
+    // what the file holds, and the field shows it again.
     rules.value = before
     problem.value = message(e)
   }
@@ -158,7 +173,47 @@ function addExamples(): void {
   void save([...rules.value, ...examples(firstDevice.value, names)])
 }
 
-// ---------------------------------------------------------------- chips
+// ---------------------------------------------------------------- when
+
+/** What the chips show for a rule: its expression, or the default they start from. */
+function simple(rule: Rule): Simple {
+  return readSimple(rule.when.expr) ?? { frequency: { kind: 'hour' }, days: [...EVERY_DAY] }
+}
+
+function advanced(rule: Rule): boolean {
+  return advancedChosen[rule.id] ?? readSimple(rule.when.expr) === null
+}
+
+function chooseFrequency(index: number, rule: Rule, frequency: Frequency): void {
+  const expr = writeSimple({ frequency, days: simple(rule).days })
+  update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
+}
+
+function chooseDays(index: number, rule: Rule, days: Days): void {
+  const expr = writeSimple({ frequency: simple(rule).frequency, days })
+  update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
+}
+
+/**
+ * Switches a rule between the chips and the advanced field. Back to the chips, an
+ * expression they cannot say becomes what they start from — every hour — rather
+ * than chips pretending to show something else.
+ */
+function chooseAdvanced(index: number, rule: Rule, event: Event): void {
+  const on = (event.target as HTMLInputElement).checked
+  advancedChosen[rule.id] = on
+  if (!on && readSimple(rule.when.expr) === null) {
+    const expr = writeSimple(simple(rule))
+    update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
+  }
+}
+
+function typeExpression(index: number, event: Event): void {
+  const expr = (event.target as HTMLInputElement).value.trim()
+  update(index, (r) => ({ ...r, when: { kind: 'cron', expr } }))
+}
+
+// ---------------------------------------------------------------- what and where
 
 const deviceKey = (d: { vid: number; pid: number }) => `${d.vid}:${d.pid}`
 
@@ -245,7 +300,7 @@ function onDrop(to: number): void {
         v-for="(raw, index) in rules"
         :key="editable(raw) ? raw.id : index"
         class="rule"
-        :class="{ off: editable(raw) && !raw.enabled, over: dragging !== null }"
+        :class="{ off: editable(raw) && !raw.enabled }"
         @dragover.prevent
         @drop="onDrop(index)"
       >
@@ -268,12 +323,15 @@ function onDrop(to: number): void {
               @change="update(index, (r) => ({ ...r, enabled: !r.enabled }))"
             />
 
-            <span class="word">{{ t('automations.every') }}</span>
-            <DurationChip
-              :seconds="raw.when.every"
-              :presets="EVERY_PRESETS"
-              :label="t('automations.every')"
-              @change="(s) => update(index, (r) => ({ ...r, when: { ...r.when, every: s } }))"
+            <FrequencyChip
+              :frequency="simple(raw).frequency"
+              :disabled="advanced(raw)"
+              @change="(f) => chooseFrequency(index, raw, f)"
+            />
+            <DaysChip
+              :days="simple(raw).days"
+              :disabled="advanced(raw)"
+              @change="(d) => chooseDays(index, raw, d)"
             />
 
             <span class="word">{{ t('automations.on') }}</span>
@@ -318,14 +376,6 @@ function onDrop(to: number): void {
               @change="(s) => update(index, (r) => ({ ...r, for: { seconds: s } }))"
             />
 
-            <WindowChip
-              :window="raw.when.between"
-              @change="
-                (w: TimeWindow | undefined) =>
-                  update(index, (r) => ({ ...r, when: { ...r.when, between: w } }))
-              "
-            />
-
             <span class="spacer" />
 
             <button type="button" class="ghost" @click="attempt(raw)">
@@ -357,6 +407,27 @@ function onDrop(to: number): void {
           </div>
 
           <div class="more">
+            <div class="advanced">
+              <label class="toggle">
+                <input
+                  type="checkbox"
+                  :checked="advanced(raw)"
+                  @change="chooseAdvanced(index, raw, $event)"
+                />
+                {{ t('automations.advanced') }}
+              </label>
+              <input
+                class="expr mono"
+                type="text"
+                spellcheck="false"
+                :aria-label="t('automations.expression')"
+                :value="raw.when.expr"
+                :disabled="!advanced(raw)"
+                @change="typeExpression(index, $event)"
+              />
+            </div>
+            <p v-if="advanced(raw)" class="help">{{ t('automations.expressionHelp') }}</p>
+
             <input
               class="name"
               type="text"
@@ -418,7 +489,7 @@ function onDrop(to: number): void {
   flex-direction: column;
   gap: var(--gap-4);
   padding: var(--gap-4);
-  max-width: 980px;
+  max-width: 1020px;
 }
 
 .head {
@@ -509,6 +580,38 @@ function onDrop(to: number): void {
   flex-direction: column;
   gap: var(--gap-2);
   padding-left: 44px;
+}
+
+.advanced {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.expr {
+  width: 16em;
+  font-size: 13px;
+}
+
+.expr:disabled {
+  opacity: 0.5;
+}
+
+.help {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: pre-line;
 }
 
 .name {
