@@ -233,13 +233,18 @@ A rule is one sentence someone can read back:
   same.
 - **Priority**: the order of the list. When two rules are active on one device,
   the higher one runs; when it ends, the next active one, or the applied effect.
+  A rule hidden by a higher one is not postponed: its occurrence goes by unseen.
+  The hourly clock placed under the night never shows at night.
 
 ### 3.3 What someone does during an interruption
 
 - **Applying an effect by hand** makes it the new applied effect, and ends the
-  current interruption: a gesture always wins over a rule. The rule triggers
-  again at its next occurrence.
-- **Resume** on the device card and in the tray ends the interruption now.
+  current interruption: a gesture always wins over a rule. It ends every rule
+  under way on the device, not only the one on screen: otherwise the night the
+  hourly clock was hiding would take the keyboard back a second later. Each rule
+  triggers again at its next occurrence.
+- **Resume** on the device card and in the tray ends the interruption now, the
+  same way.
 - **Pause automations**, in the tray and in Settings, suspends every rule until
   it is turned back on: a "do not disturb" for a meeting or a game.
 
@@ -292,10 +297,13 @@ engine:
   already makes on opening — and that effect is set again when the rule ends. An
   effect that cannot be read back (Static, Breathing) gives way to *Off*: dark is
   better than the rule's last frame, frozen.
-- **Resume and a gesture dismiss a run, not a rule.** A run is occurrences of one
+- **Resume and a gesture dismiss runs, not rules.** A run is occurrences of one
   rule that keep touching — less than a tick and a half apart. Dismissed, it stays
   dismissed while it continues, so Resume holds on every second for a second; after
-  a gap the rule comes back, the next hour or the next night.
+  a gap the rule comes back, the next hour or the next night. **Every run under way
+  on the device is dismissed**, found by asking the resolver at the gesture: a first
+  version dismissed only the run on screen, and a lower rule under way took the
+  device back at the next tick.
 - **Rules are raw JSON in the file, read one by one.** A broken rule stays as
   written and does nothing; saving from the tab refuses a new broken rule — an
   expression that is not cron typed in the advanced field — not one already there.
