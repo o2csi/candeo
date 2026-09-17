@@ -485,13 +485,14 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
 }
 
 /// Brings the effect library up to date at startup — see
-/// [`storage::Store::migrate`] — and copies the shipped effects.
+/// [`storage::Store::migrate`] — copies the shipped effects, and declares again
+/// the caches of an older format ([`storage::Store::redeclare_cache`]).
 ///
 /// A failure is logged and the startup goes on: the effects it did not reach are
 /// only missing from the library until the next launch, and the window is what
 /// lets someone look.
 fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
-    match storage::store(app).and_then(|store| store.migrate(&shipped::ALL)) {
+    let renames = match storage::store(app).and_then(|store| store.migrate(&shipped::ALL)) {
         Ok((renames, seeding)) => {
             if !renames.is_empty() {
                 tracing::info!(effects = renames.len(), "effect references moved to keys");
@@ -509,7 +510,15 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
             tracing::warn!("effects not migrated: {e}");
             BTreeMap::new()
         }
+    };
+    // After the moves above, which may rename an effect and its cache.
+    if let Ok(store) = storage::store(app) {
+        let redeclared = store.redeclare_cache();
+        if redeclared > 0 {
+            tracing::info!(effects = redeclared, "effect caches declared again");
+        }
     }
+    renames
 }
 
 /// What [`apply_adoptions`] did.

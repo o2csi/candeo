@@ -1053,6 +1053,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 // ---------------------------------------------------------------- storage
 
+/// The shape of what a cache record declares. A record of an older shape is
+/// declared again from its own JavaScript at startup
+/// ([`Store::redeclare_cache`]), without the window, which a launch at login
+/// does not build.
+///
+/// - 1: an effect's settings in the order it declares them (#177); before,
+///   sorted by key.
+const CACHE_FORMAT: u32 = 1;
+
 /// What compiling an effect produced, for one version of its file.
 ///
 /// Written to the cache folder, next to nothing the user edits: it can be deleted
@@ -1060,6 +1069,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct CacheRecord {
+    /// [`CACHE_FORMAT`] when it was written; 0 for a record from before.
+    #[serde(default)]
+    format: u32,
     /// SHA-256 of the source it was compiled from. A record whose hash differs
     /// from the file's describes another version, and is ignored.
     hash: String,
@@ -1299,6 +1311,39 @@ impl Store {
             Some(record),
             &self.shipped_records(),
         ))
+    }
+
+    /// Declares again, from their own JavaScript, the cache records written in an
+    /// older [`CACHE_FORMAT`], and returns how many were.
+    ///
+    /// Only what the module declares can change: the JavaScript and its hash stay
+    /// as they were. A record that cannot be rewritten stays too — it still runs,
+    /// and shows what it showed before.
+    pub fn redeclare_cache(&self) -> usize {
+        let mut redeclared = 0;
+        for source in Source::ALL {
+            let Ok(names) = self.names(source) else {
+                continue;
+            };
+            for name in names {
+                let key = EffectKey { source, name };
+                let Some(record) = self.read_cache(&key) else {
+                    continue;
+                };
+                if record.format >= CACHE_FORMAT {
+                    continue;
+                }
+                let fresh = compile_record(&record.hash, &record.js);
+                let written = serde_json::to_string(&fresh)
+                    .map_err(|e| Failure::unexpected(format!("cache record not serialisable: {e}")))
+                    .and_then(|json| write_atomically(&self.cache_path(&key), &json));
+                match written {
+                    Ok(()) => redeclared += 1,
+                    Err(e) => tracing::warn!(effect = %key, "cache not declared again: {e}"),
+                }
+            }
+        }
+        redeclared
     }
 
     /// An effect's executable JavaScript: what the engine loads.
@@ -1953,6 +1998,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
     let declared = crate::runtime::declared_manifest(js).and_then(|raw| declared_fields(&raw));
     match declared {
         Ok(declared) => CacheRecord {
+            format: CACHE_FORMAT,
             hash: hash.to_owned(),
             js: js.to_owned(),
             description: declared.description,
@@ -1967,6 +2013,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             error: None,
         },
         Err(error) => CacheRecord {
+            format: CACHE_FORMAT,
             hash: hash.to_owned(),
             js: js.to_owned(),
             description: empty_text(),
@@ -2543,6 +2590,74 @@ mod tests {
                 .manifest
                 .reads_keys
         );
+    }
+
+    /// A module declaring `color, background, speed`, an order no sort gives back.
+    const ORDERED: &str = "export default { params: { \
+        color: { kind: 'color', label: 'Color', default: '#ffffff' }, \
+        background: { kind: 'color', label: 'Background', default: '#000000' }, \
+        speed: { kind: 'number', label: 'Speed', min: 1, max: 10, default: 6 } }, \
+        render() {} }";
+
+    fn param_keys(entry: &EffectEntry) -> Vec<&str> {
+        entry.manifest.params.keys().map(String::as_str).collect()
+    }
+
+    /// Settings reach the window in the order the effect declares them, not
+    /// sorted by key (#177).
+    #[test]
+    fn declared_settings_keep_their_order() {
+        let (_tmp, store) = temp_store();
+        let declared = ["color", "background", "speed"];
+
+        assert_eq!(
+            param_keys(&create_and_cache(&store, "Ordered", ORDERED)),
+            declared
+        );
+        assert_eq!(
+            param_keys(&user_effect(&store, "Ordered")),
+            declared,
+            "read back from the cache"
+        );
+    }
+
+    /// A cache written before the order was kept is declared again from its own
+    /// JavaScript, once, and still runs the same code.
+    #[test]
+    fn a_cache_of_an_older_format_is_declared_again() {
+        let (tmp, store) = temp_store();
+        create_and_cache(&store, "Ordered", ORDERED);
+
+        // As an older version wrote it: no format, settings sorted by key.
+        let path = cache_file(&tmp, "Ordered");
+        let mut record: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let fields = record.as_object_mut().unwrap();
+        fields.remove("format");
+        let mut params: Vec<_> = fields["params"]
+            .as_object()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .collect();
+        params.sort_by(|a, b| a.0.cmp(&b.0));
+        fields.insert(
+            "params".into(),
+            serde_json::Value::Object(params.into_iter().collect()),
+        );
+        fs::write(&path, record.to_string()).unwrap();
+        assert_eq!(
+            param_keys(&user_effect(&store, "Ordered")),
+            ["background", "color", "speed"]
+        );
+
+        assert_eq!(store.redeclare_cache(), 1);
+        assert_eq!(
+            param_keys(&user_effect(&store, "Ordered")),
+            ["color", "background", "speed"]
+        );
+        assert_eq!(store.effect_js(&user("Ordered")).unwrap(), ORDERED);
+        assert_eq!(store.redeclare_cache(), 0, "declared again once");
     }
 
     // ------------------------------------------------------------ files
