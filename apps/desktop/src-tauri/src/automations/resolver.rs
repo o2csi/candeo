@@ -11,6 +11,12 @@
 //! `0 * * * *` for 10 seconds is the hour; `0 22 * * *` for 9 hours, the night;
 //! `0 9-18 * * 1-5`, office hours. One trigger that already says everything a
 //! schedule of our own would have grown into, one option at a time.
+//!
+//! # When: nobody uses the computer
+//!
+//! `idle` applies once the session has had no input — no key, no mouse — for some
+//! minutes, and lasts as long as that holds (#179). How long it has been comes in
+//! with the context: the system's own count, never key capture.
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -42,14 +48,17 @@ pub struct Rule {
     pub lasts: Lasts,
 }
 
-/// When a rule applies. `signal` and `idle` come with their own pull requests,
-/// as further variants of this tag.
+/// When a rule applies. `signal` comes with its own pull request, as a further
+/// variant of this tag.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Trigger {
     /// An occurrence starts each time the expression matches the local time: five
     /// fields, `minute hour day month weekday`, or six with seconds first.
     Cron { expr: String },
+    /// Under way once nobody has used the computer for `minutes`, until someone
+    /// does. The rule's duration does not apply, except to Try.
+    Idle { minutes: u32 },
 }
 
 /// What a rule shows: an effect id, as `activeEffects` names them, and its own
@@ -78,8 +87,11 @@ impl Rule {
     /// The rule's expression, parsed; or why it cannot be, in English, for the log
     /// and the interface.
     pub fn cron(&self) -> Result<Cron, String> {
-        let Trigger::Cron { expr } = &self.when;
-        Cron::from_str(expr).map_err(|e| format!("\"{expr}\" is not a cron expression: {e}"))
+        match &self.when {
+            Trigger::Cron { expr } => Cron::from_str(expr)
+                .map_err(|e| format!("\"{expr}\" is not a cron expression: {e}")),
+            Trigger::Idle { .. } => Err("an idle rule has no cron expression".into()),
+        }
     }
 
     /// What makes a rule unusable, in English.
@@ -87,8 +99,16 @@ impl Rule {
     /// A broken rule stays in the file and does nothing (§3.4): dropping it would
     /// lose what someone wrote over a typo.
     pub fn problem(&self) -> Option<String> {
-        if let Err(e) = self.cron() {
-            return Some(e);
+        match &self.when {
+            Trigger::Cron { .. } => {
+                if let Err(e) = self.cron() {
+                    return Some(e);
+                }
+            }
+            Trigger::Idle { minutes: 0 } => {
+                return Some("idle means 1 minute or more without input".into())
+            }
+            Trigger::Idle { .. } => {}
         }
         if self.lasts.seconds == 0 {
             return Some("an occurrence lasts 1 second or more".into());
@@ -135,7 +155,14 @@ pub struct Interruption {
     pub since: i64,
     /// When it ends, in epoch milliseconds.
     pub until: i64,
+    /// It lasts while its trigger holds: `until` is only the next look, not an
+    /// end anyone can announce.
+    pub open: bool,
 }
+
+/// How far ahead an idle occurrence is known to last: until the scheduler looks
+/// again, a second later.
+const IDLE_LOOK_MS: i64 = 1000;
 
 /// Everything, besides the device, the answer depends on.
 pub struct Context<'a, Tz: TimeZone> {
@@ -147,6 +174,9 @@ pub struct Context<'a, Tz: TimeZone> {
     /// Rules tried by hand, and when, in epoch milliseconds: each runs once, for
     /// its duration, switched on or not, paused or not — the gesture wins.
     pub tried: &'a HashMap<String, i64>,
+    /// How long since the last input in the session, in milliseconds; `None`
+    /// where the system does not say, and an idle rule then never applies.
+    pub idle: Option<i64>,
 }
 
 /// Every occurrence under way on `device` now, first the one that should run.
@@ -162,7 +192,7 @@ pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Int
     let tried = context.rules.iter().filter(usable).filter_map(|rule| {
         let since = *context.tried.get(&rule.id)?;
         let until = since + rule.lasts_ms();
-        (since <= now && now < until).then(|| interruption(rule, since, until))
+        (since <= now && now < until).then(|| interruption(rule, since, until, false))
     });
 
     let scheduled = context
@@ -170,21 +200,28 @@ pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Int
         .iter()
         .filter(|rule| !context.paused && rule.enabled)
         .filter(usable)
-        .filter_map(|rule| {
-            let (since, until) = occurrence(rule, &context.now)?;
-            Some(interruption(rule, since, until))
+        .filter_map(|rule| match rule.when {
+            Trigger::Cron { .. } => {
+                let (since, until) = occurrence(rule, &context.now)?;
+                Some(interruption(rule, since, until, false))
+            }
+            Trigger::Idle { minutes } => {
+                let since = idle_since(minutes, context.idle?, now)?;
+                Some(interruption(rule, since, now + IDLE_LOOK_MS, true))
+            }
         });
 
     tried.chain(scheduled).collect()
 }
 
-fn interruption(rule: &Rule, since: i64, until: i64) -> Interruption {
+fn interruption(rule: &Rule, since: i64, until: i64, open: bool) -> Interruption {
     Interruption {
         rule: rule.id.clone(),
         effect: rule.show.effect.clone(),
         params: rule.show.params.clone(),
         since,
         until,
+        open,
     }
 }
 
@@ -200,6 +237,16 @@ fn occurrence<Tz: TimeZone>(rule: &Rule, now: &DateTime<Tz>) -> Option<(i64, i64
     let since = started.timestamp_millis();
     let until = since + rule.lasts_ms();
     (now.timestamp_millis() < until).then_some((since, until))
+}
+
+/// When an idle rule's occurrence started — the instant the session had been idle
+/// for `minutes` — or `None` while it has not been that long.
+///
+/// The same instant at every look while nobody touches anything, which is what
+/// makes the scheduler read one idle stretch as one run.
+fn idle_since(minutes: u32, idle_ms: i64, now: i64) -> Option<i64> {
+    let threshold = i64::from(minutes) * 60_000;
+    (idle_ms >= threshold).then(|| now - idle_ms + threshold)
 }
 
 #[cfg(test)]
@@ -244,9 +291,17 @@ mod tests {
         }
     }
 
+    fn idle_rule(id: &str, minutes: u32) -> Rule {
+        Rule {
+            when: Trigger::Idle { minutes },
+            ..rule(id, "0 * * * *", 10)
+        }
+    }
+
     struct Given {
         paused: bool,
         tried: HashMap<String, i64>,
+        idle: Option<i64>,
     }
 
     impl Given {
@@ -254,6 +309,7 @@ mod tests {
             Self {
                 paused: false,
                 tried: HashMap::new(),
+                idle: Some(0),
             }
         }
 
@@ -269,6 +325,7 @@ mod tests {
                     rules,
                     paused: self.paused,
                     tried: &self.tried,
+                    idle: self.idle,
                 },
                 device,
             )
@@ -434,6 +491,7 @@ mod tests {
                 rules: &rules,
                 paused: false,
                 tried: &given.tried,
+                idle: given.idle,
             },
             KEYBOARD,
         );
@@ -473,5 +531,81 @@ mod tests {
             given.first(at(17, 15, 12, 10), &rules, KEYBOARD).is_none(),
             "once"
         );
+    }
+
+    /// An idle rule as the tab writes it, read from the file.
+    #[test]
+    fn an_idle_rule_reads_from_json() {
+        let raw = serde_json::json!({
+            "id": "away", "enabled": true, "devices": [{ "vid": 5426, "pid": 658 }],
+            "when": { "kind": "idle", "minutes": 10 },
+            "show": { "effect": "hardware:off" }
+        });
+        let parsed = parse(&[raw]);
+        assert_eq!(
+            parsed[0].as_ref().expect("a valid rule").when,
+            Trigger::Idle { minutes: 10 }
+        );
+    }
+
+    /// Ten minutes without input: not at nine fifty-nine, under way at ten, the
+    /// same occurrence for as long as nothing is touched, over at the first input.
+    #[test]
+    fn an_idle_rule_holds_while_nobody_uses_the_computer() {
+        let rules = [idle_rule("Away", 10)];
+        let mut given = Given::nothing();
+
+        given.idle = Some(9 * 60_000 + 59_000);
+        assert!(
+            given.first(at(17, 12, 0, 0), &rules, KEYBOARD).is_none(),
+            "not yet"
+        );
+
+        given.idle = Some(10 * 60_000);
+        let away = given
+            .first(at(17, 12, 0, 0), &rules, KEYBOARD)
+            .expect("ten minutes");
+        assert_eq!(away.since, ms(at(17, 12, 0, 0)));
+        assert!(away.open);
+
+        given.idle = Some(25 * 60_000);
+        let later = given.first(at(17, 12, 15, 0), &rules, KEYBOARD).unwrap();
+        assert_eq!(later.since, away.since, "the same stretch");
+        assert_eq!(
+            later.until,
+            ms(at(17, 12, 15, 1)),
+            "known until the next look"
+        );
+
+        given.idle = Some(200);
+        assert!(
+            given.first(at(17, 12, 15, 1), &rules, KEYBOARD).is_none(),
+            "someone is back"
+        );
+    }
+
+    /// Where the system does not say how long it has been idle, an idle rule never
+    /// applies; paused, it rests like any rule; zero minutes is not a rule.
+    #[test]
+    fn an_idle_rule_needs_the_system_to_say() {
+        let rules = [idle_rule("Away", 10)];
+        let mut given = Given::nothing();
+
+        given.idle = None;
+        assert!(
+            given.first(at(17, 12, 0, 0), &rules, KEYBOARD).is_none(),
+            "unavailable"
+        );
+
+        given.idle = Some(3_600_000);
+        given.paused = true;
+        assert!(
+            given.first(at(17, 12, 0, 0), &rules, KEYBOARD).is_none(),
+            "paused"
+        );
+
+        assert!(idle_rule("Never", 0)
+            .problem()
+            .is_some_and(|p| p.contains("1 minute")));
     }
 }

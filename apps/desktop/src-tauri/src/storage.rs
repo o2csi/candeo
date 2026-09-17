@@ -4498,6 +4498,8 @@ mod tests {
         mirror("RuleDuration", &rule.lasts);
         let serialized = serde_json::to_value(&rule).expect("serialization");
         mirror("CronTrigger", &serialized["when"]);
+        let idle = crate::automations::resolver::Trigger::Idle { minutes: 10 };
+        mirror("IdleTrigger", &idle);
         mirror(
             "Settings",
             &Settings {

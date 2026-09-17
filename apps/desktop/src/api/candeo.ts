@@ -560,7 +560,7 @@ export interface Rule {
   /** Off until someone switches it on. */
   enabled: boolean
   devices: DeviceRef[]
-  when: CronTrigger
+  when: CronTrigger | IdleTrigger
   show: RuleShow
   /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
   for: RuleDuration
@@ -573,6 +573,15 @@ export interface Rule {
 export interface CronTrigger {
   kind: 'cron'
   expr: string
+}
+
+/**
+ * Under way once nobody has used the computer for `minutes`, until someone does
+ * (#179). The rule's `for` only applies to Try.
+ */
+export interface IdleTrigger {
+  kind: 'idle'
+  minutes: number
 }
 
 /** The effect a rule shows, with its own settings rather than the device's. */
@@ -697,6 +706,11 @@ export function setRules(rules: Rule[]): Promise<void> {
 /** Runs a rule once, now, for its duration, whatever its switch and the pause. */
 export function tryRule(id: string): Promise<void> {
   return invoke('try_rule', { id })
+}
+
+/** Whether this system says how long the computer has been idle (#179, #183). */
+export function idleAvailable(): Promise<boolean> {
+  return invoke('idle_available')
 }
 
 /** L'état d'un appareil, et à qui il appartient. */

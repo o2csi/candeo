@@ -89,6 +89,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Registry",
   # Whether this process runs from an MSIX package (`src/msix.rs`).
   "Win32_Storage_Packaging_Appx",
+  # How long the session has been idle, with `GetLastInputInfo` (`src/idle.rs`).
+  "Win32_System_SystemInformation",
   "Win32_UI_Input",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",

@@ -20,6 +20,7 @@ mod autostart;
 mod failure;
 mod hotplug;
 mod i18n;
+mod idle;
 mod journal;
 mod keys;
 mod language;
@@ -1307,6 +1308,7 @@ pub fn run() {
             automations::set_automations_paused,
             automations::set_rules,
             automations::try_rule,
+            idle::idle_available,
             storage::list_effects,
             storage::save_effect_source,
             storage::cache_effect,
