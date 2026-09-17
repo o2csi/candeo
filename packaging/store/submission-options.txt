@@ -1,0 +1,36 @@
+=== RESTRICTED CAPABILITIES - justification for runFullTrust ===
+
+Candeo is a desktop application packaged as MSIX. It declares runFullTrust
+because it writes lighting frames to a USB keyboard through the Windows HID
+API (hid.dll), which is not reachable from the app container. runFullTrust is
+the only restricted capability the package declares.
+
+The device it writes to is a keyboard the customer already owns, identified by
+its USB vendor and product identifiers. The application writes lighting reports
+only: colours and brightness. It does not read what is typed, and it does not
+install a driver or a service.
+
+=== NOTES FOR CERTIFICATION ===
+
+The application needs a specific keyboard to light anything, and the tester
+almost certainly does not have one. This is expected behaviour, not a failure.
+
+Supported today: Razer DeathStalker V2 Pro (wired), USB vendor 0x1532, product
+0x0292.
+
+Without that keyboard, Candeo starts normally, shows its three screens, and the
+Devices screen lists no controlled device. The effect gallery and its editor
+work, and the preview animates the effects on a drawn keyboard. That is the
+application working, with nothing to light.
+
+Closing the window folds the application into the notification area rather than
+quitting it. This is deliberate: an effect keeps running with the window closed.
+"Quit Candeo" in the notification area menu is the way out.
+
+Nothing is collected and nothing is sent. This package makes no network request
+at all: the version check the application can perform outside the Store is
+disabled here, because the Store keeps the application up to date.
+
+The application is published under the GPL-3.0-only licence. Its source is at
+https://github.com/o2csi/candeo and the privacy policy at
+https://o2csi.github.io/candeo/privacy.html
