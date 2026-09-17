@@ -220,7 +220,7 @@ A rule is one sentence someone can read back:
   | Trigger | Examples |
   |---|---|
   | `signal` | `doorbell` becomes `ring`; `ci` equals `failed` while it does |
-  | `idle` | no key pressed for 10 minutes (reuses key capture) |
+  | `idle` | nobody has used the computer for 10 minutes — shipped (#179), see §3.6 |
   | `app` | an application in the foreground (later) |
 
 - **Duration for these triggers**:
@@ -313,6 +313,18 @@ engine:
   local offset in a multithreaded process on Linux.
 - **Pause automations** lives in `preferences`, so a "do not disturb" set for a
   game survives a restart in the middle of it; it is in the tray and in the tab.
+- **`idle` reads the system's idle time, not key capture** (#179), unlike the
+  first plan in §3.2. Capture reads keys system-wide, which Candeo does only while
+  an effect asks for them (`key-input.md`); an idle rule would keep it on for a
+  question that needs no key, and would take someone using only the mouse for
+  absent. Windows answers with `GetLastInputInfo`, read once per tick. Linux has
+  no single source, so the trigger is unavailable there and the tab says so
+  (#183).
+- **An idle occurrence is open.** It starts at the instant the threshold was
+  crossed — the same instant at every look while nothing is touched, so the
+  scheduler reads it as one run — and is known to last only until the next look.
+  No end is announced; it ends at the first input, within a second. Minutes only:
+  the use is "when I am away", and the tick is a second anyway.
 
 ## 4. Order of work
 
@@ -328,7 +340,8 @@ Each step is one pull request, with its issue:
 4. **Sound input** and two shipped effects (#107).
 5. **External signals**: the local API, the command line, `signal` triggers,
    the Home Assistant example (#108).
-6. **`idle` trigger**, then system metrics, if asked.
+6. **`idle` trigger** (#179), on Windows; Linux follows (#183). Then system
+   metrics, if asked.
 
 ## 5. Out of scope
 
