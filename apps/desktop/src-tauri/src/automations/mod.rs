@@ -79,8 +79,9 @@ pub struct Automations {
 #[derive(Default)]
 struct Tables {
     /// Runs someone ended — Resume, or an effect applied by hand — as the end of
-    /// the run, per device and rule. An occurrence continuing the run stays
-    /// dismissed and pushes that end further; one after a gap starts over.
+    /// the run, per device and rule: every run under way on the device then, not
+    /// only the one on screen. An occurrence continuing the run stays dismissed
+    /// and pushes that end further; one after a gap starts over.
     dismissed: HashMap<(DeviceRef, String), i64>,
     /// Rules tried by hand, and when.
     tried: HashMap<String, i64>,
@@ -178,18 +179,13 @@ fn until_next_second(epoch_ms: i64) -> Duration {
 
 /// One decision: what each open device should show, then acting on it.
 fn tick(app: &AppHandle) {
-    let settings = match crate::storage::store(app).and_then(|s| s.read_settings()) {
-        Ok(settings) => settings,
+    let (rules, paused) = match read_rules(app) {
+        Ok(read) => read,
         Err(e) => {
             tracing::debug!("automations skip a second, settings not read: {e}");
             return;
         }
     };
-    let rules: Vec<Rule> = settings
-        .rules()
-        .into_iter()
-        .filter_map(Result::ok)
-        .collect();
     let now = chrono::Local::now();
     let (Some(automations), Some(state)) =
         (app.try_state::<Automations>(), app.try_state::<AppState>())
@@ -212,7 +208,7 @@ fn tick(app: &AppHandle) {
                 &Context {
                     now,
                     rules: &rules,
-                    paused: settings.preferences.automations_paused,
+                    paused,
                     tried: &tables.tried,
                 },
                 device,
@@ -239,6 +235,17 @@ fn tick(app: &AppHandle) {
     }
     crate::tray::refresh(app);
     crate::tray::notify_state_changed(app);
+}
+
+/// The rules that can run, and whether automations are paused.
+fn read_rules(app: &AppHandle) -> CmdResult<(Vec<Rule>, bool)> {
+    let settings = crate::storage::store(app)?.read_settings()?;
+    let rules = settings
+        .rules()
+        .into_iter()
+        .filter_map(Result::ok)
+        .collect();
+    Ok((rules, settings.preferences.automations_paused))
 }
 
 /// Whether an occurrence starting at `since` continues a run that ended at
@@ -480,27 +487,65 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
     }
 }
 
-/// Marks the run under way on `device` as dismissed, and returns whether one was.
-fn dismiss_run(tables: &mut Tables, device: DeviceRef) -> bool {
-    let Some(running) = tables.running.get(&device) else {
-        return false;
-    };
-    let key = (device, running.interruption.rule.clone());
-    let until = running.interruption.until;
-    let end = tables.dismissed.entry(key).or_insert(until);
-    *end = (*end).max(until);
-    true
+/// The occurrences under way on `device` now, for a gesture to dismiss. Empty
+/// when the rules could not be read: the gesture then ends the one on screen.
+fn under_way_now(
+    tables: &Tables,
+    device: DeviceRef,
+    read: CmdResult<(Vec<Rule>, bool)>,
+) -> Vec<Interruption> {
+    match read {
+        Ok((rules, paused)) => resolver::active(
+            &Context {
+                now: chrono::Local::now(),
+                rules: &rules,
+                paused,
+                tried: &tables.tried,
+            },
+            device,
+        ),
+        Err(e) => {
+            tracing::debug!(
+                device = %device,
+                "only the rule on screen is dismissed, settings not read: {e}"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Dismisses every run under way on `device`, and returns whether a rule was on
+/// screen there.
+///
+/// Every run, not the one on screen: a lower rule under way — the night under
+/// the hourly clock — would otherwise take the device back at the next tick, a
+/// second after someone acted on it.
+fn dismiss_runs(tables: &mut Tables, device: DeviceRef, under_way: Vec<Interruption>) -> bool {
+    let on_screen = tables
+        .running
+        .get(&device)
+        .map(|r| (r.interruption.rule.clone(), r.interruption.until));
+    let was_on_screen = on_screen.is_some();
+    let ends = under_way.into_iter().map(|o| (o.rule, o.until));
+    for (rule, until) in ends.chain(on_screen) {
+        let end = tables.dismissed.entry((device, rule)).or_insert(until);
+        *end = (*end).max(until);
+    }
+    was_on_screen
 }
 
 /// Ends the interruption on `device` because someone acted on it — applied an
 /// effect, stopped it, turned it off. It gives nothing back: what they did takes
-/// its place. The rule comes back after its run.
+/// its place. The rules come back after their runs.
 pub(crate) fn dismiss(app: &AppHandle, device: DeviceRef) {
     let Some(automations) = app.try_state::<Automations>() else {
         return;
     };
+    // Read before taking the lock, which is never held across a disk access.
+    let read = read_rules(app);
     let mut tables = automations.tables.lock().unwrap();
-    if dismiss_run(&mut tables, device) {
+    let under_way = under_way_now(&tables, device, read);
+    if dismiss_runs(&mut tables, device, under_way) {
         if let Some(running) = tables.running.remove(&device) {
             tracing::info!(
                 device = %device,
@@ -560,11 +605,14 @@ pub(crate) fn annotate(app: &AppHandle, devices: &mut Vec<DeviceEngineStatus>) {
 // ---------------------------------------------------------------- commands
 
 /// Resume: ends the interruption on a device now and gives it back its resting
-/// state. The rule comes back after its run.
+/// state. The rules under way come back after their runs.
 #[tauri::command]
 pub fn resume_device(app: AppHandle, device: DeviceRef) {
     if let Some(automations) = app.try_state::<Automations>() {
-        dismiss_run(&mut automations.tables.lock().unwrap(), device);
+        let read = read_rules(&app);
+        let mut tables = automations.tables.lock().unwrap();
+        let under_way = under_way_now(&tables, device, read);
+        dismiss_runs(&mut tables, device, under_way);
     }
     give_back(&app, device);
     crate::tray::refresh(&app);
@@ -717,7 +765,7 @@ mod tests {
     }
 
     /// Resume on a run of back-to-back occurrences holds while they keep coming,
-    /// and gives way to the next rule meanwhile.
+    /// and gives way to a rule that starts meanwhile.
     #[test]
     fn a_dismissed_run_stays_dismissed_while_it_continues() {
         let mut dismissed = HashMap::from([((KEYBOARD, "steady".to_string()), 1_000)]);
@@ -725,7 +773,7 @@ mod tests {
         let answer = choose(
             vec![
                 occurrence("steady", 1_000, 2_000),
-                occurrence("rain", 0, 30_000),
+                occurrence("rain", 1_000, 30_000),
             ],
             KEYBOARD,
             &mut dismissed,
@@ -763,6 +811,66 @@ mod tests {
             &mut dismissed
         )
         .is_some());
+    }
+
+    /// Acting on the keyboard while the hourly clock hides the night ends both:
+    /// the night does not take the keyboard back a second later. The next hour
+    /// still comes, and so does the next night.
+    #[test]
+    fn a_gesture_ends_every_rule_under_way() {
+        const HOUR: i64 = 3_600_000;
+        let hourly = |hour: i64| occurrence("hourly", hour * HOUR, hour * HOUR + 10_000);
+        let night = |day: i64| occurrence("night", day * DAY_MS, day * DAY_MS + 9 * HOUR);
+        let mut tables = Tables::default();
+        tables
+            .running
+            .insert(KEYBOARD, running("hourly", HOUR, HOUR + 10_000));
+
+        assert!(dismiss_runs(
+            &mut tables,
+            KEYBOARD,
+            vec![hourly(1), night(0)]
+        ));
+        let dismissed = &mut tables.dismissed;
+        assert!(choose(vec![hourly(1), night(0)], KEYBOARD, dismissed).is_none());
+        assert!(
+            choose(vec![night(0)], KEYBOARD, dismissed).is_none(),
+            "the night stays dismissed once the hour ends"
+        );
+        assert_eq!(
+            choose(vec![hourly(2), night(0)], KEYBOARD, dismissed).map(|a| a.rule),
+            Some("hourly".into()),
+            "the next hour"
+        );
+        assert_eq!(
+            choose(vec![night(1)], KEYBOARD, dismissed).map(|a| a.rule),
+            Some("night".into()),
+            "the next night"
+        );
+    }
+
+    /// A hidden run of back-to-back occurrences is dismissed as a run: the
+    /// occurrence after the gesture continues it and stays dismissed.
+    #[test]
+    fn a_gesture_ends_a_hidden_run_as_a_run() {
+        let mut tables = Tables::default();
+        tables
+            .running
+            .insert(KEYBOARD, running("hourly", 0, 10_000));
+        dismiss_runs(
+            &mut tables,
+            KEYBOARD,
+            vec![
+                occurrence("hourly", 0, 10_000),
+                occurrence("steady", 5_000, 6_000),
+            ],
+        );
+        assert!(choose(
+            vec![occurrence("steady", 6_000, 7_000)],
+            KEYBOARD,
+            &mut tables.dismissed
+        )
+        .is_none());
     }
 
     /// Past the second means just past it: a tick never lands before the second
