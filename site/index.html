@@ -33,8 +33,7 @@
         <p class="lead">
           No vendor runtime, no background service, no account. Candeo writes to the device over the
           HID interface the system already exposes, and the effects you write run inside the
-          application — so they keep running with the window closed. Today it lights keyboards;
-          the same engine is what will light the rest.
+          application — so they keep running with the window closed.
         </p>
 
         <figure>
@@ -58,15 +57,13 @@
           Candeo is built for <strong>lit devices that speak HID over USB</strong> — keyboards,
           mice, mousepads, headsets. A device declares what it is and where its lights sit, and an
           effect is written against that, not against a model: an effect written for a mousepad's
-          grid runs on a keyboard, and one written for a keyboard runs on the next one to be
-          surveyed.
+          grid runs on a keyboard, and one written for a keyboard runs on whatever comes next.
         </p>
 
-        <p><strong>Supported so far:</strong> {{deviceLine}}</p>
-        <p class="note">
-          Each one is a protocol surveyed on the hardware and verified by reading the writes back —
-          which is why the list grows a device at a time, and why what is on it works.
-          <a href="devices.html">The devices, and how one gets on the list →</a>
+        <p>
+          Candeo drives a device the way its own software would — the full matrix, its firmware
+          effects, its brightness — from a protocol read off the hardware and checked write by
+          write. <a href="devices.html">See the devices →</a>
         </p>
       </section>
 
