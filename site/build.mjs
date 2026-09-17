@@ -49,6 +49,68 @@ async function latest(repo) {
   }
 }
 
+/**
+ * The devices, from the one file that lists them. The landing page shows a
+ * short form and `devices.html` the whole of it, both from here: a device
+ * described twice is a device described differently.
+ */
+const devices = JSON.parse(readFileSync(join(here, 'devices.json'), 'utf8'))
+
+/**
+ * The supported devices, as a sentence. The landing page says which they are
+ * and sends you to the list; the list itself lives on one page, so there is one
+ * place to look and one place to filter.
+ */
+function summary() {
+  const named = devices.supported.map((device) => `<strong>${device.maker} ${device.model}</strong>`)
+  if (named.length === 1) {
+    const [device] = devices.supported
+    return `${named[0]} — a ${device.connection.toLowerCase()} ${device.kind.toLowerCase()}.`
+  }
+  const shown = named.slice(0, 3)
+  const rest = named.length - shown.length
+  return rest > 0
+    ? `${shown.join(', ')}, and ${rest} more.`
+    : `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}.`
+}
+
+/**
+ * The supported devices, as a table. Every column is a fact; what a row cannot
+ * hold is in the survey it links to, which is the document that has to stay
+ * right anyway.
+ */
+function table(repo) {
+  const rows = devices.supported
+    .map(
+      (device) => `            <tr>
+              <td>${device.maker}</td>
+              <td>${device.model}</td>
+              <td>${device.kind}</td>
+              <td>${device.connection}</td>
+              <td>${device.lights}</td>
+              <td><a href="${repo}/blob/main/${device.protocol}">${device.surveyed}</a></td>
+            </tr>`,
+    )
+    .join('\n')
+  return `        <div class="scroller">
+          <table class="devices">
+            <thead>
+              <tr>
+                <th>Maker</th>
+                <th>Model</th>
+                <th>Kind</th>
+                <th>Connection</th>
+                <th>Lights</th>
+                <th>Protocol</th>
+              </tr>
+            </thead>
+            <tbody>
+${rows}
+            </tbody>
+          </table>
+        </div>`
+}
+
 const repo = repository()
 const version = await latest(repo)
 const releases = `${repo}/releases`
@@ -59,21 +121,27 @@ const values = {
   setupUrl: version
     ? `${releases}/download/v${version}/candeo_${version}_x64-setup.exe`
     : `${releases}/latest`,
+  repository: repo,
+  devices: table(repo),
+  deviceLine: summary(),
 }
 
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 
-const page = readFileSync(join(here, 'index.html'), 'utf8').replaceAll(
-  /\{\{(\w+)\}\}/g,
-  (_, key) => {
+/** One page, with what it asks for filled in. */
+function render(name) {
+  const page = readFileSync(join(here, name), 'utf8').replaceAll(/\{\{(\w+)\}\}/g, (_, key) => {
     if (!(key in values)) {
-      throw new Error(`index.html asks for an unknown {{${key}}}`)
+      throw new Error(`${name} asks for an unknown {{${key}}}`)
     }
     return values[key]
-  },
-)
-writeFileSync(join(out, 'index.html'), page)
+  })
+  writeFileSync(join(out, name), page)
+}
+
+render('index.html')
+render('devices.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))
@@ -107,6 +175,7 @@ ${policy}
 
 cpSync(join(here, 'style.css'), join(out, 'style.css'))
 cpSync(join(here, 'copy.js'), join(out, 'copy.js'))
+cpSync(join(here, 'filter.js'), join(out, 'filter.js'))
 cpSync(join(here, 'assets'), join(out, 'assets'), { recursive: true })
 
 console.log(`${out} — ${values.version}`)

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — devices</title>
+    <meta
+      name="description"
+      content="The devices Candeo drives, each linked to the survey its protocol comes from, and what it takes to add one."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="filter.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Devices</h1>
+      <p class="lead">
+        Candeo drives lit devices that speak HID over USB. A device is listed here once its
+        protocol has been surveyed on the hardware and verified by reading the writes back — the
+        survey is linked from its row, with the firmware it was established against.
+      </p>
+
+      <section>
+        <h2>Supported</h2>
+{{devices}}
+      </section>
+
+      <section>
+        <h2>Adding one</h2>
+        <p>
+          A device, reduced to its essentials, is three things — and the first two are data rather
+          than code:
+        </p>
+        <ul>
+          <li>
+            <strong>An identity</strong> — the vendor and product ids, and which interface of the
+            composite device carries the lighting.
+          </li>
+          <li>
+            <strong>A layout</strong> — the matrix, and which of its cells sit under a key. An
+            effect is written against the layout, so it runs on any device that declares one.
+          </li>
+          <li>
+            <strong>Its reports</strong> — how a frame becomes bytes, and the checksum that makes
+            the device accept them. This is the part that has to be surveyed, on the device, by
+            someone who owns it.
+          </li>
+        </ul>
+        <p>
+          Each fact carries where it came from: the firmware and the command it was read by, the
+          date, whether it was seen on the bus or written and read back, and — for anything drawn
+          rather than measured — that it was drawn.
+          <a href="{{repository}}/blob/main/docs/design/device-sdk.md">docs/design/device-sdk.md</a>
+          sets that out, and <a href="{{repository}}/issues/34">#34</a> is where a contribution
+          becomes reviewable by someone without the hardware.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>
