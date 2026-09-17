@@ -413,6 +413,14 @@ fn effect_name(effect: Effect) -> String {
     }
 }
 
+/// The effect the firmware runs now, read back through `0x0f`/`0x82` — the read
+/// [`check_effect`] makes on opening, and nothing more. `None` for an effect this
+/// crate cannot describe: Static and Breathing carry a colour whose place in the
+/// read-back is not established.
+pub(crate) fn read_effect(t: &impl Transport) -> Result<Option<Effect>, String> {
+    read(t, &Report::read_effect()).map(|r| r.effect())
+}
+
 /// A read, which is only worth anything once understood.
 fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
     let r = exchange(t, request)?;
@@ -626,6 +634,23 @@ mod tests {
         let e = fake.state.borrow();
         assert_eq!(e.effect[..], wave[8..14], "the effect changed");
         assert_eq!(e.brightness, 0x40, "the brightness changed");
+    }
+
+    /// The effect an automation gives back is the one read here: a Wave comes back
+    /// with its direction and speed, and a colored effect reads as unknown rather
+    /// than as something else.
+    #[test]
+    fn the_current_effect_reads_back() {
+        let wave = Effect::Wave {
+            direction: 0x01,
+            speed: 0x28,
+        };
+        let wave_bytes = Report::set_effect(wave).0;
+        let fake = Fake::as_surveyed().with(|e| e.effect.copy_from_slice(&wave_bytes[8..14]));
+        assert_eq!(read_effect(&fake), Ok(Some(wave)));
+
+        let breathing = Fake::as_surveyed().with(|e| e.effect = [0, 0, 0x02, 0, 0, 0x01]);
+        assert_eq!(read_effect(&breathing), Ok(None));
     }
 
     /// Another version **warns**, and nothing else: no command is refused because of
