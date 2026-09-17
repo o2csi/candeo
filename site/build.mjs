@@ -123,6 +123,7 @@ function render(name) {
 
 render('index.html')
 render('devices.html')
+render('automations.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))

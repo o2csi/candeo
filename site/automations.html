@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — automations</title>
+    <meta
+      name="description"
+      content="Rules that interrupt the effect on a device for a while, then give it back: the time on the hour, the keyboard off at night. Written as a sentence, or in cron."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Automations</h1>
+      <p class="lead">
+        A rule interrupts the effect on a device for a while, then gives it back: the time on the
+        hour over your usual effect, the keyboard dark at night. Rules run inside the application,
+        like the effects, so they keep working with the window closed.
+      </p>
+
+      <section>
+        <h2>A rule is a sentence</h2>
+        <blockquote class="sentence">
+          Every hour · on weekdays · on DeathStalker V2 Pro · show Clock · for 10 seconds
+        </blockquote>
+        <p>
+          Each part is a choice in the <strong>Automations</strong> tab: when, on which devices,
+          which effect, for how long. The effect can be any of them — one that ships with Candeo,
+          one of yours, or one the device's firmware runs, <em>Off</em> included — with settings of
+          its own, so the hourly clock need not look like the clock you apply by hand.
+        </p>
+        <p>
+          A switch turns a rule on. <strong>Try</strong> runs it once, now, for its duration, so
+          you see what it does without waiting for the hour. Two examples, <em>Hourly clock</em>
+          and <em>Night off</em>, are there to start from.
+        </p>
+      </section>
+
+      <section>
+        <h2>When: a cron expression</h2>
+        <p>
+          The chips write the usual cases: every minute, every quarter of an hour, every hour, at a
+          time; every day, weekdays, the weekend, chosen days. <strong>Advanced</strong> takes any
+          cron expression instead — one or the other holds a rule, never both.
+        </p>
+        <p>
+          An expression has five fields, <code>minute hour day month weekday</code>, or six with
+          the seconds first. It is read against the computer's clock, daylight saving included.
+          An occurrence starts each time it matches, and lasts the rule's duration.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>What</th>
+                <th>Expression</th>
+                <th>For</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>On the hour</td>
+                <td><code>0 * * * *</code></td>
+                <td>10 s</td>
+              </tr>
+              <tr>
+                <td>Five seconds before each hour</td>
+                <td><code>55 59 * * * *</code></td>
+                <td>10 s</td>
+              </tr>
+              <tr>
+                <td>Every quarter of an hour</td>
+                <td><code>*/15 * * * *</code></td>
+                <td>10 s</td>
+              </tr>
+              <tr>
+                <td>Each hour from 9 to 18, on weekdays</td>
+                <td><code>0 9-18 * * 1-5</code></td>
+                <td>10 s</td>
+              </tr>
+              <tr>
+                <td>The night</td>
+                <td><code>0 22 * * *</code></td>
+                <td>9 h</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A time window is a start and a duration: at 22:00 for nine hours. Occurrences that follow
+          each other without a gap — every second for a second — are one display, not an effect
+          restarted every second.
+        </p>
+      </section>
+
+      <section>
+        <h2>When two rules meet</h2>
+        <p>
+          <strong>The order of the list is the priority.</strong> When two rules apply to a device
+          at the same time, the higher one shows; drag a rule, or use its arrows, to move it. With
+          the hourly clock above the night:
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>The keyboard shows</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">21:59</td>
+                <td>your effect</td>
+              </tr>
+              <tr>
+                <td class="mono">22:00</td>
+                <td>nothing — the night turns it off</td>
+              </tr>
+              <tr>
+                <td class="mono">23:00:00</td>
+                <td>the clock, the higher rule</td>
+              </tr>
+              <tr>
+                <td class="mono">23:00:10</td>
+                <td>nothing again — the night is still under way</td>
+              </tr>
+              <tr>
+                <td class="mono">07:00</td>
+                <td>your effect, as it was at 21:59</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          <strong>A hidden rule is not postponed.</strong> Put the clock under the night and it
+          does not show at night — nor at 07:00: an occurrence nobody saw is simply gone.
+        </p>
+      </section>
+
+      <section>
+        <h2>You have the last word</h2>
+        <ul>
+          <li>
+            <strong>Applying an effect</strong>, stopping one, or choosing one from the tray ends
+            what the rules were showing on that device — every rule under way there, not only the
+            one on screen. Each comes back at its next occurrence: the next hour, the next night.
+          </li>
+          <li>
+            <strong>Resume</strong>, on the device card and in the tray, gives the device its effect
+            back now, the same way.
+          </li>
+          <li>
+            <strong>Pause automations</strong>, in the tray and in the tab, holds every rule until
+            you turn them back on — for a meeting, for a game — and stays paused across a restart.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>What a device goes back to</h2>
+        <p>
+          The effect applied to it, with its settings, started again from the beginning. Rules never
+          change which effect is applied: when the last one ends, the device shows what you chose.
+        </p>
+        <p>
+          When the firmware was running the lighting — Spectrum Cycle, Wave — Candeo reads its effect back
+          from the device before a rule interrupts it, and sets it again afterwards. One it cannot
+          read back gives way to <em>Off</em>, rather than leaving the rule's last frame frozen on
+          the keys.
+        </p>
+      </section>
+
+      <section>
+        <h2>Where rules live</h2>
+        <p>
+          In <code>settings.json</code>, with the other settings, in the order of the list. A rule
+          edited by hand into something unreadable does nothing and stays as written, without
+          stopping the others. The format is in
+          <a href="{{repository}}/blob/main/docs/api/commands.md#automations">docs/api/commands.md</a>,
+          and the reasons behind these choices in
+          <a href="{{repository}}/blob/main/docs/design/inputs-and-automations.md"
+            >docs/design/inputs-and-automations.md</a
+          >.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>

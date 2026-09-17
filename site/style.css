@@ -305,20 +305,20 @@ pre {
   margin: 0;
 }
 
-/* The table is the list: a row a device, a column a fact. A narrow screen
-   scrolls it rather than folding the columns into an unreadable stack. */
+/* A table is a list: a row a thing, a column a fact. A narrow screen scrolls it
+   rather than folding the columns into an unreadable stack. */
 .scroller {
   overflow-x: auto;
   margin-bottom: 14px;
 }
 
-.devices {
+.scroller table {
   border-collapse: collapse;
   width: 100%;
   font-size: 14px;
 }
 
-.devices th {
+.scroller th {
   color: var(--faint);
   font-size: 12px;
   font-weight: 500;
@@ -330,7 +330,7 @@ pre {
   border-bottom: 1px solid var(--line);
 }
 
-.devices td {
+.scroller td {
   padding: 12px 20px 12px 0;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -341,9 +341,21 @@ pre {
   font-weight: 500;
 }
 
-.devices th:last-child,
-.devices td:last-child {
+.scroller th:last-child,
+.scroller td:last-child {
   padding-right: 0;
+}
+
+/* ---------------------------------------------------------------- automations */
+
+/* A rule as the tab reads it: the sentence someone builds, set apart. */
+.sentence {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-weight: 500;
 }
 
 /* A page under the landing one: same furniture, a quieter title. */
