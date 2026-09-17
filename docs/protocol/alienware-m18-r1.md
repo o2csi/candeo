@@ -130,7 +130,16 @@ effect it rewrites the whole keyboard about once a second and wins. So sharing a
 keyboard is a question of **what the other software is doing**, not of whether it
 runs — and Candeo will have to say so rather than fight for the device.
 
-Frames of 110 keys at about twelve a second were written without a refusal.
+**It keeps up.** Written as fast as one process can, from a single open handle,
+the keyboard took **147 frames in 5 seconds** — about 29 frames a second, 353
+reports a second, every one acknowledged, and the alternation was visible as
+flicker. An animation at 8 frames a second travels across the keys smoothly.
+Command Center's 1.5 frames a second is its own choice, not the device's limit.
+
+One caveat on measuring this: **opening the device costs more than writing to
+it**. A frame written from a freshly started process takes about 250 ms, most of
+it the opening; from a handle already open, about 34 ms. A survey that reopens
+the device per frame measures its own startup.
 
 ## 4. What this leaves open
 
