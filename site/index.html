@@ -17,7 +17,6 @@
     />
     <link rel="stylesheet" href="style.css" />
     <script src="copy.js" defer></script>
-    <script src="filter.js" defer></script>
   </head>
   <body>
     <header>
@@ -63,12 +62,11 @@
           surveyed.
         </p>
 
-        <h3>Supported so far</h3>
-{{devices}}
+        <p><strong>Supported so far:</strong> {{deviceLine}}</p>
         <p class="note">
-          One row, one protocol surveyed on the hardware and verified by reading the writes back —
+          Each one is a protocol surveyed on the hardware and verified by reading the writes back —
           which is why the list grows a device at a time, and why what is on it works.
-          <a href="devices.html">How a device gets on it →</a>
+          <a href="devices.html">The devices, and how one gets on the list →</a>
         </p>
       </section>
 

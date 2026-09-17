@@ -57,6 +57,24 @@ async function latest(repo) {
 const devices = JSON.parse(readFileSync(join(here, 'devices.json'), 'utf8'))
 
 /**
+ * The supported devices, as a sentence. The landing page says which they are
+ * and sends you to the list; the list itself lives on one page, so there is one
+ * place to look and one place to filter.
+ */
+function summary() {
+  const named = devices.supported.map((device) => `<strong>${device.maker} ${device.model}</strong>`)
+  if (named.length === 1) {
+    const [device] = devices.supported
+    return `${named[0]} — a ${device.connection.toLowerCase()} ${device.kind.toLowerCase()}.`
+  }
+  const shown = named.slice(0, 3)
+  const rest = named.length - shown.length
+  return rest > 0
+    ? `${shown.join(', ')}, and ${rest} more.`
+    : `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}.`
+}
+
+/**
  * The supported devices, as a table. Every column is a fact; what a row cannot
  * hold is in the survey it links to, which is the document that has to stay
  * right anyway.
@@ -105,6 +123,7 @@ const values = {
     : `${releases}/latest`,
   repository: repo,
   devices: table(repo),
+  deviceLine: summary(),
 }
 
 rmSync(out, { recursive: true, force: true })
