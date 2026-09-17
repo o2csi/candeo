@@ -317,6 +317,11 @@ pub struct EngineStatus {
     /// For the diagnostic: see [`loggable`].
     #[serde(skip)]
     pub reads_keys: bool,
+    /// The rule interrupting this device, if one does (#106). Set from the
+    /// automations when the status is reported, never by the engine, which
+    /// knows nothing of rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interruption: Option<crate::automations::InterruptionStatus>,
 }
 
 /// A device's state, and which device it belongs to.
@@ -540,6 +545,8 @@ impl DeviceLoop {
                 reaching_keyboard: s.reaching.load(Ordering::Relaxed),
                 to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
                 reads_keys: s.reads_keys.load(Ordering::Relaxed),
+                // The engine knows nothing of rules: see [`engine_status`].
+                interruption: None,
             },
         }
     }
@@ -1561,23 +1568,14 @@ use tauri::{AppHandle, Manager, State};
 #[tauri::command]
 pub fn start_effect(
     app: AppHandle,
-    state: State<'_, AppState>,
     device: DeviceRef,
     id: String,
     params: serde_json::Value,
 ) -> CmdResult<()> {
-    let layout = crate::find_layout(device)?;
-    let js = crate::storage::store(&app)?.effect_js(&crate::storage::EffectKey::parse(&id)?)?;
-
-    let params = serialised(&params)?;
-
-    // The handle is shared with the loop, not copied: closing the device later
-    // — ignored, unplugged — shows on the next frame.
-    let out = Box::new(state.handle(device));
-    state
-        .engine
-        .start(device, id.clone(), js, params, layout, out)
-        .map_err(|error| not_started(&id, error))?;
+    run_effect(&app, device, &id, &params)?;
+    // A gesture always wins over a rule: an effect applied during an
+    // interruption ends it, and becomes the one the device goes back to.
+    crate::automations::dismiss(&app, device);
 
     // **After** the start, never before: only what actually runs is
     // remembered. An effect whose load fails must not leave behind an id that
@@ -1586,29 +1584,62 @@ pub fn start_effect(
     Ok(())
 }
 
-/// Starts `effect` on `device` with the settings saved for it on that device.
+/// Starts an effect on a device **without remembering it as applied**.
 ///
-/// What the tray and resuming do, through [`start_effect`] itself: neither may
-/// start an effect differently from the gallery.
-pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> CmdResult<()> {
-    let store = crate::storage::store(app)?;
-    let entry = store
+/// [`start_effect`] is this plus the record; an automation is this alone, since
+/// an interruption must never rewrite `activeEffects` — it would take the place
+/// of what the device goes back to (`docs/design/inputs-and-automations.md` §3.1).
+pub(crate) fn run_effect(
+    app: &AppHandle,
+    device: DeviceRef,
+    id: &str,
+    params: &serde_json::Value,
+) -> CmdResult<()> {
+    let layout = crate::find_layout(device)?;
+    let js = crate::storage::store(app)?.effect_js(&crate::storage::EffectKey::parse(id)?)?;
+    let params = serialised(params)?;
+
+    let state = app.state::<AppState>();
+    // The handle is shared with the loop, not copied: closing the device later
+    // — ignored, unplugged — shows on the next frame.
+    let out = Box::new(state.handle(device));
+    state
+        .engine
+        .start(device, id.to_owned(), js, params, layout, out)
+        .map_err(|error| not_started(id, error))
+}
+
+/// Starts `effect` on `device` with `stored` over its declared defaults, without
+/// remembering it: see [`run_effect`].
+pub(crate) fn run_with(
+    app: &AppHandle,
+    device: DeviceRef,
+    effect: &str,
+    stored: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> CmdResult<()> {
+    let entry = crate::storage::store(app)?
         .list_effects()?
         .into_iter()
         .find(|e| e.id == effect)
         .ok_or_else(|| Failure::new("effectNotFound").with("name", effect))?;
-    let settings = store.read_settings()?;
-    let params = crate::storage::starting_params(
-        &entry.manifest,
-        settings.effect_params(device.vid, device.pid, effect),
-    );
-    start_effect(
-        app.clone(),
-        app.state(),
+    let params = crate::storage::starting_params(&entry.manifest, stored);
+    run_effect(app, device, effect, &serde_json::Value::Object(params))
+}
+
+/// Starts `effect` on `device` with the settings saved for it on that device.
+///
+/// What the tray and resuming do: neither may start an effect differently from
+/// the gallery, and both remember it as applied.
+pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> CmdResult<()> {
+    let settings = crate::storage::store(app)?.read_settings()?;
+    run_with(
+        app,
         device,
-        effect.to_owned(),
-        serde_json::Value::Object(params),
-    )
+        effect,
+        settings.effect_params(device.vid, device.pid, effect),
+    )?;
+    remember_active_effect(app, device, Some(effect));
+    Ok(())
 }
 
 /// Gives a device that just opened the effect applied on it (#102): at startup,
@@ -1622,6 +1653,11 @@ pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> C
 /// "no longer in the folder" notice; edited outside Candeo, it waits for the
 /// window to compile it, and [`resume_waiting`] tries again then.
 pub(crate) fn resume_applied(app: &AppHandle, device: DeviceRef) {
+    // An interruption under way keeps the device: the rule gives the applied
+    // effect back itself when it ends.
+    if crate::automations::interrupts(app, device) {
+        return;
+    }
     let settings = match crate::storage::store(app).and_then(|s| s.read_settings()) {
         Ok(settings) => settings,
         Err(e) => {
@@ -1691,6 +1727,9 @@ fn not_started(id: &str, error: String) -> Failure {
 #[tauri::command]
 pub fn stop_effect(app: AppHandle, state: State<'_, AppState>, device: DeviceRef) {
     state.engine.stop(device);
+    // Stopping during an interruption ends it too: nothing is applied any more,
+    // so there is nothing to give back.
+    crate::automations::dismiss(&app, device);
     remember_active_effect(&app, device, None);
 }
 
@@ -1834,8 +1873,10 @@ pub fn unsubscribe_frames(state: State<'_, AppState>, device: DeviceRef) {
 /// `preview` is **separate**, and the interface cannot confuse the two: see
 /// [`PreviewStatus`].
 #[tauri::command]
-pub fn engine_status(state: State<'_, AppState>) -> EngineReport {
-    state.engine.report()
+pub fn engine_status(app: AppHandle, state: State<'_, AppState>) -> EngineReport {
+    let mut report = state.engine.report();
+    crate::automations::annotate(&app, &mut report.devices);
+    report
 }
 
 #[cfg(test)]

@@ -43,6 +43,12 @@
     "modified": "{nature} · modified",
     "readsKeys": "reacts to key presses",
     "readsClock": "reads the clock",
+    "interruptedFor": "{rule} — for {seconds} s, then {applied}",
+    "interruptedForAlone": "{rule} — for {seconds} s",
+    "interruptedUntil": "{rule} — until {time}, then {applied}",
+    "interruptedUntilAlone": "{rule} — until {time}",
+    "interruptedOpen": "{rule} — until resumed",
+    "resume": "Resume",
     "costs": {
       "host": "host loop · runs with the window closed",
       "hardware": "firmware · no processor time · survives everything"
@@ -161,6 +167,9 @@
     "builtinEffects": "Built-in",
     "userEffects": "Yours",
     "turnOff": "Turn off",
+    "interruptedBy": "Interrupted by {rule}",
+    "resume": "Resume",
+    "pauseAutomations": "Pause automations",
     "notOpenTitle": "{name} — not open",
     "notOpenReason": "Plugged in but not open — see the window",
     "unpluggedTitle": "{name} — unplugged"
@@ -214,6 +223,8 @@
     "nameEdges": "“{name}”: an effect name cannot start or end with a space or a dot.",
     "nameReserved": "“{name}” is a name reserved by Windows.",
     "effectNotFound": "No effect is named “{name}”.",
+    "ruleInvalid": "The rule “{name}” cannot be saved: {error}.",
+    "ruleNotFound": "No rule is named “{name}”.",
     "effectExists": "An effect named “{name}” already exists.",
     "builtinNotSaved": "“{name}” is a built-in effect: duplicate it to change it.",
     "builtinNotRenamed": "“{name}” is a built-in effect: duplicate it to rename it.",

@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'vitest'
+
+import { interruptionLine } from './interruption'
+
+const NOW = new Date(2026, 8, 17, 14, 0, 0).getTime()
+
+describe('interruptionLine', () => {
+  it('counts down a short interruption, and names what comes back', () => {
+    const line = interruptionLine(
+      { rule: 'hourly', name: '', effect: 'shipped:Clock', until: NOW + 6_200 },
+      'Clock',
+      'Bubbles',
+      NOW,
+    )
+    expect(line).toEqual({
+      key: 'effects.interruptedFor',
+      params: { rule: 'Clock', seconds: 7, applied: 'Bubbles' },
+    })
+  })
+
+  it('says only the countdown when nothing named comes back', () => {
+    const line = interruptionLine(
+      { rule: 'hourly', name: 'Hourly', effect: 'shipped:Clock', until: NOW + 3_000 },
+      'Hourly',
+      null,
+      NOW,
+    )
+    expect(line.key).toBe('effects.interruptedForAlone')
+    expect(line.params).toEqual({ rule: 'Hourly', seconds: 3 })
+  })
+
+  it('gives the time a long interruption ends at, rather than thousands of seconds', () => {
+    const sevenTomorrow = new Date(2026, 8, 18, 7, 0, 0).getTime()
+    const line = interruptionLine(
+      { rule: 'night', name: 'Night', effect: 'hardware:off', until: sevenTomorrow },
+      'Night',
+      'Bubbles',
+      NOW,
+    )
+    expect(line).toEqual({
+      key: 'effects.interruptedUntil',
+      params: { rule: 'Night', time: '07:00', applied: 'Bubbles' },
+    })
+  })
+
+  it('has no end to announce for a rule that never stops', () => {
+    const line = interruptionLine(
+      { rule: 'always', name: '', effect: 'shipped:Clock' },
+      'Clock',
+      'Bubbles',
+      NOW,
+    )
+    expect(line).toEqual({ key: 'effects.interruptedOpen', params: { rule: 'Clock' } })
+  })
+
+  it('never counts below zero while the engine catches up', () => {
+    const line = interruptionLine(
+      { rule: 'hourly', name: '', effect: 'shipped:Clock', until: NOW - 400 },
+      'Clock',
+      null,
+      NOW,
+    )
+    expect(line.params.seconds).toBe(0)
+  })
+})

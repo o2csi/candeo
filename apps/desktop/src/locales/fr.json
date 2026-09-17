@@ -43,6 +43,12 @@
     "modified": "{nature} · modifié",
     "readsKeys": "réagit aux frappes",
     "readsClock": "lit l'horloge",
+    "interruptedFor": "{rule} — encore {seconds} s, puis {applied}",
+    "interruptedForAlone": "{rule} — encore {seconds} s",
+    "interruptedUntil": "{rule} — jusqu'à {time}, puis {applied}",
+    "interruptedUntilAlone": "{rule} — jusqu'à {time}",
+    "interruptedOpen": "{rule} — jusqu'à reprise",
+    "resume": "Reprendre",
     "costs": {
       "host": "boucle hôte · tourne fenêtre fermée",
       "hardware": "micrologiciel · aucun temps processeur · survit à tout"
@@ -161,6 +167,9 @@
     "builtinEffects": "Intégrés",
     "userEffects": "À vous",
     "turnOff": "Éteindre",
+    "interruptedBy": "Interrompu par {rule}",
+    "resume": "Reprendre",
+    "pauseAutomations": "Mettre en pause les automatisations",
     "notOpenTitle": "{name} — non ouvert",
     "notOpenReason": "Branché mais non ouvert — voir la fenêtre",
     "unpluggedTitle": "{name} — débranché"
@@ -214,6 +223,8 @@
     "nameEdges": "« {name} » : un nom d'effet ne peut ni commencer ni finir par une espace ou un point.",
     "nameReserved": "« {name} » est un nom réservé par Windows.",
     "effectNotFound": "Aucun effet nommé « {name} ».",
+    "ruleInvalid": "La règle « {name} » ne peut pas être enregistrée : {error}.",
+    "ruleNotFound": "Aucune règle nommée « {name} ».",
     "effectExists": "Un effet nommé « {name} » existe déjà.",
     "builtinNotSaved": "« {name} » est un effet intégré : dupliquez-le pour le modifier.",
     "builtinNotRenamed": "« {name} » est un effet intégré : dupliquez-le pour le renommer.",

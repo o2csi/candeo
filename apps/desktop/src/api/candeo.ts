@@ -669,6 +669,40 @@ export interface EngineStatus {
    */
   reachingKeyboard: boolean
   toKeyboard: boolean
+  /** The rule interrupting this device, when one does (#106). */
+  interruption?: InterruptionStatus
+}
+
+/** A rule interrupting a device, as the engine reports it. */
+export interface InterruptionStatus {
+  /** The rule's id. */
+  rule: string
+  /** The rule's name; empty when it has none. */
+  name: string
+  /** The effect it shows. */
+  effect: string
+  /** When it ends, in epoch milliseconds; absent for a rule that never stops. */
+  until?: number
+}
+
+/** Ends the interruption on a device now, and gives it its effect back. */
+export function resumeDevice(device: DeviceRef): Promise<void> {
+  return invoke('resume_device', { device })
+}
+
+/** Pauses automations, or turns them back on. */
+export function setAutomationsPaused(paused: boolean): Promise<void> {
+  return invoke('set_automations_paused', { paused })
+}
+
+/** Replaces the rules, in the order given, which is their priority. */
+export function setRules(rules: Rule[]): Promise<void> {
+  return invoke('set_rules', { rules })
+}
+
+/** Runs a rule once, now, for its duration, whatever its switch and the pause. */
+export function tryRule(id: string): Promise<void> {
+  return invoke('try_rule', { id })
 }
 
 /** L'état d'un appareil, et à qui il appartient. */

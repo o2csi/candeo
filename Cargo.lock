@@ -404,6 +404,7 @@ version = "0.5.1"
 dependencies = [
  "candeo-device",
  "candeo-protocol",
+ "chrono",
  "hidapi",
  "libc",
  "rquickjs",
