@@ -26,7 +26,10 @@ serde.workspace = true
 # la fermer arrête le processus, donc les fils de rendu.
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
-serde_json = "1"
+# `preserve_order`: a map keeps the order it was given (`indexmap`, already in the
+# tree). An effect's settings are shown in the order it declares them (#177), and
+# `settings.json` is written back in the order it was read rather than sorted.
+serde_json = { version = "1", features = ["preserve_order"] }
 
 # Une seule instance à la fois — voir `src/single_instance.rs`. Sans la
 # fonctionnalité `semver`, qui laisserait cohabiter deux versions incompatibles :
