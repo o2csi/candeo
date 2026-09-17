@@ -1402,8 +1402,9 @@ goes back to what someone applied.
   makes on opening) — is set again; one that cannot be read back gives way to
   `Off` rather than a frozen frame.
 - **A gesture always wins**: `start_effect`, `stop_effect`, `set_effect` and the
-  tray's actions end an interruption on that device. The run is dismissed, not the
-  rule: it comes back after a gap — the next hour, the next night.
+  tray's actions end an interruption on that device. Every run under way there is
+  dismissed, including one a higher rule was hiding, and not the rules: each comes
+  back after a gap — the next hour, the next night.
 - `rules` stay raw JSON in `settings.json`, read one by one: a rule edited by hand
   into something unreadable costs that rule, stays as written, and does nothing.
 
@@ -1421,9 +1422,9 @@ Runs a rule once, now, for its duration — switched on or not, paused or not.
 
 ### `resume_device(device)`
 
-Ends the interruption on a device now and gives it back what it goes back to. The
-run is dismissed; the rule comes back after a gap. Also in the tray, under the
-device.
+Ends the interruption on a device now and gives it back what it goes back to.
+Every run under way on the device is dismissed; each rule comes back after a gap.
+Also in the tray, under the device.
 
 ### `set_automations_paused(paused: boolean)`
 
