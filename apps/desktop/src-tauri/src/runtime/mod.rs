@@ -2531,6 +2531,44 @@ mod tests {
         );
     }
 
+    /// With the seconds on, the banner carries two more digits and a colon, so
+    /// over the same ten seconds it lights more keys than without.
+    #[test]
+    fn the_clock_effect_shows_the_seconds_when_asked() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Clock"), layout()).expect("load");
+        let len = layout().led_count();
+        const BACKGROUND: [u8; 3] = [4, 6, 12];
+
+        let lit_over_ten_seconds = |params: &str| -> usize {
+            (0..40)
+                .map(|i| {
+                    let frame = render_with_inputs(
+                        &ctx,
+                        f64::from(i) * 0.25,
+                        0,
+                        params,
+                        "",
+                        1_600_000_007_250.0,
+                        len,
+                    )
+                    .expect("render");
+                    layout()
+                        .keys
+                        .iter()
+                        .filter(|k| {
+                            let i = k.index as usize * 3;
+                            frame[i..i + 3] != BACKGROUND
+                        })
+                        .count()
+                })
+                .sum()
+        };
+
+        let without = lit_over_ten_seconds("{}");
+        let with = lit_over_ten_seconds(r#"{"seconds":true}"#);
+        assert!(with > without, "seconds on lit {with} keys, off {without}");
+    }
+
     /// Ripples draws its ring from the pressed key: at the instant of the press,
     /// the key itself takes the ring color; at rest, the background.
     #[test]

@@ -70,6 +70,11 @@ export default defineEffect({
       label: { en: 'Blink the colon', fr: 'Faire clignoter les deux-points' },
       default: true,
     },
+    seconds: {
+      kind: 'boolean',
+      label: { en: 'Show the seconds', fr: 'Afficher les secondes' },
+      default: false,
+    },
   },
   render({ layout, time, clock, frame, params }) {
     const color = params.color ?? COLOR
@@ -85,12 +90,17 @@ export default defineEffect({
     // Lit for the first half of each second, so the clock shows it is running.
     const colon = (params.blink ?? true) && clock.ms >= 500 ? NO_COLON : COLON
 
-    const lines = banner([
+    const glyphs = [
       ...hourGlyphs,
       colon,
       DIGITS[Math.floor(clock.minutes / 10)],
       DIGITS[clock.minutes % 10],
-    ])
+    ]
+    // The seconds change while the text crosses the keyboard, as a ticker's do.
+    if (params.seconds ?? false) {
+      glyphs.push(colon, DIGITS[Math.floor(clock.seconds / 10)], DIGITS[clock.seconds % 10])
+    }
+    const lines = banner(glyphs)
     const width = lines[0].length
 
     // The text comes in past the right edge and leaves past the left one, then
