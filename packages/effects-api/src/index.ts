@@ -174,6 +174,14 @@ export interface EffectContext<P = undefined> {
    * On a device, only that keyboard's presses; in the preview, any keyboard's.
    */
   readonly presses: readonly Press[]
+  /**
+   * The local wall-clock time, read once per frame. Zeroed unless the effect
+   * declares `inputs: ['clock']`.
+   *
+   * {@link EffectContext.time} stays the seconds since the effect started, and
+   * is what animations run on; `clock` is what a clock face needs.
+   */
+  readonly clock: Clock
 }
 
 /** A key going down. See {@link EffectContext.presses}. */
@@ -184,8 +192,25 @@ export interface Press {
   readonly at: number
 }
 
+/** The local wall-clock time. See {@link EffectContext.clock}. */
+export interface Clock {
+  readonly year: number
+  /** 1 is January — unlike `Date.prototype.getMonth()`, which starts at 0. */
+  readonly month: number
+  /** Day of the month, 1 to 31. */
+  readonly day: number
+  /** 0 is Sunday, as `Date.prototype.getDay()` has it. */
+  readonly weekday: number
+  /** 0 to 23: the hour as the clock shows it, not on 12. */
+  readonly hours: number
+  readonly minutes: number
+  readonly seconds: number
+  /** Milliseconds within the second, 0 to 999, for a second hand that moves. */
+  readonly ms: number
+}
+
 /** What an effect reads besides time and its parameters. */
-export type Input = 'keys'
+export type Input = 'keys' | 'clock'
 
 /** Un effet rend une image à chaque appel. */
 export type Effect = (ctx: EffectContext) => void
@@ -284,6 +309,9 @@ export interface EffectModule<P = undefined> {
    * What the effect reads besides time and its parameters. `['keys']` gives it
    * {@link EffectContext.presses}; key presses are read only while such an
    * effect runs, and the gallery says so (`docs/design/key-input.md`).
+   * `['clock']` gives it {@link EffectContext.clock}: nothing is captured for
+   * it, so it is read whenever the effect asks
+   * (`docs/design/inputs-and-automations.md` §2.1).
    */
   readonly inputs?: readonly Input[]
   readonly params?: P

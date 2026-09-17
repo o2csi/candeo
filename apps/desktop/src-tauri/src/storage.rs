@@ -119,6 +119,11 @@ pub struct Manifest {
     /// runs, which the gallery shows.
     #[serde(default)]
     pub reads_keys: bool,
+    /// The effect declares `inputs: ['clock']`: it is given the wall-clock time.
+    /// Nothing is captured for it, and the gallery says so all the same — what
+    /// an effect reads is what someone chooses it by.
+    #[serde(default)]
+    pub reads_clock: bool,
 }
 
 /// Kind of effect: shipped with the application, or the user's.
@@ -1038,6 +1043,9 @@ struct CacheRecord {
     api_version: u32,
     #[serde(default)]
     reads_keys: bool,
+    /// Defaulted, so a cache written before the clock input reads back.
+    #[serde(default)]
+    reads_clock: bool,
     #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
@@ -1874,6 +1882,7 @@ fn library_entry(
                 params: r.params,
                 api_version: r.api_version,
                 reads_keys: r.reads_keys,
+                reads_clock: r.reads_clock,
             },
         ),
     };
@@ -1898,6 +1907,7 @@ fn library_entry(
             params: declared.params,
             api_version: declared.api_version,
             reads_keys: declared.reads_keys,
+            reads_clock: declared.reads_clock,
         },
     }
 }
@@ -1920,6 +1930,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             params: declared.params,
             api_version: declared.api_version,
             reads_keys: declared.reads_keys,
+            reads_clock: declared.reads_clock,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -1933,6 +1944,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             params: serde_json::Map::new(),
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
+            reads_clock: false,
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -1966,6 +1978,7 @@ struct Declared {
     params: serde_json::Map<String, serde_json::Value>,
     api_version: u32,
     reads_keys: bool,
+    reads_clock: bool,
 }
 
 impl Declared {
@@ -1976,6 +1989,7 @@ impl Declared {
             params: serde_json::Map::new(),
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
+            reads_clock: false,
         }
     }
 }
@@ -2006,15 +2020,18 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
             "effect written for version {api_version} of the effects API; this version of Candeo only knows version {EFFECTS_API_VERSION}"
         ));
     }
-    let reads_keys = value
-        .get("inputs")
-        .and_then(|i| i.as_array())
-        .is_some_and(|inputs| inputs.iter().any(|i| i == "keys"));
+    let declares = |input: &str| {
+        value
+            .get("inputs")
+            .and_then(|i| i.as_array())
+            .is_some_and(|inputs| inputs.iter().any(|i| i == input))
+    };
     Ok(Declared {
         description,
         params,
         api_version,
-        reads_keys,
+        reads_keys: declares("keys"),
+        reads_clock: declares("clock"),
     })
 }
 
@@ -4265,6 +4282,7 @@ mod tests {
             .clone(),
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
+            reads_clock: false,
         }
     }
 

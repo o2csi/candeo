@@ -42,6 +42,7 @@
     },
     "modified": "{nature} · modifié",
     "readsKeys": "réagit aux frappes",
+    "readsClock": "lit l'horloge",
     "costs": {
       "host": "boucle hôte · tourne fenêtre fermée",
       "hardware": "micrologiciel · aucun temps processeur · survit à tout"

@@ -44,6 +44,9 @@ The effect API version stays 1 until the first release (`key-input.md` §1).
 
 ### 2.1 Clock
 
+**Shipped** (#105): the input and the *Clock* effect are in the application; the
+rules that show it on the hour are §3.
+
 ```ts
 render({ clock }) // { year, month, day, weekday, hours, minutes, seconds, ms }
 ```
@@ -51,6 +54,13 @@ render({ clock }) // { year, month, day, weekday, hours, minutes, seconds, ms }
 The local wall-clock time, read once per frame. `time` stays the seconds since
 the effect started; `clock` is what a clock face needs. Nothing to capture and
 nothing private, so no guard: every effect declaring `clock` gets it.
+
+**How it is handed over.** The host reads the instant — milliseconds since the
+epoch, `std::time::SystemTime` and no date crate — and passes it with the frame;
+the split into fields happens in the bootstrap, where `Date` already knows the
+machine's time zone. So a test renders any instant it likes, the device loop and
+the preview see the same one, and an effect declaring nothing is given zeros —
+which is also how a swatch is sampled.
 
 **Showing the hour** takes two pieces:
 

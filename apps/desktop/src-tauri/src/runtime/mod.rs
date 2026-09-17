@@ -72,7 +72,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use candeo_device::{Keyboard, Layout};
 use candeo_protocol::{Effect, Rgb};
@@ -1042,7 +1042,15 @@ fn render_loop(
         // for all on the `Runtime`.
         budget.grant(FRAME_BUDGET);
 
-        match render_with_presses(&ctx, time, frame_index, &params, &pressed, frame_len) {
+        match render_with_inputs(
+            &ctx,
+            time,
+            frame_index,
+            &params,
+            &pressed,
+            wall_clock_ms(),
+            frame_len,
+        ) {
             Ok(bytes) => {
                 consecutive_errors = 0;
                 // The effect recovered: clear the error, otherwise the
@@ -1269,7 +1277,26 @@ fn prepare_with_layout(
     Ok((rt, ctx))
 }
 
-/// One frame with no key presses: swatches, tests, and effects that read no keys.
+/// The wall clock, in milliseconds since the epoch.
+///
+/// Read here rather than in the effect so that both loops see the same instant
+/// and a test can hand one in. A clock set before 1970 gives zero, which the
+/// bootstrap already means as "no clock": nothing to draw is better than a
+/// negative date.
+///
+/// `f64` is what `Date` takes, and it counts milliseconds exactly for another
+/// 280 000 years.
+fn wall_clock_ms() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |since| since.as_millis() as f64)
+}
+
+/// One frame with neutral inputs: swatches, tests, and effects reading nothing.
+///
+/// A swatch is sampled this way on purpose — no presses and a zeroed clock — so
+/// it shows what the effect draws at rest (`docs/design/inputs-and-automations.md`
+/// §1).
 fn render_once(
     ctx: &Context,
     time: f64,
@@ -1277,16 +1304,21 @@ fn render_once(
     params: &str,
     frame_len: usize,
 ) -> Result<Vec<u8>, String> {
-    render_with_presses(ctx, time, frame_index, params, "", frame_len)
+    render_with_inputs(ctx, time, frame_index, params, "", 0.0, frame_len)
 }
 
-/// One frame, with `presses` as `presses::to_json` writes them (empty: none).
-fn render_with_presses(
+/// One frame, with `presses` as `presses::to_json` writes them (empty: none) and
+/// `clock_ms` the wall clock in milliseconds since the epoch.
+///
+/// The host reads the clock rather than the effect: a test then renders any
+/// instant, and the device loop and the preview see the same one.
+fn render_with_inputs(
     ctx: &Context,
     time: f64,
     frame_index: u32,
     params: &str,
     presses: &str,
+    clock_ms: f64,
     frame_len: usize,
 ) -> Result<Vec<u8>, String> {
     ctx.with(|ctx| {
@@ -1296,7 +1328,7 @@ fn render_with_presses(
             .map_err(|_| "the render function is gone from the context".to_string())?;
 
         let out: Vec<u8> = render
-            .call((time, frame_index, params, presses))
+            .call((time, frame_index, params, presses, clock_ms))
             .catch(&ctx)
             .map_err(|e| format!("{e}"))?;
 
@@ -2396,6 +2428,103 @@ mod tests {
         engine.stop(FIRST);
     }
 
+    /// An effect writing what the clock says onto the first key, so a test can
+    /// read the fields back out of a frame.
+    const CLOCK_EFFECT: &str = "export default {
+        inputs: ['clock'],
+        render({ layout, clock, frame }) {
+            frame.set(layout.keys[0], {
+                r: clock.seconds,
+                g: clock.hours,
+                b: Math.floor(clock.ms / 4),
+            })
+        },
+    }";
+
+    /// The instant the host hands over reaches the effect.
+    ///
+    /// Asserted on **seconds and milliseconds**: hours and minutes are local, so
+    /// this machine and a runner in another time zone would not agree on them —
+    /// seconds are the same everywhere, offsets of half an hour included.
+    #[test]
+    fn an_effect_declaring_the_clock_is_given_the_instant_the_host_reads() {
+        let (_rt, ctx) = prepare(CLOCK_EFFECT, layout()).expect("load");
+        let len = layout().led_count();
+
+        // 1 600 000 007 250 ms since the epoch: 47 seconds and 250 ms past a
+        // minute, wherever the machine stands.
+        let frame =
+            render_with_inputs(&ctx, 0.0, 0, "{}", "", 1_600_000_007_250.0, len).expect("render");
+
+        assert_eq!(frame[0], 47, "seconds");
+        assert_eq!(frame[2], 250 / 4, "milliseconds, in quarters");
+        assert!(frame[1] <= 23, "hours of a local day, got {}", frame[1]);
+    }
+
+    /// An effect that asks for nothing is given a zeroed clock, whatever the host
+    /// passes — the rule that also makes a swatch show an effect at rest.
+    #[test]
+    fn an_effect_declaring_nothing_sees_no_clock() {
+        const SILENT: &str = "export default {
+            render({ layout, clock, frame }) {
+                frame.set(layout.keys[0], { r: clock.seconds, g: clock.hours, b: clock.ms })
+            },
+        }";
+        let (_rt, ctx) = prepare(SILENT, layout()).expect("load");
+        let len = layout().led_count();
+
+        let frame =
+            render_with_inputs(&ctx, 0.0, 0, "{}", "", 1_600_000_007_250.0, len).expect("render");
+
+        assert_eq!(&frame[0..3], &[0, 0, 0], "a clock nobody asked for");
+    }
+
+    /// The shipped Clock lights the digits of the hour it is given, and nothing
+    /// else on the number row.
+    #[test]
+    fn the_clock_effect_lights_the_digits_of_the_time() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Clock"), layout()).expect("load");
+        let len = layout().led_count();
+
+        // Whatever the time zone, some hour and some minute are shown: exactly
+        // four digit keys carry a color, or fewer when two digits are the same.
+        let frame = render_with_inputs(&ctx, 0.0, 0, "{}", "", 1_600_000_007_250.0, len)
+            .expect("render")
+            .to_vec();
+
+        // The LED index of each digit key, not its rank in `keys`: a frame
+        // covers the 132 matrix positions, of which 106 carry a key.
+        let digits: Vec<usize> = (0x02u16..=0x0b)
+            .filter_map(|code| {
+                layout()
+                    .keys
+                    .iter()
+                    .find(|k| k.scancode == code)
+                    .map(|k| k.index as usize)
+            })
+            .collect();
+        assert_eq!(digits.len(), 10, "the number row of this layout");
+
+        let lit = digits
+            .iter()
+            .filter(|&&i| frame[i * 3..i * 3 + 3] != [4, 6, 12])
+            .count();
+        assert!((1..=4).contains(&lit), "digit keys lit: {lit}");
+
+        // Escape is not a digit, so it stays the background.
+        let escape = layout()
+            .keys
+            .iter()
+            .find(|k| k.scancode == 0x01)
+            .expect("Escape")
+            .index as usize;
+        assert_eq!(
+            &frame[escape * 3..escape * 3 + 3],
+            &[4, 6, 12],
+            "background"
+        );
+    }
+
     /// Ripples draws its ring from the pressed key: at the instant of the press,
     /// the key itself takes the ring color; at rest, the background.
     #[test]
@@ -2411,7 +2540,7 @@ mod tests {
             device: None,
         };
         let pressed = presses::positions(layout()).to_json(&[press], now, 1.0);
-        let lit = render_with_presses(&ctx, 1.0, 1, "{}", &pressed, len).expect("render");
+        let lit = render_with_inputs(&ctx, 1.0, 1, "{}", &pressed, 0.0, len).expect("render");
 
         let led = 46 * 3;
         assert_eq!(&rest[led..led + 3], &[6, 12, 28], "background at rest");

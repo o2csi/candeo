@@ -231,6 +231,8 @@ interface Choice {
   modified: boolean
   /** Key presses are read while it runs: said on screen (`docs/design/key-input.md` §3). */
   readsKeys: boolean
+  /** It is given the wall-clock time: said on screen, like every input read. */
+  readsClock: boolean
 }
 
 const library = ref<EffectEntry[]>([])
@@ -254,6 +256,7 @@ function fromEntry(e: EffectEntry): Choice {
     error: e.error ?? null,
     modified: e.modified,
     readsKeys: e.readsKeys ?? false,
+    readsClock: e.readsClock ?? false,
   }
 }
 
@@ -270,6 +273,7 @@ function fromHardware(e: HardwareEffect): Choice {
     error: null,
     modified: false,
     readsKeys: false,
+    readsClock: false,
   }
 }
 
@@ -1315,6 +1319,9 @@ onBeforeUnmount(() => {
             }}
           </span>
           <span v-if="selectedEffect.readsKeys" class="badge keys">{{ t('effects.readsKeys') }}</span>
+          <span v-if="selectedEffect.readsClock" class="badge keys">{{
+            t('effects.readsClock')
+          }}</span>
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>

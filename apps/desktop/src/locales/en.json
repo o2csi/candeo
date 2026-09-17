@@ -42,6 +42,7 @@
     },
     "modified": "{nature} · modified",
     "readsKeys": "reacts to key presses",
+    "readsClock": "reads the clock",
     "costs": {
       "host": "host loop · runs with the window closed",
       "hardware": "firmware · no processor time · survives everything"
