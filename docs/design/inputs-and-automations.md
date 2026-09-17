@@ -67,9 +67,9 @@ which is also how a swatch is sampled.
 - **The effect** draws the time. It is an ordinary effect with
   `inputs: ['clock']`: applied by hand, it shows the time all along. The shipped
   *Clock* reads the keyboard as a small display — each key a pixel, digits in a
-  3×5 font on the five rows below the function keys — and scrolls the hour
-  across it, in physical key units so a digit keeps its width over the
-  staggered rows.
+  3×5 font on the five top rows, function keys included, the space bar's row
+  left dark — and scrolls the hour across it, in physical key units so a digit
+  keeps its width over the staggered rows.
 - **When and for how long** is an **automation** (§3): *every 3600 seconds, for
   10 seconds* shows the clock on the hour and gives the keyboard back; *every
   second, for 1 second* never gives it back, which is the continuous display

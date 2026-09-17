@@ -1,10 +1,11 @@
 // Clock — the time, scrolling across the keyboard in lit digits.
 //
 // The keyboard is read as a small display: each key a pixel, digits drawn in a
-// 3×5 font over the five rows from the number row down, the function row left
-// dark above them. The text travels from right to left in physical key units,
-// so a digit keeps its width across the staggered rows and the speed is the
-// same with or without a numeric keypad.
+// 3×5 font over the five top rows, function keys included. The bottom row stays
+// dark: its space bar is six keys wide for one light, and would eat a digit's
+// foot. The text travels from right to left in physical key units, so a digit
+// keeps its width across the staggered rows and the speed is the same with or
+// without a numeric keypad.
 //
 // It reads the wall clock (`inputs: ['clock']`), for which nothing is captured.
 // With no clock, which is how the swatch is sampled, it scrolls 00:00.
@@ -99,8 +100,8 @@ export default defineEffect({
     const left = area.x + area.w - ((time * speed) % lap)
 
     for (const key of layout.keys) {
-      // The number row is the text's first line; the function row has none.
-      const line = key.row - 1
+      // The function row is the text's first line; the bottom row has none.
+      const line = key.row
       const column = Math.floor(center(key).x - left)
       const lit =
         line >= 0 && line < 5 && column >= 0 && column < width && lines[line][column] === '#'

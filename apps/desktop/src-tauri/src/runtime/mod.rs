@@ -2480,7 +2480,7 @@ mod tests {
     }
 
     /// The shipped Clock draws the time as a banner crossing the keyboard: over a
-    /// lap it lights a digit's worth of keys, never on the function row, and what
+    /// lap it lights a digit's worth of keys, never on the bottom row, and what
     /// it lights moves.
     ///
     /// Asserted on shapes, not on which digits: the hour is local, so the text
@@ -2503,8 +2503,9 @@ mod tests {
                 .filter(|&i| frame[i * 3..i * 3 + 3] != BACKGROUND)
                 .collect()
         };
-        // The first row of the matrix, holes left out.
-        let function_row: Vec<usize> = layout().matrix[..usize::from(layout().cols)]
+        // The last row of the matrix, the space bar's, holes left out.
+        let cols = usize::from(layout().cols);
+        let bottom_row: Vec<usize> = layout().matrix[layout().matrix.len() - cols..]
             .iter()
             .filter(|&&index| index != u16::MAX)
             .map(|&index| usize::from(index))
@@ -2521,8 +2522,8 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .all(|lit| lit.iter().all(|i| !function_row.contains(i))),
-            "the function row stays dark"
+                .all(|lit| lit.iter().all(|i| !bottom_row.contains(i))),
+            "the bottom row stays dark"
         );
         assert!(
             frames.windows(2).any(|pair| pair[0] != pair[1]),
