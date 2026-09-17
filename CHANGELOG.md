@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.7.0](https://github.com/o2csi/candeo/compare/v0.6.0...v0.7.0) (2026-09-17)
+
+
+### Features
+
+* automations can wait for the computer to be idle ([0118d21](https://github.com/o2csi/candeo/commit/0118d21c5edfc27e239c34d850758e1e2d8e47c1))
+* the Automations tab offers the idle trigger ([4e1f740](https://github.com/o2csi/candeo/commit/4e1f7401e1f149259e56ba3da592dd1c0818b59c))
+
+
+### Bug Fixes
+
+* effect settings keep the order the effect declares them ([7cdb4ce](https://github.com/o2csi/candeo/commit/7cdb4ce7b676d433e633aad317e0a231afa6bea4))
+
+
+### Documentation
+
+* settings order and the cache record format ([03c039f](https://github.com/o2csi/candeo/commit/03c039ffa06deb734e03a1a59933c10db640f492))
+* the idle trigger in the design and the command reference ([efd92ac](https://github.com/o2csi/candeo/commit/efd92ac44002173276432208ed2d90ff19930ff5))
+* the Store listing describes 0.6.0 ([a58f5e0](https://github.com/o2csi/candeo/commit/a58f5e0a26bd2ef6451877a2898638cddf56ff3b))
+
 ## [0.6.0](https://github.com/o2csi/candeo/compare/v0.5.1...v0.6.0) (2026-09-17)
 
 
