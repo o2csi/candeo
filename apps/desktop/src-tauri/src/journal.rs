@@ -998,7 +998,10 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                         .as_ref()
                         .map_or_else(|e| format!("not read ({e})"), ToString::to_string),
                 },
-                layout.surveyed_firmware
+                layout.surveyed_firmware.map_or_else(
+                    || "no version it can be asked".to_string(),
+                    |f| f.to_string()
+                )
             ),
         );
         if let Some(i) = &inspection {

@@ -59,7 +59,10 @@ impl From<candeo_device::Error> for Failure {
             Error::NotFound { .. } => Self::new("deviceNotFound"),
             Error::Refused { command } => Self::new("commandUnsupported").with("command", command),
             Error::Hid(e) => Self::new("deviceAccess").with("detail", e),
-            e @ Error::RowOutOfRange { .. } => Self::unexpected(e),
+            Error::NoFirmwareEffect { device } => {
+                Self::new("noFirmwareEffect").with("device", device)
+            }
+            e @ (Error::RowOutOfRange { .. } | Error::NoRowWrite { .. }) => Self::unexpected(e),
         }
     }
 }

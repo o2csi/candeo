@@ -609,6 +609,30 @@ variant: it is another family. A data layout that was wrong
 would be accepted by the device, return `Ok`, and light nothing — see §8. The
 provenance `method: inferred` exists for exactly this case.
 
+### What the second family taught (2026-09-18)
+
+The Alienware m18 R1 (#188) is that other family: 64-byte feature reports, no
+checksum, keys addressed one by one. Writing it settled two things.
+
+**A family is a trait, not a branch.** `candeo_device::lighting::Lighting` turns
+a frame into the reports that carry it, and `Keyboard` sends bytes without
+knowing whose they are. What a family cannot do it says — the m18 has no
+firmware effect, so *Off* is a black frame and a spectrum is refused rather than
+approximated. A `match` on the device would have grown one arm per model; a
+trait grows one file per protocol, and a device of a known family stays data.
+
+**A position is not an address.** An effect paints *positions*: where a key sits
+in the matrix, which is also what the simulator draws and what `frame[index]`
+means. What the protocol writes is the *address* the device gives that position.
+On the Razer the two coincide; the m18 counts from one; the next model may
+number its keys in any order at all. So the layout carries **the address per
+position**, the identity included, and no protocol module does arithmetic on it.
+
+That distinction was found the hard way: with the shift written in the protocol
+instead, every key following an empty cell stayed dark on the hardware — Caps
+Lock, both Shifts, Ctrl, the Windows keys, two arrows and a whole column of the
+keypad. The tests passed; only the keyboard said otherwise.
+
 ---
 
 ## 8. What cannot be verified without the hardware

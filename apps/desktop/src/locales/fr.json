@@ -296,6 +296,7 @@
     "deviceNotFound": "Clavier introuvable : branchez-le et réessayez.",
     "deviceAccess": "Le clavier ne répond pas : {detail}",
     "commandUnsupported": "Ce micrologiciel ne prend pas en charge la commande {command}.",
+    "noFirmwareEffect": "« {device} » n'exécute aucun effet par lui-même : choisissez-en un dans la bibliothèque.",
     "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
     "deviceWrite": "Écriture vers le clavier impossible : {detail}",
     "deviceClosed": "Appareil refermé : reconnectez-le depuis Périphériques."
