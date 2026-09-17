@@ -414,7 +414,7 @@ JavaScript compiled from a file's **current** bytes.
   swatch: string[],               // couleurs « #rrggbb », prélevées sur le rendu
   name: string,
   description: string | Record<string, string>,   // une chaîne, ou une par langue
-  params: Record<string, ParamSpec>,
+  params: Record<string, ParamSpec>,   // in the order the effect declares them
   apiVersion: number,
   readsKeys: boolean              // déclare `inputs: ['keys']`
   readsClock: boolean             // déclare `inputs: ['clock']`
@@ -513,6 +513,11 @@ a uniform effect cannot look alike.
 
 **Once per version of a file**, by `cache_effect`, in the cache record next to the
 JavaScript — never when the list is displayed, which remains a disk read.
+
+A record carries the `format` it was written in. When what a record declares
+changes shape — the order of the settings, kept since #177 — the records of an
+older format are declared again from their own JavaScript at startup, without
+the window: a launch at login builds none.
 
 #### What can go wrong
 
