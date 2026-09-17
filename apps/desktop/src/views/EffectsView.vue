@@ -1130,7 +1130,8 @@ onBeforeUnmount(() => {
                    distingue deux claviers de la même marque. Il passe à la ligne
                    plutôt que d'être tronqué. -->
               <span class="dev-name">{{ d.name }}</span>
-              <span class="dev-fx">{{ deviceLine(d) }}</span>
+              <!-- The column is narrow and cuts the line: the whole of it on hover. -->
+              <span class="dev-fx" :title="deviceLine(d)">{{ deviceLine(d) }}</span>
             </span>
           </button>
 

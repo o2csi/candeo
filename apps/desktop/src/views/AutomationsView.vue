@@ -306,6 +306,7 @@ function onDrop(to: number): void {
       >
         <template v-if="editable(raw)">
           <div class="line">
+            <div class="sentence">
             <span
               class="grip"
               draggable="true"
@@ -323,16 +324,27 @@ function onDrop(to: number): void {
               @change="update(index, (r) => ({ ...r, enabled: !r.enabled }))"
             />
 
-            <FrequencyChip
-              :frequency="simple(raw).frequency"
-              :disabled="advanced(raw)"
-              @change="(f) => chooseFrequency(index, raw, f)"
-            />
-            <DaysChip
-              :days="simple(raw).days"
-              :disabled="advanced(raw)"
-              @change="(d) => chooseDays(index, raw, d)"
-            />
+            <!--
+              The advanced field holds the rule. When the chips could say its
+              expression they show it, disabled; when they could not, they would
+              show something the rule does not do — one inert chip says where
+              "when" is written instead.
+            -->
+            <span v-if="advanced(raw) && readSimple(raw.when.expr) === null" class="by-expression">
+              {{ t('automations.byExpression') }}
+            </span>
+            <template v-else>
+              <FrequencyChip
+                :frequency="simple(raw).frequency"
+                :disabled="advanced(raw)"
+                @change="(f) => chooseFrequency(index, raw, f)"
+              />
+              <DaysChip
+                :days="simple(raw).days"
+                :disabled="advanced(raw)"
+                @change="(d) => chooseDays(index, raw, d)"
+              />
+            </template>
 
             <span class="word">{{ t('automations.on') }}</span>
             <select
@@ -375,9 +387,9 @@ function onDrop(to: number): void {
               :label="t('automations.for')"
               @change="(s) => update(index, (r) => ({ ...r, for: { seconds: s } }))"
             />
+            </div>
 
-            <span class="spacer" />
-
+            <div class="actions">
             <button type="button" class="ghost" @click="attempt(raw)">
               {{ t('automations.try') }}
             </button>
@@ -404,6 +416,7 @@ function onDrop(to: number): void {
             <button type="button" class="ghost" @click="remove(index)">
               {{ t('automations.delete') }}
             </button>
+            </div>
           </div>
 
           <div class="more">
@@ -426,7 +439,10 @@ function onDrop(to: number): void {
                 @change="typeExpression(index, $event)"
               />
             </div>
-            <p v-if="advanced(raw)" class="help">{{ t('automations.expressionHelp') }}</p>
+            <details v-if="advanced(raw)" class="format">
+              <summary>{{ t('automations.format') }}</summary>
+              <p class="help">{{ t('automations.expressionHelp') }}</p>
+            </details>
 
             <input
               class="name"
@@ -489,7 +505,8 @@ function onDrop(to: number): void {
   flex-direction: column;
   gap: var(--gap-4);
   padding: var(--gap-4);
-  max-width: 1020px;
+  /* Wide enough for a rule's sentence on one line; it wraps below that. */
+  max-width: 1280px;
 }
 
 .head {
@@ -545,10 +562,41 @@ function onDrop(to: number): void {
 
 .line {
   display: flex;
+  align-items: flex-start;
+  gap: var(--gap-3);
+  font-size: 14px;
+}
+
+/* The sentence wraps on a narrow window; the actions stay together, on the right. */
+.sentence {
+  display: flex;
+  flex: 1;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-2);
-  font-size: 14px;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-2);
+}
+
+.by-expression {
+  padding: 3px var(--gap-2);
+  border-radius: var(--r-md);
+  background: var(--raised-2);
+  color: var(--text-faint);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.format summary {
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .grip {

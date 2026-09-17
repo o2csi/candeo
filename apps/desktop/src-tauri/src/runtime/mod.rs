@@ -599,7 +599,8 @@ impl DeviceLoop {
         // overlapping on this device. It is taken only here and in
         // [`Self::stop`], and the render thread does not know it.
         let mut thread = self.thread.lock().unwrap();
-        if let Some(s) = self.shared.lock().unwrap().take() {
+        let previous = self.shared.lock().unwrap().take();
+        if let Some(s) = &previous {
             s.stop.store(true, Ordering::Relaxed);
         }
         if let Some(h) = thread.take() {
@@ -609,6 +610,15 @@ impl DeviceLoop {
         let shared = Arc::new(Shared::default());
         *shared.params.lock().unwrap() = params;
         *shared.effect_id.lock().unwrap() = Some(effect_id.clone());
+        // The simulator listens to a target, not to an effect: whoever subscribed
+        // keeps the frames when another effect starts there. An automation
+        // restarts a device's loop without the window knowing — a rule's effect,
+        // then the one it gives back — and the simulator must go on showing what
+        // the device shows (#106). Taken once the old loop has ended, so no frame
+        // of it is racing for the channel.
+        if let Some(previous) = &previous {
+            *shared.frames.lock().unwrap() = previous.frames.lock().unwrap().take();
+        }
 
         // The JavaScript context is built **inside** the thread and never
         // leaves it: QuickJS types do not cross threads, and confining them
@@ -2022,6 +2032,33 @@ mod tests {
 
     /// A few failures below the threshold close nothing: a transient error
     /// must not cost a manual reconnection, and a success clears the count.
+    #[test]
+    fn frames_follow_the_device_when_another_effect_starts_there() {
+        let engine = Engine::default();
+        let received = Arc::new(AtomicU32::new(0));
+        let counter = Arc::clone(&received);
+        let channel = Channel::new(move |_| {
+            counter.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        });
+
+        start(&engine, FIRST, "applied", Arc::new(Output::default()));
+        engine.set_channel(FIRST, Some(channel));
+        wait_for("no frame reached the simulator", || {
+            received.load(Ordering::Relaxed) > 0
+        });
+
+        // What an automation does: another effect on the same device, with no
+        // window to subscribe again.
+        start(&engine, FIRST, "rule", Arc::new(Output::default()));
+        let before = received.load(Ordering::Relaxed);
+        wait_for(
+            "the simulator lost the device when its effect changed",
+            || received.load(Ordering::Relaxed) > before + 3,
+        );
+        engine.stop(FIRST);
+    }
+
     #[test]
     fn a_transient_write_failure_does_not_close_the_device() {
         let engine = Engine::default();
