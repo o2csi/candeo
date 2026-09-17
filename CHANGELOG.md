@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.6.0](https://github.com/o2csi/candeo/compare/v0.5.1...v0.6.0) (2026-09-17)
+
+
+### Features
+
+* a devices page on the site, with a filter ([499ce50](https://github.com/o2csi/candeo/commit/499ce50794f598120e404453aad3e2d0a4891889))
+* a page for the project, at o2csi.github.io/candeo ([ade11ea](https://github.com/o2csi/candeo/commit/ade11ea4d33d05169a6eb3322d08db97bedbebd0))
+* automations, rules that interrupt the effect on a device for a while, written in cron ([3b8c8d4](https://github.com/o2csi/candeo/commit/3b8c8d40d8387304fab2b8cb41b289c8c52eea1f))
+* Clock, a shipped effect that scrolls the time across the keyboard ([5a8117b](https://github.com/o2csi/candeo/commit/5a8117b73f414cd04ff65e237a10194ad49d077b))
+* copy buttons on the site's commands and code ([50b8529](https://github.com/o2csi/candeo/commit/50b85293ec2bdfe33279af7d698675116fda1de4))
+* effects can read the clock ([5a8117b](https://github.com/o2csi/candeo/commit/5a8117b73f414cd04ff65e237a10194ad49d077b))
+
+
+### Documentation
+
+* a privacy policy, which the Store listing asks for ([36beea7](https://github.com/o2csi/candeo/commit/36beea7f71972dc58e09a0e97369deb1f19a0bfd))
+* install by the winget moniker ([50b8529](https://github.com/o2csi/candeo/commit/50b85293ec2bdfe33279af7d698675116fda1de4))
+* O2CSI links to its site ([9e0a738](https://github.com/o2csi/candeo/commit/9e0a738c2edf753fa8ade3e06b962764ff021296))
+* position the site on devices, with a roadmap ([278c526](https://github.com/o2csi/candeo/commit/278c52665b3d30c7d93223eb1c389b3bf02a310c))
+* the landing page stops counting devices ([#170](https://github.com/o2csi/candeo/issues/170)) ([446e40a](https://github.com/o2csi/candeo/commit/446e40a107e69ea40066feb0c43747586cde3110))
+* the Store listing, in English and French ([e503812](https://github.com/o2csi/candeo/commit/e503812c84359ec61f51b115e90c338cb8f2eae0))
+
 ## [0.5.1](https://github.com/o2csi/candeo/compare/v0.5.0...v0.5.1) (2026-09-16)
 
 
