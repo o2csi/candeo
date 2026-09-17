@@ -2479,49 +2479,54 @@ mod tests {
         assert_eq!(&frame[0..3], &[0, 0, 0], "a clock nobody asked for");
     }
 
-    /// The shipped Clock lights the digits of the hour it is given, and nothing
-    /// else on the number row.
+    /// The shipped Clock draws the time as a banner crossing the keyboard: over a
+    /// lap it lights a digit's worth of keys, never on the function row, and what
+    /// it lights moves.
+    ///
+    /// Asserted on shapes, not on which digits: the hour is local, so the text
+    /// depends on the time zone the test runs in.
     #[test]
-    fn the_clock_effect_lights_the_digits_of_the_time() {
+    fn the_clock_effect_scrolls_the_time_across_the_keyboard() {
         let (_rt, ctx) = prepare(crate::shipped::source("Clock"), layout()).expect("load");
         let len = layout().led_count();
+        const BACKGROUND: [u8; 3] = [4, 6, 12];
 
-        // Whatever the time zone, some hour and some minute are shown: exactly
-        // four digit keys carry a color, or fewer when two digits are the same.
-        let frame = render_with_inputs(&ctx, 0.0, 0, "{}", "", 1_600_000_007_250.0, len)
-            .expect("render")
-            .to_vec();
-
-        // The LED index of each digit key, not its rank in `keys`: a frame
-        // covers the 132 matrix positions, of which 106 carry a key.
-        let digits: Vec<usize> = (0x02u16..=0x0b)
-            .filter_map(|code| {
-                layout()
-                    .keys
-                    .iter()
-                    .find(|k| k.scancode == code)
-                    .map(|k| k.index as usize)
-            })
+        // LED indices, not ranks in `keys`: a frame covers the 132 matrix
+        // positions, of which 106 carry a key.
+        let lit_at = |time: f64| -> Vec<usize> {
+            let frame = render_with_inputs(&ctx, time, 0, "{}", "", 1_600_000_007_250.0, len)
+                .expect("render");
+            layout()
+                .keys
+                .iter()
+                .map(|k| k.index as usize)
+                .filter(|&i| frame[i * 3..i * 3 + 3] != BACKGROUND)
+                .collect()
+        };
+        // The first row of the matrix, holes left out.
+        let function_row: Vec<usize> = layout().matrix[..usize::from(layout().cols)]
+            .iter()
+            .filter(|&&index| index != u16::MAX)
+            .map(|&index| usize::from(index))
             .collect();
-        assert_eq!(digits.len(), 10, "the number row of this layout");
 
-        let lit = digits
-            .iter()
-            .filter(|&&i| frame[i * 3..i * 3 + 3] != [4, 6, 12])
-            .count();
-        assert!((1..=4).contains(&lit), "digit keys lit: {lit}");
+        // Ten seconds at the default speed is more than a lap.
+        let frames: Vec<Vec<usize>> = (0..40).map(|i| lit_at(f64::from(i) * 0.25)).collect();
 
-        // Escape is not a digit, so it stays the background.
-        let escape = layout()
-            .keys
-            .iter()
-            .find(|k| k.scancode == 0x01)
-            .expect("Escape")
-            .index as usize;
-        assert_eq!(
-            &frame[escape * 3..escape * 3 + 3],
-            &[4, 6, 12],
-            "background"
+        let most = frames.iter().map(Vec::len).max().unwrap_or(0);
+        assert!(
+            most >= 15,
+            "a banner of four digits lights keys: at most {most}"
+        );
+        assert!(
+            frames
+                .iter()
+                .all(|lit| lit.iter().all(|i| !function_row.contains(i))),
+            "the function row stays dark"
+        );
+        assert!(
+            frames.windows(2).any(|pair| pair[0] != pair[1]),
+            "the text moves"
         );
     }
 

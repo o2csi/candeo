@@ -1,82 +1,110 @@
-// Clock — the time, read on the number row.
+// Clock — the time, scrolling across the keyboard in lit digits.
 //
-// It reads the wall clock (`inputs: ['clock']`), which costs nothing to capture
-// and reveals nothing: every effect asking for it gets it.
+// The keyboard is read as a small display: each key a pixel, digits drawn in a
+// 3×5 font over the five rows from the number row down, the function row left
+// dark above them. The text travels from right to left in physical key units,
+// so a digit keeps its width across the staggered rows and the speed is the
+// same with or without a numeric keypad.
 //
-// The digits are found by **scancode**, not by label: `0x02`…`0x0B` are the keys
-// engraved 1 to 9 then 0 on every layout, AZERTY and QWERTY alike. So 14:35
-// lights 1 and 4 in the hours colour and 3 and 5 in the minutes colour; a digit
-// both halves need — 12:23 — takes the two mixed, the only honest thing to draw
-// on one key.
-//
-// With no clock, which is how the swatch is sampled, the time reads 00:00: the
-// zero lights, and the thumbnail shows the effect's colours rather than black.
+// It reads the wall clock (`inputs: ['clock']`), for which nothing is captured.
+// With no clock, which is how the swatch is sampled, it scrolls 00:00.
 
-import { defineEffect, mix } from '@candeo/effects-api'
+import { bounds, center, defineEffect } from '@candeo/effects-api'
 
-const HOURS = { r: 255, g: 176, b: 64 }
-const MINUTES = { r: 64, g: 200, b: 255 }
+const COLOR = { r: 255, g: 176, b: 64 }
 const BACKGROUND = { r: 4, g: 6, b: 12 }
 
-/** Scancodes of the number row, in digit order: `1`…`9`, then `0`. */
-const DIGITS = [0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b]
+/** Digits 0 to 9, three columns by five rows, `#` lit. */
+const DIGITS = [
+  ['###', '#.#', '#.#', '#.#', '###'],
+  ['.#.', '##.', '.#.', '.#.', '###'],
+  ['###', '..#', '###', '#..', '###'],
+  ['###', '..#', '.##', '..#', '###'],
+  ['#.#', '#.#', '###', '..#', '..#'],
+  ['###', '#..', '###', '..#', '###'],
+  ['###', '#..', '###', '#.#', '###'],
+  ['###', '..#', '..#', '..#', '..#'],
+  ['###', '#.#', '###', '#.#', '###'],
+  ['###', '#.#', '###', '..#', '###'],
+]
+const COLON = ['.', '#', '.', '#', '.']
+const NO_COLON = ['.', '.', '.', '.', '.']
 
-/** The scancode of the key engraved with this digit — `0` sits last on the row. */
-function scancodeOf(digit = 0) {
-  return DIGITS[(digit + 9) % 10]
+/** The five lines of text these glyphs make, one dark column between two. */
+function banner(glyphs = [NO_COLON]) {
+  const lines = ['', '', '', '', '']
+  glyphs.forEach((glyph, i) => {
+    for (let line = 0; line < 5; line++) {
+      lines[line] += (i === 0 ? '' : '.') + glyph[line]
+    }
+  })
+  return lines
 }
 
 export default defineEffect({
   description: {
-    en: 'The time, lit on the number row: hours in one colour, minutes in another',
-    fr: "L'heure, allumée sur la rangée des chiffres : heures d'une couleur, minutes d'une autre",
+    en: 'The time scrolling across the keyboard, in lit digits',
+    fr: "L'heure qui défile sur le clavier, en chiffres lumineux",
   },
   kinds: ['keyboard'],
   inputs: ['clock'],
   params: {
-    hours: { kind: 'color', label: { en: 'Hours', fr: 'Heures' }, default: HOURS },
-    minutes: { kind: 'color', label: { en: 'Minutes', fr: 'Minutes' }, default: MINUTES },
+    color: { kind: 'color', label: { en: 'Digits', fr: 'Chiffres' }, default: COLOR },
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },
+    speed: {
+      kind: 'number',
+      label: { en: 'Speed (keys per second)', fr: 'Vitesse (touches par seconde)' },
+      min: 1,
+      max: 20,
+      step: 1,
+      default: 6,
+    },
     hour12: {
       kind: 'boolean',
       label: { en: 'Show the hour on 12', fr: "Afficher l'heure sur 12" },
       default: false,
     },
-    beat: {
+    blink: {
       kind: 'boolean',
-      label: { en: 'Beat every second', fr: 'Battre chaque seconde' },
+      label: { en: 'Blink the colon', fr: 'Faire clignoter les deux-points' },
       default: true,
     },
   },
-  render({ layout, clock, frame, params }) {
-    const hoursColor = params.hours ?? HOURS
-    const minutesColor = params.minutes ?? MINUTES
+  render({ layout, time, clock, frame, params }) {
+    const color = params.color ?? COLOR
     const background = params.background ?? BACKGROUND
-    const both = mix(hoursColor, minutesColor, 0.5)
+    const speed = Number(params.speed ?? 6)
+    const onTwelve = params.hour12 ?? false
 
-    // Midnight and noon read 12 on a twelve-hour face, never 0.
-    const hour = (params.hour12 ?? false) ? clock.hours % 12 || 12 : clock.hours
+    // Midnight and noon read 12 on a twelve-hour face, and its hours take no
+    // leading zero there: 9:05, where a 24-hour clock reads 09:05.
+    const hour = onTwelve ? clock.hours % 12 || 12 : clock.hours
+    const hourGlyphs =
+      onTwelve && hour < 10 ? [DIGITS[hour]] : [DIGITS[Math.floor(hour / 10)], DIGITS[hour % 10]]
+    // Lit for the first half of each second, so the clock shows it is running.
+    const colon = (params.blink ?? true) && clock.ms >= 500 ? NO_COLON : COLON
 
-    // A pulse fading over the second, so the keyboard shows a clock running
-    // rather than one frozen on the minute.
-    const beat = (params.beat ?? true) ? 1 - 0.35 * (clock.ms / 1000) : 1
+    const lines = banner([
+      ...hourGlyphs,
+      colon,
+      DIGITS[Math.floor(clock.minutes / 10)],
+      DIGITS[clock.minutes % 10],
+    ])
+    const width = lines[0].length
 
-    const firstHour = scancodeOf(Math.floor(hour / 10))
-    const lastHour = scancodeOf(hour % 10)
-    const firstMinute = scancodeOf(Math.floor(clock.minutes / 10))
-    const lastMinute = scancodeOf(clock.minutes % 10)
+    // The text comes in past the right edge and leaves past the left one, then
+    // comes round again: a lap is the keyboard's width plus the text's own.
+    const area = bounds(layout)
+    const lap = area.w + width
+    const left = area.x + area.w - ((time * speed) % lap)
 
     for (const key of layout.keys) {
-      const code = key.scancode
-      const isHour = code === firstHour || code === lastHour
-      const isMinute = code === firstMinute || code === lastMinute
-
-      if (!isHour && !isMinute) {
-        frame.set(key, background)
-        continue
-      }
-      const color = isHour && isMinute ? both : isHour ? hoursColor : minutesColor
-      frame.set(key, mix(background, color, beat))
+      // The number row is the text's first line; the function row has none.
+      const line = key.row - 1
+      const column = Math.floor(center(key).x - left)
+      const lit =
+        line >= 0 && line < 5 && column >= 0 && column < width && lines[line][column] === '#'
+      frame.set(key, lit ? color : background)
     }
   },
 })

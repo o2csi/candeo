@@ -566,7 +566,7 @@ user's; what was done there is repaired on request, never at startup — see
 | Crossing beams | — | a vertical and a horizontal beam sweeping across each other |
 | Swirl circles | — | two glowing circles orbiting the center |
 | Ripples | — | a ring spreading from every key pressed; reads key presses |
-| Clock | — | the time on the number row, hours and minutes in two colors; reads the clock |
+| Clock | — | the time scrolling across the keys in lit digits; reads the clock |
 
 Color wheel to Swirl circles were written for Candeo after effects of the OpenRGB
 Effects Plugin, from what they show, not from its code. None of the shipped
