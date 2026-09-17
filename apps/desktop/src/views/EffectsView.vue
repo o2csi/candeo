@@ -72,6 +72,7 @@ import {
   engineStatus,
   getDefaultLayout,
   getLayout,
+  resumeDevice,
   startEffect,
   stopEffect,
   type EffectEntry,
@@ -86,6 +87,7 @@ import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
+import { interruptionLine } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
 import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
@@ -431,6 +433,9 @@ function statusOf(d: { vid: number; pid: number } | null) {
  */
 function runningOn(d: { vid: number; pid: number } | null): string | null {
   const s = statusOf(d)
+  // A rule interrupting the device runs its own effect, but that effect is not
+  // applied: the one the device goes back to still is (#106).
+  if (d && s?.interruption) return lastAppliedOn({ vid: d.vid, pid: d.pid })
   if (s?.running === true && s.effectId !== null) return s.effectId
   return appliedOn(d ? { vid: d.vid, pid: d.pid } : null)
 }
@@ -448,6 +453,13 @@ function effectName(id: string | null): string | null {
  * où elle décrit quelque chose.
  */
 function deviceLine(d: { vid: number; pid: number }): string {
+  const interruption = statusOf(d)?.interruption
+  if (interruption) {
+    const rule = interruption.name || (effectName(interruption.effect) ?? interruption.effect)
+    const applied = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
+    const line = interruptionLine(interruption, rule, applied, Date.now())
+    return t(line.key, line.params)
+  }
   const tourne = effectName(runningOn(d))
   if (tourne !== null) return tourne
   const retenu = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
@@ -657,6 +669,26 @@ async function halt(): Promise<void> {
     // relecture, la colonne annoncerait encore « retenu : … » pour un appareil
     // dont plus rien n'est retenu.
     await reloadSettings()
+  }
+}
+
+/**
+ * Ends the rule interrupting the selected device, and gives the device its
+ * effect back now. The rule comes back at its next occurrence.
+ */
+async function resume(): Promise<void> {
+  const d = selectedDevice.value
+  if (!d) return
+
+  problem.value = null
+  working.value = true
+  try {
+    await resumeDevice({ vid: d.vid, pid: d.pid })
+  } catch (e) {
+    problem.value = message(e)
+  } finally {
+    working.value = false
+    await refreshStatus()
   }
 }
 
@@ -1098,7 +1130,8 @@ onBeforeUnmount(() => {
                    distingue deux claviers de la même marque. Il passe à la ligne
                    plutôt que d'être tronqué. -->
               <span class="dev-name">{{ d.name }}</span>
-              <span class="dev-fx">{{ deviceLine(d) }}</span>
+              <!-- The column is narrow and cuts the line: the whole of it on hover. -->
+              <span class="dev-fx" :title="deviceLine(d)">{{ deviceLine(d) }}</span>
             </span>
           </button>
 
@@ -1373,6 +1406,11 @@ onBeforeUnmount(() => {
           -->
           <button v-if="runningHere" class="ghost" :disabled="working" @click="halt">
             {{ t('effects.stop') }}
+          </button>
+
+          <!-- A rule interrupts the device: the gesture that ends it now. -->
+          <button v-if="status?.interruption" class="ghost" :disabled="working" @click="resume">
+            {{ t('effects.resume') }}
           </button>
 
           <!-- Un effet matériel n'a pas de code : le dire vaut mieux que de

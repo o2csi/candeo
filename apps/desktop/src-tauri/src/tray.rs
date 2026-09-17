@@ -177,6 +177,10 @@ enum Action {
     ToggleOutput { device: DeviceRef },
     /// The firmware's `Effect::Off` on this device.
     TurnOff { device: DeviceRef },
+    /// End the rule interrupting this device, and give it its effect back (#106).
+    Resume { device: DeviceRef },
+    /// Pause automations, or turn them back on.
+    ToggleAutomations,
 }
 
 // Each constant is named after the value it holds, and three of them are
@@ -187,6 +191,8 @@ const QUITTER: &str = "quitter";
 const EFFET: &str = "effet";
 const SORTIE: &str = "sortie";
 const ETEINDRE: &str = "eteindre";
+const RESUME: &str = "resume";
+const AUTOMATIONS: &str = "automations";
 
 /// The separator between the fields of an identifier.
 ///
@@ -222,6 +228,8 @@ impl Action {
             Self::Start { device, effet } => format!("{EFFET}{SEP}{}{SEP}{effet}", hex_id(*device)),
             Self::ToggleOutput { device } => format!("{SORTIE}{SEP}{}", hex_id(*device)),
             Self::TurnOff { device } => format!("{ETEINDRE}{SEP}{}", hex_id(*device)),
+            Self::Resume { device } => format!("{RESUME}{SEP}{}", hex_id(*device)),
+            Self::ToggleAutomations => AUTOMATIONS.to_owned(),
         }
     }
 
@@ -234,6 +242,7 @@ impl Action {
         match id {
             OUVRIR => return Some(Self::OpenWindow),
             QUITTER => return Some(Self::QuitApp),
+            AUTOMATIONS => return Some(Self::ToggleAutomations),
             _ => {}
         }
 
@@ -251,6 +260,9 @@ impl Action {
                 device: device(vid, rest)?,
             }),
             ETEINDRE => Some(Self::TurnOff {
+                device: device(vid, rest)?,
+            }),
+            RESUME => Some(Self::Resume {
                 device: device(vid, rest)?,
             }),
             _ => None,
@@ -453,6 +465,19 @@ fn menu(app: &AppHandle) -> Built<(Menu<Wry>, Option<String>)> {
     };
 
     items.push(Box::new(separator_item(app)?));
+    // Above Open window, and only once there is a rule to pause: a switch that
+    // governs nothing would be one more line to read past.
+    if let Ok(settings) = storage::store(app).and_then(|s| s.read_settings()) {
+        if !settings.rules.is_empty() {
+            items.push(Box::new(check_item(
+                app,
+                &Action::ToggleAutomations,
+                &i18n::text(language, "tray.pauseAutomations"),
+                true,
+                settings.preferences.automations_paused,
+            )?));
+        }
+    }
     items.push(Box::new(item(
         app,
         &Action::OpenWindow,
@@ -500,6 +525,33 @@ fn device_submenu(
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
     if let Some(reason) = &view.reason {
         items.push(Box::new(inert_item(app, reason)?));
+        items.push(Box::new(separator_item(app)?));
+    }
+    // A rule interrupting the device comes first: it is what the device shows,
+    // and Resume is the gesture that ends it. No countdown — a menu does not
+    // update while it is open, and a figure frozen there would be wrong.
+    if let Some(interruption) = crate::automations::status(app, controlled.device) {
+        let rule = if interruption.name.is_empty() {
+            effect_label(&interruption.effect, library, language)
+        } else {
+            interruption.name
+        };
+        items.push(Box::new(inert_item(
+            app,
+            &i18n::t(
+                language,
+                "tray.interruptedBy",
+                &BTreeMap::from([("rule", rule)]),
+            ),
+        )?));
+        items.push(Box::new(item(
+            app,
+            &Action::Resume {
+                device: controlled.device,
+            },
+            &i18n::text(language, "tray.resume"),
+            view.effects,
+        )?));
         items.push(Box::new(separator_item(app)?));
     }
     // Only what can start: a file not compiled yet, or that does not load, would
@@ -563,6 +615,23 @@ fn device_submenu(
         .map_err(|e| format!("submenu of {} not assembled: {e}", controlled.device))
 }
 
+/// How an effect a rule shows is named to a person: the library's name, or the
+/// firmware effect's, in the interface language.
+fn effect_label(id: &str, library: &[EffectEntry], language: Language) -> String {
+    let key = match id {
+        "hardware:off" => "effects.hardwareEffects.off.name",
+        "hardware:spectrumCycle" => "effects.hardwareEffects.spectrumCycle.name",
+        "hardware:wave" => "effects.hardwareEffects.wave.name",
+        _ => {
+            return library
+                .iter()
+                .find(|e| e.id == id)
+                .map_or_else(|| id.to_owned(), |e| e.manifest.name.clone())
+        }
+    };
+    i18n::text(language, key)
+}
+
 fn item(app: &AppHandle, action: &Action, text: &str, enabled: bool) -> Built<MenuItem<Wry>> {
     MenuItem::with_id(app, action.to_id(), text, enabled, None::<&str>)
         .map_err(|e| format!("item “{text}” not created: {e}"))
@@ -617,7 +686,28 @@ fn perform(app: &AppHandle, action: Action) {
             turn_off_device(app, device);
             report_change(app);
         }
+        // Both report the change themselves, through the command they share
+        // with the window.
+        Action::Resume { device } => crate::automations::resume_device(app.clone(), device),
+        Action::ToggleAutomations => toggle_automations(app),
     }
+}
+
+/// Pauses automations, or turns them back on, **based on the file**: muda flips
+/// the check mark on click by itself, and trusting it would undo a change made
+/// from the window meanwhile.
+fn toggle_automations(app: &AppHandle) {
+    let paused = match storage::store(app).and_then(|s| s.read_settings()) {
+        Ok(settings) => settings.preferences.automations_paused,
+        Err(e) => {
+            tracing::warn!("automations not paused from the system tray: {e}");
+            return;
+        }
+    };
+    if let Err(e) = crate::automations::set_automations_paused(app.clone(), !paused) {
+        tracing::warn!("automations not paused from the system tray: {e}");
+    }
+    report_change(app);
 }
 
 /// What an action has just invalidated: the menu, and the window.
@@ -672,6 +762,8 @@ fn start(app: &AppHandle, device: DeviceRef, effect: &str) {
     // The window's command, not a copy: starting an effect from the menu must
     // do exactly what the gallery does — same library lookup, same layout, same
     // handle shared with the loop, settings re-read now.
+    // A gesture from the menu ends an interruption, as one from the window does.
+    crate::automations::dismiss(app, device);
     if let Err(e) = crate::runtime::start_saved(app, device, effect) {
         // The engine may already have named the cause under its own *span*;
         // what would be missing without this line is **where the request came
@@ -711,6 +803,7 @@ fn toggle_output(app: &AppHandle, device: DeviceRef) {
 fn turn_off_device(app: &AppHandle, device: DeviceRef) {
     let state = app.state::<AppState>();
     state.engine.stop(device);
+    crate::automations::dismiss(app, device);
     // Nothing runs on this device any more, and the file must say so: leaving
     // the identifier in place would make `settings.json` describe an effect
     // nobody asks for any more. It is the same step `stop_effect` takes from
@@ -876,6 +969,8 @@ mod tests {
             },
             Action::ToggleOutput { device: DEVICE },
             Action::TurnOff { device: OTHER },
+            Action::Resume { device: DEVICE },
+            Action::ToggleAutomations,
         ]
     }
 

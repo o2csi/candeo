@@ -1,0 +1,477 @@
+//! Rules, and the resolver deciding what they ask of a device at an instant.
+//!
+//! **Pure**: no clock, no device, no disk. Everything that changes the answer —
+//! the instant, the rules, the pause, what someone tried — comes in as an
+//! argument, so every case below is a unit test rather than an evening in front of
+//! a keyboard waiting for the hour (`docs/design/inputs-and-automations.md` §3.4).
+//!
+//! # When: a cron expression
+//!
+//! A rule says when it applies with a cron expression and for how long each time:
+//! `0 * * * *` for 10 seconds is the hour; `0 22 * * *` for 9 hours, the night;
+//! `0 9-18 * * 1-5`, office hours. One trigger that already says everything a
+//! schedule of our own would have grown into, one option at a time.
+
+use std::collections::HashMap;
+use std::str::FromStr;
+
+use chrono::{DateTime, TimeZone};
+use croner::Cron;
+use serde::{Deserialize, Serialize};
+
+use crate::DeviceRef;
+
+/// A rule, as `settings.json` holds it (§3.2).
+///
+/// > **Every hour** · **on** *DeathStalker V2 Pro* · **show** *Clock* · **for**
+/// > *10 seconds*
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Rule {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// Off unless said: a rule someone has not switched on does nothing, and the
+    /// examples the interface offers start that way.
+    #[serde(default)]
+    pub enabled: bool,
+    pub devices: Vec<DeviceRef>,
+    pub when: Trigger,
+    pub show: Show,
+    #[serde(rename = "for", default)]
+    pub lasts: Lasts,
+}
+
+/// When a rule applies. `signal` and `idle` come with their own pull requests,
+/// as further variants of this tag.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Trigger {
+    /// An occurrence starts each time the expression matches the local time: five
+    /// fields, `minute hour day month weekday`, or six with seconds first.
+    Cron { expr: String },
+}
+
+/// What a rule shows: an effect id, as `activeEffects` names them, and its own
+/// settings — never the ones saved for that effect on the device, since the
+/// clock on the hour and the clock applied by hand need not look alike.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Show {
+    pub effect: String,
+    #[serde(default)]
+    pub params: serde_json::Map<String, serde_json::Value>,
+}
+
+/// How long an occurrence lasts.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lasts {
+    pub seconds: u32,
+}
+
+impl Default for Lasts {
+    fn default() -> Self {
+        Self { seconds: 10 }
+    }
+}
+
+impl Rule {
+    /// The rule's expression, parsed; or why it cannot be, in English, for the log
+    /// and the interface.
+    pub fn cron(&self) -> Result<Cron, String> {
+        let Trigger::Cron { expr } = &self.when;
+        Cron::from_str(expr).map_err(|e| format!("\"{expr}\" is not a cron expression: {e}"))
+    }
+
+    /// What makes a rule unusable, in English.
+    ///
+    /// A broken rule stays in the file and does nothing (§3.4): dropping it would
+    /// lose what someone wrote over a typo.
+    pub fn problem(&self) -> Option<String> {
+        if let Err(e) = self.cron() {
+            return Some(e);
+        }
+        if self.lasts.seconds == 0 {
+            return Some("an occurrence lasts 1 second or more".into());
+        }
+        if self.show.effect.is_empty() {
+            return Some("the rule shows no effect".into());
+        }
+        if self.devices.is_empty() {
+            return Some("the rule targets no device".into());
+        }
+        None
+    }
+
+    fn lasts_ms(&self) -> i64 {
+        i64::from(self.lasts.seconds) * 1000
+    }
+}
+
+/// Reads the rules of `settings.json` one by one.
+///
+/// They are kept raw in the file: one malformed rule — edited by hand, written
+/// by a later version — must not make the whole file unreadable, since that
+/// would leave the application silent at startup. Each comes back with its own
+/// verdict instead.
+pub fn parse(raw: &[serde_json::Value]) -> Vec<Result<Rule, String>> {
+    raw.iter()
+        .map(|value| {
+            let rule: Rule = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
+            match rule.problem() {
+                Some(problem) => Err(problem),
+                None => Ok(rule),
+            }
+        })
+        .collect()
+}
+
+/// An occurrence of a rule under way on a device.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Interruption {
+    pub rule: String,
+    pub effect: String,
+    pub params: serde_json::Map<String, serde_json::Value>,
+    /// When this occurrence started, in epoch milliseconds.
+    pub since: i64,
+    /// When it ends, in epoch milliseconds.
+    pub until: i64,
+}
+
+/// Everything, besides the device, the answer depends on.
+pub struct Context<'a, Tz: TimeZone> {
+    /// Now, on the local clock — what a cron expression is read against.
+    pub now: DateTime<Tz>,
+    pub rules: &'a [Rule],
+    /// Pause automations: no expression applies. A rule tried by hand still does.
+    pub paused: bool,
+    /// Rules tried by hand, and when, in epoch milliseconds: each runs once, for
+    /// its duration, switched on or not, paused or not — the gesture wins.
+    pub tried: &'a HashMap<String, i64>,
+}
+
+/// Every occurrence under way on `device` now, first the one that should run.
+///
+/// A rule tried by hand comes first; then the enabled rules, in their order,
+/// which is their priority (§3.2). Several can be under way at once: which one
+/// actually runs also depends on what someone dismissed, and that is the
+/// scheduler's to know — it takes the first it has not.
+pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Interruption> {
+    let now = context.now.timestamp_millis();
+    let usable = |rule: &&Rule| rule.devices.contains(&device) && rule.problem().is_none();
+
+    let tried = context.rules.iter().filter(usable).filter_map(|rule| {
+        let since = *context.tried.get(&rule.id)?;
+        let until = since + rule.lasts_ms();
+        (since <= now && now < until).then(|| interruption(rule, since, until))
+    });
+
+    let scheduled = context
+        .rules
+        .iter()
+        .filter(|rule| !context.paused && rule.enabled)
+        .filter(usable)
+        .filter_map(|rule| {
+            let (since, until) = occurrence(rule, &context.now)?;
+            Some(interruption(rule, since, until))
+        });
+
+    tried.chain(scheduled).collect()
+}
+
+fn interruption(rule: &Rule, since: i64, until: i64) -> Interruption {
+    Interruption {
+        rule: rule.id.clone(),
+        effect: rule.show.effect.clone(),
+        params: rule.show.params.clone(),
+        since,
+        until,
+    }
+}
+
+/// The occurrence of a rule under way at `now`, as `(since, until)`: the last
+/// time its expression matched, when that was less than its duration ago.
+///
+/// Read backwards from now on the local clock, so "at 02:30" on a night the clock
+/// jumps from 02:00 to 03:00 is the library's to settle, not an arithmetic of
+/// ours on milliseconds.
+fn occurrence<Tz: TimeZone>(rule: &Rule, now: &DateTime<Tz>) -> Option<(i64, i64)> {
+    let cron = rule.cron().ok()?;
+    let started = cron.find_previous_occurrence(now, true).ok()?;
+    let since = started.timestamp_millis();
+    let until = since + rule.lasts_ms();
+    (now.timestamp_millis() < until).then_some((since, until))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::FixedOffset;
+
+    const KEYBOARD: DeviceRef = DeviceRef {
+        vid: 0x1532,
+        pid: 0x0292,
+    };
+    const OTHER: DeviceRef = DeviceRef {
+        vid: 0x1234,
+        pid: 0x5678,
+    };
+
+    /// Paris in summer: a fixed offset, so the tests read the same on any
+    /// machine and any runner.
+    fn at(day: u32, hours: u32, minutes: u32, seconds: u32) -> DateTime<FixedOffset> {
+        FixedOffset::east_opt(2 * 3600)
+            .unwrap()
+            .with_ymd_and_hms(2026, 9, day, hours, minutes, seconds)
+            .unwrap()
+    }
+
+    fn ms(time: DateTime<FixedOffset>) -> i64 {
+        time.timestamp_millis()
+    }
+
+    fn rule(id: &str, expr: &str, seconds: u32) -> Rule {
+        Rule {
+            id: id.into(),
+            name: String::new(),
+            enabled: true,
+            devices: vec![KEYBOARD],
+            when: Trigger::Cron { expr: expr.into() },
+            show: Show {
+                effect: format!("shipped:{id}"),
+                params: serde_json::Map::new(),
+            },
+            lasts: Lasts { seconds },
+        }
+    }
+
+    struct Given {
+        paused: bool,
+        tried: HashMap<String, i64>,
+    }
+
+    impl Given {
+        fn nothing() -> Self {
+            Self {
+                paused: false,
+                tried: HashMap::new(),
+            }
+        }
+
+        fn first(
+            &self,
+            now: DateTime<FixedOffset>,
+            rules: &[Rule],
+            device: DeviceRef,
+        ) -> Option<Interruption> {
+            active(
+                &Context {
+                    now,
+                    rules,
+                    paused: self.paused,
+                    tried: &self.tried,
+                },
+                device,
+            )
+            .into_iter()
+            .next()
+        }
+    }
+
+    /// A rule as the tab writes it, read from the file.
+    #[test]
+    fn a_rule_reads_from_json() {
+        let raw: serde_json::Value = serde_json::from_str(
+            r#"{
+              "id": "hourly", "name": "Hourly clock", "enabled": true,
+              "devices": [{ "vid": 5426, "pid": 658 }],
+              "when": { "kind": "cron", "expr": "0 * * * *" },
+              "show": { "effect": "shipped:Clock", "params": {} },
+              "for": { "seconds": 10 }
+            }"#,
+        )
+        .unwrap();
+        let parsed = parse(&[raw]);
+        let rule = parsed[0].as_ref().expect("a valid rule");
+        assert_eq!(rule.devices, vec![KEYBOARD]);
+        assert_eq!(rule.lasts.seconds, 10);
+    }
+
+    /// A malformed rule comes back as an error beside the valid ones, rather
+    /// than making the list unreadable; so does an expression that is not cron.
+    #[test]
+    fn a_broken_rule_does_not_take_the_others_with_it() {
+        let good = serde_json::to_value(rule("Clock", "0 * * * *", 10)).unwrap();
+        let bad_expr = serde_json::to_value(rule("Odd", "every hour", 10)).unwrap();
+        let unreadable = serde_json::json!({ "id": "x", "when": "whenever", "show": 12 });
+        let never = serde_json::to_value(rule("Never", "0 * * * *", 0)).unwrap();
+
+        let parsed = parse(&[good, bad_expr, unreadable, never]);
+        assert!(parsed[0].is_ok());
+        assert!(
+            parsed[1].as_ref().unwrap_err().contains("every hour"),
+            "{:?}",
+            parsed[1]
+        );
+        assert!(parsed[2].is_err());
+        assert!(
+            parsed[3].as_ref().unwrap_err().contains("1 second"),
+            "{:?}",
+            parsed[3]
+        );
+    }
+
+    /// Absent, `for` is ten seconds and `enabled` is off.
+    #[test]
+    fn a_rule_says_little_and_gets_the_defaults() {
+        let raw = serde_json::json!({
+            "id": "hourly", "devices": [{ "vid": 5426, "pid": 658 }],
+            "when": { "kind": "cron", "expr": "0 * * * *" },
+            "show": { "effect": "shipped:Clock" }
+        });
+        let rule: Rule = serde_json::from_value(raw).unwrap();
+        assert_eq!(rule.lasts.seconds, 10);
+        assert!(!rule.enabled);
+    }
+
+    /// The hour for ten seconds: on the hour, not a second before, not one after.
+    #[test]
+    fn an_hourly_rule_interrupts_on_the_hour_for_its_duration() {
+        let rules = [rule("Clock", "0 * * * *", 10)];
+        let given = Given::nothing();
+
+        let found = given
+            .first(at(17, 10, 0, 5), &rules, KEYBOARD)
+            .expect("on the hour");
+        assert_eq!(found.since, ms(at(17, 10, 0, 0)));
+        assert_eq!(found.until, ms(at(17, 10, 0, 10)));
+        assert_eq!(found.effect, "shipped:Clock");
+
+        assert!(
+            given.first(at(17, 10, 0, 10), &rules, KEYBOARD).is_none(),
+            "over"
+        );
+        assert!(
+            given.first(at(17, 9, 59, 59), &rules, KEYBOARD).is_none(),
+            "not yet"
+        );
+        assert!(
+            given.first(at(17, 10, 0, 5), &rules, OTHER).is_none(),
+            "another device"
+        );
+    }
+
+    /// At 22:00 for nine hours is the night: still under way at 06:59 the next
+    /// morning, over at seven.
+    #[test]
+    fn a_long_occurrence_runs_past_midnight() {
+        let rules = [rule("Off", "0 22 * * *", 9 * 3600)];
+        let given = Given::nothing();
+
+        let night = given.first(at(17, 23, 30, 0), &rules, KEYBOARD).unwrap();
+        assert_eq!(night.since, ms(at(17, 22, 0, 0)));
+        assert_eq!(night.until, ms(at(18, 7, 0, 0)));
+
+        let dawn = given.first(at(18, 6, 59, 59), &rules, KEYBOARD).unwrap();
+        assert_eq!(dawn.since, night.since, "the same night");
+
+        assert!(
+            given.first(at(18, 7, 0, 0), &rules, KEYBOARD).is_none(),
+            "seven"
+        );
+        assert!(
+            given.first(at(18, 12, 0, 0), &rules, KEYBOARD).is_none(),
+            "noon"
+        );
+    }
+
+    /// Weekdays only: Thursday the 17th of September 2026 matches, Saturday the
+    /// 19th does not.
+    #[test]
+    fn days_of_the_week_are_the_expression_s() {
+        let rules = [rule("Clock", "0 9 * * 1-5", 60)];
+        let given = Given::nothing();
+        assert!(
+            given.first(at(17, 9, 0, 30), &rules, KEYBOARD).is_some(),
+            "Thursday"
+        );
+        assert!(
+            given.first(at(19, 9, 0, 30), &rules, KEYBOARD).is_none(),
+            "Saturday"
+        );
+    }
+
+    /// Six fields: every thirty seconds, a five-second flash.
+    #[test]
+    fn seconds_are_a_sixth_field() {
+        let rules = [rule("Flash", "*/30 * * * * *", 5)];
+        let given = Given::nothing();
+        assert!(given.first(at(17, 12, 0, 32), &rules, KEYBOARD).is_some());
+        assert!(given.first(at(17, 12, 0, 36), &rules, KEYBOARD).is_none());
+    }
+
+    /// Every second for a second: an occurrence under way at every instant,
+    /// each starting when the last ended — the scheduler strings them into one.
+    #[test]
+    fn back_to_back_occurrences_touch() {
+        let rules = [rule("Clock", "* * * * * *", 1)];
+        let given = Given::nothing();
+        let first = given.first(at(17, 14, 0, 0), &rules, KEYBOARD).unwrap();
+        let next = given.first(at(17, 14, 0, 1), &rules, KEYBOARD).unwrap();
+        assert_eq!(next.since, first.until);
+    }
+
+    /// Two rules at once: both are under way, the first in the list first.
+    #[test]
+    fn rules_come_in_their_order() {
+        let rules = [
+            rule("Clock", "0 * * * *", 10),
+            rule("Rain", "* * * * *", 30),
+        ];
+        let given = Given::nothing();
+        let under_way = active(
+            &Context {
+                now: at(17, 10, 0, 5),
+                rules: &rules,
+                paused: false,
+                tried: &given.tried,
+            },
+            KEYBOARD,
+        );
+        let order: Vec<&str> = under_way.iter().map(|i| i.rule.as_str()).collect();
+        assert_eq!(order, ["Clock", "Rain"]);
+    }
+
+    /// Switched off or paused, a rule does nothing; tried by hand, it runs once
+    /// all the same, ahead of everything scheduled.
+    #[test]
+    fn off_and_paused_rules_rest_but_a_try_runs() {
+        let mut off = rule("Clock", "0 * * * *", 10);
+        off.enabled = false;
+        let rules = [off, rule("Rain", "* * * * *", 59)];
+        let mut given = Given::nothing();
+        assert_eq!(
+            given
+                .first(at(17, 10, 0, 5), &rules, KEYBOARD)
+                .unwrap()
+                .rule,
+            "Rain"
+        );
+
+        given.paused = true;
+        assert!(
+            given.first(at(17, 10, 0, 5), &rules, KEYBOARD).is_none(),
+            "paused"
+        );
+
+        given.tried.insert("Clock".into(), ms(at(17, 15, 12, 0)));
+        let tried = given
+            .first(at(17, 15, 12, 3), &rules, KEYBOARD)
+            .expect("tried");
+        assert_eq!(tried.rule, "Clock");
+        assert_eq!(tried.until, ms(at(17, 15, 12, 10)));
+        assert!(
+            given.first(at(17, 15, 12, 10), &rules, KEYBOARD).is_none(),
+            "once"
+        );
+    }
+}

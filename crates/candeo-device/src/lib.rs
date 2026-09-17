@@ -114,6 +114,14 @@ impl Keyboard {
         self.send(Report::set_effect(effect))
     }
 
+    /// The effect the firmware runs now, read back — the same read the inspection
+    /// makes on opening. An automation reads it before interrupting a device no
+    /// host loop drives, to give that effect back afterwards: nothing else
+    /// remembers a firmware effect. `None` for one it cannot describe.
+    pub fn current_effect(&self) -> Result<Option<Effect>, String> {
+        inspection::read_effect(&self.device)
+    }
+
     pub fn set_brightness(&self, level: u8) -> Result<(), Error> {
         self.send(Report::set_brightness(level))
     }

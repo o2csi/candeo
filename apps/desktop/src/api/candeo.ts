@@ -413,6 +413,8 @@ export interface Preferences {
   theme?: ThemeSetting
   /** Whether Candeo asks GitHub, once per launch, for a newer version. Absent = on. */
   checkForUpdates?: boolean
+  /** Pause automations: no rule interrupts any device. Absent = off. */
+  automationsPaused?: boolean
 }
 
 /** Turns resuming applied effects on or off. */
@@ -540,6 +542,47 @@ export interface Settings {
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]
   effectParams: EffectParamsRecord[]
+  /**
+   * Automation rules, in their order, which is their priority. Kept here even by
+   * code that does not read them: writing `Settings` back without them would
+   * erase them.
+   */
+  rules: Rule[]
+}
+
+/**
+ * A rule interrupting the effect applied on a device for a while (#106). Mirror
+ * of `Rule`, in `src-tauri/src/automations/resolver.rs`.
+ */
+export interface Rule {
+  id: string
+  name: string
+  /** Off until someone switches it on. */
+  enabled: boolean
+  devices: DeviceRef[]
+  when: CronTrigger
+  show: RuleShow
+  /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
+  for: RuleDuration
+}
+
+/**
+ * An occurrence starts each time the expression matches the local time: five
+ * fields, `minute hour day month weekday`, or six with seconds first.
+ */
+export interface CronTrigger {
+  kind: 'cron'
+  expr: string
+}
+
+/** The effect a rule shows, with its own settings rather than the device's. */
+export interface RuleShow {
+  effect: string
+  params: EffectParams
+}
+
+export interface RuleDuration {
+  seconds: number
 }
 
 /**
@@ -620,6 +663,40 @@ export interface EngineStatus {
    */
   reachingKeyboard: boolean
   toKeyboard: boolean
+  /** The rule interrupting this device, when one does (#106). */
+  interruption?: InterruptionStatus
+}
+
+/** A rule interrupting a device, as the engine reports it. */
+export interface InterruptionStatus {
+  /** The rule's id. */
+  rule: string
+  /** The rule's name; empty when it has none. */
+  name: string
+  /** The effect it shows. */
+  effect: string
+  /** When it ends, in epoch milliseconds; absent for a rule that never stops. */
+  until?: number
+}
+
+/** Ends the interruption on a device now, and gives it its effect back. */
+export function resumeDevice(device: DeviceRef): Promise<void> {
+  return invoke('resume_device', { device })
+}
+
+/** Pauses automations, or turns them back on. */
+export function setAutomationsPaused(paused: boolean): Promise<void> {
+  return invoke('set_automations_paused', { paused })
+}
+
+/** Replaces the rules, in the order given, which is their priority. */
+export function setRules(rules: Rule[]): Promise<void> {
+  return invoke('set_rules', { rules })
+}
+
+/** Runs a rule once, now, for its duration, whatever its switch and the pause. */
+export function tryRule(id: string): Promise<void> {
+  return invoke('try_rule', { id })
 }
 
 /** L'état d'un appareil, et à qui il appartient. */

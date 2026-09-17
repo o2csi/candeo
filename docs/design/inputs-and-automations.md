@@ -70,10 +70,10 @@ which is also how a swatch is sampled.
   3×5 font on the five top rows, function keys included, the space bar's row
   left dark — and scrolls the hour across it, in physical key units so a digit
   keeps its width over the staggered rows.
-- **When and for how long** is an **automation** (§3): *every 3600 seconds, for
-  10 seconds* shows the clock on the hour and gives the keyboard back; *every
-  second, for 1 second* never gives it back, which is the continuous display
-  again, on top of whatever is applied.
+- **When and for how long** is an **automation** (§3): `0 * * * *` *for 10
+  seconds* shows the clock on the hour and gives the keyboard back; `* * * * * *`
+  *for 1 second* never gives it back, which is the continuous display again, on
+  top of whatever is applied.
 
 Later, if asked: sunrise and sunset, which need a location.
 
@@ -150,6 +150,11 @@ render({ signals }) // { doorbell: 'ring', ci: 'failed', volume: 0.4 }
 
 ## 3. Automations
 
+**Shipped with the `cron` trigger** (#106): the resolver and the scheduler in
+`src-tauri/src/automations/`, `rules` in `settings.json`, the Automations tab,
+interruptions on the device card and in the tray. What the implementation had to
+decide beyond this section is written at the end of it, in §3.6.
+
 ### 3.1 The principle: one effect per device, interrupted
 
 A device still runs **exactly one effect** at a time. What changes is where that
@@ -168,34 +173,47 @@ chose, with its settings.
 
 A rule is one sentence someone can read back:
 
-> **Every** *3600 seconds* · **on** *DeathStalker V2 Pro* · **show** *Clock* ·
-> **for** *10 seconds*
+> **Every hour** · **on** *DeathStalker V2 Pro* · **show** *Clock* · **for**
+> *10 seconds*
 
 ```json
 "rules": [{
   "id": "…", "name": "Hourly clock", "enabled": true,
   "devices": [{ "vid": 5426, "pid": 658 }],
-  "when": { "kind": "schedule", "every": 3600, "aligned": true },
-  "show": { "effect": "Clock", "params": {} },
+  "when": { "kind": "cron", "expr": "0 * * * *" },
+  "show": { "effect": "shipped:Clock", "params": {} },
   "for": { "seconds": 10 }
 }]
 ```
 
-- **The schedule**: one trigger, in seconds, with a few options:
+- **When: a cron expression**, read against the local clock, and a duration. An
+  occurrence starts each time the expression matches and lasts `for` seconds
+  (10 unless said):
 
-  | Option | Meaning | Default |
+  | Rule | Expression | For |
   |---|---|---|
-  | `every` | seconds between two occurrences, 1 or more; the interface offers 1 s, 1 min, 15 min, 1 h | — |
-  | `for` | seconds each occurrence lasts | 10 |
-  | `aligned` | occurrences fall on the clock (on the minute, on the hour) rather than counted from when the rule was enabled | on when `every` divides a day |
-  | `between` | only between two times, `22:00`–`07:00`; outside them the rule sleeps | always |
+  | The hour | `0 * * * *` | 10 s |
+  | Every quarter of an hour | `*/15 * * * *` | 10 s |
+  | The night | `0 22 * * *` | 9 h |
+  | Office hours, weekdays | `0 9-18 * * 1-5` | 10 s |
+  | A flash every thirty seconds | `*/30 * * * * *` | 5 s |
 
-  - **When `for` reaches `every`**, the next occurrence starts before the current
-    one ends: the interruption simply continues. The effect is not restarted, so
-    *every 1 s for 1 s* is a steady display, not a flicker.
-  - **`between` covers time windows**: *every 1 s for 1 s between 22:00 and
-    07:00, show Off* turns the keyboard off at night. No separate trigger is
-    needed.
+  Five fields, or six with seconds first. **A first version had a trigger of its
+  own** — `every` N seconds, `aligned` on the clock, `between` two times — and it
+  was replaced before release: it said less than cron (no days, no fixed times)
+  with more to explain and maintain. Cron's only loss is "every 7 seconds from when
+  the rule was switched on", which nobody asked for.
+
+  - **Back-to-back occurrences are one run.** When an occurrence starts before the
+    last one ended — every second for a second — the interruption continues and the
+    effect is not restarted: a steady display, not a flicker.
+  - **A time window is a start and a duration**: at 22:00 for nine hours, show Off,
+    turns the keyboard off at night.
+
+- **The interface writes the common expressions as chips** — every minute, every
+  quarter of an hour, every hour, at a time; every day, weekdays, weekend, chosen
+  days — and an **advanced** field takes any expression, with its format explained
+  beside it. One of the two holds a rule at a time; the other is shown disabled.
 
 - **Other triggers, with their own pull requests**:
 
@@ -250,8 +268,8 @@ engine:
 ### 3.5 Interface
 
 - **An Automations tab** in the rail, between Effects and Devices:
-  - Each rule is a sentence of chips — *Every* / *on* / *show* / *for*, and
-    *between* when set — each opening a small picker; the durations take presets
+  - Each rule is a sentence of chips — *every hour* / *on weekdays* / *on* / *show*
+    / *for* — each opening a small picker, or an advanced cron field (§3.2); the durations take presets
     and any number of seconds. The effect picker is the gallery's list; its
     settings form is the gallery's.
   - A switch per rule, the order changed by dragging, and a **Try** button that
@@ -265,6 +283,29 @@ engine:
 - **The simulator** shows what the device shows, interruption included, since it
   draws the device loop's frames.
 
+### 3.6 What the implementation decided
+
+- **The applied effect to go back to may be a firmware one.** Candeo remembers a
+  library effect in `activeEffects`, but nothing remembers a firmware effect set
+  from the gallery. So before a first interruption, a device no host loop drives
+  has its current effect read back — `0x0f`/`0x82`, the read the inspection
+  already makes on opening — and that effect is set again when the rule ends. An
+  effect that cannot be read back (Static, Breathing) gives way to *Off*: dark is
+  better than the rule's last frame, frozen.
+- **Resume and a gesture dismiss a run, not a rule.** A run is occurrences of one
+  rule that keep touching — less than a tick and a half apart. Dismissed, it stays
+  dismissed while it continues, so Resume holds on every second for a second; after
+  a gap the rule comes back, the next hour or the next night.
+- **Rules are raw JSON in the file, read one by one.** A broken rule stays as
+  written and does nothing; saving from the tab refuses a new broken rule — an
+  expression that is not cron typed in the advanced field — not one already there.
+- **Expressions are read by `croner`**, backwards from now on the local clock,
+  daylight-saving changes included; **local time comes from `chrono`**: the
+  standard library has no time zones, and `time`, already in the tree, refuses the
+  local offset in a multithreaded process on Linux.
+- **Pause automations** lives in `preferences`, so a "do not disturb" set for a
+  game survives a restart in the middle of it; it is in the tray and in the tab.
+
 ## 4. Order of work
 
 Each step is one pull request, with its issue:
@@ -272,7 +313,7 @@ Each step is one pull request, with its issue:
 1. **Resume the applied effect** when a device opens — at startup, on adoption,
    on replug (#81) — behind a Settings option, on by default (#102).
 2. **Clock input** and the shipped *Clock* effect (#105).
-3. **Automations with the `schedule` trigger**: the resolver, the scheduler,
+3. **Automations with the `cron` trigger**: the resolver, the scheduler,
    `rules` in `settings.json`, the Automations tab, interruptions on the device
    card and in the tray. The periodic clock and the night window come with it
    (#106).

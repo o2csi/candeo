@@ -86,6 +86,7 @@ onMounted(() => {
   <div class="app" :class="{ full }">
     <nav v-if="!full" class="rail">
       <RouterLink to="/" class="tab">{{ t('app.tabs.effects') }}</RouterLink>
+      <RouterLink to="/automations" class="tab">{{ t('app.tabs.automations') }}</RouterLink>
       <RouterLink to="/devices" class="tab">{{ t('app.tabs.devices') }}</RouterLink>
       <RouterLink to="/settings" class="tab">{{ t('app.tabs.settings') }}</RouterLink>
 

@@ -407,6 +407,12 @@ pub struct Preferences {
     /// the answer allows is showing a version and a link.
     #[serde(skip_serializing_if = "is_true")]
     pub check_for_updates: bool,
+    /// Pause automations: no rule interrupts any device until it is turned back
+    /// on (#106). A setting rather than a state of the running application, so
+    /// that a "do not disturb" set for a game survives the restart in the
+    /// middle of it. Off by default, and written only when on.
+    #[serde(skip_serializing_if = "is_false")]
+    pub automations_paused: bool,
 }
 
 impl Default for Preferences {
@@ -418,6 +424,7 @@ impl Default for Preferences {
             log_files_kept: crate::journal::DEFAULT_FILES_KEPT,
             theme: Theme::default(),
             check_for_updates: true,
+            automations_paused: false,
         }
     }
 }
@@ -441,6 +448,10 @@ impl Theme {
 
 fn is_true(value: &bool) -> bool {
     *value
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn is_default_files_kept(value: &u32) -> bool {
@@ -490,6 +501,17 @@ pub struct Settings {
     /// An entry stays when its file is deleted or renamed: it is what keeps a
     /// shipped effect someone removed from coming back at the next launch.
     pub shipped_effects: BTreeMap<String, Option<String>>,
+    /// Automation rules, in their order, which is their priority (#106).
+    ///
+    /// At the root: a rule belongs to no single device — it can target several
+    /// — and is not a preference either.
+    ///
+    /// **Raw JSON, read rule by rule** through [`Settings::rules`]. One rule
+    /// edited by hand into something unreadable must cost that rule, not the
+    /// file: typed here, it would fail the whole read and leave the application
+    /// silent at startup. A broken rule stays as it was written, and does
+    /// nothing.
+    pub rules: Vec<serde_json::Value>,
     /// The log level as an earlier version wrote it, **at the root**.
     ///
     /// Read, never written back (`skip_serializing`): [`Store::read_settings`]
@@ -523,12 +545,19 @@ impl Default for Settings {
             active_effects: Vec::new(),
             effect_params: Vec::new(),
             shipped_effects: BTreeMap::new(),
+            rules: Vec::new(),
             legacy_log_level: None,
         }
     }
 }
 
 impl Settings {
+    /// The rules of the file, each with its own verdict — why the field stays raw
+    /// JSON is said on it; see [`crate::automations::resolver::parse`].
+    pub fn rules(&self) -> Vec<Result<crate::automations::resolver::Rule, String>> {
+        crate::automations::resolver::parse(&self.rules)
+    }
+
     /// Moves into [`Preferences`] what an earlier file carried at the root.
     ///
     /// What is already in place wins: a file written by this version is right
@@ -3618,6 +3647,7 @@ mod tests {
                 log_files_kept: 30,
                 theme: Theme::Light,
                 check_for_updates: false,
+                automations_paused: true,
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -3641,6 +3671,13 @@ mod tests {
                 ("Breathing".to_owned(), Some("abc".to_owned())),
                 ("Sweep".to_owned(), None),
             ]),
+            rules: vec![serde_json::json!({
+                "id": "hourly", "name": "Hourly clock", "enabled": true,
+                "devices": [{ "vid": 5426, "pid": 658 }],
+                "when": { "kind": "cron", "expr": "0 * * * *" },
+                "show": { "effect": "shipped:Clock", "params": {} },
+                "for": { "seconds": 10 }
+            })],
             legacy_log_level: None,
         };
 
@@ -3667,6 +3704,42 @@ mod tests {
         assert_eq!(settings.brightness(VID, PID, None), 10);
         assert_eq!(settings.active_effect(VID, PID), None);
         assert_eq!(settings.preferences, Preferences::default());
+        assert!(settings.rules.is_empty(), "a file from before automations");
+    }
+
+    /// A rule edited by hand into nonsense costs that rule, not the file: the
+    /// settings still read, the rule keeps what was written, and says why it
+    /// does nothing.
+    #[test]
+    fn an_unreadable_rule_does_not_make_the_settings_unreadable() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(
+            config.join("settings.json"),
+            r#"{
+              "devices": [{"vid":5426,"pid":658,"state":"adopted"}],
+              "rules": [
+                {"id": "odd", "when": "whenever", "show": 12},
+                {"id": "hourly", "enabled": true, "devices": [{"vid":5426,"pid":658}],
+                 "when": {"kind":"cron","expr":"0 * * * *"}, "show": {"effect":"shipped:Clock"}}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let settings = store.read_settings().expect("the file still reads");
+        assert_eq!(settings.rules.len(), 2, "both kept as written");
+        let rules = settings.rules();
+        assert!(rules[0].is_err());
+        assert_eq!(rules[1].as_ref().expect("the good one").id, "hourly");
+
+        store.write_settings(&settings).unwrap();
+        let written = fs::read_to_string(config.join("settings.json")).unwrap();
+        assert!(
+            written.contains("whenever"),
+            "the broken rule is written back, not dropped"
+        );
     }
 
     /// **The three single-device leftovers are gone from the file.** Keeping them
@@ -4408,8 +4481,23 @@ mod tests {
             log_files_kept: 0,
             theme: Theme::Dark,
             check_for_updates: false,
+            automations_paused: true,
         };
         mirror("Preferences", &preferences);
+        // A rule with every part present.
+        let rule: crate::automations::resolver::Rule = serde_json::from_value(serde_json::json!({
+            "id": "night", "name": "Night", "enabled": true,
+            "devices": [{ "vid": 5426, "pid": 658 }],
+            "when": { "kind": "cron", "expr": "0 22 * * *" },
+            "show": { "effect": "hardware:off", "params": {} },
+            "for": { "seconds": 32400 }
+        }))
+        .expect("a rule");
+        mirror("Rule", &rule);
+        mirror("RuleShow", &rule.show);
+        mirror("RuleDuration", &rule.lasts);
+        let serialized = serde_json::to_value(&rule).expect("serialization");
+        mirror("CronTrigger", &serialized["when"]);
         mirror(
             "Settings",
             &Settings {

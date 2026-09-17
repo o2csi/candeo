@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager, State};
 use failure::Failure;
 use storage::{DeviceState, Settings};
 
+mod automations;
 mod autostart;
 mod failure;
 mod hotplug;
@@ -1094,8 +1095,16 @@ fn remember_brightness(
 }
 
 #[tauri::command]
-fn set_effect(state: State<'_, AppState>, device: DeviceRef, effect: EffectDto) -> CmdResult<()> {
-    with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect.into())?))
+fn set_effect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    effect: EffectDto,
+) -> CmdResult<()> {
+    with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect.into())?))?;
+    // A firmware effect chosen by hand ends an interruption, like any gesture.
+    automations::dismiss(&app, device);
+    Ok(())
 }
 
 /// Pushes a complete frame.
@@ -1198,6 +1207,9 @@ pub fn run() {
             // the manager, and adoption needs nothing but the state.
             apply_adoptions(app.handle(), &state, &HashSet::new());
             app.manage(state);
+            // Before anything starts an effect: starting one asks whether a
+            // rule interrupts the device.
+            app.manage(automations::Automations::default());
 
             // After `manage`, since starting goes through the command path, which
             // reads the state from the manager; before the tray, so its first menu
@@ -1211,8 +1223,11 @@ pub fn run() {
             // After adoption too, so that the first menu shows the devices
             // already open rather than an empty list.
             tray::install(app.handle());
-            // Last: a replug reconciles through everything above.
+            // A replug reconciles through everything above.
             hotplug::watch(app.handle());
+            // Last: a rule acts on open devices and refreshes the tray, so both
+            // must exist first.
+            automations::start(app.handle());
 
             // The window is declared `create: false`, and built here once the
             // state it reads is managed. Launched at login, no window is built
@@ -1288,6 +1303,10 @@ pub fn run() {
             runtime::subscribe_preview_frames,
             runtime::unsubscribe_preview_frames,
             runtime::engine_status,
+            automations::resume_device,
+            automations::set_automations_paused,
+            automations::set_rules,
+            automations::try_rule,
             storage::list_effects,
             storage::save_effect_source,
             storage::cache_effect,
