@@ -417,6 +417,7 @@ JavaScript compiled from a file's **current** bytes.
   params: Record<string, ParamSpec>,
   apiVersion: number,
   readsKeys: boolean              // déclare `inputs: ['keys']`
+  readsClock: boolean             // déclare `inputs: ['clock']`
 }
 ```
 
@@ -565,12 +566,15 @@ user's; what was done there is repaired on request, never at startup — see
 | Crossing beams | — | a vertical and a horizontal beam sweeping across each other |
 | Swirl circles | — | two glowing circles orbiting the center |
 | Ripples | — | a ring spreading from every key pressed; reads key presses |
+| Clock | — | the time scrolling across the keys in lit digits; reads the clock |
 
 Color wheel to Swirl circles were written for Candeo after effects of the OpenRGB
 Effects Plugin, from what they show, not from its code. None of the shipped
 effects keeps state between frames: what a key shows depends on the instant, and
 for Ripples on the presses the engine gives with it (`docs/design/key-input.md`),
-drawn from deterministic hashes where it looks random.
+for Clock on the wall clock it is handed
+(`docs/design/inputs-and-automations.md` §2.1), drawn from deterministic hashes
+where it looks random.
 
 The former ids are those of the version that compiled them into the binary: the
 migration below moves the settings that still use them.

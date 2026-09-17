@@ -184,6 +184,8 @@ export interface EffectManifest {
   apiVersion: number
   /** Declares `inputs: ['keys']`: key presses are read while it runs. */
   readsKeys?: boolean
+  /** Declares `inputs: ['clock']`: it is given the wall-clock time. */
+  readsClock?: boolean
 }
 
 /**
