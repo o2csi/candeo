@@ -84,10 +84,22 @@ function site() {
   return `https://${owner.toLowerCase()}.github.io/${name}/`
 }
 
+/**
+ * The publisher's page: the owner of the repository on GitHub. It answers as
+ * long as the repository does, which winget's URL check requires of every
+ * address in the manifest — the publisher's own site did not, the day it was
+ * submitted.
+ */
+function publisher() {
+  const [owner] = repository().replace('https://github.com/', '').split('/')
+  return `https://github.com/${owner}`
+}
+
 const values = {
   version,
   repository: repository(),
   site: site(),
+  publisher: publisher(),
   date: await releaseDate(version),
   sha256_setup: named(`candeo_${version}_x64-setup.exe`),
   sha256_msi: named(`candeo_${version}_x64_en-US.msi`),

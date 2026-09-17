@@ -5,7 +5,7 @@ PackageIdentifier: O2CSI.Candeo
 PackageVersion: {{version}}
 PackageLocale: en-US
 Publisher: O2CSI
-PublisherUrl: https://www.o2csi.com
+PublisherUrl: {{publisher}}
 PublisherSupportUrl: {{repository}}/issues
 PrivacyUrl: {{site}}privacy.html
 Author: O2CSI
