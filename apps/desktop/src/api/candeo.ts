@@ -413,6 +413,8 @@ export interface Preferences {
   theme?: ThemeSetting
   /** Whether Candeo asks GitHub, once per launch, for a newer version. Absent = on. */
   checkForUpdates?: boolean
+  /** Pause automations: no rule interrupts any device. Absent = off. */
+  automationsPaused?: boolean
 }
 
 /** Turns resuming applied effects on or off. */
@@ -540,6 +542,53 @@ export interface Settings {
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]
   effectParams: EffectParamsRecord[]
+  /**
+   * Automation rules, in their order, which is their priority. Kept here even by
+   * code that does not read them: writing `Settings` back without them would
+   * erase them.
+   */
+  rules: Rule[]
+}
+
+/**
+ * A rule interrupting the effect applied on a device for a while (#106). Mirror
+ * of `Rule`, in `src-tauri/src/automations/resolver.rs`.
+ */
+export interface Rule {
+  id: string
+  name: string
+  /** Off until someone switches it on. */
+  enabled: boolean
+  devices: DeviceRef[]
+  when: ScheduleTrigger
+  show: RuleShow
+  /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
+  for: RuleDuration
+}
+
+/** Every `every` seconds, aligned on the clock or not, between two times or always. */
+export interface ScheduleTrigger {
+  kind: 'schedule'
+  every: number
+  /** Absent = on when `every` divides a day. */
+  aligned?: boolean
+  between?: TimeWindow
+}
+
+/** `from` included, `to` excluded, as `HH:MM`; wraps past midnight when `from > to`. */
+export interface TimeWindow {
+  from: string
+  to: string
+}
+
+/** The effect a rule shows, with its own settings rather than the device's. */
+export interface RuleShow {
+  effect: string
+  params: EffectParams
+}
+
+export interface RuleDuration {
+  seconds: number
 }
 
 /**

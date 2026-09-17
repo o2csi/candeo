@@ -35,6 +35,7 @@ function settings(part: Partial<Settings> = {}): Settings {
     devices: [],
     activeEffects: [],
     effectParams: [],
+    rules: [],
     ...part,
   }
 }
