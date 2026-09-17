@@ -166,6 +166,27 @@ pub struct LayoutInfo {
     pub frame_len: usize,
     /// Only the cells carrying an LED.
     pub keys: Vec<KeyInfo>,
+    /// The effects this device's **firmware** runs, by the gallery's ids —
+    /// `hardware:spectrumCycle`, `hardware:wave`.
+    ///
+    /// *Off* is never in it and is offered for every device: a firmware that
+    /// draws nothing still goes dark, on a frame of black. The gallery offers
+    /// these and no others, so that nobody picks an effect the device would
+    /// refuse.
+    pub firmware_effects: Vec<String>,
+}
+
+/// The gallery's id for a firmware effect, as `useEffects.ts` writes them.
+fn hardware_id(effect: candeo_protocol::Effect) -> Option<&'static str> {
+    use candeo_protocol::Effect;
+    match effect {
+        Effect::Off => Some("hardware:off"),
+        Effect::SpectrumCycle => Some("hardware:spectrumCycle"),
+        Effect::Wave { .. } => Some("hardware:wave"),
+        // Static and Breathing need a colour the gallery has no way to pass, and
+        // Custom is what the engine drives.
+        _ => None,
+    }
 }
 
 impl From<&'static Layout> for LayoutInfo {
@@ -199,6 +220,12 @@ impl From<&'static Layout> for LayoutInfo {
             cols: l.cols,
             frame_len: l.led_count(),
             keys,
+            firmware_effects: l
+                .firmware_effects
+                .iter()
+                .filter_map(|&e| hardware_id(e))
+                .map(str::to_owned)
+                .collect(),
         }
     }
 }
@@ -1422,6 +1449,7 @@ mod tests {
         port: candeo_device::Port::Interface(3),
         lighting: &candeo_device::lighting::RazerRows,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
+        firmware_effects: &[],
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -1434,6 +1462,7 @@ mod tests {
         port: candeo_device::Port::Interface(3),
         lighting: &candeo_device::lighting::RazerRows,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
+        firmware_effects: &[],
         rows: 1,
         cols: 1,
         matrix: &[0],

@@ -1,6 +1,6 @@
 //! Physical description of the supported devices.
 
-use candeo_protocol::Firmware;
+use candeo_protocol::{Effect, Firmware};
 
 use crate::lighting::{AlienwareKeys, Lighting, RazerRows};
 
@@ -101,6 +101,14 @@ pub struct Layout {
     /// `release_number`: HID enumeration returns the `bcdDevice` there, a frozen
     /// hardware revision that looks like a version and is not one.
     pub surveyed_firmware: Option<Firmware>,
+    /// The effects this **firmware** runs by itself, which the gallery offers
+    /// for this device and no other.
+    ///
+    /// *Off* is not in it and is offered everywhere: a device whose firmware
+    /// draws nothing still goes dark, on a frame of black. Everything else is a
+    /// mode of the device, and offering one the firmware does not know would be
+    /// letting someone choose an effect that never runs.
+    pub firmware_effects: &'static [Effect],
     pub rows: u8,
     pub cols: u8,
     /// **The address the device gives each position**, row by row; `u16::MAX`
@@ -252,6 +260,16 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     // `01 05`, read back through `0x00`/`0x81` on 12/09/2026 — the version the
     // device also declares elsewhere. See §8 of the survey.
     surveyed_firmware: Some(Firmware { major: 1, minor: 5 }),
+    // Surveyed by reading each identifier back: Static and Breathing take a
+    // colour this application has nowhere to ask for, and Reactive and Starlight
+    // are refused by this firmware. See §8 of the survey.
+    firmware_effects: &[
+        Effect::SpectrumCycle,
+        Effect::Wave {
+            direction: 0x02,
+            speed: 0x28,
+        },
+    ],
     rows: 6,
     cols: 22,
     #[rustfmt::skip]
@@ -374,6 +392,9 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
     lighting: &AlienwareKeys,
     // No command is known to read a version from this device yet.
     surveyed_firmware: None,
+    // Its firmware draws nothing by itself: every effect it shows comes from
+    // here, frame by frame.
+    firmware_effects: &[],
     rows: 7,
     cols: 20,
     #[rustfmt::skip]
@@ -382,7 +403,9 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
         // these sit, and the two must not be confused.
         //     0      1      2      3      4      5      6      7      8      9     10     11     12     13     14     15     16     17     18     19
                1,     2,     3,     4,     5,     6,     7,     8,     9,    10,    11,    12,    13,    14,    15,    16,    17,    18,    19,    20,
-              21,    22,    23,    24,    25,    26,    27,    28,    29,    30,    31,    32,    33,    34, EMPTY, EMPTY,    37,    38,    39,    40,
+        // Backspace is 36, not 34: two addresses in between drive nothing. An
+        // offset would have missed it; a table cannot.
+              21,    22,    23,    24,    25,    26,    27,    28,    29,    30,    31,    32,    33,    36, EMPTY, EMPTY,    37,    38,    39,    40,
               41, EMPTY,    43,    44,    45,    46,    47,    48,    49,    50,    51,    52,    53,    54, EMPTY, EMPTY,    57,    58,    59, EMPTY,
            EMPTY,    62,    63,    64,    65,    66,    67,    68,    69,    70,    71,    72,    73,    74,    75, EMPTY,    77,    78,    79,    80,
            EMPTY,    82,    83,    84,    85,    86,    87,    88,    89,    90,    91,    92,    93, EMPTY,    95, EMPTY,    97,    98,    99, EMPTY,
