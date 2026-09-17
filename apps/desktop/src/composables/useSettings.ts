@@ -781,6 +781,11 @@ export function useSettings() {
     return names
   })
 
+  /** Closes the message: what failed is read, and the screen goes back to work. */
+  function dismissError(): void {
+    error.value = null
+  }
+
   return {
     load,
     reload,
@@ -798,5 +803,6 @@ export function useSettings() {
     setBrightness,
     flush: flushAll,
     error: readonly(error),
+    dismissError,
   }
 }

@@ -81,21 +81,21 @@ import {
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
-import type { DeviceRef } from '../api/types'
+import type { DeviceRef, LayoutInfo } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
+import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { interruptionLine } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
-import { hardwareEffects, useEffects, type HardwareEffect } from '../composables/useEffects'
+import { hardwareEffectsFor, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
 import { t } from '../i18n'
 import { localized } from '../i18n/text'
-import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
 /** Période d'interrogation du moteur, en millisecondes. */
@@ -118,7 +118,7 @@ const router = useRouter()
 const { devices, current, select, busy, refresh } = useDevice()
 // `apply` ne lève pas : il range son échec dans `applyError`, qu'il faut donc
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
-const { appliedOn, apply, error: applyError } = useEffects()
+const { appliedOn, apply, error: applyError, dismissError: dismissApplyError } = useEffects()
 const {
   load: loadSettings,
   reload: reloadSettings,
@@ -135,6 +135,7 @@ const {
   setBrightness,
   flush: flushParams,
   error: paramsError,
+  dismissError: dismissParamsError,
 } = useSettings()
 
 /** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
@@ -282,7 +283,9 @@ function fromHardware(e: HardwareEffect): Choice {
 const choices = computed<Choice[]>(() => [
   ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry),
   ...library.value.filter((e) => e.kind === 'user').map(fromEntry),
-  ...hardwareEffects.map(fromHardware),
+  // Only what this device's firmware runs: offering a mode it does not know
+  // would be offering an effect that never starts.
+  ...hardwareEffectsFor(board.value).map(fromHardware),
 ])
 
 /**
@@ -508,10 +511,15 @@ async function refreshStatus(): Promise<void> {
  * Gabarit de repli, demandé au Rust : il faut bien dessiner quelque chose avant
  * qu'un appareil soit ouvert.
  */
-const fallback = ref<LayoutView | null>(null)
+const fallback = ref<LayoutInfo | null>(null)
 /** Gabarit de l'appareil sélectionné, quand il est réellement ouvert. */
-const opened = ref<LayoutView | null>(null)
-const board = computed<LayoutView | null>(() => opened.value ?? fallback.value)
+const opened = ref<LayoutInfo | null>(null)
+/**
+ * The whole layout, not the simulator's view of it: this screen also reads what
+ * the firmware runs, to offer those effects and no others. A `LayoutInfo` is a
+ * `LayoutView` wherever the drawing is what matters.
+ */
+const board = computed<LayoutInfo | null>(() => opened.value ?? fallback.value)
 
 /**
  * Le dessin suit l'appareil sélectionné.
@@ -1295,13 +1303,20 @@ onBeforeUnmount(() => {
 
     <!-- --------------------------------------------------------- réglages -->
     <section class="col detail" :aria-label="t('effects.columns.settings')">
-      <p v-if="listError" class="failure" role="alert">{{ listError }}</p>
-      <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
-      <p v-if="applyError" class="failure" role="alert">{{ applyError }}</p>
-      <p v-if="paramsError" class="failure" role="alert">{{ paramsError }}</p>
-      <p v-if="status?.error" class="failure" role="alert">
+      <FailureNote v-if="listError" class="failure" @close="listError = null">
+        {{ listError }}
+      </FailureNote>
+      <FailureNote v-if="problem" class="failure" @close="problem = null">{{ problem }}</FailureNote>
+      <FailureNote v-if="applyError" class="failure" @close="dismissApplyError">
+        {{ applyError }}
+      </FailureNote>
+      <FailureNote v-if="paramsError" class="failure" @close="dismissParamsError">
+        {{ paramsError }}
+      </FailureNote>
+      <!-- The effect that raised keeps raising: nothing here can close this one. -->
+      <FailureNote v-if="status?.error" class="failure">
         {{ t('effects.effectError', { error: status.error }) }}
-      </p>
+      </FailureNote>
       <p v-if="status?.deviceError" class="notice warn" role="alert">
         {{ message(status.deviceError) }}
       </p>
@@ -1358,9 +1373,11 @@ onBeforeUnmount(() => {
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>
-        <p v-if="selectedEffect.state === 'broken'" class="failure" role="alert">
+        <!-- A load error its author reads, and copies into the editor: it stays
+             as long as the file does not compile. -->
+        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure">
           {{ selectedEffect.error }}
-        </p>
+        </FailureNote>
         <p class="cost">{{ cost(selectedEffect.nature) }}</p>
 
         <div class="preview">

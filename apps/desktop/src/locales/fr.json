@@ -12,7 +12,8 @@
       "system": "Thème du système",
       "light": "Thème clair",
       "dark": "Thème sombre"
-    }
+    },
+    "dismiss": "Fermer ce message"
   },
   "effects": {
     "columns": {

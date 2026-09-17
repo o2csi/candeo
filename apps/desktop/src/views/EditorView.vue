@@ -78,6 +78,7 @@ import { effectName, userKey } from '../api/effectKey'
 import { erreur, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
+import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
 import { useSettings } from '../composables/useSettings'
@@ -610,10 +611,13 @@ onBeforeUnmount(() => {
           describes the last gesture, whereas a loop error describes something
           that keeps running.
         -->
-        <p v-if="problem" class="failure" role="alert">{{ problem }}</p>
-        <p v-else-if="effectError" class="failure" role="alert">
+        <FailureNote v-if="problem" class="failure" @close="problem = null">
+          {{ problem }}
+        </FailureNote>
+        <!-- The loop keeps raising: closing this would only hide what is happening. -->
+        <FailureNote v-else-if="effectError" class="failure">
           {{ t('editor.effectError', { error: effectError }) }}
-        </p>
+        </FailureNote>
         <p v-else class="hint">
           {{ t('editor.hint') }}
         </p>
