@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.8.0](https://github.com/o2csi/candeo/compare/v0.7.0...v0.8.0) (2026-09-18)
+
+
+### Features
+
+* a device family is a trait, and a layout says its addresses ([9186685](https://github.com/o2csi/candeo/commit/918668578e4dca11105941257ed46775b61ae405))
+* a device says what its lights are ([796e33b](https://github.com/o2csi/candeo/commit/796e33bf88357ed4a8fafa99bf5174a0067a75ff))
+* a firmware effect can be given a colour ([392ab98](https://github.com/o2csi/candeo/commit/392ab98907132165c301e7f86470ba65aa38db0a))
+* a firmware effect is illustrated in the simulator ([9dc4e78](https://github.com/o2csi/candeo/commit/9dc4e7856096b882b81ad65a0ec8bbed410cc6a4))
+* a firmware effect is named, not enumerated ([1c01798](https://github.com/o2csi/candeo/commit/1c017982133c90cc61b283f865ee0ee6af0e19e8))
+* a layout says which effects its firmware runs ([bb13a17](https://github.com/o2csi/candeo/commit/bb13a17e76c790c0dcda07acbec74cc4c4dca6c3))
+* a setting reaches the running effect, firmware included ([0260684](https://github.com/o2csi/candeo/commit/026068441277785c2d4081332fa18de9df1cfded))
+* an error message can be selected and closed ([bfc09a4](https://github.com/o2csi/candeo/commit/bfc09a4033154040799099534db7f59162ee43c1))
+* apply comes back when a firmware colour changes ([ba7164e](https://github.com/o2csi/candeo/commit/ba7164e824dc294b2786d6aa21f3e44ed1583cdd))
+* candeo drives the Alienware m18 R1 keyboard ([0bdb546](https://github.com/o2csi/candeo/commit/0bdb5468f020883cfcf3db2e59cce20393d0366f))
+* candeo drives the m18 R1 zones ([c201d90](https://github.com/o2csi/candeo/commit/c201d9024a3247f2d41bc100bd92458682b121c8))
+* changing a firmware effect's colour reaches the device ([374998e](https://github.com/o2csi/candeo/commit/374998e1f971ce0a04201cb4c1a6db7f37453228))
+* the m18 R1 effects take their maker's names ([3668072](https://github.com/o2csi/candeo/commit/3668072cf433de9735b7b001d54de6c96b0bee4d))
+* the m18 R1 offers the seven effects its firmware shows ([a22005c](https://github.com/o2csi/candeo/commit/a22005c2ab3eb7bbb54369a4a10e30ea7c904d33))
+* the reports of the Alienware m18 R1 keyboard ([e329d26](https://github.com/o2csi/candeo/commit/e329d26eb96e8bed0c118f120eb3805567bef710))
+
+
+### Bug Fixes
+
+* a device that refuses writes is not called the keyboard ([2558e04](https://github.com/o2csi/candeo/commit/2558e0401111fde74a6116032c58897b9081e0d6))
+* a device write failure can be closed ([92b3d3f](https://github.com/o2csi/candeo/commit/92b3d3f5e4505c06e29c8febaa71dbbaa79f1faf))
+* a firmware effect is never missing from the folder ([9e85cb5](https://github.com/o2csi/candeo/commit/9e85cb575dfcc13255eaa4d529f2c425449ba4c2))
+* a firmware effect may keep its settings ([d068e80](https://github.com/o2csi/candeo/commit/d068e80690235dc3cce6002250c10987e0d5628c))
+* a frame that does not fit the layout is not drawn ([321bd4b](https://github.com/o2csi/candeo/commit/321bd4b486c0733342f014bba979d2a367be6d3f))
+* every error on screen can now be closed ([2d074e7](https://github.com/o2csi/candeo/commit/2d074e718ea3153c4f854875c26551ba7115120d))
+* the cross on an error message actually appears ([2a0cd9e](https://github.com/o2csi/candeo/commit/2a0cd9e27717484908f670e2a61840038f43fe38))
+* the illustration is drawn when read, not stored ([6e88ea0](https://github.com/o2csi/candeo/commit/6e88ea0be2afe8030ca31a1466a1b3d6aa27eea8))
+* the m18 R1 dims with 83 38 9c, after a frame ([523d823](https://github.com/o2csi/candeo/commit/523d8239b17c3045871e89b4eb71ad825327f79d))
+* the m18 R1 zones write to the common target ([5854a9a](https://github.com/o2csi/candeo/commit/5854a9a7bb5487307c2ad8d461e7dfc69f2342c4))
+* the write messages name a device, not a keyboard ([7199cc3](https://github.com/o2csi/candeo/commit/7199cc3fe3774e610af2f044990366b6de992f64))
+
+
+### Documentation
+
+* how the m18 R1 zones are written, and which is which ([81fc3a8](https://github.com/o2csi/candeo/commit/81fc3a8ac6248499db6130717ff8787ab40a02ce))
+* survey the Alienware m18 R1 lighting ([c631671](https://github.com/o2csi/candeo/commit/c631671a25ba898ca68685236a007f381e3cd28a))
+* the m18 R1 brightness cannot be read back ([284e01d](https://github.com/o2csi/candeo/commit/284e01d51973cd6f05140f79c3a0eff16444d89c))
+* the m18 R1 keyboard is a grid, and takes what we write ([6294ce4](https://github.com/o2csi/candeo/commit/6294ce4b1443174f819b6be99bf0c6d3c32f1653))
+* the m18 R1 keyboard takes 29 frames a second ([2676848](https://github.com/o2csi/candeo/commit/26768485d56bf2841a47708d1b2b250f3725ab9c))
+* the m18 R1 zones can stop applying, for everyone ([fb08781](https://github.com/o2csi/candeo/commit/fb087818ea8aa5f446d7206ed7b12115f5d47e01))
+* the m18 R1's brightness command, and its key map ([b64c4ef](https://github.com/o2csi/candeo/commit/b64c4ef97bc5f60b97fcb835545dd39744039e0f))
+
 ## [0.7.0](https://github.com/o2csi/candeo/compare/v0.6.0...v0.7.0) (2026-09-17)
 
 
