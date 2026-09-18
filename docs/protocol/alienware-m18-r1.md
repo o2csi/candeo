@@ -111,6 +111,21 @@ already models.
 Colours are plain `R, G, B`. When a key changes, Command Center sends it first,
 then every other key in index order.
 
+### Brightness cannot be read, and a dark keyboard is usually it
+
+Established on 2026-09-18. Writing two levels and reading the collection back
+gives the **same** answer for both — the echo of the last command, `cc 93 …`,
+and once the leftover bytes of the previous colour frame. Nothing in it follows
+the level. A host therefore knows only what it wrote itself, and a level set by
+other software is invisible.
+
+Which matters more than it sounds: **a keyboard that looks dead is usually a
+keyboard at brightness zero**. Colours written to it are accepted, acknowledged,
+and show nothing. It happened twice here — once after the maker's software took
+the device, once from a probe that sent the brightness command with its level
+byte left at zero — and both times writing `cc 83 38 9c ff` brought everything
+back. Before concluding that a device is stuck, set its brightness.
+
 ### An address is not a position
 
 Established on 2026-09-18, by lighting single addresses and reading the keyboard,
