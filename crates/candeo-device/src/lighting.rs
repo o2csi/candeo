@@ -12,7 +12,6 @@
 //! So `Keyboard` knows how to send bytes and check a refusal, and knows nothing
 //! about who it is talking to (#34).
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -226,10 +225,6 @@ impl Lighting for AlienwareKeys {
 /// report shape, another way out of the machine — and a change is a numbered
 /// transaction rather than a frame.
 pub struct AlienwareZones {
-    /// The next transaction number. One the device has already seen reads as a
-    /// repeat and the change is dropped without a word, so this walks rather
-    /// than restarting from a constant.
-    next: AtomicU8,
     /// The last image sent and when, so that an unchanged one sends nothing and
     /// a changing one goes out at a pace the device survives.
     ///
@@ -250,7 +245,6 @@ impl AlienwareZones {
     /// which is why there is no `Default` here.
     pub const fn new() -> Self {
         Self {
-            next: AtomicU8::new(1),
             last: Mutex::new((Vec::new(), None)),
         }
     }
@@ -279,8 +273,10 @@ impl Lighting for AlienwareZones {
             *when = Some(Instant::now());
         }
 
-        let tx = self.next.fetch_add(1, Ordering::Relaxed);
-        let mut out: Vec<Outgoing> = alienware_elc::begin(tx)
+        // Always the common target: the others are stored profiles, and writing
+        // one would change what the machine shows with nothing running.
+        let target = alienware_elc::COMMON;
+        let mut out: Vec<Outgoing> = alienware_elc::begin(target)
             .iter()
             .map(|report| Outgoing::output(report))
             .collect();
@@ -305,7 +301,7 @@ impl Lighting for AlienwareZones {
         }
 
         out.extend(
-            alienware_elc::commit(tx)
+            alienware_elc::commit(target)
                 .iter()
                 .map(|report| Outgoing::output(report)),
         );

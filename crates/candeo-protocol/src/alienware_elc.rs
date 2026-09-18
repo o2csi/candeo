@@ -1,9 +1,14 @@
 //! Reports of the AW-ELC, the zones around the keyboard, as surveyed in
 //! `docs/protocol/alienware-m18-r1.md` §2.
 //!
-//! A change is a **numbered transaction**: it opens, names the zones it touches,
-//! gives them a colour, then commits. One transaction can name several sets, so a
-//! whole surface goes out in one.
+//! A change opens, names the zones it touches, gives them a colour, then
+//! commits. One such block can name several sets, so a whole surface goes out in
+//! one.
+//!
+//! The byte after `00` in the framing reports is **a target**, not a counter:
+//! `ff` is the common one, and other values name the stored profiles — the
+//! power states among them. Walking it, as a transaction number would be walked,
+//! writes each change to a different target.
 //!
 //! Two families sit side by side and only one shows: `03 21 …` lights what it
 //! carries, `03 22 …` writes the configuration the device keeps. Everything here
@@ -20,10 +25,15 @@ pub const REPORT_LEN: usize = 33;
 /// addressed at once, which is every zone this machine has.
 pub const ZONES_PER_SELECT: usize = 4;
 
-/// The two pairs the capture holds on a fixed colour. What they measure is open
-/// — durations, most likely — and they are kept as they were seen rather than
-/// guessed at.
-const TIMING: [u8; 4] = [0x07, 0xd0, 0x00, 0xfa];
+/// The common target, which is the lighting shown now. Other values name stored
+/// profiles — a power state, the startup colour — and writing one of those
+/// changes what the machine shows when nothing is running. Candeo does not.
+pub const COMMON: u8 = 0xff;
+
+/// What follows the mode on a fixed colour: a duration, the sub-command of the
+/// effect (`d0` is the plain colour), a zero, then a tempo — `fa` meaning
+/// steady, since a fixed colour animates nothing.
+const STEADY: [u8; 4] = [0x07, 0xd0, 0x00, 0xfa];
 
 fn report(bytes: &[u8]) -> [u8; REPORT_LEN] {
     assert!(bytes.len() <= REPORT_LEN, "a report is {REPORT_LEN} bytes");
@@ -32,14 +42,11 @@ fn report(bytes: &[u8]) -> [u8; REPORT_LEN] {
     out
 }
 
-/// Opens transaction `tx`.
-///
-/// `tx` must differ from the last one the device saw: a number it already knows
-/// reads as a repeat, and the change is dropped without a word.
-pub fn begin(tx: u8) -> [[u8; REPORT_LEN]; 2] {
+/// Clears the target, then starts writing to it.
+pub fn begin(target: u8) -> [[u8; REPORT_LEN]; 2] {
     [
-        report(&[0x03, 0x21, 0x00, 0x04, 0x00, tx]),
-        report(&[0x03, 0x21, 0x00, 0x01, 0x00, tx]),
+        report(&[0x03, 0x21, 0x00, 0x04, 0x00, target]),
+        report(&[0x03, 0x21, 0x00, 0x01, 0x00, target]),
     ]
 }
 
@@ -57,16 +64,17 @@ pub fn select(zones: &[u8]) -> [u8; REPORT_LEN] {
 /// One fixed colour, for the zones last selected.
 pub fn colour(rgb: Rgb) -> [u8; REPORT_LEN] {
     let mut bytes = vec![0x03, 0x24, 0x00];
-    bytes.extend_from_slice(&TIMING);
+    bytes.extend_from_slice(&STEADY);
     bytes.extend_from_slice(&[rgb.r, rgb.g, rgb.b]);
     report(&bytes)
 }
 
-/// Commits transaction `tx`, which is when the zones change.
-pub fn commit(tx: u8) -> [[u8; REPORT_LEN]; 2] {
+/// Finishes the target, then makes it the one in force — which is when the
+/// zones change.
+pub fn commit(target: u8) -> [[u8; REPORT_LEN]; 2] {
     [
-        report(&[0x03, 0x21, 0x00, 0x02, 0x00, tx]),
-        report(&[0x03, 0x21, 0x00, 0x06, 0x00, tx]),
+        report(&[0x03, 0x21, 0x00, 0x02, 0x00, target]),
+        report(&[0x03, 0x21, 0x00, 0x06, 0x00, target]),
     ]
 }
 
