@@ -7,7 +7,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
+use candeo_device::{
+    Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES,
+    DEATHSTALKER_V2_PRO,
+};
 use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -42,7 +45,11 @@ mod update;
 /// Visible in the crate: the [`journal`] diagnostic lists the same devices as
 /// [`list_devices`], and copying them over there would make a second list that
 /// would diverge at the first added layout.
-pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
+pub(crate) const LAYOUTS: &[&Layout] = &[
+    &DEATHSTALKER_V2_PRO,
+    &ALIENWARE_M18_R1,
+    &ALIENWARE_M18_R1_ZONES,
+];
 
 // ---------------------------------------------------------------- exposed types
 

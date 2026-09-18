@@ -2,7 +2,7 @@
 
 use candeo_protocol::{Effect, Firmware};
 
-use crate::lighting::{AlienwareKeys, Lighting, RazerRows};
+use crate::lighting::{AlienwareKeys, Lighting, RazerRows, ALIENWARE_ZONES};
 
 /// Matrix position without an LED.
 ///
@@ -480,6 +480,47 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
         k( 133, 0xE04B,     13.5,  5.0), k(134, 0xE050, 14.5, 5.0), k(135, 0xE04D, 15.5, 5.0),
         kw(117, 0x52,       16.5,  5.0, 2.0),
         k( 118, 0x53,       18.5,  5.0),
+    ],
+};
+
+/// The lights around that keyboard: the ring at the rear, the logo on the lid,
+/// the power button. Surveyed in `docs/protocol/alienware-m18-r1.md` §2.
+///
+/// A second device, not a second matrix of the same one: another product id,
+/// another report shape, another family. One row of four cells, because that is
+/// all there is — the drawing below places them where they are on the machine,
+/// which is what tells someone which light a colour will reach.
+///
+/// **The power button is not here, and that is the finding.** Its own firmware
+/// pulses it — white on mains, green on battery, more slowly there — and takes
+/// it back within the second, verified from the application on 18/09/2026.
+/// Offering a light that never keeps what it is given would be a lie on screen,
+/// and the machine already does the useful thing without anyone running.
+pub static ALIENWARE_M18_R1_ZONES: Layout = Layout {
+    name: "Alienware m18 R1 zones",
+    vid: 0x187c,
+    pid: 0x0551,
+    port: Port::Collection {
+        usage_page: 0xff00,
+        usage: 0x0001,
+    },
+    lighting: &ALIENWARE_ZONES,
+    // No command is known to read a version from this device yet.
+    surveyed_firmware: None,
+    // It runs no effect of its own that anyone has surveyed.
+    firmware_effects: &[],
+    rows: 1,
+    cols: 3,
+    // The zone ids the device answers to. `3` lights nothing on this machine and
+    // `4`, the power button, never keeps what it is given.
+    matrix: &[0, 1, 2],
+    #[rustfmt::skip]
+    keys: &[
+        // A top-down view of the machine: the lid above, the ring across the
+        // back. No scancode — nothing here is a key.
+        kh(0, NO_SCANCODE, 0.0, 1.5, 8.0, 0.5),   // ring, upper half
+        kh(1, NO_SCANCODE, 0.0, 2.0, 8.0, 0.5),   // ring, lower half
+        kh(2, NO_SCANCODE, 3.0, 0.0, 2.0, 1.0),   // logo on the lid
     ],
 };
 

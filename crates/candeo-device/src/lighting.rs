@@ -12,14 +12,35 @@
 //! So `Keyboard` knows how to send bytes and check a refusal, and knows nothing
 //! about who it is talking to (#34).
 
-use candeo_protocol::{alienware, CommandId, Effect, Report, Rgb};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use candeo_protocol::{alienware, alienware_elc, CommandId, Effect, Report, Rgb};
 
 use crate::layout::{Layout, EMPTY};
 
+/// How a report reaches the device, which is not a detail of plumbing.
+///
+/// The AW-ELC accepts an **output report on the control endpoint** and ignores
+/// the very same bytes written any other way — established by capturing our own
+/// writes beside the maker's software, which differed only in the path they took
+/// (`docs/protocol/alienware-m18-r1.md` §2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Wire {
+    /// `HidD_SetFeature`: the two keyboards.
+    Feature,
+    /// `HidD_SetOutputReport`: the zones.
+    Output,
+}
+
 /// One report on its way to a device.
 pub struct Outgoing {
-    /// The buffer as `HidD_SetFeature` wants it, report id included.
+    /// The buffer as the HID API wants it, report id included — a leading zero
+    /// where the device carries none.
     pub bytes: Vec<u8>,
+    /// Which call carries it.
+    pub wire: Wire,
     /// The command it carries, when the device can be asked about one: that is
     /// what lets an inspection refuse to send it. `None` where a family has no
     /// such notion.
@@ -30,6 +51,20 @@ impl Outgoing {
     fn plain(bytes: Vec<u8>) -> Self {
         Self {
             bytes,
+            wire: Wire::Feature,
+            command: None,
+        }
+    }
+
+    /// A report for a device with no report id of its own: the API still wants a
+    /// byte in front, and a zero is what the maker's software sends.
+    fn output(bytes: &[u8]) -> Self {
+        let mut buffer = Vec::with_capacity(bytes.len() + 1);
+        buffer.push(0);
+        buffer.extend_from_slice(bytes);
+        Self {
+            bytes: buffer,
+            wire: Wire::Output,
             command: None,
         }
     }
@@ -46,8 +81,12 @@ pub trait Lighting: Sync {
     /// The reports setting overall brightness.
     ///
     /// A list, because a family may need more than one: the m18 R1 takes its
-    /// level only after a frame has been opened and closed.
-    fn brightness(&self, level: u8) -> Vec<Outgoing>;
+    /// level only after a frame has been opened and closed. `None` where a
+    /// family has no brightness at all — the zones around that keyboard — and
+    /// the screen then offers no slider rather than one that changes nothing.
+    fn brightness(&self, _level: u8) -> Option<Vec<Outgoing>> {
+        None
+    }
 
     /// A segment of one row, for a family that addresses the matrix that way.
     /// `None` where it does not, and the command then says so rather than
@@ -96,8 +135,8 @@ impl Lighting for RazerRows {
         out
     }
 
-    fn brightness(&self, level: u8) -> Vec<Outgoing> {
-        vec![report(Report::set_brightness(level))]
+    fn brightness(&self, level: u8) -> Option<Vec<Outgoing>> {
+        Some(vec![report(Report::set_brightness(level))])
     }
 
     fn row(&self, row: u8, col_start: u8, colours: &[Rgb]) -> Option<Outgoing> {
@@ -125,6 +164,7 @@ fn report(report: Report) -> Outgoing {
     Outgoing {
         command: Some(report.id()),
         bytes: report.to_feature_buffer().to_vec(),
+        wire: Wire::Feature,
     }
 }
 
@@ -159,13 +199,121 @@ impl Lighting for AlienwareKeys {
     /// The level alone is accepted and does nothing: this device takes it only
     /// after a frame has been opened and closed, measured both ways on
     /// 18/09/2026. The frame carries no colour — nothing on screen changes.
-    fn brightness(&self, level: u8) -> Vec<Outgoing> {
-        vec![
+    fn brightness(&self, level: u8) -> Option<Vec<Outgoing>> {
+        Some(vec![
             Outgoing::plain(alienware::open().to_vec()),
             Outgoing::plain(alienware::close().to_vec()),
             Outgoing::plain(alienware::brightness(level).to_vec()),
-        ]
+        ])
     }
+
+    fn firmware_effect(&self, _effect: Effect) -> Option<Outgoing> {
+        None
+    }
+
+    fn inspect(
+        &self,
+        _device: &hidapi::HidDevice,
+        accept: &mut dyn FnMut(Option<&str>) -> bool,
+    ) -> Option<crate::Inspection> {
+        accept(None).then(crate::Inspection::unread)
+    }
+}
+
+/// Alienware: the zones around a keyboard, addressed by id.
+///
+/// Its own family, not a variant of [`AlienwareKeys`]: another device, another
+/// report shape, another way out of the machine — and a change is a numbered
+/// transaction rather than a frame.
+pub struct AlienwareZones {
+    /// The next transaction number. One the device has already seen reads as a
+    /// repeat and the change is dropped without a word, so this walks rather
+    /// than restarting from a constant.
+    next: AtomicU8,
+    /// The last image sent and when, so that an unchanged one sends nothing and
+    /// a changing one goes out at a pace the device survives.
+    ///
+    /// **This device takes changes, not a stream.** An engine pushing thirty
+    /// images a second puts some three hundred reports a second on a bus where
+    /// the maker's software sends seven, and the writes then start failing:
+    /// measured on 18/09/2026, `HidD_SetOutputReport` refusing until the runtime
+    /// gave up on the device. Four lights do not need more than [`PACE`].
+    last: Mutex<(Vec<Rgb>, Option<Instant>)>,
+}
+
+/// The shortest gap between two transactions: ten a second, still more than the
+/// maker's software sends, and slow enough that every write goes through.
+const PACE: Duration = Duration::from_millis(100);
+
+impl AlienwareZones {
+    /// `const`, so that the family can be a `static` a layout points at —
+    /// which is why there is no `Default` here.
+    pub const fn new() -> Self {
+        Self {
+            next: AtomicU8::new(1),
+            last: Mutex::new((Vec::new(), None)),
+        }
+    }
+}
+
+impl Default for AlienwareZones {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The instance layouts name: a family holding a counter cannot be a unit
+/// struct, and one counter per device would say nothing more.
+pub static ALIENWARE_ZONES: AlienwareZones = AlienwareZones::new();
+
+impl Lighting for AlienwareZones {
+    fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing> {
+        {
+            let (sent, when) = &mut *self.last.lock().expect("no panic holds this lock");
+            let too_soon = when.is_some_and(|at| at.elapsed() < PACE);
+            if sent == frame || too_soon {
+                return Vec::new();
+            }
+            sent.clear();
+            sent.extend_from_slice(frame);
+            *when = Some(Instant::now());
+        }
+
+        let tx = self.next.fetch_add(1, Ordering::Relaxed);
+        let mut out: Vec<Outgoing> = alienware_elc::begin(tx)
+            .iter()
+            .map(|report| Outgoing::output(report))
+            .collect();
+
+        // Zones sharing a colour are named together, as the maker's software
+        // does for the two halves of the ring: one selection, one colour.
+        let mut groups: Vec<(Rgb, Vec<u8>)> = Vec::new();
+        for (&address, &colour) in layout.matrix.iter().zip(frame) {
+            if address == EMPTY {
+                continue;
+            }
+            match groups.iter_mut().find(|(seen, _)| *seen == colour) {
+                Some((_, zones)) => zones.push(address as u8),
+                None => groups.push((colour, vec![address as u8])),
+            }
+        }
+        for (colour, zones) in groups {
+            for chunk in zones.chunks(alienware_elc::ZONES_PER_SELECT) {
+                out.push(Outgoing::output(&alienware_elc::select(chunk)));
+                out.push(Outgoing::output(&alienware_elc::colour(colour)));
+            }
+        }
+
+        out.extend(
+            alienware_elc::commit(tx)
+                .iter()
+                .map(|report| Outgoing::output(report)),
+        );
+        out
+    }
+
+    // No brightness: nothing in the survey dims these zones, and the level of a
+    // colour is the colour itself.
 
     fn firmware_effect(&self, _effect: Effect) -> Option<Outgoing> {
         None

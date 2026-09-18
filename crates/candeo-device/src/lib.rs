@@ -10,8 +10,10 @@ pub mod layout;
 pub mod lighting;
 
 pub use inspection::{Check, Inspection, Verdict, Warning};
-pub use layout::{Key, Layout, Port, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO, NO_SCANCODE};
-pub use lighting::{Lighting, Outgoing};
+pub use layout::{
+    Key, Layout, Port, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES, DEATHSTALKER_V2_PRO, NO_SCANCODE,
+};
+pub use lighting::{Lighting, Outgoing, Wire};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -31,6 +33,8 @@ pub enum Error {
     NoFirmwareEffect { device: &'static str },
     #[error("{device} is addressed key by key, not by rows")]
     NoRowWrite { device: &'static str },
+    #[error("{device} does not dim: its firmware has no brightness")]
+    NoBrightness { device: &'static str },
 }
 
 /// An open keyboard, ready to receive commands.
@@ -123,7 +127,10 @@ impl Keyboard {
                 return Err(Error::Refused { command });
             }
         }
-        self.device.send_feature_report(&report.bytes)?;
+        match report.wire {
+            Wire::Feature => self.device.send_feature_report(&report.bytes)?,
+            Wire::Output => self.device.send_output_report(&report.bytes)?,
+        }
         Ok(())
     }
 
@@ -154,8 +161,18 @@ impl Keyboard {
     }
 
     /// Dims the whole device, in whatever reports its family takes.
+    ///
+    /// A family with no brightness is refused rather than written to: the screen
+    /// offers no slider for it, so reaching this is a bug, not a gesture.
     pub fn set_brightness(&self, level: u8) -> Result<(), Error> {
-        for report in self.layout.lighting.brightness(level) {
+        let reports = self
+            .layout
+            .lighting
+            .brightness(level)
+            .ok_or(Error::NoBrightness {
+                device: self.layout.name,
+            })?;
+        for report in reports {
             self.send(&report)?;
         }
         Ok(())
