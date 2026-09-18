@@ -81,7 +81,7 @@ import {
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
-import type { DeviceRef, LayoutInfo } from '../api/types'
+import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
@@ -91,7 +91,14 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { interruptionLine } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
-import { hardwareEffectsFor, useEffects, type HardwareEffect } from '../composables/useEffects'
+import { illustrates } from '../keyboard/illustration'
+import {
+  colourBytes,
+  hardwareEffectsFor,
+  hardwareParams,
+  useEffects,
+  type HardwareEffect,
+} from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
 import { t } from '../i18n'
@@ -118,7 +125,12 @@ const router = useRouter()
 const { devices, current, select, busy, refresh } = useDevice()
 // `apply` ne lève pas : il range son échec dans `applyError`, qu'il faut donc
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
-const { appliedOn, apply, error: applyError, dismissError: dismissApplyError } = useEffects()
+const {
+  appliedOn,
+  apply,
+  error: applyError,
+  dismissError: dismissApplyError,
+} = useEffects()
 const {
   load: loadSettings,
   reload: reloadSettings,
@@ -266,11 +278,13 @@ function fromEntry(e: EffectEntry): Choice {
 function fromHardware(e: HardwareEffect): Choice {
   return {
     id: e.id,
-    name: t(`effects.hardwareEffects.${e.key}.name`),
+    name: e.name,
     nature: 'hardware',
-    description: t(`effects.hardwareEffects.${e.key}.summary`),
+    description: e.summary,
     swatch: [],
-    params: {},
+    // Its colours, when it paints with any: the settings column then draws the
+    // same form as for any other effect, and what is chosen is kept the same way.
+    params: hardwareParams(e),
     hardware: e,
     state: 'ready',
     error: null,
@@ -568,6 +582,18 @@ const { frame, restartPreview } = useSimulatorFeed({
     // Nor an effect that cannot run: its JavaScript is not there, or does not load.
     return c && !c.hardware && c.state === 'ready' ? c.id : null
   },
+  // What it *is* drawn as, which is a different promise: a legend of what the
+  // effect was seen doing, not the device's frames. The note below says so.
+  illustrated: () => {
+    const c = selectedEffect.value
+    return c?.hardware && illustrates(c.id) ? c.id : null
+  },
+  // The drawing paints with what the effect was given, so that it says what the
+  // keyboard will show rather than a colour of its own.
+  illustratedColours: () => {
+    const bytes = colourBytes(paramValues.value)
+    return bytes.length >= 3 ? [[bytes[0], bytes[1], bytes[2]] as Rgb] : []
+  },
   params: () => paramValues.value,
   onError: (e) => {
     problem.value = message(e)
@@ -585,7 +611,11 @@ const { frame, restartPreview } = useSimulatorFeed({
 const previewNote = computed(() => {
   const c = selectedEffect.value
   if (showsDevice.value) return t('effects.preview.device')
-  if (c?.hardware) return t('effects.preview.hardware')
+  if (c?.hardware) {
+    // Two different promises, and the sentence must not confuse them: a drawing
+    // of what the effect does, or nothing at all.
+    return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
+  }
 
   const tourne = effectName(activeId.value)
   const ailleurs = runningHere.value && tourne !== null
@@ -630,7 +660,7 @@ async function applyEffect(): Promise<void> {
   try {
     if (c.hardware) {
       if (statusOf(d)?.running === true) await stopEffect(device)
-      await apply(device, c.hardware)
+      await apply(device, c.hardware, colourBytes(paramValues.value))
     } else {
       // Les réglages retenus pour **cette paire**, et non les valeurs déclarées :
       // un effet réglé puis quitté doit repartir comme on l'avait laissé, sans
@@ -763,7 +793,13 @@ async function restoreOriginal(): Promise<void> {
 const missingEffects = computed(() => {
   if (!libraryRead.value) return []
   const present = new Set(library.value.map((e) => e.id))
-  return [...referencedEffects.value].filter((name) => !present.has(name)).sort()
+  return (
+    [...referencedEffects.value]
+      // A firmware effect is never in the folder: it is run by the device, and
+      // the settings kept for it — a colour — refer to no file to put back.
+      .filter((name) => !name.startsWith('hardware:') && !present.has(name))
+      .sort()
+  )
 })
 
 async function forgetMissing(name: string): Promise<void> {
@@ -973,7 +1009,17 @@ function onParamCommit(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  settle({ vid: d.vid, pid: d.pid }, c.id)
+  const device = { vid: d.vid, pid: d.pid }
+  settle(device, c.id)
+
+  // **One rule for every effect: a setting changed reaches the one running.** A
+  // host effect has a loop, adjusted live above; a firmware effect has none and
+  // holds the last colour it was given, so reaching it means sending the effect
+  // again. At the end of the gesture, not at every shade a picker travels
+  // through, and only on the device already showing it.
+  if (c.hardware && c.id === appliedOn(device)) {
+    void apply(device, c.hardware, colourBytes(paramValues.value))
+  }
 }
 
 function onParamReset(): void {

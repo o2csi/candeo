@@ -9,58 +9,143 @@ import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
 import { message } from '../api/journal'
-import type { DeviceRef, Effect } from '../api/types'
+import type { ParamSpec } from '@candeo/effects-api'
+
+import type { DeviceRef } from '../api/types'
+import { t } from '../i18n'
 
 export interface HardwareEffect {
   id: string
-  /** Its name and one-sentence summary, under `effects.hardwareEffects.<key>`. */
-  key: 'spectrumCycle' | 'wave' | 'off'
-  effect: Effect
+  /** Its name, as the gallery shows it. */
+  name: string
+  /** One sentence on what it does, when we know. */
+  summary: string
+  /** How many colours it paints with — none for one with its own palette. */
+  colours: number
 }
 
 /**
- * Seules valeurs relevées à la capture, cf. `docs/protocol/deathstalker-v2-pro.md`.
- * La plage réelle de ces deux paramètres fait partie des questions ouvertes du
- * relevé : offrir un réglage reviendrait à inventer une échelle et à laisser
- * l'utilisateur découvrir tout seul quelles valeurs ne font rien.
+ * The one effect every device offers: a firmware that draws nothing of its own
+ * still goes dark, on a black frame.
  */
-const WAVE_DIRECTION = 0x02
-const WAVE_SPEED = 0x28
+export const OFF = 'hardware:off'
 
 /**
- * Le catalogue est écrit ici, et non demandé au Rust : ces modes sont figés par
- * le micrologiciel, pas découverts. Une commande de listage n'apprendrait rien
- * et ajouterait un aller-retour au lancement.
+ * What a firmware effect declares as settings: its colours, and nothing else.
  *
- * `custom` n'y figure pas volontairement. C'est le mode piloté par l'hôte : le
- * poser sans moteur pour pousser des images laisserait le clavier sur sa
- * dernière image, c'est-à-dire un effet qui ne fait rien, présenté comme un
- * effet. Il apparaîtra avec le moteur (issue #6).
+ * **A firmware effect is an effect with settings**, so it says so the same way
+ * the others do. The form that draws them, the values kept for a device, the
+ * ones a rule carries: all of it already works on a declaration, and none of it
+ * had to learn what a firmware effect is.
  */
+export function hardwareParams(e: HardwareEffect): Record<string, ParamSpec> {
+  const specs: Record<string, ParamSpec> = {}
+  if (e.colours >= 1) {
+    specs.colour = {
+      kind: 'color',
+      label: t('effects.hardwareEffects.pickColour'),
+      default: { r: 0xff, g: 0x00, b: 0x00 },
+    }
+  }
+  if (e.colours >= 2) {
+    specs.colour2 = {
+      kind: 'color',
+      label: t('effects.hardwareEffects.pickColour2'),
+      default: { r: 0x00, g: 0x00, b: 0xff },
+    }
+  }
+  return specs
+}
+
 /**
- * Those a given device runs, **Off included**: a firmware that draws nothing of
- * its own still goes dark, on a black frame.
+ * The colours out of those values, flat, in the order the effect takes them —
+ * the shape the command wants, and the one a frame crosses in.
+ */
+export function colourBytes(values: Record<string, unknown>): number[] {
+  return ['colour', 'colour2'].flatMap((key) => {
+    const colour = values[key] as { r?: number; g?: number; b?: number } | undefined
+    if (!colour || typeof colour.r !== 'number') return []
+    return [colour.r, colour.g ?? 0, colour.b ?? 0]
+  })
+}
+
+/** What an Alienware keyboard's own effects are called, before their number. */
+const ALIENWARE = 'hardware:m18-'
+
+/**
+ * What each of that keyboard's kinds shows, watched one by one on the hardware.
+ * The protocol says nothing about it: the numbers answer, the names were read
+ * off the keyboard.
  *
- * Without a layout — no device chosen — the whole catalogue comes back: the list
- * is then a presentation, not a command.
+ * **The words are the maker's own**, as its software lists them — *Couleur*,
+ * *Respiration*, *Spectre*, *Onde arc-en-ciel*, *Scanner* — so that someone
+ * coming from it finds what they know. The two it does not offer, `02` and `09`,
+ * keep the names of the lighting API they belong to.
+ */
+const ALIENWARE_NAMES = {
+  '01': 'colour',
+  '02': 'pulse',
+  '03': 'rainbowWave',
+  '08': 'breathing',
+  '09': 'morph',
+  '0a': 'scanner',
+  '0e': 'spectrum',
+} as const
+
+/**
+ * A firmware effect's name comes from its id, not from a catalogue written here.
+ *
+ * **One family's modes are not another's.** The layout says which ids a device
+ * runs; this only puts words on them. The Alienware keyboard's sixteen kinds are
+ * named after their number until someone says what each one shows — which takes
+ * eyes on a keyboard, not code.
+ */
+export function named(id: string, colours = 0): HardwareEffect {
+  if (id === OFF) {
+    return {
+      id,
+      colours,
+      name: t('effects.hardwareEffects.off.name'),
+      summary: t('effects.hardwareEffects.off.summary'),
+    }
+  }
+  if (id === 'hardware:spectrumCycle' || id === 'hardware:wave') {
+    const key = id === 'hardware:wave' ? 'wave' : 'spectrumCycle'
+    return {
+      id,
+      colours,
+      name: t(`effects.hardwareEffects.${key}.name`),
+      summary: t(`effects.hardwareEffects.${key}.summary`),
+    }
+  }
+  const kind = id.slice(ALIENWARE.length) as keyof typeof ALIENWARE_NAMES
+  const alienware = ALIENWARE_NAMES[kind]
+  if (id.startsWith(ALIENWARE) && alienware) {
+    return {
+      id,
+      colours,
+      name: t(`effects.hardwareEffects.${alienware}.name`),
+      summary: t(`effects.hardwareEffects.${alienware}.summary`),
+    }
+  }
+  // An id nobody named: shown as it is rather than invented. The gallery only
+  // offers what a layout lists, so this is the sign of a layout gone ahead of
+  // the words for it.
+  return { id, colours, name: id, summary: '' }
+}
+
+/**
+ * Those a given device runs, **Off included**.
+ *
+ * Without a layout — no device chosen — only *Off* comes back: naming what an
+ * unknown device runs would be inventing it.
  */
 export function hardwareEffectsFor(
-  layout: { firmwareEffects?: string[] } | null | undefined,
+  layout: { firmwareEffects?: { id: string; colours: number }[] } | null | undefined,
 ): readonly HardwareEffect[] {
-  const offered = layout?.firmwareEffects
-  if (!offered) return hardwareEffects
-  return hardwareEffects.filter((h) => h.key === 'off' || offered.includes(h.id))
+  const offered = layout?.firmwareEffects ?? []
+  return [...offered.map((e) => named(e.id, e.colours)), named(OFF)]
 }
-
-export const hardwareEffects: readonly HardwareEffect[] = [
-  { id: 'hardware:spectrumCycle', key: 'spectrumCycle', effect: { kind: 'spectrumCycle' } },
-  {
-    id: 'hardware:wave',
-    key: 'wave',
-    effect: { kind: 'wave', direction: WAVE_DIRECTION, speed: WAVE_SPEED },
-  },
-  { id: 'hardware:off', key: 'off', effect: { kind: 'off' } },
-]
 
 /**
  * Ce que cette session a posé, **appareil par appareil**, clé « vid:pid ».
@@ -69,7 +154,7 @@ export const hardwareEffects: readonly HardwareEffect[] = [
  * dans une liste qui décrit ce que fait **un** appareil : ce n'est pas une
  * simplification, c'est une information fausse dès le second clavier.
  */
-const posed = ref<Record<string, string>>({})
+const posed = ref<Record<string, { id: string; colours: number[] }>>({})
 const error = ref<string | null>(null)
 
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
@@ -84,13 +169,13 @@ export function useEffects() {
    * n'est donc marqué au lancement — une supposition serait pire que le vide,
    * puisqu'elle se tromperait silencieusement après un redémarrage.
    */
-  async function apply(device: DeviceRef, e: HardwareEffect) {
+  async function apply(device: DeviceRef, e: HardwareEffect, colours: number[] = []) {
     error.value = null
     try {
-      await api.setEffect(device, e.effect)
+      await api.setEffect(device, e.id, colours)
       // Remplacement plutôt que mutation : `readonly()` interdit d'écrire dans
       // l'objet exposé, et la réactivité ne dépend plus de la clé déjà présente.
-      posed.value = { ...posed.value, [key(device)]: e.id }
+      posed.value = { ...posed.value, [key(device)]: { id: e.id, colours } }
     } catch (err) {
       error.value = message(err)
     }
@@ -98,8 +183,9 @@ export function useEffects() {
 
   /** L'effet matériel que cette session a posé sur cet appareil, s'il y en a un. */
   function appliedOn(device: DeviceRef | null): string | null {
-    return device ? (posed.value[key(device)] ?? null) : null
+    return device ? (posed.value[key(device)]?.id ?? null) : null
   }
+
 
   /**
    * Oublie ce que cette session avait posé, sur tous les appareils.

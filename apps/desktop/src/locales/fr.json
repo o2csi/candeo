@@ -75,6 +75,7 @@
     "preview": {
       "device": "Images du moteur, exactement celles qui partent vers le clavier.",
       "hardware": "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici.",
+      "illustration": "Exécuté par le micrologiciel. Ceci est le dessin qu'en fait l'application, pas les images du clavier.",
       "noDevice": "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté.",
       "elsewhere": "Aperçu : rien n'est envoyé au clavier, où « {name} » continue de tourner.",
       "apply": "Aperçu : rien n'est envoyé au clavier. « Appliquer » y envoie celui-ci.",
@@ -105,6 +106,36 @@
     "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
     "cancel": "Annuler",
     "hardwareEffects": {
+      "pickColour": "Couleur",
+      "pickColour2": "Seconde couleur",
+      "colour": {
+        "name": "Couleur",
+        "summary": "Une couleur, tenue — celle que vous choisissez ci-dessous."
+      },
+      "pulse": {
+        "name": "Pulsation",
+        "summary": "Cette couleur bat, sans fin."
+      },
+      "breathing": {
+        "name": "Respiration",
+        "summary": "Les couleurs se succèdent, en passant par le noir entre chacune."
+      },
+      "morph": {
+        "name": "Morph",
+        "summary": "Les couleurs se succèdent sans jamais s'éteindre."
+      },
+      "scanner": {
+        "name": "Scanner",
+        "summary": "Une bande lumineuse traverse les touches et revient."
+      },
+      "rainbowWave": {
+        "name": "Onde arc-en-ciel",
+        "summary": "Un arc-en-ciel traverse le clavier de part en part."
+      },
+      "spectrum": {
+        "name": "Spectre",
+        "summary": "Tout le clavier défile dans les teintes, sans fin."
+      },
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "Tout le clavier change de teinte ensemble, sans fin."
@@ -295,12 +326,12 @@
     "noLayout": "Aucun gabarit connu pour {device}.",
     "deviceNotOpen": "Aucun appareil ouvert pour {device}.",
     "deviceNotFound": "Clavier introuvable : branchez-le et réessayez.",
-    "deviceAccess": "Le clavier ne répond pas : {detail}",
+    "deviceAccess": "Cet appareil refuse ce que Candeo lui écrit ({detail}). S'il persiste, éteignez la machine puis rallumez-la.",
     "commandUnsupported": "Ce micrologiciel ne prend pas en charge la commande {command}.",
     "noFirmwareEffect": "« {device} » n'exécute aucun effet par lui-même : choisissez-en un dans la bibliothèque.",
     "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
-    "deviceWrite": "Écriture vers le clavier impossible : {detail}",
-    "deviceClosed": "Appareil refermé : reconnectez-le depuis Périphériques."
+    "deviceWrite": "Écriture impossible vers cet appareil : {detail}",
+    "deviceClosed": "Appareil refermé après trop d'écritures refusées : reconnectez-le depuis Périphériques, et éteignez puis rallumez la machine s'il persiste."
   },
   "settings": {
     "title": "Réglages",

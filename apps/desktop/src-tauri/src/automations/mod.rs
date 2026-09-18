@@ -36,7 +36,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use candeo_protocol::Effect;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
@@ -106,7 +105,7 @@ struct Running {
 /// Read at the **first** interruption and carried over when one rule hands the
 /// device to another: by then the device shows the first rule's effect, which
 /// is nobody's resting state.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Resting {
     /// A host loop was running: the applied effect, restarted from
     /// `activeEffects` with its saved settings. Its `time` starts again from
@@ -117,7 +116,7 @@ enum Resting {
     /// read back before interrupting, since nothing else remembers it. `None`
     /// when it could not be read, and the device then goes dark rather than
     /// staying frozen on the rule's last frame.
-    Firmware(Option<Effect>),
+    Firmware(Option<String>),
 }
 
 /// What a tick asks of a device.
@@ -326,16 +325,8 @@ impl Tables {
 /// The Wave's direction and speed are the only ones surveyed, the same the
 /// gallery uses (`src/composables/useEffects.ts`): offering others would be
 /// inventing a scale.
-fn hardware(id: &str) -> Option<Effect> {
-    match id {
-        "hardware:off" => Some(Effect::Off),
-        "hardware:spectrumCycle" => Some(Effect::SpectrumCycle),
-        "hardware:wave" => Some(Effect::Wave {
-            direction: 0x02,
-            speed: 0x28,
-        }),
-        _ => None,
-    }
+fn hardware(id: &str) -> Option<&str> {
+    id.starts_with("hardware:").then_some(id)
 }
 
 /// Puts a rule's effect on a device.
@@ -356,7 +347,7 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
         if dismissed {
             return;
         }
-        tables.running.get(&device).map(|r| r.resting)
+        tables.running.get(&device).map(|r| r.resting.clone())
     };
     let resting = carried.unwrap_or_else(|| resting_state(&state, device));
 
@@ -365,7 +356,8 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
             // The loop stops first, and is awaited: its next frame would light
             // up again what the firmware was just told to do.
             state.engine.stop(device);
-            crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect)?))
+            let colours = crate::colours_of(&interruption.params);
+            crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect, &colours)?))
         }
         None => crate::runtime::run_with(
             app,
@@ -427,8 +419,9 @@ fn resting_state(state: &AppState, device: DeviceRef) -> Resting {
         kb.current_effect().map_err(Failure::unexpected)
     });
     match read {
-        // Host-controlled with no loop is a frozen frame, not a resting state.
-        Ok(effect) => Resting::Firmware(effect.filter(|e| *e != Effect::Custom)),
+        // Host-controlled with no loop is a frozen frame, not a resting state,
+        // and the family already leaves it unnamed.
+        Ok(effect) => Resting::Firmware(effect),
         Err(e) => {
             tracing::info!(device = %device, "firmware effect not read before interrupting: {e}");
             Resting::Firmware(None)
@@ -467,7 +460,10 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
         Resting::Firmware(effect) => {
             state.engine.stop(device);
             crate::with_keyboard(&state, device, |kb| {
-                Ok(kb.set_effect(effect.unwrap_or(Effect::Off))?)
+                // No colour: this is an effect **read back** from a device, and
+                // only the family that can be asked has one — none of its
+                // effects paints a colour the application chose.
+                Ok(kb.set_effect(effect.as_deref().unwrap_or(crate::OFF), &[])?)
             })
         }
     };
@@ -903,17 +899,17 @@ mod tests {
         assert_eq!(until_next_second(10_999), Duration::from_millis(6));
     }
 
+    /// A rule's effect is a firmware one, or a loop to run — and the scheduler
+    /// tells them apart by the id alone. What a firmware id means is the
+    /// device's business, not this module's.
     #[test]
     fn hardware_ids_name_firmware_effects() {
-        assert_eq!(hardware("hardware:off"), Some(Effect::Off));
+        assert_eq!(hardware("hardware:off"), Some("hardware:off"));
         assert_eq!(
             hardware("hardware:spectrumCycle"),
-            Some(Effect::SpectrumCycle)
+            Some("hardware:spectrumCycle")
         );
-        assert!(matches!(
-            hardware("hardware:wave"),
-            Some(Effect::Wave { .. })
-        ));
+        assert_eq!(hardware("hardware:m18-0f"), Some("hardware:m18-0f"));
         assert_eq!(hardware("shipped:Clock"), None);
     }
 }

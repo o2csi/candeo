@@ -9,6 +9,8 @@ export function stubWindow(): void {
   vi.stubGlobal('window', {
     setTimeout: (run: () => void, ms?: number) => setTimeout(run, ms),
     clearTimeout: (timer?: ReturnType<typeof setTimeout>) => clearTimeout(timer),
+    setInterval: (run: () => void, ms?: number) => setInterval(run, ms),
+    clearInterval: (timer?: ReturnType<typeof setInterval>) => clearInterval(timer),
     addEventListener: () => {},
   })
 }

@@ -137,7 +137,19 @@ export interface LayoutInfo {
    * nothing of its own still goes dark, on a black frame. The gallery offers
    * these only, so that nobody picks a mode the device would refuse.
    */
-  firmwareEffects: string[]
+  firmwareEffects: FirmwareEffectInfo[]
+}
+
+/**
+ * Un effet exécuté par le micrologiciel, tel que la galerie en a besoin.
+ *
+ * `colours` dit combien de couleurs il peint : zéro pour ceux qui ont leur
+ * propre palette — un spectre, un arc-en-ciel — et la galerie ne demande alors
+ * rien, plutôt que d'offrir un réglage sans effet.
+ */
+export interface FirmwareEffectInfo {
+  id: string
+  colours: number
 }
 
 export type Effect =

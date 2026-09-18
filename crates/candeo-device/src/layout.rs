@@ -1,8 +1,8 @@
 //! Physical description of the supported devices.
 
-use candeo_protocol::{Effect, Firmware};
+use candeo_protocol::Firmware;
 
-use crate::lighting::{AlienwareKeys, Lighting, RazerRows};
+use crate::lighting::{AlienwareKeys, Lighting, RazerRows, ALIENWARE_ZONES};
 
 /// Matrix position without an LED.
 ///
@@ -58,6 +58,20 @@ pub struct Key {
     pub h: f32,
 }
 
+/// An effect a firmware runs, as a layout declares it.
+///
+/// **How many colours it takes is part of the effect, not of the device.** A
+/// spectrum paints its own palette and would ignore anything given to it; a
+/// steady colour shows nothing without one — which is how the same keyboard
+/// goes dark. The gallery asks for exactly as many as are used, so nobody picks
+/// a colour that changes nothing.
+pub struct FirmwareEffect {
+    /// The id the gallery uses, `hardware:wave`.
+    pub id: &'static str,
+    /// How many colours it paints with: none, one, or two.
+    pub colours: u8,
+}
+
 /// Which HID entry of a device carries the lighting.
 ///
 /// Two makers, two habits, and picking the wrong entry gives a valid handle on
@@ -108,7 +122,7 @@ pub struct Layout {
     /// draws nothing still goes dark, on a frame of black. Everything else is a
     /// mode of the device, and offering one the firmware does not know would be
     /// letting someone choose an effect that never runs.
-    pub firmware_effects: &'static [Effect],
+    pub firmware_effects: &'static [FirmwareEffect],
     pub rows: u8,
     pub cols: u8,
     /// **The address the device gives each position**, row by row; `u16::MAX`
@@ -260,14 +274,18 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     // `01 05`, read back through `0x00`/`0x81` on 12/09/2026 — the version the
     // device also declares elsewhere. See §8 of the survey.
     surveyed_firmware: Some(Firmware { major: 1, minor: 5 }),
-    // Surveyed by reading each identifier back: Static and Breathing take a
-    // colour this application has nowhere to ask for, and Reactive and Starlight
-    // are refused by this firmware. See §8 of the survey.
+    // Surveyed by reading each identifier back, see §8 of the survey; what each
+    // one sends is in `RazerRows::firmware_effect`. Neither takes a colour:
+    // Static and Breathing, which do, are not offered — the survey never
+    // established where their colour sits in a read-back.
     firmware_effects: &[
-        Effect::SpectrumCycle,
-        Effect::Wave {
-            direction: 0x02,
-            speed: 0x28,
+        FirmwareEffect {
+            id: "hardware:spectrumCycle",
+            colours: 0,
+        },
+        FirmwareEffect {
+            id: "hardware:wave",
+            colours: 0,
         },
     ],
     rows: 6,
@@ -392,9 +410,50 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
     lighting: &AlienwareKeys,
     // No command is known to read a version from this device yet.
     surveyed_firmware: None,
-    // Its firmware draws nothing by itself: every effect it shows comes from
-    // here, frame by frame.
-    firmware_effects: &[],
+    // Sixteen kinds answer; these seven are the ones that show something,
+    // watched one by one on the keyboard on 18/09/2026. The others stop
+    // whatever was running and draw nothing — offering them would be offering
+    // an effect that never starts — and `0c` is the dark one *Off* already is.
+    //
+    // Which ones take a colour was read the same way: given red, three of them
+    // showed red and four kept their own palette.
+    firmware_effects: &[
+        // a steady colour
+        FirmwareEffect {
+            id: "hardware:m18-01",
+            colours: 1,
+        },
+        // that colour, throbbing
+        FirmwareEffect {
+            id: "hardware:m18-02",
+            colours: 1,
+        },
+        // a rainbow crossing the keys
+        FirmwareEffect {
+            id: "hardware:m18-03",
+            colours: 0,
+        },
+        // colours following one another through black
+        FirmwareEffect {
+            id: "hardware:m18-08",
+            colours: 0,
+        },
+        // the same without going dark
+        FirmwareEffect {
+            id: "hardware:m18-09",
+            colours: 0,
+        },
+        // a lit band sweeping across and back
+        FirmwareEffect {
+            id: "hardware:m18-0a",
+            colours: 1,
+        },
+        // hues cycling, faster
+        FirmwareEffect {
+            id: "hardware:m18-0e",
+            colours: 0,
+        },
+    ],
     rows: 7,
     cols: 20,
     #[rustfmt::skip]
@@ -480,6 +539,47 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
         k( 133, 0xE04B,     13.5,  5.0), k(134, 0xE050, 14.5, 5.0), k(135, 0xE04D, 15.5, 5.0),
         kw(117, 0x52,       16.5,  5.0, 2.0),
         k( 118, 0x53,       18.5,  5.0),
+    ],
+};
+
+/// The lights around that keyboard: the ring at the rear, the logo on the lid,
+/// the power button. Surveyed in `docs/protocol/alienware-m18-r1.md` §2.
+///
+/// A second device, not a second matrix of the same one: another product id,
+/// another report shape, another family. One row of four cells, because that is
+/// all there is — the drawing below places them where they are on the machine,
+/// which is what tells someone which light a colour will reach.
+///
+/// **The power button is not here, and that is the finding.** Its own firmware
+/// pulses it — white on mains, green on battery, more slowly there — and takes
+/// it back within the second, verified from the application on 18/09/2026.
+/// Offering a light that never keeps what it is given would be a lie on screen,
+/// and the machine already does the useful thing without anyone running.
+pub static ALIENWARE_M18_R1_ZONES: Layout = Layout {
+    name: "Alienware m18 R1 zones",
+    vid: 0x187c,
+    pid: 0x0551,
+    port: Port::Collection {
+        usage_page: 0xff00,
+        usage: 0x0001,
+    },
+    lighting: &ALIENWARE_ZONES,
+    // No command is known to read a version from this device yet.
+    surveyed_firmware: None,
+    // It runs no effect of its own that anyone has surveyed.
+    firmware_effects: &[],
+    rows: 1,
+    cols: 3,
+    // The zone ids the device answers to. `3` lights nothing on this machine and
+    // `4`, the power button, never keeps what it is given.
+    matrix: &[0, 1, 2],
+    #[rustfmt::skip]
+    keys: &[
+        // A top-down view of the machine: the lid above, the ring across the
+        // back. No scancode — nothing here is a key.
+        kh(0, NO_SCANCODE, 0.0, 1.5, 8.0, 0.5),   // ring, upper half
+        kh(1, NO_SCANCODE, 0.0, 2.0, 8.0, 0.5),   // ring, lower half
+        kh(2, NO_SCANCODE, 3.0, 0.0, 2.0, 1.0),   // logo on the lid
     ],
 };
 

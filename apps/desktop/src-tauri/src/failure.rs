@@ -62,7 +62,11 @@ impl From<candeo_device::Error> for Failure {
             Error::NoFirmwareEffect { device } => {
                 Self::new("noFirmwareEffect").with("device", device)
             }
-            e @ (Error::RowOutOfRange { .. } | Error::NoRowWrite { .. }) => Self::unexpected(e),
+            // The screen offers neither a row write nor a slider to a device
+            // whose family has neither: reaching these is a bug, not a gesture.
+            e @ (Error::RowOutOfRange { .. }
+            | Error::NoRowWrite { .. }
+            | Error::NoBrightness { .. }) => Self::unexpected(e),
         }
     }
 }

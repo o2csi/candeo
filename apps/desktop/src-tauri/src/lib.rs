@@ -7,8 +7,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
-use candeo_protocol::{Effect, Rgb};
+use candeo_device::{
+    Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES,
+    DEATHSTALKER_V2_PRO,
+};
+use candeo_protocol::Rgb;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
@@ -42,7 +45,11 @@ mod update;
 /// Visible in the crate: the [`journal`] diagnostic lists the same devices as
 /// [`list_devices`], and copying them over there would make a second list that
 /// would diverge at the first added layout.
-pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
+pub(crate) const LAYOUTS: &[&Layout] = &[
+    &DEATHSTALKER_V2_PRO,
+    &ALIENWARE_M18_R1,
+    &ALIENWARE_M18_R1_ZONES,
+];
 
 // ---------------------------------------------------------------- exposed types
 
@@ -166,27 +173,54 @@ pub struct LayoutInfo {
     pub frame_len: usize,
     /// Only the cells carrying an LED.
     pub keys: Vec<KeyInfo>,
-    /// The effects this device's **firmware** runs, by the gallery's ids —
-    /// `hardware:spectrumCycle`, `hardware:wave`.
+    /// The effects this device's **firmware** runs, with how many colours each
+    /// takes.
     ///
     /// *Off* is never in it and is offered for every device: a firmware that
     /// draws nothing still goes dark, on a frame of black. The gallery offers
     /// these and no others, so that nobody picks an effect the device would
-    /// refuse.
-    pub firmware_effects: Vec<String>,
+    /// refuse — nor a colour an effect would ignore.
+    pub firmware_effects: Vec<FirmwareEffectInfo>,
 }
 
-/// The gallery's id for a firmware effect, as `useEffects.ts` writes them.
-fn hardware_id(effect: candeo_protocol::Effect) -> Option<&'static str> {
-    use candeo_protocol::Effect;
-    match effect {
-        Effect::Off => Some("hardware:off"),
-        Effect::SpectrumCycle => Some("hardware:spectrumCycle"),
-        Effect::Wave { .. } => Some("hardware:wave"),
-        // Static and Breathing need a colour the gallery has no way to pass, and
-        // Custom is what the engine drives.
-        _ => None,
-    }
+/// One firmware effect, as the gallery needs it. Mirror of
+/// `candeo_device::FirmwareEffect`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareEffectInfo {
+    pub id: String,
+    pub colours: u8,
+}
+
+/// The one effect every device offers, whatever its firmware runs: a device that
+/// draws nothing of its own still goes dark, on a frame of black.
+pub(crate) const OFF: &str = "hardware:off";
+
+/// Colours as they cross the boundary — flat bytes — read back as triplets. A
+/// trailing byte or two is dropped rather than made into a colour.
+pub(crate) fn triplets(bytes: &[u8]) -> Vec<Rgb> {
+    bytes
+        .chunks_exact(3)
+        .map(|c| Rgb::new(c[0], c[1], c[2]))
+        .collect()
+}
+
+/// The colours a firmware effect is to paint with, out of the settings kept for
+/// it — `colour` and `colour2`, each three numbers.
+///
+/// The same table an effect's settings live in, rather than a second one beside
+/// it: a rule carries them, the gallery saves them, and a firmware effect is
+/// still an effect with settings.
+pub(crate) fn colours_of(params: &serde_json::Map<String, serde_json::Value>) -> Vec<Rgb> {
+    ["colour", "colour2"]
+        .iter()
+        .filter_map(|key| {
+            // A colour setting is an object, as an effect reads it: `{r, g, b}`.
+            let colour = params.get(*key)?;
+            let read = |name: &str| colour.get(name)?.as_u64().map(|v| v.min(255) as u8);
+            Some(Rgb::new(read("r")?, read("g")?, read("b")?))
+        })
+        .collect()
 }
 
 impl From<&'static Layout> for LayoutInfo {
@@ -223,33 +257,18 @@ impl From<&'static Layout> for LayoutInfo {
             firmware_effects: l
                 .firmware_effects
                 .iter()
-                .filter_map(|&e| hardware_id(e))
-                .map(str::to_owned)
+                .map(|e| FirmwareEffectInfo {
+                    id: e.id.to_owned(),
+                    colours: e.colours,
+                })
                 .collect(),
         }
     }
 }
 
-/// Effect, as named on the interface side.
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum EffectDto {
-    Off,
-    SpectrumCycle,
-    Wave { direction: u8, speed: u8 },
-    Custom,
-}
-
-impl From<EffectDto> for Effect {
-    fn from(e: EffectDto) -> Self {
-        match e {
-            EffectDto::Off => Effect::Off,
-            EffectDto::SpectrumCycle => Effect::SpectrumCycle,
-            EffectDto::Wave { direction, speed } => Effect::Wave { direction, speed },
-            EffectDto::Custom => Effect::Custom,
-        }
-    }
-}
+// No effect type crosses this boundary any more: a firmware effect is named by
+// the id the gallery uses, and the family that owns the device turns it into
+// bytes. One family's modes are not another's.
 
 // ---------------------------------------------------------------- state
 
@@ -1004,7 +1023,7 @@ pub(crate) fn release_devices(state: &AppState) {
 
     for device in state.open_devices() {
         let _ = with_keyboard(state, device, |kb| {
-            kb.set_effect(Effect::Off).map_err(Failure::from)
+            kb.set_effect(crate::OFF, &[]).map_err(Failure::from)
         });
         state.set_open(device, None);
     }
@@ -1147,9 +1166,11 @@ fn set_effect(
     app: AppHandle,
     state: State<'_, AppState>,
     device: DeviceRef,
-    effect: EffectDto,
+    effect: String,
+    colours: Vec<u8>,
 ) -> CmdResult<()> {
-    with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect.into())?))?;
+    let colours = triplets(&colours);
+    with_keyboard(&state, device, |kb| Ok(kb.set_effect(&effect, &colours)?))?;
     // A firmware effect chosen by hand ends an interruption, like any gesture.
     automations::dismiss(&app, device);
     Ok(())

@@ -75,6 +75,7 @@
     "preview": {
       "device": "Frames from the engine, exactly the ones sent to the keyboard.",
       "hardware": "Run by the firmware: the application does not receive its frames, there is nothing to animate here.",
+      "illustration": "Run by the firmware. This is the application's drawing of what it does, not the keyboard's own frames.",
       "noDevice": "Preview on the default layout: nothing is sent anywhere, and no device is controlled.",
       "elsewhere": "Preview: nothing is sent to the keyboard, where “{name}” keeps running.",
       "apply": "Preview: nothing is sent to the keyboard. “Apply” sends this one there.",
@@ -105,6 +106,36 @@
     "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
     "cancel": "Cancel",
     "hardwareEffects": {
+      "pickColour": "Colour",
+      "pickColour2": "Second colour",
+      "colour": {
+        "name": "Colour",
+        "summary": "One colour, held — the one chosen below."
+      },
+      "pulse": {
+        "name": "Pulse",
+        "summary": "That colour throbs, on and off, endlessly."
+      },
+      "breathing": {
+        "name": "Breathing",
+        "summary": "Colours follow one another, fading through black in between."
+      },
+      "morph": {
+        "name": "Morph",
+        "summary": "Colours follow one another without ever going dark."
+      },
+      "scanner": {
+        "name": "Scanner",
+        "summary": "A lit band sweeps across the keys and back."
+      },
+      "rainbowWave": {
+        "name": "Rainbow Wave",
+        "summary": "A rainbow crosses the keyboard from side to side."
+      },
+      "spectrum": {
+        "name": "Spectrum",
+        "summary": "The whole keyboard cycles through hues, endlessly."
+      },
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "The whole keyboard changes hue together, endlessly."
@@ -295,12 +326,12 @@
     "noLayout": "No known layout for {device}.",
     "deviceNotOpen": "No device open for {device}.",
     "deviceNotFound": "Keyboard not found: plug it in and try again.",
-    "deviceAccess": "The keyboard cannot be reached: {detail}",
+    "deviceAccess": "This device refuses what Candeo writes to it ({detail}). If it keeps refusing, shut the machine down and start it again.",
     "commandUnsupported": "This firmware does not support command {command}.",
     "noFirmwareEffect": "“{device}” runs no effect of its own: choose one from the library.",
     "wrongUnit": "The plugged-in unit (serial {fingerprint}) is not the one that was controlled: it stays closed. “Control” adopts it too.",
-    "deviceWrite": "Cannot write to the keyboard: {detail}",
-    "deviceClosed": "Device closed: reconnect it from Devices."
+    "deviceWrite": "Cannot write to this device: {detail}",
+    "deviceClosed": "Device closed after too many refused writes: reconnect it from Devices, and power the machine off and on if it keeps refusing."
   },
   "settings": {
     "title": "Settings",
