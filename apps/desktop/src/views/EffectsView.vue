@@ -125,7 +125,13 @@ const router = useRouter()
 const { devices, current, select, busy, refresh } = useDevice()
 // `apply` ne lève pas : il range son échec dans `applyError`, qu'il faut donc
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
-const { appliedOn, apply, error: applyError, dismissError: dismissApplyError } = useEffects()
+const {
+  appliedOn,
+  poseMatches,
+  apply,
+  error: applyError,
+  dismissError: dismissApplyError,
+} = useEffects()
 const {
   load: loadSettings,
   reload: reloadSettings,
@@ -559,9 +565,22 @@ watch(
  * montre les vraies images du clavier, et il n'y a aucune raison d'entretenir un
  * second contexte QuickJS pour afficher la même chose.
  */
-const applied = computed(
-  () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
-)
+/**
+ * Le clavier montre-t-il **exactement** l'effet sélectionné, réglages compris ?
+ *
+ * Pour un effet piloté, changer un réglage ajuste la boucle en cours : ce que
+ * montre l'appareil ne s'écarte jamais de ce qu'on lit. Un effet du
+ * micrologiciel n'a pas de boucle — il garde la dernière couleur reçue — donc
+ * en changer une laisse un écart, et « Appliquer » redevient le geste qui le
+ * comble.
+ */
+const applied = computed(() => {
+  const c = selectedEffect.value
+  if (c === null || activeId.value !== c.id) return false
+  if (!c.hardware) return true
+  const d = selectedDevice.value
+  return poseMatches(d, c.id, colourBytes(paramValues.value))
+})
 
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
@@ -1004,16 +1023,7 @@ function onParamCommit(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  const device = { vid: d.vid, pid: d.pid }
-  settle(device, c.id)
-
-  // A firmware effect has no loop to adjust: the device holds the colour it was
-  // last given, so changing it means sending the effect again. Only the one the
-  // device is actually showing — and at the end of the gesture, not at every
-  // shade a colour picker travels through.
-  if (c.hardware && c.id === appliedOn(device)) {
-    void apply(device, c.hardware, colourBytes(paramValues.value))
-  }
+  settle({ vid: d.vid, pid: d.pid }, c.id)
 }
 
 function onParamReset(): void {

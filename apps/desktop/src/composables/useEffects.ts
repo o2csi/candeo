@@ -149,7 +149,7 @@ export function hardwareEffectsFor(
  * dans une liste qui décrit ce que fait **un** appareil : ce n'est pas une
  * simplification, c'est une information fausse dès le second clavier.
  */
-const posed = ref<Record<string, string>>({})
+const posed = ref<Record<string, { id: string; colours: number[] }>>({})
 const error = ref<string | null>(null)
 
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
@@ -170,7 +170,7 @@ export function useEffects() {
       await api.setEffect(device, e.id, colours)
       // Remplacement plutôt que mutation : `readonly()` interdit d'écrire dans
       // l'objet exposé, et la réactivité ne dépend plus de la clé déjà présente.
-      posed.value = { ...posed.value, [key(device)]: e.id }
+      posed.value = { ...posed.value, [key(device)]: { id: e.id, colours } }
     } catch (err) {
       error.value = message(err)
     }
@@ -178,7 +178,20 @@ export function useEffects() {
 
   /** L'effet matériel que cette session a posé sur cet appareil, s'il y en a un. */
   function appliedOn(device: DeviceRef | null): string | null {
-    return device ? (posed.value[key(device)] ?? null) : null
+    return device ? (posed.value[key(device)]?.id ?? null) : null
+  }
+
+  /**
+   * True when the device is showing this effect **with these colours**.
+   *
+   * A firmware effect has no loop to adjust: the device holds what it was last
+   * given, so a colour changed since then is a change waiting to be applied —
+   * and the button says so instead of reading *Applied* over a keyboard showing
+   * the previous colour.
+   */
+  function poseMatches(device: DeviceRef | null, id: string, colours: number[]): boolean {
+    const pose = device ? posed.value[key(device)] : undefined
+    return pose?.id === id && String(pose.colours) === String(colours)
   }
 
   /**
@@ -201,6 +214,7 @@ export function useEffects() {
 
   return {
     appliedOn,
+    poseMatches,
     error: readonly(error),
     dismissError,
     apply,
