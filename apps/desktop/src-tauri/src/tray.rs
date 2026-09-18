@@ -809,7 +809,7 @@ fn turn_off_device(app: &AppHandle, device: DeviceRef) {
     // the window.
     crate::runtime::remember_active_effect(app, device, None);
 
-    if let Err(e) = crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(crate::OFF)?)) {
+    if let Err(e) = crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(crate::OFF, &[])?)) {
         // The expected case: the device was unplugged — or ignored from the
         // window — while the menu was open. The item was enabled when the menu
         // was built; the device was gone by the time of the click.

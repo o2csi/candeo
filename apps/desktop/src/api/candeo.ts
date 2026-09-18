@@ -113,8 +113,8 @@ export function rememberBrightness(device: DeviceRef, level: number): Promise<vo
  * Which ids a device runs is its layout's business — `firmwareEffects` — and the
  * family that owns it turns the id into bytes.
  */
-export function setEffect(device: DeviceRef, effect: string): Promise<void> {
-  return invoke('set_effect', { device, effect })
+export function setEffect(device: DeviceRef, effect: string, colours: number[] = []): Promise<void> {
+  return invoke('set_effect', { device, effect, colours })
 }
 
 /**

@@ -442,7 +442,7 @@ impl DeviceOut for Handle {
 
     fn turn_off(&self) {
         let guard = self.lock().unwrap();
-        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(crate::OFF)) {
+        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(crate::OFF, &[])) {
             tracing::warn!("backlight not turned off after the effect stopped: {e}");
         }
     }

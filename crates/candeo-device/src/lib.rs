@@ -139,8 +139,8 @@ impl Keyboard {
     /// A family whose firmware draws nothing has no such thing: *Off* is then a
     /// black frame, and anything else is refused rather than approximated, so
     /// that nobody believes the device runs an effect it does not.
-    pub fn set_effect(&self, id: &str) -> Result<(), Error> {
-        match self.layout.lighting.firmware_effect(id) {
+    pub fn set_effect(&self, id: &str, colours: &[Rgb]) -> Result<(), Error> {
+        match self.layout.lighting.firmware_effect(id, colours) {
             Some(report) => self.send(&report),
             None if id == "hardware:off" => {
                 self.present(&vec![Rgb::default(); self.layout.led_count()])

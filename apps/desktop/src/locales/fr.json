@@ -106,9 +106,11 @@
     "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
     "cancel": "Annuler",
     "hardwareEffects": {
+      "colour": "Couleur",
+      "colour2": "Seconde couleur",
       "static": {
         "name": "Statique",
-        "summary": "Une couleur, tenue. Rouge pour l'instant : la choisir n'est pas encore branché."
+        "summary": "Une couleur, tenue — celle que vous choisissez ci-dessous."
       },
       "pulse": {
         "name": "Pulsation",

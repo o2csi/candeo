@@ -58,6 +58,8 @@ export interface SimulatorFeedOptions {
    * ever sent to a keyboard. See [`illustration`].
    */
   illustrated?: () => string | null
+  /** The colours that effect paints with, as its settings have them. */
+  illustratedColours?: () => readonly Rgb[]
   /**
    * Read when the preview starts, never watched: a slider move adjusts the
    * running preview live instead of rebuilding a QuickJS context.
@@ -133,7 +135,13 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
   let animation = 0
 
   watch(
-    [illustrated, () => options.layout()?.frameLen ?? 0],
+    // The colours are watched as text: a fresh array at every read would
+    // restart the drawing on each tick.
+    [
+      illustrated,
+      () => options.layout()?.frameLen ?? 0,
+      () => String(options.illustratedColours?.()),
+    ],
     ([id, frameLen]) => {
       window.clearInterval(animation)
       drawn.value = null
@@ -144,7 +152,13 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
       // few lights.
       const started = Date.now()
       const draw = () => {
-        drawn.value = illustrate(id, (Date.now() - started) / 1000, layout.cols, frameLen)
+        drawn.value = illustrate(
+          id,
+          (Date.now() - started) / 1000,
+          layout.cols,
+          frameLen,
+          options.illustratedColours?.() ?? [],
+        )
       }
       draw()
       animation = window.setInterval(draw, ILLUSTRATION_PACE)

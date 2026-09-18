@@ -173,19 +173,55 @@ pub struct LayoutInfo {
     pub frame_len: usize,
     /// Only the cells carrying an LED.
     pub keys: Vec<KeyInfo>,
-    /// The effects this device's **firmware** runs, by the gallery's ids —
-    /// `hardware:spectrumCycle`, `hardware:wave`.
+    /// The effects this device's **firmware** runs, with how many colours each
+    /// takes.
     ///
     /// *Off* is never in it and is offered for every device: a firmware that
     /// draws nothing still goes dark, on a frame of black. The gallery offers
     /// these and no others, so that nobody picks an effect the device would
-    /// refuse.
-    pub firmware_effects: Vec<String>,
+    /// refuse — nor a colour an effect would ignore.
+    pub firmware_effects: Vec<FirmwareEffectInfo>,
+}
+
+/// One firmware effect, as the gallery needs it. Mirror of
+/// `candeo_device::FirmwareEffect`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareEffectInfo {
+    pub id: String,
+    pub colours: u8,
 }
 
 /// The one effect every device offers, whatever its firmware runs: a device that
 /// draws nothing of its own still goes dark, on a frame of black.
 pub(crate) const OFF: &str = "hardware:off";
+
+/// Colours as they cross the boundary — flat bytes — read back as triplets. A
+/// trailing byte or two is dropped rather than made into a colour.
+pub(crate) fn triplets(bytes: &[u8]) -> Vec<Rgb> {
+    bytes
+        .chunks_exact(3)
+        .map(|c| Rgb::new(c[0], c[1], c[2]))
+        .collect()
+}
+
+/// The colours a firmware effect is to paint with, out of the settings kept for
+/// it — `colour` and `colour2`, each three numbers.
+///
+/// The same table an effect's settings live in, rather than a second one beside
+/// it: a rule carries them, the gallery saves them, and a firmware effect is
+/// still an effect with settings.
+pub(crate) fn colours_of(params: &serde_json::Map<String, serde_json::Value>) -> Vec<Rgb> {
+    ["colour", "colour2"]
+        .iter()
+        .filter_map(|key| {
+            // A colour setting is an object, as an effect reads it: `{r, g, b}`.
+            let colour = params.get(*key)?;
+            let read = |name: &str| colour.get(name)?.as_u64().map(|v| v.min(255) as u8);
+            Some(Rgb::new(read("r")?, read("g")?, read("b")?))
+        })
+        .collect()
+}
 
 impl From<&'static Layout> for LayoutInfo {
     fn from(l: &'static Layout) -> Self {
@@ -218,7 +254,14 @@ impl From<&'static Layout> for LayoutInfo {
             cols: l.cols,
             frame_len: l.led_count(),
             keys,
-            firmware_effects: l.firmware_effects.iter().map(|&id| id.to_owned()).collect(),
+            firmware_effects: l
+                .firmware_effects
+                .iter()
+                .map(|e| FirmwareEffectInfo {
+                    id: e.id.to_owned(),
+                    colours: e.colours,
+                })
+                .collect(),
         }
     }
 }
@@ -980,7 +1023,7 @@ pub(crate) fn release_devices(state: &AppState) {
 
     for device in state.open_devices() {
         let _ = with_keyboard(state, device, |kb| {
-            kb.set_effect(crate::OFF).map_err(Failure::from)
+            kb.set_effect(crate::OFF, &[]).map_err(Failure::from)
         });
         state.set_open(device, None);
     }
@@ -1124,8 +1167,10 @@ fn set_effect(
     state: State<'_, AppState>,
     device: DeviceRef,
     effect: String,
+    colours: Vec<u8>,
 ) -> CmdResult<()> {
-    with_keyboard(&state, device, |kb| Ok(kb.set_effect(&effect)?))?;
+    let colours = triplets(&colours);
+    with_keyboard(&state, device, |kb| Ok(kb.set_effect(&effect, &colours)?))?;
     // A firmware effect chosen by hand ends an interruption, like any gesture.
     automations::dismiss(&app, device);
     Ok(())

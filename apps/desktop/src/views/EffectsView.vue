@@ -81,7 +81,7 @@ import {
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
-import type { DeviceRef, LayoutInfo } from '../api/types'
+import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
@@ -92,7 +92,13 @@ import { interruptionLine } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
 import { illustrates } from '../keyboard/illustration'
-import { hardwareEffectsFor, useEffects, type HardwareEffect } from '../composables/useEffects'
+import {
+  colourBytes,
+  hardwareEffectsFor,
+  hardwareParams,
+  useEffects,
+  type HardwareEffect,
+} from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
 import { t } from '../i18n'
@@ -271,7 +277,9 @@ function fromHardware(e: HardwareEffect): Choice {
     nature: 'hardware',
     description: e.summary,
     swatch: [],
-    params: {},
+    // Its colours, when it paints with any: the settings column then draws the
+    // same form as for any other effect, and what is chosen is kept the same way.
+    params: hardwareParams(e),
     hardware: e,
     state: 'ready',
     error: null,
@@ -575,6 +583,12 @@ const { frame, restartPreview } = useSimulatorFeed({
     const c = selectedEffect.value
     return c?.hardware && illustrates(c.id) ? c.id : null
   },
+  // The drawing paints with what the effect was given, so that it says what the
+  // keyboard will show rather than a colour of its own.
+  illustratedColours: () => {
+    const bytes = colourBytes(paramValues.value)
+    return bytes.length >= 3 ? [[bytes[0], bytes[1], bytes[2]] as Rgb] : []
+  },
   params: () => paramValues.value,
   onError: (e) => {
     problem.value = message(e)
@@ -641,7 +655,7 @@ async function applyEffect(): Promise<void> {
   try {
     if (c.hardware) {
       if (statusOf(d)?.running === true) await stopEffect(device)
-      await apply(device, c.hardware)
+      await apply(device, c.hardware, colourBytes(paramValues.value))
     } else {
       // Les réglages retenus pour **cette paire**, et non les valeurs déclarées :
       // un effet réglé puis quitté doit repartir comme on l'avait laissé, sans

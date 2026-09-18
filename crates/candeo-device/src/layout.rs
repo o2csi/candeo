@@ -58,6 +58,20 @@ pub struct Key {
     pub h: f32,
 }
 
+/// An effect a firmware runs, as a layout declares it.
+///
+/// **How many colours it takes is part of the effect, not of the device.** A
+/// spectrum paints its own palette and would ignore anything given to it; a
+/// steady colour shows nothing without one — which is how the same keyboard
+/// goes dark. The gallery asks for exactly as many as are used, so nobody picks
+/// a colour that changes nothing.
+pub struct FirmwareEffect {
+    /// The id the gallery uses, `hardware:wave`.
+    pub id: &'static str,
+    /// How many colours it paints with: none, one, or two.
+    pub colours: u8,
+}
+
 /// Which HID entry of a device carries the lighting.
 ///
 /// Two makers, two habits, and picking the wrong entry gives a valid handle on
@@ -101,14 +115,14 @@ pub struct Layout {
     /// `release_number`: HID enumeration returns the `bcdDevice` there, a frozen
     /// hardware revision that looks like a version and is not one.
     pub surveyed_firmware: Option<Firmware>,
-    /// The effects this **firmware** runs by itself, by the ids the gallery
-    /// uses, which it offers for this device and no other.
+    /// The effects this **firmware** runs by itself, which the gallery offers
+    /// for this device and no other.
     ///
     /// *Off* is not in it and is offered everywhere: a device whose firmware
     /// draws nothing still goes dark, on a frame of black. Everything else is a
     /// mode of the device, and offering one the firmware does not know would be
     /// letting someone choose an effect that never runs.
-    pub firmware_effects: &'static [&'static str],
+    pub firmware_effects: &'static [FirmwareEffect],
     pub rows: u8,
     pub cols: u8,
     /// **The address the device gives each position**, row by row; `u16::MAX`
@@ -261,8 +275,19 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
     // device also declares elsewhere. See §8 of the survey.
     surveyed_firmware: Some(Firmware { major: 1, minor: 5 }),
     // Surveyed by reading each identifier back, see §8 of the survey; what each
-    // one sends is in `RazerRows::firmware_effect`.
-    firmware_effects: &["hardware:spectrumCycle", "hardware:wave"],
+    // one sends is in `RazerRows::firmware_effect`. Neither takes a colour:
+    // Static and Breathing, which do, are not offered — the survey never
+    // established where their colour sits in a read-back.
+    firmware_effects: &[
+        FirmwareEffect {
+            id: "hardware:spectrumCycle",
+            colours: 0,
+        },
+        FirmwareEffect {
+            id: "hardware:wave",
+            colours: 0,
+        },
+    ],
     rows: 6,
     cols: 22,
     #[rustfmt::skip]
@@ -389,14 +414,45 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
     // watched one by one on the keyboard on 18/09/2026. The others stop
     // whatever was running and draw nothing — offering them would be offering
     // an effect that never starts — and `0c` is the dark one *Off* already is.
+    //
+    // Which ones take a colour was read the same way: given red, three of them
+    // showed red and four kept their own palette.
     firmware_effects: &[
-        "hardware:m18-01", // a steady colour
-        "hardware:m18-02", // that colour, throbbing
-        "hardware:m18-03", // a rainbow crossing the keys
-        "hardware:m18-08", // colours following one another through black
-        "hardware:m18-09", // the same without going dark
-        "hardware:m18-0a", // a lit band sweeping across and back
-        "hardware:m18-0e", // hues cycling, faster
+        // a steady colour
+        FirmwareEffect {
+            id: "hardware:m18-01",
+            colours: 1,
+        },
+        // that colour, throbbing
+        FirmwareEffect {
+            id: "hardware:m18-02",
+            colours: 1,
+        },
+        // a rainbow crossing the keys
+        FirmwareEffect {
+            id: "hardware:m18-03",
+            colours: 0,
+        },
+        // colours following one another through black
+        FirmwareEffect {
+            id: "hardware:m18-08",
+            colours: 0,
+        },
+        // the same without going dark
+        FirmwareEffect {
+            id: "hardware:m18-09",
+            colours: 0,
+        },
+        // a lit band sweeping across and back
+        FirmwareEffect {
+            id: "hardware:m18-0a",
+            colours: 1,
+        },
+        // hues cycling, faster
+        FirmwareEffect {
+            id: "hardware:m18-0e",
+            colours: 0,
+        },
     ],
     rows: 7,
     cols: 20,

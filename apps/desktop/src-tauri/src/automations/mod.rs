@@ -356,7 +356,8 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
             // The loop stops first, and is awaited: its next frame would light
             // up again what the firmware was just told to do.
             state.engine.stop(device);
-            crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect)?))
+            let colours = crate::colours_of(&interruption.params);
+            crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(effect, &colours)?))
         }
         None => crate::runtime::run_with(
             app,
@@ -459,7 +460,10 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
         Resting::Firmware(effect) => {
             state.engine.stop(device);
             crate::with_keyboard(&state, device, |kb| {
-                Ok(kb.set_effect(effect.as_deref().unwrap_or(crate::OFF))?)
+                // No colour: this is an effect **read back** from a device, and
+                // only the family that can be asked has one — none of its
+                // effects paints a colour the application chose.
+                Ok(kb.set_effect(effect.as_deref().unwrap_or(crate::OFF), &[])?)
             })
         }
     };

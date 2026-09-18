@@ -106,9 +106,11 @@
     "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
     "cancel": "Cancel",
     "hardwareEffects": {
+      "colour": "Colour",
+      "colour2": "Second colour",
       "static": {
         "name": "Static",
-        "summary": "One colour, held. Red for now: choosing it is not wired yet."
+        "summary": "One colour, held — the one chosen below."
       },
       "pulse": {
         "name": "Pulse",

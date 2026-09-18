@@ -20,7 +20,7 @@
 
 import type { Rgb } from '../api/types'
 
-/** The colour a firmware effect is given, until the gallery can ask for one. */
+/** What an effect paints with when its settings say nothing. */
 const ONE: Rgb = [0xff, 0x00, 0x00]
 const TWO: Rgb = [0x00, 0x00, 0xff]
 
@@ -88,7 +88,20 @@ export function illustrates(id: string): boolean {
  * Cells outside the drawing — the gaps of a matrix — are black, as they are in
  * any frame: the simulator only draws the ones carrying a key.
  */
-export function illustrate(id: string, seconds: number, cols: number, frameLen: number): Rgb[] {
+export function illustrate(
+  id: string,
+  seconds: number,
+  cols: number,
+  frameLen: number,
+  /**
+   * The colours the effect was given, so that the drawing says what the device
+   * will show. An effect painting its own palette ignores them, here as there.
+   */
+  colours: readonly Rgb[] = [],
+): Rgb[] {
+  const one = colours[0] ?? ONE
+  const two = colours[1] ?? TWO
+
   const cell = (position: number): Rgb => {
     const column = cols > 0 ? position % cols : 0
     const across = cols > 1 ? column / (cols - 1) : 0
@@ -96,11 +109,11 @@ export function illustrate(id: string, seconds: number, cols: number, frameLen: 
     switch (id) {
       // One colour, held.
       case 'hardware:m18-01':
-        return ONE
+        return one
 
       // The same colour, throbbing: full, dark, full.
       case 'hardware:m18-02':
-        return dim(ONE, (1 + Math.cos(seconds * Math.PI)) / 2)
+        return dim(one, (1 + Math.cos(seconds * Math.PI)) / 2)
 
       // A rainbow crossing the keys, and the Razer's wave beside it. Five sixths
       // of the wheel, not the whole of it: a full turn puts the same red at both
@@ -113,14 +126,14 @@ export function illustrate(id: string, seconds: number, cols: number, frameLen: 
       case 'hardware:m18-08': {
         const phase = (seconds / 2) % 2
         const fading = phase % 1
-        const colour = phase < 1 ? ONE : TWO
+        const colour = phase < 1 ? one : two
         return dim(colour, fading < 0.5 ? 1 - fading * 2 : (fading - 0.5) * 2)
       }
 
       // The same, never going dark.
       case 'hardware:m18-09': {
         const phase = (seconds / 2) % 2
-        return phase < 1 ? between(ONE, TWO, phase) : between(TWO, ONE, phase - 1)
+        return phase < 1 ? between(one, two, phase) : between(two, one, phase - 1)
       }
 
       // A lit band sweeping across the keys and back.
@@ -128,7 +141,7 @@ export function illustrate(id: string, seconds: number, cols: number, frameLen: 
         // Starts at the left edge, as the keyboard's own does.
         const sweep = 1 - Math.abs(((seconds / 1.5) % 2) - 1)
         const distance = Math.abs(across - sweep)
-        return dim(ONE, Math.max(0, 1 - distance * 4))
+        return dim(one, Math.max(0, 1 - distance * 4))
       }
 
       // Hues cycling over the whole surface, and the Razer's spectrum beside it.

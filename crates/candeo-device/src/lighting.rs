@@ -102,9 +102,12 @@ pub trait Lighting: Sync {
     /// kinds of its own. A shared enumeration would carry each family's
     /// vocabulary into every other, and every new device would widen it.
     ///
+    /// `colours` carries what the gallery was asked for, as many as the layout
+    /// says the effect takes; an effect painting its own palette gets none.
+    ///
     /// `None` for an id this family does not run — including where it runs none
     /// at all, and *Off* is then a black frame rather than a mode.
-    fn firmware_effect(&self, id: &str) -> Option<Outgoing>;
+    fn firmware_effect(&self, id: &str, colours: &[Rgb]) -> Option<Outgoing>;
 
     /// The effect the firmware runs now, by its id, for a family that can be
     /// asked. `None` for one the gallery does not offer — a mode needing a
@@ -159,7 +162,7 @@ impl Lighting for RazerRows {
     /// The wave's two values are the only ones ever captured; their real range
     /// is an open question of the survey, so offering a setting would be
     /// inventing a scale.
-    fn firmware_effect(&self, id: &str) -> Option<Outgoing> {
+    fn firmware_effect(&self, id: &str, _colours: &[Rgb]) -> Option<Outgoing> {
         let effect = match id {
             "hardware:off" => Effect::Off,
             "hardware:spectrumCycle" => Effect::SpectrumCycle,
@@ -249,18 +252,18 @@ impl Lighting for AlienwareKeys {
     /// redraws over anything the host pushes: an image of black is overwritten
     /// within the second, and the keyboard never goes dark.
     ///
-    /// The two colours are provisional. Several kinds paint what they are given
-    /// and show nothing on black — which is how `Off` works — so until the
-    /// gallery can ask for a colour, the others get a pair one can see.
-    fn firmware_effect(&self, id: &str) -> Option<Outgoing> {
-        let (kind, one, two) = match id {
-            "hardware:off" => (ALIENWARE_STEADY, Rgb::default(), Rgb::default()),
-            _ => (
-                u8::from_str_radix(id.strip_prefix(ALIENWARE_EFFECT)?, 16).ok()?,
-                Rgb::new(0xff, 0x00, 0x00),
-                Rgb::new(0x00, 0x00, 0xff),
-            ),
+    /// Colours are taken as given, and the kinds that paint their own palette
+    /// are unaffected by them: the layout says which take one, so an effect that
+    /// would ignore a colour is never asked for one.
+    fn firmware_effect(&self, id: &str, colours: &[Rgb]) -> Option<Outgoing> {
+        let kind = match id {
+            "hardware:off" => ALIENWARE_STEADY,
+            _ => u8::from_str_radix(id.strip_prefix(ALIENWARE_EFFECT)?, 16).ok()?,
         };
+        // A kind that paints what it is given, given nothing, shows nothing —
+        // which is exactly what `Off` is here.
+        let one = colours.first().copied().unwrap_or_default();
+        let two = colours.get(1).copied().unwrap_or(one);
         Some(Outgoing::plain(
             alienware::effect(kind, 0x05, one, two).to_vec(),
         ))
@@ -376,7 +379,7 @@ impl Lighting for AlienwareZones {
     // No brightness: nothing in the survey dims these zones, and the level of a
     // colour is the colour itself.
 
-    fn firmware_effect(&self, _id: &str) -> Option<Outgoing> {
+    fn firmware_effect(&self, _id: &str, _colours: &[Rgb]) -> Option<Outgoing> {
         None
     }
 

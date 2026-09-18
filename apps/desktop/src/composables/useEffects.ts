@@ -9,6 +9,8 @@ import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
 import { message } from '../api/journal'
+import type { ParamSpec } from '@candeo/effects-api'
+
 import type { DeviceRef } from '../api/types'
 import { t } from '../i18n'
 
@@ -18,6 +20,8 @@ export interface HardwareEffect {
   name: string
   /** One sentence on what it does, when we know. */
   summary: string
+  /** How many colours it paints with — none for one with its own palette. */
+  colours: number
 }
 
 /**
@@ -25,6 +29,45 @@ export interface HardwareEffect {
  * still goes dark, on a black frame.
  */
 export const OFF = 'hardware:off'
+
+/**
+ * What a firmware effect declares as settings: its colours, and nothing else.
+ *
+ * **A firmware effect is an effect with settings**, so it says so the same way
+ * the others do. The form that draws them, the values kept for a device, the
+ * ones a rule carries: all of it already works on a declaration, and none of it
+ * had to learn what a firmware effect is.
+ */
+export function hardwareParams(e: HardwareEffect): Record<string, ParamSpec> {
+  const specs: Record<string, ParamSpec> = {}
+  if (e.colours >= 1) {
+    specs.colour = {
+      kind: 'color',
+      label: t('effects.hardwareEffects.colour'),
+      default: { r: 0xff, g: 0x00, b: 0x00 },
+    }
+  }
+  if (e.colours >= 2) {
+    specs.colour2 = {
+      kind: 'color',
+      label: t('effects.hardwareEffects.colour2'),
+      default: { r: 0x00, g: 0x00, b: 0xff },
+    }
+  }
+  return specs
+}
+
+/**
+ * The colours out of those values, flat, in the order the effect takes them —
+ * the shape the command wants, and the one a frame crosses in.
+ */
+export function colourBytes(values: Record<string, unknown>): number[] {
+  return ['colour', 'colour2'].flatMap((key) => {
+    const colour = values[key] as { r?: number; g?: number; b?: number } | undefined
+    if (!colour || typeof colour.r !== 'number') return []
+    return [colour.r, colour.g ?? 0, colour.b ?? 0]
+  })
+}
 
 /** What an Alienware keyboard's own effects are called, before their number. */
 const ALIENWARE = 'hardware:m18-'
@@ -52,10 +95,11 @@ const ALIENWARE_NAMES = {
  * named after their number until someone says what each one shows — which takes
  * eyes on a keyboard, not code.
  */
-export function named(id: string): HardwareEffect {
+export function named(id: string, colours = 0): HardwareEffect {
   if (id === OFF) {
     return {
       id,
+      colours,
       name: t('effects.hardwareEffects.off.name'),
       summary: t('effects.hardwareEffects.off.summary'),
     }
@@ -64,6 +108,7 @@ export function named(id: string): HardwareEffect {
     const key = id === 'hardware:wave' ? 'wave' : 'spectrumCycle'
     return {
       id,
+      colours,
       name: t(`effects.hardwareEffects.${key}.name`),
       summary: t(`effects.hardwareEffects.${key}.summary`),
     }
@@ -73,6 +118,7 @@ export function named(id: string): HardwareEffect {
   if (id.startsWith(ALIENWARE) && alienware) {
     return {
       id,
+      colours,
       name: t(`effects.hardwareEffects.${alienware}.name`),
       summary: t(`effects.hardwareEffects.${alienware}.summary`),
     }
@@ -80,7 +126,7 @@ export function named(id: string): HardwareEffect {
   // An id nobody named: shown as it is rather than invented. The gallery only
   // offers what a layout lists, so this is the sign of a layout gone ahead of
   // the words for it.
-  return { id, name: id, summary: '' }
+  return { id, colours, name: id, summary: '' }
 }
 
 /**
@@ -90,9 +136,10 @@ export function named(id: string): HardwareEffect {
  * unknown device runs would be inventing it.
  */
 export function hardwareEffectsFor(
-  layout: { firmwareEffects?: string[] } | null | undefined,
+  layout: { firmwareEffects?: { id: string; colours: number }[] } | null | undefined,
 ): readonly HardwareEffect[] {
-  return [...(layout?.firmwareEffects ?? []), OFF].map(named)
+  const offered = layout?.firmwareEffects ?? []
+  return [...offered.map((e) => named(e.id, e.colours)), named(OFF)]
 }
 
 /**
@@ -117,10 +164,10 @@ export function useEffects() {
    * n'est donc marqué au lancement — une supposition serait pire que le vide,
    * puisqu'elle se tromperait silencieusement après un redémarrage.
    */
-  async function apply(device: DeviceRef, e: HardwareEffect) {
+  async function apply(device: DeviceRef, e: HardwareEffect, colours: number[] = []) {
     error.value = null
     try {
-      await api.setEffect(device, e.id)
+      await api.setEffect(device, e.id, colours)
       // Remplacement plutôt que mutation : `readonly()` interdit d'écrire dans
       // l'objet exposé, et la réactivité ne dépend plus de la clé déjà présente.
       posed.value = { ...posed.value, [key(device)]: e.id }
