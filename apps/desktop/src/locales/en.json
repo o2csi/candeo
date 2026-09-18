@@ -157,7 +157,8 @@
     },
     "swatchKnown": "Colors sampled by running the effect",
     "swatchUnknown": "No swatch",
-    "simulator": "Preview of {layout}: {keys} lit keys"
+    "simulator": "Preview of {layout}: {keys} lit keys",
+    "simulatorZones": "Preview of {layout}: {zones} lit zones"
   },
   "editor": {
     "back": "Back",

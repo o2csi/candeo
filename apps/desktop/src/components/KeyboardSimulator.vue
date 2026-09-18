@@ -147,7 +147,11 @@ if (import.meta.env.DEV) {
       :viewBox="`0 0 ${size.w} ${size.h}`"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      :aria-label="t('effects.simulator', { layout: layout.name, keys: layout.keys.length })"
+      :aria-label="
+        layout.lights === 'zones'
+          ? t('effects.simulatorZones', { layout: layout.name, zones: layout.keys.length })
+          : t('effects.simulator', { layout: layout.name, keys: layout.keys.length })
+      "
     >
       <rect
         v-for="cap in caps"

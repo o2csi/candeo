@@ -157,7 +157,8 @@
     },
     "swatchKnown": "Couleurs prélevées en exécutant l'effet",
     "swatchUnknown": "Repère indisponible",
-    "simulator": "Aperçu de {layout} : {keys} touches éclairées"
+    "simulator": "Aperçu de {layout} : {keys} touches éclairées",
+    "simulatorZones": "Aperçu de {layout} : {zones} zones éclairées"
   },
   "editor": {
     "back": "Retour",

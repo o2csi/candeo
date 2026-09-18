@@ -138,6 +138,15 @@ export interface LayoutInfo {
    * these only, so that nobody picks a mode the device would refuse.
    */
   firmwareEffects: FirmwareEffectInfo[]
+  /**
+   * Ce que sont les lumières de cet appareil.
+   *
+   * `keys` : des touches, qu'on peut presser. `zones` : un cerclage, un logo,
+   * une bande — éclairés, jamais frappés. La galerie s'en sert pour ne pas
+   * proposer, à une surface sur laquelle personne ne tape, un effet qui lit les
+   * frappes : il n'en verrait jamais.
+   */
+  lights: 'keys' | 'zones'
 }
 
 /**

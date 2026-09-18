@@ -294,9 +294,20 @@ function fromHardware(e: HardwareEffect): Choice {
   }
 }
 
+/**
+ * Un effet qui lit les frappes, sur une surface où personne ne tape.
+ *
+ * Il tournerait sans rien voir passer — et resterait donc noir, sans que rien
+ * ne dise pourquoi. L'appareil déclare ce que sont ses lumières ; tant qu'il
+ * n'a rien dit, on n'écarte rien.
+ */
+function offered(e: Choice): boolean {
+  return !e.readsKeys || (board.value?.lights ?? 'keys') === 'keys'
+}
+
 const choices = computed<Choice[]>(() => [
-  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry),
-  ...library.value.filter((e) => e.kind === 'user').map(fromEntry),
+  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry).filter(offered),
+  ...library.value.filter((e) => e.kind === 'user').map(fromEntry).filter(offered),
   // Only what this device's firmware runs: offering a mode it does not know
   // would be offering an effect that never starts.
   ...hardwareEffectsFor(board.value).map(fromHardware),

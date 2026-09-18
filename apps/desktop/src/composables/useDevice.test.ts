@@ -32,6 +32,7 @@ const layoutOf = (pid: number): LayoutInfo => ({
   frameLen: 1,
   keys: [],
   firmwareEffects: [],
+  lights: 'keys',
 })
 
 /** Module state: each test starts from a fresh one. */
