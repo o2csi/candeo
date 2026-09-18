@@ -91,6 +91,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { interruptionLine } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
+import { illustrates } from '../keyboard/illustration'
 import { hardwareEffectsFor, useEffects, type HardwareEffect } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
@@ -568,6 +569,12 @@ const { frame, restartPreview } = useSimulatorFeed({
     // Nor an effect that cannot run: its JavaScript is not there, or does not load.
     return c && !c.hardware && c.state === 'ready' ? c.id : null
   },
+  // What it *is* drawn as, which is a different promise: a legend of what the
+  // effect was seen doing, not the device's frames. The note below says so.
+  illustrated: () => {
+    const c = selectedEffect.value
+    return c?.hardware && illustrates(c.id) ? c.id : null
+  },
   params: () => paramValues.value,
   onError: (e) => {
     problem.value = message(e)
@@ -585,7 +592,11 @@ const { frame, restartPreview } = useSimulatorFeed({
 const previewNote = computed(() => {
   const c = selectedEffect.value
   if (showsDevice.value) return t('effects.preview.device')
-  if (c?.hardware) return t('effects.preview.hardware')
+  if (c?.hardware) {
+    // Two different promises, and the sentence must not confuse them: a drawing
+    // of what the effect does, or nothing at all.
+    return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
+  }
 
   const tourne = effectName(activeId.value)
   const ailleurs = runningHere.value && tourne !== null

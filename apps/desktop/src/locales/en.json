@@ -75,6 +75,7 @@
     "preview": {
       "device": "Frames from the engine, exactly the ones sent to the keyboard.",
       "hardware": "Run by the firmware: the application does not receive its frames, there is nothing to animate here.",
+      "illustration": "Run by the firmware. This is the application's drawing of what it does, not the keyboard's own frames.",
       "noDevice": "Preview on the default layout: nothing is sent anywhere, and no device is controlled.",
       "elsewhere": "Preview: nothing is sent to the keyboard, where “{name}” keeps running.",
       "apply": "Preview: nothing is sent to the keyboard. “Apply” sends this one there.",

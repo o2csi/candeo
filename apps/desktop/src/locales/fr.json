@@ -75,6 +75,7 @@
     "preview": {
       "device": "Images du moteur, exactement celles qui partent vers le clavier.",
       "hardware": "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici.",
+      "illustration": "Exécuté par le micrologiciel. Ceci est le dessin qu'en fait l'application, pas les images du clavier.",
       "noDevice": "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté.",
       "elsewhere": "Aperçu : rien n'est envoyé au clavier, où « {name} » continue de tourner.",
       "apply": "Aperçu : rien n'est envoyé au clavier. « Appliquer » y envoie celui-ci.",

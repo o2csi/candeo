@@ -12,8 +12,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 import { startPreview, stopPreview, type EffectParams } from '../api/candeo'
-import type { DeviceRef } from '../api/types'
+import type { DeviceRef, Rgb } from '../api/types'
 import { useEngineFrames } from './engineFrames'
+import { illustrate } from './illustration'
 import type { LayoutView } from './layout'
 
 /**
@@ -33,6 +34,9 @@ import type { LayoutView } from './layout'
  */
 const PREVIEW_DELAY = 180
 
+/** How often an illustration is redrawn, in milliseconds: 25 images a second. */
+const ILLUSTRATION_PACE = 40
+
 export interface SimulatorFeedOptions {
   /** The layout black frames are drawn with until the first frame arrives. */
   layout: () => LayoutView | null
@@ -46,6 +50,15 @@ export interface SimulatorFeedOptions {
   /** The effect to preview when the device is not shown, or `null`. */
   previewed: () => string | null
   /**
+   * The firmware effect to **illustrate** instead, or `null`.
+   *
+   * Not a preview and never called one: the device draws it and shows us
+   * nothing, so this is the application's own drawing of what it was seen
+   * doing. It runs in the window, without an engine context: nothing of it is
+   * ever sent to a keyboard. See [`illustration`].
+   */
+  illustrated?: () => string | null
+  /**
    * Read when the preview starts, never watched: a slider move adjusts the
    * running preview live instead of rebuilding a QuickJS context.
    */
@@ -54,7 +67,7 @@ export interface SimulatorFeedOptions {
 }
 
 export function useSimulatorFeed(options: SimulatorFeedOptions) {
-  const { frame, listen, listenPreview, stop } = useEngineFrames(options.layout)
+  const { frame: engineFrame, listen, listenPreview, stop } = useEngineFrames(options.layout)
 
   // Only comparable values are watched. `engine_status` is re-read every second
   // and returns fresh objects: watching those would reopen a channel per second.
@@ -110,6 +123,35 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
     { immediate: true },
   )
 
+  // ------------------------------------------------------------ illustration
+
+  /** The firmware effect drawn here, when one is selected and no device shows. */
+  const illustrated = computed(() =>
+    showsDevice.value ? null : (options.illustrated?.() ?? null),
+  )
+  const drawn = ref<readonly Rgb[] | null>(null)
+  let animation = 0
+
+  watch(
+    [illustrated, () => options.layout()?.frameLen ?? 0],
+    ([id, frameLen]) => {
+      window.clearInterval(animation)
+      drawn.value = null
+      const layout = options.layout()
+      if (id === null || !layout || frameLen === 0) return
+      // Nothing is sent anywhere, so the pace is what an eye needs to read a
+      // movement — a quarter of what a screen refreshes at, for a drawing of a
+      // few lights.
+      const started = Date.now()
+      const draw = () => {
+        drawn.value = illustrate(id, (Date.now() - started) / 1000, layout.cols, frameLen)
+      }
+      draw()
+      animation = window.setInterval(draw, ILLUSTRATION_PACE)
+    },
+    { immediate: true },
+  )
+
   /** Rebuilds the preview, for code that was just installed under the same id. */
   function restartPreview(): void {
     revision.value++
@@ -117,12 +159,16 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
 
   onBeforeUnmount(() => {
     window.clearTimeout(timer)
+    window.clearInterval(animation)
     // The preview stops with the screen, the applied effect does not: one is
     // what the keyboard does, the other what someone watches, and nobody is
     // left watching. Rust does the same when the window is hidden, which does
     // not go through here.
     void stopPreview()
   })
+
+  /** The illustration when one is drawn, the engine's frames otherwise. */
+  const frame = computed(() => drawn.value ?? engineFrame.value)
 
   return { frame, restartPreview }
 }
