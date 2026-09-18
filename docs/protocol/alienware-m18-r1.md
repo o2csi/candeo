@@ -151,6 +151,66 @@ While a rainbow animation ran, the colours went past in the clear — `ff0000`,
 `ffa500`, `ffff00`, `008000`, `00bfff`, `0000ff`, `800080` — rewritten every
 150 ms.
 
+### Writing to it, established on 2026-09-18
+
+Three things had to be right at once, and getting any one of them wrong looks
+exactly like a device that ignores everything.
+
+**The control endpoint, not the interrupt one.** A plain HID write leaves through
+the interrupt endpoint; this device acts only on `SET_REPORT` of its output
+report, which is what the maker's software sends. Verified by capturing our own
+writes and comparing them with Command Center's: same bytes, different path,
+no effect. With `hidapi`, that is `send_output_report`, not `write`.
+
+**The transaction that applies, not the one that stores.** Two families sit side
+by side and only one shows:
+
+| Family | What it does |
+|---|---|
+| `03 22 00 04/01/02 00 <tx>` | writes the configuration the device keeps |
+| `03 21 00 04/01/02/06 00 <tx>` | the transaction whose colours are **lit** |
+
+A change through `03 22` alone is accepted, answers nothing, and shows nothing.
+
+**A transaction is numbered.** `<tx>` walks (`5e`, `5f`, `60`…). Reusing a number
+the device has already seen looks like a repeat.
+
+One zone, lit, is then:
+
+```
+03 21 00 04 00 <tx>          opens
+03 21 00 01 00 <tx>
+03 23 01 00 <count> <ids…>   selects zones by id
+03 24 <mode> <hi lo> <hi lo> <R G B> [more entries]
+03 21 00 02 00 <tx>          commits
+03 21 00 06 00 <tx>
+```
+
+`<mode>` is `00` for a fixed colour, `01` and `02` for the animated ones, which
+carry several colour entries; the two pairs of bytes are durations
+(`07d0` = 2000, `03e8` = 1000).
+
+### Which zone is which
+
+Established by writing one zone at a time, each in its own colour, and reading
+the machine — with the colours **rewritten every 150 ms**, because the maker's
+lighting agent restarts on its own and repaints within a second otherwise.
+
+| Id | Light |
+|---|---|
+| 0 | the ring around the rear connectors, upper half |
+| 1 | the same ring, lower half |
+| 2 | the logo on the lid |
+| 4 | the power button |
+
+Id `3` lights nothing on this machine. Ids 0 and 1 are always addressed together
+by the maker's software, which is why the ring looked like one light until each
+half was written alone.
+
+**The power button is not only ours.** It pulses by itself, and more slowly on
+battery than on mains: that state is the device's own, not something a host
+writes. Anything Candeo sets there is overwritten when the firmware pulses.
+
 ## 3. Writing works, and what it costs
 
 The keyboard **accepts the reports above** from anything that opens its collection:
@@ -179,8 +239,10 @@ the device per frame measures its own startup.
 
 - The **firmware version** of each device, and where to read it.
 - What `cc 8c 01 01`, `cc 8c 13 00` and the three `00`/`01` maps mean.
-- Which **zones** the AW-ELC addresses, and what `02 82 00 0f` selects. Nothing
-  has been written to it.
+- What the two duration pairs of `03 24` really measure, and what modes `01` and
+  `02` do beyond carrying several colours.
+- Whether the power button can be held against its own pulsing, and where that
+  pulse is configured.
 - What the keyboard does with a **faster stream** than twelve frames a second,
   and whether it keeps its colours when the machine sleeps.
 
