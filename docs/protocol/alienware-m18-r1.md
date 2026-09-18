@@ -36,7 +36,8 @@ the Razer keyboard.
 | `cc 8c 02 00` | **colours** | 15 groups of `index, R, G, B` |
 | `cc 94 00 00` | opens a frame | zeroes |
 | `cc 93 00 00` | closes it | zeroes |
-| `cc 8b 01 ff` | brightness | `ff` while the lighting was at full |
+| `cc 83 38 9c <level>` | **brightness**, `00` dark to `ff` full | only after a frame has been opened and closed |
+| `cc 8b 01 ff` | commits a frame | always that same `ff`, never a level |
 | `cc 8c 05 00`, `cc 8c 06 00`, `cc 8c 07 00` | three maps of 60 bytes, each `00` or `01` | which positions carry a key, most likely |
 | `cc 8c 01 01` | a mode, carrying `ff ff 00 ff ff` | not established |
 | `cc 8c 13 00` | zeroes | not established |
@@ -44,6 +45,23 @@ the Razer keyboard.
 **One frame is eight colour reports**: 8 × 15 = 120 groups, for **110 addressed
 keys**. Command Center sent about 91 frames a minute while an animation ran, and
 resent the whole frame each time.
+
+### Brightness, and what it is not
+
+Established on 2026-09-18, on a keyboard lit white.
+
+- `cc 8b 01 <level>` is **not** brightness. Written at `ff`, `80`, `40`, `10` and
+  `00`, each report acknowledged, nothing changed. Command Center only ever
+  writes it with `ff`, which is what it is: the commit of a frame.
+- `cc 83 38 9c <level>` **is** brightness, `00` dark to `ff` full, the whole
+  surface at once.
+- It lands **only after `cc 94` then `cc 93`**. Sent on its own the report is
+  acknowledged and nothing changes; sent after that pair, the level takes. The
+  pair carries no colour, so nothing else moves.
+
+The command did not come from the capture — Command Center never varied a level
+while it was watched. It came from another project's source for this family of
+keyboards, and every byte above was then written to this keyboard here. See §5.
 
 ### Key indexes
 
@@ -92,6 +110,22 @@ already models.
 
 Colours are plain `R, G, B`. When a key changes, Command Center sends it first,
 then every other key in index order.
+
+### An address is not a position
+
+Established on 2026-09-18, by lighting single addresses and reading the keyboard,
+key by key, until every one answered.
+
+The device names a key by its **address**. An image names a key by its
+**position** in the seven by twenty grid. The two are not the same number, and
+taking one for the other lights the wrong key: past the first gap, every key
+falls one cell short of where it should be. The map lives in
+`crates/candeo-device/src/layout.rs`, position by position, with a marker where
+the grid carries no key.
+
+**Backspace is 36, not 34.** Addresses 34 and 35 are acknowledged and drive
+nothing. It is the one address that does not follow its neighbours, and it was
+found by lighting the orphans one at a time.
 
 ## 2. AW-ELC: the zones
 
@@ -144,13 +178,32 @@ the device per frame measures its own startup.
 ## 4. What this leaves open
 
 - The **firmware version** of each device, and where to read it.
-- **Which key sits at each index**, one by one: the rows and the gaps are
-  established, the cell of every key is not.
 - What `cc 8c 01 01`, `cc 8c 13 00` and the three `00`/`01` maps mean.
 - Which **zones** the AW-ELC addresses, and what `02 82 00 0f` selects. Nothing
   has been written to it.
 - What the keyboard does with a **faster stream** than twelve frames a second,
   and whether it keeps its colours when the machine sleeps.
+
+## 5. What others have published
+
+Looked for on 2026-09-18, once the keyboard was already lighting, to check this
+reading against anyone else's.
+
+- **No published description of this protocol was found.** Searches for the
+  report ids and the byte sequences came back to this repository's own issue.
+- `tr1xem/alienfx-linux` (GPL-3.0) names feature report `0xcc` the lighting
+  interface of the per-key notebook keyboards, what it calls API v5. It
+  corroborates the shape without giving the commands.
+- `T-Troll/AlienFX-SDK`, whose licence we could not establish, carries that API's
+  command table, brightness included; `T-Troll/alienfx-tools` documents it from
+  the outside as a hardware dimming level from 0 to 255. That is what put
+  `cc 83 38 9c` under our eyes — and what sent us back to the keyboard, where
+  every byte of §1 was written and read back.
+- **No key map** for this model or a sibling was found: the one this application
+  carries is this survey's own.
+- Nobody tells the firmware to stop its own animation. What these projects do is
+  stop Command Center's Windows service — a choice about a machine, not a report
+  to send.
 
 ## Method
 
