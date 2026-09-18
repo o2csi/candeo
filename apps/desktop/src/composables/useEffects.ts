@@ -43,14 +43,14 @@ export function hardwareParams(e: HardwareEffect): Record<string, ParamSpec> {
   if (e.colours >= 1) {
     specs.colour = {
       kind: 'color',
-      label: t('effects.hardwareEffects.colour'),
+      label: t('effects.hardwareEffects.pickColour'),
       default: { r: 0xff, g: 0x00, b: 0x00 },
     }
   }
   if (e.colours >= 2) {
     specs.colour2 = {
       kind: 'color',
-      label: t('effects.hardwareEffects.colour2'),
+      label: t('effects.hardwareEffects.pickColour2'),
       default: { r: 0x00, g: 0x00, b: 0xff },
     }
   }
@@ -74,17 +74,22 @@ const ALIENWARE = 'hardware:m18-'
 
 /**
  * What each of that keyboard's kinds shows, watched one by one on the hardware.
- * The protocol says nothing about it: the numbers answer, the names come from
- * eyes on a keyboard.
+ * The protocol says nothing about it: the numbers answer, the names were read
+ * off the keyboard.
+ *
+ * **The words are the maker's own**, as its software lists them — *Couleur*,
+ * *Respiration*, *Spectre*, *Onde arc-en-ciel*, *Scanner* — so that someone
+ * coming from it finds what they know. The two it does not offer, `02` and `09`,
+ * keep the names of the lighting API they belong to.
  */
 const ALIENWARE_NAMES = {
-  '01': 'static',
+  '01': 'colour',
   '02': 'pulse',
-  '03': 'wave',
+  '03': 'rainbowWave',
   '08': 'breathing',
   '09': 'morph',
-  '0a': 'scan',
-  '0e': 'spectrumCycle',
+  '0a': 'scanner',
+  '0e': 'spectrum',
 } as const
 
 /**

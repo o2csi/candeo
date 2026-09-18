@@ -106,10 +106,10 @@
     "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
     "cancel": "Annuler",
     "hardwareEffects": {
-      "colour": "Couleur",
-      "colour2": "Seconde couleur",
-      "static": {
-        "name": "Statique",
+      "pickColour": "Couleur",
+      "pickColour2": "Seconde couleur",
+      "colour": {
+        "name": "Couleur",
         "summary": "Une couleur, tenue — celle que vous choisissez ci-dessous."
       },
       "pulse": {
@@ -121,12 +121,20 @@
         "summary": "Les couleurs se succèdent, en passant par le noir entre chacune."
       },
       "morph": {
-        "name": "Fondu",
+        "name": "Morph",
         "summary": "Les couleurs se succèdent sans jamais s'éteindre."
       },
-      "scan": {
-        "name": "Balayage",
+      "scanner": {
+        "name": "Scanner",
         "summary": "Une bande lumineuse traverse les touches et revient."
+      },
+      "rainbowWave": {
+        "name": "Onde arc-en-ciel",
+        "summary": "Un arc-en-ciel traverse le clavier de part en part."
+      },
+      "spectrum": {
+        "name": "Spectre",
+        "summary": "Tout le clavier défile dans les teintes, sans fin."
       },
       "spectrumCycle": {
         "name": "Spectrum Cycle",

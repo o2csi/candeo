@@ -106,10 +106,10 @@
     "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
     "cancel": "Cancel",
     "hardwareEffects": {
-      "colour": "Colour",
-      "colour2": "Second colour",
-      "static": {
-        "name": "Static",
+      "pickColour": "Colour",
+      "pickColour2": "Second colour",
+      "colour": {
+        "name": "Colour",
         "summary": "One colour, held — the one chosen below."
       },
       "pulse": {
@@ -124,9 +124,17 @@
         "name": "Morph",
         "summary": "Colours follow one another without ever going dark."
       },
-      "scan": {
-        "name": "Scan",
+      "scanner": {
+        "name": "Scanner",
         "summary": "A lit band sweeps across the keys and back."
+      },
+      "rainbowWave": {
+        "name": "Rainbow Wave",
+        "summary": "A rainbow crosses the keyboard from side to side."
+      },
+      "spectrum": {
+        "name": "Spectrum",
+        "summary": "The whole keyboard cycles through hues, endlessly."
       },
       "spectrumCycle": {
         "name": "Spectrum Cycle",
