@@ -127,7 +127,6 @@ const { devices, current, select, busy, refresh } = useDevice()
 // afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
 const {
   appliedOn,
-  poseMatches,
   apply,
   error: applyError,
   dismissError: dismissApplyError,
@@ -565,22 +564,9 @@ watch(
  * montre les vraies images du clavier, et il n'y a aucune raison d'entretenir un
  * second contexte QuickJS pour afficher la même chose.
  */
-/**
- * Le clavier montre-t-il **exactement** l'effet sélectionné, réglages compris ?
- *
- * Pour un effet piloté, changer un réglage ajuste la boucle en cours : ce que
- * montre l'appareil ne s'écarte jamais de ce qu'on lit. Un effet du
- * micrologiciel n'a pas de boucle — il garde la dernière couleur reçue — donc
- * en changer une laisse un écart, et « Appliquer » redevient le geste qui le
- * comble.
- */
-const applied = computed(() => {
-  const c = selectedEffect.value
-  if (c === null || activeId.value !== c.id) return false
-  if (!c.hardware) return true
-  const d = selectedDevice.value
-  return poseMatches(d, c.id, colourBytes(paramValues.value))
-})
+const applied = computed(
+  () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
+)
 
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
@@ -1023,7 +1009,17 @@ function onParamCommit(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  settle({ vid: d.vid, pid: d.pid }, c.id)
+  const device = { vid: d.vid, pid: d.pid }
+  settle(device, c.id)
+
+  // **One rule for every effect: a setting changed reaches the one running.** A
+  // host effect has a loop, adjusted live above; a firmware effect has none and
+  // holds the last colour it was given, so reaching it means sending the effect
+  // again. At the end of the gesture, not at every shade a picker travels
+  // through, and only on the device already showing it.
+  if (c.hardware && c.id === appliedOn(device)) {
+    void apply(device, c.hardware, colourBytes(paramValues.value))
+  }
 }
 
 function onParamReset(): void {

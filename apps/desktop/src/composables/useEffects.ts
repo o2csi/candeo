@@ -181,18 +181,6 @@ export function useEffects() {
     return device ? (posed.value[key(device)]?.id ?? null) : null
   }
 
-  /**
-   * True when the device is showing this effect **with these colours**.
-   *
-   * A firmware effect has no loop to adjust: the device holds what it was last
-   * given, so a colour changed since then is a change waiting to be applied —
-   * and the button says so instead of reading *Applied* over a keyboard showing
-   * the previous colour.
-   */
-  function poseMatches(device: DeviceRef | null, id: string, colours: number[]): boolean {
-    const pose = device ? posed.value[key(device)] : undefined
-    return pose?.id === id && String(pose.colours) === String(colours)
-  }
 
   /**
    * Oublie ce que cette session avait posé, sur tous les appareils.
@@ -214,7 +202,6 @@ export function useEffects() {
 
   return {
     appliedOn,
-    poseMatches,
     error: readonly(error),
     dismissError,
     apply,
