@@ -153,8 +153,12 @@ impl Keyboard {
         self.layout.lighting.current_effect(&self.device)
     }
 
+    /// Dims the whole device, in whatever reports its family takes.
     pub fn set_brightness(&self, level: u8) -> Result<(), Error> {
-        self.send(&self.layout.lighting.brightness(level))
+        for report in self.layout.lighting.brightness(level) {
+            self.send(&report)?;
+        }
+        Ok(())
     }
 
     /// Writes a row segment, for a device addressed that way. The Razer handles

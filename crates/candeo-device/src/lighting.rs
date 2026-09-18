@@ -43,8 +43,11 @@ pub trait Lighting: Sync {
     /// addresses keys one by one leaves them out itself.
     fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing>;
 
-    /// The report setting overall brightness.
-    fn brightness(&self, level: u8) -> Outgoing;
+    /// The reports setting overall brightness.
+    ///
+    /// A list, because a family may need more than one: the m18 R1 takes its
+    /// level only after a frame has been opened and closed.
+    fn brightness(&self, level: u8) -> Vec<Outgoing>;
 
     /// A segment of one row, for a family that addresses the matrix that way.
     /// `None` where it does not, and the command then says so rather than
@@ -93,8 +96,8 @@ impl Lighting for RazerRows {
         out
     }
 
-    fn brightness(&self, level: u8) -> Outgoing {
-        report(Report::set_brightness(level))
+    fn brightness(&self, level: u8) -> Vec<Outgoing> {
+        vec![report(Report::set_brightness(level))]
     }
 
     fn row(&self, row: u8, col_start: u8, colours: &[Rgb]) -> Option<Outgoing> {
@@ -151,8 +154,17 @@ impl Lighting for AlienwareKeys {
         out
     }
 
-    fn brightness(&self, level: u8) -> Outgoing {
-        Outgoing::plain(alienware::brightness(level).to_vec())
+    /// An open and a close, then the level.
+    ///
+    /// The level alone is accepted and does nothing: this device takes it only
+    /// after a frame has been opened and closed, measured both ways on
+    /// 18/09/2026. The frame carries no colour — nothing on screen changes.
+    fn brightness(&self, level: u8) -> Vec<Outgoing> {
+        vec![
+            Outgoing::plain(alienware::open().to_vec()),
+            Outgoing::plain(alienware::close().to_vec()),
+            Outgoing::plain(alienware::brightness(level).to_vec()),
+        ]
     }
 
     fn firmware_effect(&self, _effect: Effect) -> Option<Outgoing> {

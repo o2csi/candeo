@@ -42,9 +42,17 @@ pub fn close() -> [u8; REPORT_LEN] {
     report([0x93, 0x00, 0x00], &[])
 }
 
-/// Overall brightness, `0xff` being what the maker's software writes at full.
+/// Overall brightness, `0x00` dark to `0xff` full.
+///
+/// **It only takes effect after an [`open`] and a [`close`]**: sent alone, the
+/// device accepts the report and nothing changes. Measured both ways on
+/// 18/09/2026, on a keyboard lit white.
+///
+/// `cc 8b 01 ff`, which the capture also holds, is not this: it is a frame
+/// commit, always written with that same `ff` — which is why varying its last
+/// byte changed nothing.
 pub fn brightness(level: u8) -> [u8; REPORT_LEN] {
-    report([0x8b, 0x01, level], &[])
+    report([0x83, 0x38, 0x9c], &[level])
 }
 
 /// Colours for up to [`KEYS_PER_REPORT`] keys, each named by its index.
@@ -73,7 +81,7 @@ mod tests {
     fn framing_reports_are_what_the_capture_shows() {
         assert_eq!(open()[..4], [0xcc, 0x94, 0x00, 0x00]);
         assert_eq!(close()[..4], [0xcc, 0x93, 0x00, 0x00]);
-        assert_eq!(brightness(0xff)[..4], [0xcc, 0x8b, 0x01, 0xff]);
+        assert_eq!(brightness(0x40)[..5], [0xcc, 0x83, 0x38, 0x9c, 0x40]);
         assert!(open()[4..].iter().all(|&b| b == 0), "the rest is zeroes");
         assert_eq!(open().len(), 64);
     }
