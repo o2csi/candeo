@@ -972,6 +972,23 @@ impl EffectKey {
         }
     }
 
+    /// What names an effect whose **settings** may be kept.
+    ///
+    /// Not every effect is a file. A firmware effect is run by the device, has no
+    /// source, no folder and no [`Source`] — and it still has settings, a colour
+    /// among them, kept per device like any other. Giving it a source would mean
+    /// answering "which folder does it live in?" about something that lives in a
+    /// keyboard.
+    ///
+    /// The id is nonetheless checked: a rule and the effects table already carry
+    /// these, and an id nobody recognises must not open a line in `settings.json`.
+    pub fn settings_of(effect: &str) -> CmdResult<()> {
+        if effect.starts_with("hardware:") {
+            return validate_name(effect.trim_start_matches("hardware:"));
+        }
+        EffectKey::parse(effect).map(|_| ())
+    }
+
     /// The key a string holds, refused like a name that designates nothing.
     pub fn parse(key: &str) -> CmdResult<Self> {
         let not_found = || Failure::new("effectNotFound").with("name", key);
@@ -2465,7 +2482,7 @@ pub fn remember_effect_params(
     effect: String,
     params: serde_json::Map<String, serde_json::Value>,
 ) -> CmdResult<()> {
-    EffectKey::parse(&effect)?;
+    EffectKey::settings_of(&effect)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
 
@@ -2867,6 +2884,22 @@ mod tests {
             "user:a:b",
         ] {
             assert!(EffectKey::parse(bad).is_err(), "\"{bad}\" was accepted");
+        }
+    }
+
+    /// **A firmware effect is not a key, and still keeps settings.** It is run by
+    /// the device, so it has no source and no folder — but it has a colour, kept
+    /// per device like any other effect's values.
+    #[test]
+    fn a_firmware_effect_keeps_settings_without_being_a_key() {
+        assert!(EffectKey::parse("hardware:m18-01").is_err());
+        assert!(EffectKey::settings_of("hardware:m18-01").is_ok());
+        assert!(EffectKey::settings_of("shipped:Rain").is_ok());
+        for bad in ["hardware:", "nowhere:Rain", "Rain"] {
+            assert!(
+                EffectKey::settings_of(bad).is_err(),
+                "\"{bad}\" was accepted"
+            );
         }
     }
 
