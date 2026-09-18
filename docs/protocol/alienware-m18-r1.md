@@ -190,6 +190,22 @@ One zone, lit, is then:
 carry several colour entries; the two pairs of bytes are durations
 (`07d0` = 2000, `03e8` = 1000).
 
+### It can stop applying, for everyone
+
+Seen twice on 2026-09-18, hours apart: the device goes on **acknowledging every
+write and applying none**. Not our doing, and not a question of who is talking to
+it — the maker's own software, on its own reports, could no longer change a zone
+either, while it kept changing the keyboard in the same session. The state was
+there before anything of ours had ever written to this device.
+
+What does *not* clear it: writing anything else, waiting, closing and reopening
+the collection, stopping the maker's agent, restarting its application. What is
+left is a power cycle.
+
+So a host that drives these zones cannot take silence for success, and cannot
+read a refusal as its own mistake. The reports here are the ones the maker sends;
+when they stop working, the device is the thing to reset.
+
 ### Which zone is which
 
 Established by writing one zone at a time, each in its own colour, and reading
