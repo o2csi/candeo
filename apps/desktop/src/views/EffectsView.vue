@@ -1004,7 +1004,16 @@ function onParamCommit(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  settle({ vid: d.vid, pid: d.pid }, c.id)
+  const device = { vid: d.vid, pid: d.pid }
+  settle(device, c.id)
+
+  // A firmware effect has no loop to adjust: the device holds the colour it was
+  // last given, so changing it means sending the effect again. Only the one the
+  // device is actually showing — and at the end of the gesture, not at every
+  // shade a colour picker travels through.
+  if (c.hardware && c.id === appliedOn(device)) {
+    void apply(device, c.hardware, colourBytes(paramValues.value))
+  }
 }
 
 function onParamReset(): void {
