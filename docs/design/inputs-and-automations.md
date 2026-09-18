@@ -114,8 +114,11 @@ Named values that other software sends to Candeo:
 POST http://127.0.0.1:<port>/signals   { "doorbell": "ring", "ci": "failed", "volume": 0.4 }
 ```
 
-```ts
-render({ signals }) // { doorbell: 'ring', ci: 'failed', volume: 0.4 }
+They reach an effect **through its parameters**, not as a bag of names it has to
+read (§2.3.1):
+
+```text
+Fixed gradient · colour ← signal "status"   ·   Ripples · speed ← signal "volume"
 ```
 
 **Why it matters most**: once other software can push values, every integration
@@ -143,10 +146,10 @@ all point the same way.
 - A signal naming a device would **bypass the resolver**, and with it the
   priority between rules that §3.1 exists to keep.
 
-Whoever wants direct control is served at the third step below, without giving
-any of this up: an effect reading `signals`, applied where its author wants,
-takes the colour from the value. The sender supplies the value, the person
-supplies the place.
+Whoever wants direct control is served by §2.3.1, without giving any of this up:
+a parameter of the running effect reads the value, and the person chose which
+effect and which device. The sender supplies the value, the person supplies the
+place.
 
 - **What a request may carry**:
   - Strings, numbers and booleans, **flat**. No objects, no arrays: a rule
@@ -191,8 +194,59 @@ supplies the place.
 **Three pull requests, in this order.** The command line first: it makes signals
 work end to end with no port open, and it answers "a long job has finished"
 straight away. Then the HTTP API, the token and the Settings block, which is
-what Home Assistant on another machine needs. Then `inputs: ['signals']` and an
-effect that draws a value — until one exists, the input has nothing to show.
+what Home Assistant on another machine needs. Then the parameter bindings of
+§2.3.1.
+
+#### 2.3.1 How a signal reaches an effect: it binds to a parameter
+
+**Signals are the one source that does not follow §1**, and this is why: an
+effect declares nothing, reads nothing and is not marked in the gallery.
+
+**The arrow points from the effect to the signal.** A signal does not find an
+effect to drive; a **parameter of an effect names the signal it reads**. Instead
+of a fixed value, a parameter is bound: *Fixed gradient*, whose colour reads
+`status`; *Ripples*, whose speed reads `volume`.
+
+A first version of this section gave the effect the whole bag —
+`inputs: ['signals']`, `render({ signals })` — and it was wrong in three ways:
+
+- **The effect's author chose the names.** Someone would have to send `status`
+  because it is written in that effect's source. The coupling is invisible and
+  it points the wrong way.
+- **Every effect would parse strings.** What is `"red"`? Each one would carry
+  its own vocabulary, its own conversion and its own handling of nonsense.
+- **Nothing would be typed**, so the gallery could show nothing and the preview
+  could draw nothing.
+
+Binding a parameter puts the conversion **in one place, once, typed**, against
+the four `ParamSpec` kinds that already exist: `color` takes `#rrggbb`, `number`
+takes a number and is clamped to its declared `min`/`max`, `boolean` takes true
+or false, `choice` takes one of its options. **A value that is missing or does
+not convert leaves the configured value in place** — so nothing goes dark,
+nothing needs a special case, and the preview and the swatch draw at rest.
+
+And every shipped effect becomes signal-driven without a line of code. There is
+no *Status* effect to write.
+
+**Words belong to rules, values belong to bindings.** `{"status": "red"}` where
+red is a state someone chose is a rule — *when `status` is `red`, show a red
+Fixed gradient on the ring* — where the word is written by the person who reads
+it, and where priority between rules applies. A colour the sender computed is a
+value, and travels as `#ff0000` into a bound parameter. **No mapping table in a
+binding** (`failed → red`): that would be a small language, and a second place
+where lighting is decided — the very thing this section refuses of the API.
+
+**Where it costs.** Parameters are already read afresh on every frame, inside
+the render loop, so the binding is applied in that one place before the effect
+is called: no argument added to the host's render entry point, no decoder in the
+bootstrap, no manifest flag, no gallery badge, and **nothing at all in
+`packages/effects-api`**. The work is in the settings form, which has to offer
+"bound to signal …" per parameter and show it. Bindings are stored **beside**
+`effectParams`, not inside: the literal value stays what the preview and the
+swatch use, and the fallback above falls out of that rather than being written.
+
+The bag stays possible later, for an effect drawing sixteen values at once. It
+is not the answer here, and it must not be the main mechanism.
 
 ### 2.4 Later, if asked
 
@@ -398,8 +452,8 @@ Each step is one pull request, with its issue:
 4. **Sound input** and two shipped effects (#107).
 5. **External signals** (#108), in three pull requests (§2.3): the store, the
    `signal` trigger and `candeo signal name=value`; then the HTTP API, its
-   token, the Settings block and the Home Assistant example; then
-   `inputs: ['signals']` and an effect that draws a value.
+   token, the Settings block and the Home Assistant example; then the parameter
+   bindings of §2.3.1.
 6. **`idle` trigger** (#179), on Windows; Linux follows (#183). Then system
    metrics, if asked.
 
