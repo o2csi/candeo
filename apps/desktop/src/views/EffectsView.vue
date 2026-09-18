@@ -579,6 +579,22 @@ const applied = computed(
   () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
 )
 
+/**
+ * Ce qui a échoué **à l'écriture sur l'appareil**, une fois fermé ce qu'on a
+ * déjà lu.
+ *
+ * Fermer ne corrige rien ici : l'échec continue, et la boucle le reproduira à
+ * l'image suivante. Le message reste donc masqué **tant qu'il ne change pas** —
+ * un appareil qui se met à échouer autrement a quelque chose de neuf à dire, et
+ * le reste n'était que la même phrase répétée devant quelqu'un qui l'a lue.
+ */
+const hushed = ref<string | null>(null)
+const deviceTrouble = computed(() => {
+  const trouble = status.value?.deviceError
+  const said = trouble ? message(trouble) : null
+  return said === hushed.value ? null : said
+})
+
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
 
@@ -1374,9 +1390,9 @@ onBeforeUnmount(() => {
       <FailureNote v-if="status?.error" class="failure">
         {{ t('effects.effectError', { error: status.error }) }}
       </FailureNote>
-      <p v-if="status?.deviceError" class="notice warn" role="alert">
-        {{ message(status.deviceError) }}
-      </p>
+      <FailureNote v-if="deviceTrouble" class="notice warn" @close="hushed = deviceTrouble">
+        {{ deviceTrouble }}
+      </FailureNote>
       <!--
         L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le
         dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
