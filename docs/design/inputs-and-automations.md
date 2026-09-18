@@ -118,27 +118,81 @@ POST http://127.0.0.1:<port>/signals   { "doorbell": "ring", "ci": "failed", "vo
 render({ signals }) // { doorbell: 'ring', ci: 'failed', volume: 0.4 }
 ```
 
-- **Why it matters most**: once other software can push values, every
-  integration Candeo does not write becomes a script — Home Assistant, a CI job,
-  a mute state, a recording state.
+**Why it matters most**: once other software can push values, every integration
+Candeo does not write becomes a script — Home Assistant, a mute state, a
+recording state, a machine joining the network.
+
+**The sender says *what*, Candeo says *where*.** A request names values and
+nothing else: no device, no zone, no effect, no colour. Five reasons, and they
+all point the same way.
+
+- A signal is **a fact about the world**, not a lighting instruction. The sender
+  knows the fact; it knows nothing of which keyboard is plugged in, which effect
+  is running or which zone is free. Home Assistant has no idea what `1532:658`
+  is, and must not have to learn.
+- **The mapping from fact to light already exists**: it is the rule (§3), which
+  names the devices, the effect, its settings, the duration and the priority. A
+  sender choosing the device would put the decision in two places, and the rule
+  list would stop being the single readable answer to "why is my keyboard red".
+- It **survives the hardware**. Unplug one keyboard, buy another: the sender is
+  unchanged. A rule naming a device that is not there simply does not fire.
+- The **blast radius of the token** is not the same. A token that protects
+  "set a named value" is not a token that protects "drive my hardware from the
+  network" — which would also mean validating effect names, parameters and
+  geometry over HTTP, the whole gallery exposed.
+- A signal naming a device would **bypass the resolver**, and with it the
+  priority between rules that §3.1 exists to keep.
+
+Whoever wants direct control is served at the third step below, without giving
+any of this up: an effect reading `signals`, applied where its author wants,
+takes the colour from the value. The sender supplies the value, the person
+supplies the place.
+
+- **What a request may carry**:
+  - Strings, numbers and booleans, **flat**. No objects, no arrays: a rule
+    compares one equality and an effect reads one scalar; nested, both would
+    need a path language nobody asked for.
+  - Bounds, so a broken sender cannot grow the process: at most 64 signals, a
+    name of at most 64 characters, a string value of at most 256.
+  - **Nothing is whitelisted.** A signal no rule and no effect mentions lights
+    nothing — and still shows in the panel below. That is the discovery loop:
+    send it, see it, then write the rule.
+- **A signal's lifetime**: 60 s by default, set per send, `0` meaning "until
+  erased"; an empty value erases it. The default protects against a sender that
+  dies, which is right for a watcher that re-sends in a loop anyway, and wrong
+  on its own for a state pushed once — `build=failed` must not go out by itself
+  while the build is still broken.
 - **The local API**:
-  - **Off by default**, enabled in Settings.
-  - Listens on loopback only.
+  - **Off by default**, enabled in Settings, and on loopback when it is.
+  - One endpoint, `POST /signals`, taking a flat object. No path naming a
+    device.
   - Every request carries a token, shown in Settings with a button to generate
     a new one.
-  - Listening on the local network is a second, explicit choice, for Home
-    Assistant on another machine.
-  - Values are strings, numbers or booleans; a signal expires after a lifetime
-    its sender can set (default 60 s), so a crashed sender does not leave the
-    keyboard red forever.
+  - **Listening on the local network is the main path, not an afterthought**:
+    Home Assistant runs on another machine. It stays a separate switch, and on
+    Windows the inbound rule is scoped to the **Private** profile, so a public
+    network refuses the port without anyone remembering to turn the switch off —
+    which matters on a laptop.
+- **Seeing what arrived**: Settings lists the signals held right now — name,
+  value, time left — and sends a test one. Without it, a rule names a signal
+  nobody can see, and nothing is debuggable.
 - **Also from the command line**: `candeo signal ci=failed`, which talks to the
   running instance through the single-instance channel, for scripts that would
-  rather not handle HTTP.
+  rather not handle HTTP. It needs no port, no token and no firewall rule, and
+  **it covers every sender running on this machine** — which is most of them.
+  A hosted CI runner is not one of them: it cannot reach this loopback, so the
+  sender there is a local watcher, not the job.
 - **Home Assistant**: the HTTP API is enough for its `rest_command`. MQTT, with
   Candeo as a client of the broker Home Assistant already runs, needs no inbound
   port and could expose Candeo as an entity. It is a later step, if HTTP proves
   awkward there.
 - Signals are also **automation triggers** (§3): "when `doorbell` becomes `ring`".
+
+**Three pull requests, in this order.** The command line first: it makes signals
+work end to end with no port open, and it answers "a long job has finished"
+straight away. Then the HTTP API, the token and the Settings block, which is
+what Home Assistant on another machine needs. Then `inputs: ['signals']` and an
+effect that draws a value — until one exists, the input has nothing to show.
 
 ### 2.4 Later, if asked
 
@@ -223,10 +277,14 @@ A rule is one sentence someone can read back:
   | `idle` | nobody has used the computer for 10 minutes — shipped (#179), see §3.6 |
   | `app` | an application in the foreground (later) |
 
-- **Duration for these triggers**:
-  - `for: { seconds }` ends the interruption after a time (a flash);
-  - `while` lasts as long as the trigger holds (a signal that keeps its value,
-    idleness).
+- **Duration for these triggers**: `for: { seconds }` ends the interruption
+  after a time (a flash). **There is no second duration.** A first version of
+  this section announced a `while`, and the implementation of `idle` (#179)
+  found it was not needed: "as long as the trigger holds" is a property of the
+  occurrence, not of the rule — the resolver answers with an **open**
+  occurrence, known to last only until the next look, and the scheduler reads a
+  string of them as one run (§3.6). A `signal` trigger says "while `ci` is
+  `failed`" exactly that way, and adds no field to a rule.
 - **Action**: any effect of the library or a hardware effect, including *Off*,
   with its own settings. A rule does not borrow the device's saved settings for
   that effect: the hourly clock and the clock applied by hand need not look the
@@ -338,8 +396,10 @@ Each step is one pull request, with its issue:
    card and in the tray. The periodic clock and the night window come with it
    (#106).
 4. **Sound input** and two shipped effects (#107).
-5. **External signals**: the local API, the command line, `signal` triggers,
-   the Home Assistant example (#108).
+5. **External signals** (#108), in three pull requests (§2.3): the store, the
+   `signal` trigger and `candeo signal name=value`; then the HTTP API, its
+   token, the Settings block and the Home Assistant example; then
+   `inputs: ['signals']` and an effect that draws a value.
 6. **`idle` trigger** (#179), on Windows; Linux follows (#183). Then system
    metrics, if asked.
 
