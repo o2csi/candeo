@@ -3,7 +3,7 @@
 //! The transport layer is isolated here so that [`candeo_protocol`] stays pure,
 //! testable without hardware, and free of system dependencies.
 
-use candeo_protocol::{CommandId, Effect, Rgb};
+use candeo_protocol::{CommandId, Rgb};
 
 pub mod inspection;
 pub mod layout;
@@ -139,10 +139,10 @@ impl Keyboard {
     /// A family whose firmware draws nothing has no such thing: *Off* is then a
     /// black frame, and anything else is refused rather than approximated, so
     /// that nobody believes the device runs an effect it does not.
-    pub fn set_effect(&self, effect: Effect) -> Result<(), Error> {
-        match self.layout.lighting.firmware_effect(effect) {
+    pub fn set_effect(&self, id: &str) -> Result<(), Error> {
+        match self.layout.lighting.firmware_effect(id) {
             Some(report) => self.send(&report),
-            None if effect == Effect::Off => {
+            None if id == "hardware:off" => {
                 self.present(&vec![Rgb::default(); self.layout.led_count()])
             }
             None => Err(Error::NoFirmwareEffect {
@@ -156,7 +156,7 @@ impl Keyboard {
     /// host loop drives, to give that effect back afterwards: nothing else
     /// remembers a firmware effect. `None` for one it cannot describe, and for a
     /// device that runs none.
-    pub fn current_effect(&self) -> Result<Option<Effect>, String> {
+    pub fn current_effect(&self) -> Result<Option<String>, String> {
         self.layout.lighting.current_effect(&self.device)
     }
 

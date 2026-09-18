@@ -105,6 +105,8 @@
     "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
     "cancel": "Annuler",
     "hardwareEffects": {
+      "numbered": "Effet micrologiciel {n}",
+      "unnamed": "Un effet propre à ce clavier. Ce qu'il affiche n'est pas encore consigné.",
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "Tout le clavier change de teinte ensemble, sans fin."

@@ -40,11 +40,7 @@ import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
-import {
-  hardwareEffects,
-  hardwareEffectsFor,
-  type HardwareEffect,
-} from '../composables/useEffects'
+import { hardwareEffectsFor, named, type HardwareEffect } from '../composables/useEffects'
 import {
   EVERY_DAY,
   FOR_PRESETS,
@@ -281,8 +277,7 @@ function missing(rule: Rule): boolean {
 }
 
 function effectLabel(rule: Rule): string {
-  const hardware = hardwareEffects.find((h) => h.id === rule.show.effect)
-  if (hardware) return t(`effects.hardwareEffects.${hardware.key}.name`)
+  if (rule.show.effect.startsWith('hardware:')) return named(rule.show.effect).name
   return manifest(rule)?.name ?? rule.show.effect
 }
 
@@ -424,7 +419,7 @@ function onDrop(to: number): void {
             >
               <optgroup :label="t('automations.hardware')">
                 <option v-for="h in hardwareFor(raw)" :key="h.id" :value="h.id">
-                  {{ t(`effects.hardwareEffects.${h.key}.name`) }}
+                  {{ h.name }}
                 </option>
               </optgroup>
               <optgroup :label="t('automations.builtin')">

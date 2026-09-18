@@ -266,9 +266,9 @@ function fromEntry(e: EffectEntry): Choice {
 function fromHardware(e: HardwareEffect): Choice {
   return {
     id: e.id,
-    name: t(`effects.hardwareEffects.${e.key}.name`),
+    name: e.name,
     nature: 'hardware',
-    description: t(`effects.hardwareEffects.${e.key}.summary`),
+    description: e.summary,
     swatch: [],
     params: {},
     hardware: e,

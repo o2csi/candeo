@@ -94,13 +94,22 @@ pub trait Lighting: Sync {
         None
     }
 
-    /// The report handing the lighting back to the firmware, for a family whose
-    /// firmware draws by itself. `None` when it does not, and *Off* then means a
-    /// black frame rather than a mode.
-    fn firmware_effect(&self, effect: Effect) -> Option<Outgoing>;
+    /// The report handing the lighting back to the firmware, for the effect the
+    /// gallery calls `id`.
+    ///
+    /// **Named, not enumerated.** One family's modes are not another's: the
+    /// Razer has a spectrum and a wave, this Alienware keyboard has sixteen
+    /// kinds of its own. A shared enumeration would carry each family's
+    /// vocabulary into every other, and every new device would widen it.
+    ///
+    /// `None` for an id this family does not run — including where it runs none
+    /// at all, and *Off* is then a black frame rather than a mode.
+    fn firmware_effect(&self, id: &str) -> Option<Outgoing>;
 
-    /// The effect the firmware runs now, for a family that can be asked.
-    fn current_effect(&self, _device: &hidapi::HidDevice) -> Result<Option<Effect>, String> {
+    /// The effect the firmware runs now, by its id, for a family that can be
+    /// asked. `None` for one the gallery does not offer — a mode needing a
+    /// colour, or the host-driven one — since nobody could select it back.
+    fn current_effect(&self, _device: &hidapi::HidDevice) -> Result<Option<String>, String> {
         Ok(None)
     }
 
@@ -142,12 +151,39 @@ impl Lighting for RazerRows {
         Some(report(Report::write_row(row, col_start, colours)))
     }
 
-    fn firmware_effect(&self, effect: Effect) -> Option<Outgoing> {
+    /// Only what the survey established on this firmware: `Static` and
+    /// `Breathing` take a colour the gallery has nowhere to ask for, and
+    /// `Reactive` and `Starlight` are refused by the device
+    /// (`docs/protocol/deathstalker-v2-pro.md` §8).
+    ///
+    /// The wave's two values are the only ones ever captured; their real range
+    /// is an open question of the survey, so offering a setting would be
+    /// inventing a scale.
+    fn firmware_effect(&self, id: &str) -> Option<Outgoing> {
+        let effect = match id {
+            "hardware:off" => Effect::Off,
+            "hardware:spectrumCycle" => Effect::SpectrumCycle,
+            "hardware:wave" => Effect::Wave {
+                direction: 0x02,
+                speed: 0x28,
+            },
+            _ => return None,
+        };
         Some(report(Report::set_effect(effect)))
     }
 
-    fn current_effect(&self, device: &hidapi::HidDevice) -> Result<Option<Effect>, String> {
-        crate::inspection::read_effect(device)
+    fn current_effect(&self, device: &hidapi::HidDevice) -> Result<Option<String>, String> {
+        Ok(crate::inspection::read_effect(device)?.and_then(|effect| {
+            let id = match effect {
+                Effect::Off => "hardware:off",
+                Effect::SpectrumCycle => "hardware:spectrumCycle",
+                Effect::Wave { .. } => "hardware:wave",
+                // Static and Breathing carry a colour the gallery cannot pass
+                // back, and Custom is the host's own frames.
+                _ => return None,
+            };
+            Some(id.to_owned())
+        }))
     }
 
     fn inspect(
@@ -206,8 +242,16 @@ impl Lighting for AlienwareKeys {
         ])
     }
 
-    fn firmware_effect(&self, _effect: Effect) -> Option<Outgoing> {
-        None
+    /// The sixteen kinds its firmware runs, `hardware:m18-00` to
+    /// `hardware:m18-0f`. Each one answers and shows something; the tempo and
+    /// the two colours are Command Center's, kept until an effect is named after
+    /// what it actually does.
+    fn firmware_effect(&self, id: &str) -> Option<Outgoing> {
+        let kind = id.strip_prefix(ALIENWARE_EFFECT)?;
+        let kind = u8::from_str_radix(kind, 16).ok()?;
+        Some(Outgoing::plain(
+            alienware::effect(kind, 0x05, Rgb::default(), Rgb::default()).to_vec(),
+        ))
     }
 
     fn inspect(
@@ -218,6 +262,10 @@ impl Lighting for AlienwareKeys {
         accept(None).then(crate::Inspection::unread)
     }
 }
+
+/// What an Alienware keyboard's firmware effects are called, before the two
+/// hexadecimal digits of the kind.
+pub const ALIENWARE_EFFECT: &str = "hardware:m18-";
 
 /// Alienware: the zones around a keyboard, addressed by id.
 ///
@@ -311,7 +359,7 @@ impl Lighting for AlienwareZones {
     // No brightness: nothing in the survey dims these zones, and the level of a
     // colour is the colour itself.
 
-    fn firmware_effect(&self, _effect: Effect) -> Option<Outgoing> {
+    fn firmware_effect(&self, _id: &str) -> Option<Outgoing> {
         None
     }
 

@@ -10,7 +10,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
-import type { DeviceInfo, DeviceRef, DeviceState, Effect, Failure, LayoutInfo, Rgb } from './types'
+import type { DeviceInfo, DeviceRef, DeviceState, Failure, LayoutInfo, Rgb } from './types'
 
 /** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -107,12 +107,13 @@ export function rememberBrightness(device: DeviceRef, level: number): Promise<vo
 }
 
 /**
- * Bascule l'effet matériel d'un appareil.
+ * Puts a firmware effect on a device, by the id the gallery uses.
  *
- * Tout sauf `custom` est exécuté par le **micrologiciel** : coût processeur
- * nul, et l'effet survit à la fermeture de l'application.
+ * Run by the **firmware**: no processor time, and it outlives the application.
+ * Which ids a device runs is its layout's business — `firmwareEffects` — and the
+ * family that owns it turns the id into bytes.
  */
-export function setEffect(device: DeviceRef, effect: Effect): Promise<void> {
+export function setEffect(device: DeviceRef, effect: string): Promise<void> {
   return invoke('set_effect', { device, effect })
 }
 

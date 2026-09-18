@@ -75,7 +75,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use candeo_device::{Keyboard, Layout};
-use candeo_protocol::{Effect, Rgb};
+use candeo_protocol::Rgb;
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::runtime::InterruptHandler;
 use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
@@ -442,7 +442,7 @@ impl DeviceOut for Handle {
 
     fn turn_off(&self) {
         let guard = self.lock().unwrap();
-        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(Effect::Off)) {
+        if let Some(Err(e)) = guard.as_ref().map(|kb| kb.set_effect(crate::OFF)) {
             tracing::warn!("backlight not turned off after the effect stopped: {e}");
         }
     }

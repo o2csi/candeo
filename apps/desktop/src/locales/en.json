@@ -105,6 +105,8 @@
     "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
     "cancel": "Cancel",
     "hardwareEffects": {
+      "numbered": "Firmware effect {n}",
+      "unnamed": "One of this keyboard's own effects. What it shows is not written down yet.",
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "The whole keyboard changes hue together, endlessly."

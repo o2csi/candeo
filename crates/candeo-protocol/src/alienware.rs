@@ -55,6 +55,26 @@ pub fn brightness(level: u8) -> [u8; REPORT_LEN] {
     report([0x83, 0x38, 0x9c], &[level])
 }
 
+/// An effect the **firmware** runs, by its kind, with a tempo and two colours.
+///
+/// Sixteen kinds answer and all of them show something — fixed colours, a
+/// breath, a rainbow — verified one by one on 18/09/2026. What each one is
+/// called is not in the protocol: it was read off the keyboard.
+///
+/// The fixed bytes are Command Center's, kept as captured. An effect that
+/// ignores the colours runs on its own palette.
+pub fn effect(kind: u8, tempo: u8, one: Rgb, two: Rgb) -> [u8; REPORT_LEN] {
+    let mut payload = [0u8; 13];
+    payload[2] = 0x01;
+    payload[3] = 0x01;
+    payload[4] = 0x01;
+    payload[5] = 0x01;
+    payload[6..9].copy_from_slice(&[one.r, one.g, one.b]);
+    payload[9..12].copy_from_slice(&[two.r, two.g, two.b]);
+    payload[12] = 0x05;
+    report([0x80, kind, tempo], &payload)
+}
+
 /// Colours for up to [`KEYS_PER_REPORT`] keys, each named by its index.
 ///
 /// More than that does not fit, and is a caller's mistake rather than something
@@ -82,6 +102,23 @@ mod tests {
         assert_eq!(open()[..4], [0xcc, 0x94, 0x00, 0x00]);
         assert_eq!(close()[..4], [0xcc, 0x93, 0x00, 0x00]);
         assert_eq!(brightness(0x40)[..5], [0xcc, 0x83, 0x38, 0x9c, 0x40]);
+        // The capture holds `cc 80 03 05 00 00 01 01 01 01 …`.
+        let red = Rgb {
+            r: 0xff,
+            g: 0,
+            b: 0,
+        };
+        let blue = Rgb {
+            r: 0,
+            g: 0,
+            b: 0xff,
+        };
+        let fx = effect(0x03, 0x05, red, blue);
+        assert_eq!(
+            fx[..10],
+            [0xcc, 0x80, 0x03, 0x05, 0x00, 0x00, 0x01, 0x01, 0x01, 0x01]
+        );
+        assert_eq!(fx[10..17], [0xff, 0x00, 0x00, 0x00, 0x00, 0xff, 0x05]);
         assert!(open()[4..].iter().all(|&b| b == 0), "the rest is zeroes");
         assert_eq!(open().len(), 64);
     }
