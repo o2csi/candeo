@@ -788,7 +788,13 @@ async function restoreOriginal(): Promise<void> {
 const missingEffects = computed(() => {
   if (!libraryRead.value) return []
   const present = new Set(library.value.map((e) => e.id))
-  return [...referencedEffects.value].filter((name) => !present.has(name)).sort()
+  return (
+    [...referencedEffects.value]
+      // A firmware effect is never in the folder: it is run by the device, and
+      // the settings kept for it — a colour — refer to no file to put back.
+      .filter((name) => !name.startsWith('hardware:') && !present.has(name))
+      .sort()
+  )
 })
 
 async function forgetMissing(name: string): Promise<void> {
