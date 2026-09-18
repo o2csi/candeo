@@ -131,40 +131,47 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
   const illustrated = computed(() =>
     showsDevice.value ? null : (options.illustrated?.() ?? null),
   )
-  const drawn = ref<readonly Rgb[] | null>(null)
+  /** Ticks while an illustration runs: what makes the drawing below move. */
+  const tick = ref(0)
   let animation = 0
+  let since = 0
 
   watch(
-    // The colours are watched as text: a fresh array at every read would
-    // restart the drawing on each tick.
-    [
-      illustrated,
-      () => options.layout()?.frameLen ?? 0,
-      () => String(options.illustratedColours?.()),
-    ],
-    ([id, frameLen]) => {
+    illustrated,
+    (id) => {
       window.clearInterval(animation)
-      drawn.value = null
-      const layout = options.layout()
-      if (id === null || !layout || frameLen === 0) return
+      if (id === null) return
       // Nothing is sent anywhere, so the pace is what an eye needs to read a
       // movement — a quarter of what a screen refreshes at, for a drawing of a
       // few lights.
-      const started = Date.now()
-      const draw = () => {
-        drawn.value = illustrate(
-          id,
-          (Date.now() - started) / 1000,
-          layout.cols,
-          frameLen,
-          options.illustratedColours?.() ?? [],
-        )
-      }
-      draw()
-      animation = window.setInterval(draw, ILLUSTRATION_PACE)
+      since = Date.now()
+      tick.value = 0
+      animation = window.setInterval(() => tick.value++, ILLUSTRATION_PACE)
     },
     { immediate: true },
   )
+
+  /**
+   * The drawing, computed when it is read.
+   *
+   * **Read, not stored**: it takes the layout as it is at that moment, so a
+   * frame never carries the length of the device shown a moment ago — the
+   * simulator would then draw a keyboard against another's matrix. And nothing
+   * of it runs while this screen is not showing one.
+   */
+  const drawn = computed<readonly Rgb[] | null>(() => {
+    const id = illustrated.value
+    const layout = options.layout()
+    if (id === null || !layout || layout.frameLen === 0) return null
+    void tick.value
+    return illustrate(
+      id,
+      (Date.now() - since) / 1000,
+      layout.cols,
+      layout.frameLen,
+      options.illustratedColours?.() ?? [],
+    )
+  })
 
   /** Rebuilds the preview, for code that was just installed under the same id. */
   function restartPreview(): void {
