@@ -29,6 +29,12 @@ export interface LayoutView {
   cols: number
   frameLen: number
   keys: readonly KeyInfo[]
+  /**
+   * Ce que sont ces lumières : le dessin est le même, ce qu'on en dit ne l'est
+   * pas — « 103 touches éclairées » sur un cerclage et un logo serait faux.
+   * Absent, on lit des touches, comme avant qu'un appareil sache le dire.
+   */
+  lights?: 'keys' | 'zones'
 }
 
 /**

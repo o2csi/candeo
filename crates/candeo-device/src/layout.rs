@@ -58,6 +58,21 @@ pub struct Key {
     pub h: f32,
 }
 
+/// What a device's lights **are**.
+///
+/// Not a taxonomy of models: two values, because two things differ in what can
+/// be asked of them. A key can be pressed, so an effect reading presses has
+/// something to read; a zone cannot, so offering it that effect would offer one
+/// that never sees anything. Everything else — where the lights sit, how many,
+/// what shape — is the matrix and the geometry, which describe both alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lights {
+    /// Keys, which can be pressed.
+    Keys,
+    /// Zones: a ring, a logo, a strip. Lit, never typed on.
+    Zones,
+}
+
 /// An effect a firmware runs, as a layout declares it.
 ///
 /// **How many colours it takes is part of the effect, not of the device.** A
@@ -123,6 +138,9 @@ pub struct Layout {
     /// mode of the device, and offering one the firmware does not know would be
     /// letting someone choose an effect that never runs.
     pub firmware_effects: &'static [FirmwareEffect],
+    /// What its lights are — see [`Lights`]. The gallery reads it to stop
+    /// offering, to a surface nobody types on, an effect that reads key presses.
+    pub lights: Lights,
     pub rows: u8,
     pub cols: u8,
     /// **The address the device gives each position**, row by row; `u16::MAX`
@@ -288,6 +306,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
             colours: 0,
         },
     ],
+    lights: Lights::Keys,
     rows: 6,
     cols: 22,
     #[rustfmt::skip]
@@ -454,6 +473,7 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
             colours: 0,
         },
     ],
+    lights: Lights::Keys,
     rows: 7,
     cols: 20,
     #[rustfmt::skip]
@@ -568,6 +588,7 @@ pub static ALIENWARE_M18_R1_ZONES: Layout = Layout {
     surveyed_firmware: None,
     // It runs no effect of its own that anyone has surveyed.
     firmware_effects: &[],
+    lights: Lights::Zones,
     rows: 1,
     cols: 3,
     // The zone ids the device answers to. `3` lights nothing on this machine and
@@ -879,6 +900,16 @@ mod tests {
         assert_eq!(space.scancode, 0x39);
         assert_eq!(space.w, 6.25);
         assert_eq!(l.keys.iter().filter(|k| k.scancode == 0x39).count(), 1);
+    }
+
+    /// What a device's lights are is data, not a guess from its name: the two
+    /// keyboards have keys, the ring and the logo have none, and a surface
+    /// nobody types on is never offered an effect that reads key presses.
+    #[test]
+    fn a_layout_says_what_its_lights_are() {
+        assert_eq!(DEATHSTALKER_V2_PRO.lights, Lights::Keys);
+        assert_eq!(ALIENWARE_M18_R1.lights, Lights::Keys);
+        assert_eq!(ALIENWARE_M18_R1_ZONES.lights, Lights::Zones);
     }
 
     /// The drawing fits within the footprint of a full-size ISO keyboard.

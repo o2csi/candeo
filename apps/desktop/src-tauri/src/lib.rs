@@ -181,6 +181,11 @@ pub struct LayoutInfo {
     /// these and no others, so that nobody picks an effect the device would
     /// refuse — nor a colour an effect would ignore.
     pub firmware_effects: Vec<FirmwareEffectInfo>,
+    /// What this device's lights are: `keys` or `zones`.
+    ///
+    /// The gallery reads it to stop offering, to a surface nobody types on, an
+    /// effect that reads key presses — it would never see one.
+    pub lights: &'static str,
 }
 
 /// One firmware effect, as the gallery needs it. Mirror of
@@ -262,6 +267,10 @@ impl From<&'static Layout> for LayoutInfo {
                     colours: e.colours,
                 })
                 .collect(),
+            lights: match l.lights {
+                candeo_device::Lights::Keys => "keys",
+                candeo_device::Lights::Zones => "zones",
+            },
         }
     }
 }
@@ -1471,6 +1480,7 @@ mod tests {
         lighting: &candeo_device::lighting::RazerRows,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
+        lights: candeo_device::Lights::Keys,
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -1484,6 +1494,7 @@ mod tests {
         lighting: &candeo_device::lighting::RazerRows,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
+        lights: candeo_device::Lights::Keys,
         rows: 1,
         cols: 1,
         matrix: &[0],

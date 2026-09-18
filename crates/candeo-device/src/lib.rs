@@ -11,7 +11,8 @@ pub mod lighting;
 
 pub use inspection::{Check, Inspection, Verdict, Warning};
 pub use layout::{
-    Key, Layout, Port, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES, DEATHSTALKER_V2_PRO, NO_SCANCODE,
+    Key, Layout, Lights, Port, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES, DEATHSTALKER_V2_PRO,
+    NO_SCANCODE,
 };
 pub use lighting::{Lighting, Outgoing, Wire};
 

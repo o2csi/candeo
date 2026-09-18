@@ -294,9 +294,20 @@ function fromHardware(e: HardwareEffect): Choice {
   }
 }
 
+/**
+ * Un effet qui lit les frappes, sur une surface où personne ne tape.
+ *
+ * Il tournerait sans rien voir passer — et resterait donc noir, sans que rien
+ * ne dise pourquoi. L'appareil déclare ce que sont ses lumières ; tant qu'il
+ * n'a rien dit, on n'écarte rien.
+ */
+function offered(e: Choice): boolean {
+  return !e.readsKeys || (board.value?.lights ?? 'keys') === 'keys'
+}
+
 const choices = computed<Choice[]>(() => [
-  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry),
-  ...library.value.filter((e) => e.kind === 'user').map(fromEntry),
+  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry).filter(offered),
+  ...library.value.filter((e) => e.kind === 'user').map(fromEntry).filter(offered),
   // Only what this device's firmware runs: offering a mode it does not know
   // would be offering an effect that never starts.
   ...hardwareEffectsFor(board.value).map(fromHardware),
@@ -567,6 +578,22 @@ watch(
 const applied = computed(
   () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
 )
+
+/**
+ * Ce qui a échoué **à l'écriture sur l'appareil**, une fois fermé ce qu'on a
+ * déjà lu.
+ *
+ * Fermer ne corrige rien ici : l'échec continue, et la boucle le reproduira à
+ * l'image suivante. Le message reste donc masqué **tant qu'il ne change pas** —
+ * un appareil qui se met à échouer autrement a quelque chose de neuf à dire, et
+ * le reste n'était que la même phrase répétée devant quelqu'un qui l'a lue.
+ */
+const hushed = ref<string | null>(null)
+const deviceTrouble = computed(() => {
+  const trouble = status.value?.deviceError
+  const said = trouble ? message(trouble) : null
+  return said === hushed.value ? null : said
+})
 
 /** Vrai quand le simulateur doit afficher le flux de l'appareil. */
 const showsDevice = computed(() => runningHere.value && applied.value)
@@ -1360,20 +1387,20 @@ onBeforeUnmount(() => {
         {{ paramsError }}
       </FailureNote>
       <!-- The effect that raised keeps raising: nothing here can close this one. -->
-      <FailureNote v-if="status?.error" class="failure">
+      <FailureNote v-if="status?.error" class="failure" :closable="false">
         {{ t('effects.effectError', { error: status.error }) }}
       </FailureNote>
-      <p v-if="status?.deviceError" class="notice warn" role="alert">
-        {{ message(status.deviceError) }}
-      </p>
+      <FailureNote v-if="deviceTrouble" class="notice warn" @close="hushed = deviceTrouble">
+        {{ deviceTrouble }}
+      </FailureNote>
       <!--
         L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le
         dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
         clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
       -->
-      <p v-if="previewError" class="notice warn" role="alert">
+      <FailureNote v-if="previewError" class="notice warn" :closable="false">
         {{ t('effects.previewError', { error: previewError }) }}
-      </p>
+      </FailureNote>
 
       <!--
         La bibliothèque se parcourt sans appareil : on doit pouvoir voir ce que
@@ -1421,7 +1448,7 @@ onBeforeUnmount(() => {
         <p class="desc">{{ selectedEffect.description }}</p>
         <!-- A load error its author reads, and copies into the editor: it stays
              as long as the file does not compile. -->
-        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure">
+        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure" :closable="false">
           {{ selectedEffect.error }}
         </FailureNote>
         <p class="cost">{{ cost(selectedEffect.nature) }}</p>

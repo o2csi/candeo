@@ -6,18 +6,20 @@
  * not a page — but an error is precisely the text a bug report needs verbatim,
  * and retyping it invites a typo in the one sentence that has to be exact.
  *
- * The cross appears only when someone listens for it. A failure the window
- * cannot clear — an appliance's own state, read at each refresh — would come
- * straight back, and a cross that closes nothing is a lie.
+ * The cross is asked for, not guessed. A failure the window cannot clear — an
+ * appliance's own state, read at each refresh — says `closable: false`, because
+ * a cross that closes nothing is a lie.
+ *
+ * **It is a property and not a listener on purpose.** Reading `useAttrs()` for
+ * an `onClose` looked tidier and was wrong: Vue takes a declared emit out of the
+ * attributes, so the test was always false and no message anywhere had a cross —
+ * a whole feature shipped invisible.
  */
-import { computed, useAttrs } from 'vue'
-
 import { t } from '../i18n'
 
-defineEmits<{ close: [] }>()
+withDefaults(defineProps<{ closable?: boolean }>(), { closable: true })
 
-const attrs = useAttrs()
-const closable = computed(() => 'onClose' in attrs)
+defineEmits<{ close: [] }>()
 </script>
 
 <template>
