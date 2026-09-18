@@ -105,8 +105,26 @@
     "restoreOriginalDetail": "Changes made to this file are lost: duplicate it first to keep them.",
     "cancel": "Cancel",
     "hardwareEffects": {
-      "numbered": "Firmware effect {n}",
-      "unnamed": "One of this keyboard's own effects. What it shows is not written down yet.",
+      "static": {
+        "name": "Static",
+        "summary": "One colour, held. Red for now: choosing it is not wired yet."
+      },
+      "pulse": {
+        "name": "Pulse",
+        "summary": "That colour throbs, on and off, endlessly."
+      },
+      "breathing": {
+        "name": "Breathing",
+        "summary": "Colours follow one another, fading through black in between."
+      },
+      "morph": {
+        "name": "Morph",
+        "summary": "Colours follow one another without ever going dark."
+      },
+      "scan": {
+        "name": "Scan",
+        "summary": "A lit band sweeps across the keys and back."
+      },
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "The whole keyboard changes hue together, endlessly."

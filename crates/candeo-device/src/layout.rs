@@ -385,15 +385,18 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
     lighting: &AlienwareKeys,
     // No command is known to read a version from this device yet.
     surveyed_firmware: None,
-    // Sixteen kinds, every one of which answers and shows something — verified
-    // on the keyboard on 18/09/2026. They are named after their number until
-    // someone says what each one does.
-    #[rustfmt::skip]
+    // Sixteen kinds answer; these seven are the ones that show something,
+    // watched one by one on the keyboard on 18/09/2026. The others stop
+    // whatever was running and draw nothing — offering them would be offering
+    // an effect that never starts — and `0c` is the dark one *Off* already is.
     firmware_effects: &[
-        "hardware:m18-00", "hardware:m18-01", "hardware:m18-02", "hardware:m18-03",
-        "hardware:m18-04", "hardware:m18-05", "hardware:m18-06", "hardware:m18-07",
-        "hardware:m18-08", "hardware:m18-09", "hardware:m18-0a", "hardware:m18-0b",
-        "hardware:m18-0c", "hardware:m18-0d", "hardware:m18-0e", "hardware:m18-0f",
+        "hardware:m18-01", // a steady colour
+        "hardware:m18-02", // that colour, throbbing
+        "hardware:m18-03", // a rainbow crossing the keys
+        "hardware:m18-08", // colours following one another through black
+        "hardware:m18-09", // the same without going dark
+        "hardware:m18-0a", // a lit band sweeping across and back
+        "hardware:m18-0e", // hues cycling, faster
     ],
     rows: 7,
     cols: 20,

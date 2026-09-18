@@ -30,6 +30,21 @@ export const OFF = 'hardware:off'
 const ALIENWARE = 'hardware:m18-'
 
 /**
+ * What each of that keyboard's kinds shows, watched one by one on the hardware.
+ * The protocol says nothing about it: the numbers answer, the names come from
+ * eyes on a keyboard.
+ */
+const ALIENWARE_NAMES = {
+  '01': 'static',
+  '02': 'pulse',
+  '03': 'wave',
+  '08': 'breathing',
+  '09': 'morph',
+  '0a': 'scan',
+  '0e': 'spectrumCycle',
+} as const
+
+/**
  * A firmware effect's name comes from its id, not from a catalogue written here.
  *
  * **One family's modes are not another's.** The layout says which ids a device
@@ -53,14 +68,18 @@ export function named(id: string): HardwareEffect {
       summary: t(`effects.hardwareEffects.${key}.summary`),
     }
   }
-  if (id.startsWith(ALIENWARE)) {
-    const n = parseInt(id.slice(ALIENWARE.length), 16)
+  const kind = id.slice(ALIENWARE.length) as keyof typeof ALIENWARE_NAMES
+  const alienware = ALIENWARE_NAMES[kind]
+  if (id.startsWith(ALIENWARE) && alienware) {
     return {
       id,
-      name: t('effects.hardwareEffects.numbered', { n }),
-      summary: t('effects.hardwareEffects.unnamed'),
+      name: t(`effects.hardwareEffects.${alienware}.name`),
+      summary: t(`effects.hardwareEffects.${alienware}.summary`),
     }
   }
+  // An id nobody named: shown as it is rather than invented. The gallery only
+  // offers what a layout lists, so this is the sign of a layout gone ahead of
+  // the words for it.
   return { id, name: id, summary: '' }
 }
 

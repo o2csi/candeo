@@ -105,8 +105,26 @@
     "restoreOriginalDetail": "Les modifications faites à ce fichier sont perdues : dupliquez-le d'abord pour les garder.",
     "cancel": "Annuler",
     "hardwareEffects": {
-      "numbered": "Effet micrologiciel {n}",
-      "unnamed": "Un effet propre à ce clavier. Ce qu'il affiche n'est pas encore consigné.",
+      "static": {
+        "name": "Statique",
+        "summary": "Une couleur, tenue. Rouge pour l'instant : la choisir n'est pas encore branché."
+      },
+      "pulse": {
+        "name": "Pulsation",
+        "summary": "Cette couleur bat, sans fin."
+      },
+      "breathing": {
+        "name": "Respiration",
+        "summary": "Les couleurs se succèdent, en passant par le noir entre chacune."
+      },
+      "morph": {
+        "name": "Fondu",
+        "summary": "Les couleurs se succèdent sans jamais s'éteindre."
+      },
+      "scan": {
+        "name": "Balayage",
+        "summary": "Une bande lumineuse traverse les touches et revient."
+      },
       "spectrumCycle": {
         "name": "Spectrum Cycle",
         "summary": "Tout le clavier change de teinte ensemble, sans fin."

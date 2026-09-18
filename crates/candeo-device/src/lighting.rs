@@ -243,14 +243,26 @@ impl Lighting for AlienwareKeys {
     }
 
     /// The sixteen kinds its firmware runs, `hardware:m18-00` to
-    /// `hardware:m18-0f`. Each one answers and shows something; the tempo and
-    /// the two colours are Command Center's, kept until an effect is named after
-    /// what it actually does.
+    /// `hardware:m18-0f`, and *Off*.
+    ///
+    /// **Off is a kind here, not a black frame.** Once the firmware animates, it
+    /// redraws over anything the host pushes: an image of black is overwritten
+    /// within the second, and the keyboard never goes dark.
+    ///
+    /// The two colours are provisional. Several kinds paint what they are given
+    /// and show nothing on black — which is how `Off` works — so until the
+    /// gallery can ask for a colour, the others get a pair one can see.
     fn firmware_effect(&self, id: &str) -> Option<Outgoing> {
-        let kind = id.strip_prefix(ALIENWARE_EFFECT)?;
-        let kind = u8::from_str_radix(kind, 16).ok()?;
+        let (kind, one, two) = match id {
+            "hardware:off" => (ALIENWARE_STEADY, Rgb::default(), Rgb::default()),
+            _ => (
+                u8::from_str_radix(id.strip_prefix(ALIENWARE_EFFECT)?, 16).ok()?,
+                Rgb::new(0xff, 0x00, 0x00),
+                Rgb::new(0x00, 0x00, 0xff),
+            ),
+        };
         Some(Outgoing::plain(
-            alienware::effect(kind, 0x05, Rgb::default(), Rgb::default()).to_vec(),
+            alienware::effect(kind, 0x05, one, two).to_vec(),
         ))
     }
 
@@ -266,6 +278,11 @@ impl Lighting for AlienwareKeys {
 /// What an Alienware keyboard's firmware effects are called, before the two
 /// hexadecimal digits of the kind.
 pub const ALIENWARE_EFFECT: &str = "hardware:m18-";
+
+/// The kind that paints the colour it is given and nothing else, which on black
+/// is how this keyboard goes dark. Read off the keyboard on 18/09/2026, where
+/// every kind carrying no colour showed nothing.
+const ALIENWARE_STEADY: u8 = 0x01;
 
 /// Alienware: the zones around a keyboard, addressed by id.
 ///
