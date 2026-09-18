@@ -139,12 +139,11 @@ export interface LayoutInfo {
    */
   firmwareEffects: FirmwareEffectInfo[]
   /**
-   * Ce que sont les lumières de cet appareil.
+   * What this device's lights are.
    *
-   * `keys` : des touches, qu'on peut presser. `zones` : un cerclage, un logo,
-   * une bande — éclairés, jamais frappés. La galerie s'en sert pour ne pas
-   * proposer, à une surface sur laquelle personne ne tape, un effet qui lit les
-   * frappes : il n'en verrait jamais.
+   * `keys`: keys, which can be pressed. `zones`: a ring, a logo, a strip — lit,
+   * never typed on. The gallery uses it so that a surface nobody types on is
+   * never offered an effect reading key presses: it would never see one.
    */
   lights: 'keys' | 'zones'
 }

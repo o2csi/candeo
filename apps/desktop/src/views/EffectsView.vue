@@ -295,11 +295,11 @@ function fromHardware(e: HardwareEffect): Choice {
 }
 
 /**
- * Un effet qui lit les frappes, sur une surface où personne ne tape.
+ * An effect reading key presses, on a surface nobody types on.
  *
- * Il tournerait sans rien voir passer — et resterait donc noir, sans que rien
- * ne dise pourquoi. L'appareil déclare ce que sont ses lumières ; tant qu'il
- * n'a rien dit, on n'écarte rien.
+ * It would run without ever seeing one — and so stay dark, with nothing saying
+ * why. A device declares what its lights are; while it has said nothing,
+ * nothing is left out.
  */
 function offered(e: Choice): boolean {
   return !e.readsKeys || (board.value?.lights ?? 'keys') === 'keys'
@@ -580,13 +580,12 @@ const applied = computed(
 )
 
 /**
- * Ce qui a échoué **à l'écriture sur l'appareil**, une fois fermé ce qu'on a
- * déjà lu.
+ * What failed **writing to the device**, once what has been read is closed.
  *
- * Fermer ne corrige rien ici : l'échec continue, et la boucle le reproduira à
- * l'image suivante. Le message reste donc masqué **tant qu'il ne change pas** —
- * un appareil qui se met à échouer autrement a quelque chose de neuf à dire, et
- * le reste n'était que la même phrase répétée devant quelqu'un qui l'a lue.
+ * Closing fixes nothing here: the failure goes on, and the loop will raise it
+ * again at the next frame. So the message stays hidden **while it does not
+ * change** — a device that starts failing differently has something new to say,
+ * and the rest was the same sentence repeated to someone who has read it.
  */
 const hushed = ref<string | null>(null)
 const deviceTrouble = computed(() => {
