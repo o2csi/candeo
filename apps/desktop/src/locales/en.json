@@ -326,7 +326,7 @@
     "noLayout": "No known layout for {device}.",
     "deviceNotOpen": "No device open for {device}.",
     "deviceNotFound": "Keyboard not found: plug it in and try again.",
-    "deviceAccess": "The keyboard cannot be reached: {detail}",
+    "deviceAccess": "This device refuses what Candeo writes to it ({detail}). If it keeps refusing, shut the machine down and start it again.",
     "commandUnsupported": "This firmware does not support command {command}.",
     "noFirmwareEffect": "“{device}” runs no effect of its own: choose one from the library.",
     "wrongUnit": "The plugged-in unit (serial {fingerprint}) is not the one that was controlled: it stays closed. “Control” adopts it too.",

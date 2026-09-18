@@ -326,7 +326,7 @@
     "noLayout": "Aucun gabarit connu pour {device}.",
     "deviceNotOpen": "Aucun appareil ouvert pour {device}.",
     "deviceNotFound": "Clavier introuvable : branchez-le et réessayez.",
-    "deviceAccess": "Le clavier ne répond pas : {detail}",
+    "deviceAccess": "Cet appareil refuse ce que Candeo lui écrit ({detail}). S'il persiste, éteignez la machine puis rallumez-la.",
     "commandUnsupported": "Ce micrologiciel ne prend pas en charge la commande {command}.",
     "noFirmwareEffect": "« {device} » n'exécute aucun effet par lui-même : choisissez-en un dans la bibliothèque.",
     "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
