@@ -1387,7 +1387,7 @@ onBeforeUnmount(() => {
         {{ paramsError }}
       </FailureNote>
       <!-- The effect that raised keeps raising: nothing here can close this one. -->
-      <FailureNote v-if="status?.error" class="failure">
+      <FailureNote v-if="status?.error" class="failure" :closable="false">
         {{ t('effects.effectError', { error: status.error }) }}
       </FailureNote>
       <FailureNote v-if="deviceTrouble" class="notice warn" @close="hushed = deviceTrouble">
@@ -1398,7 +1398,7 @@ onBeforeUnmount(() => {
         dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
         clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
       -->
-      <FailureNote v-if="previewError" class="notice warn">
+      <FailureNote v-if="previewError" class="notice warn" :closable="false">
         {{ t('effects.previewError', { error: previewError }) }}
       </FailureNote>
 
@@ -1448,7 +1448,7 @@ onBeforeUnmount(() => {
         <p class="desc">{{ selectedEffect.description }}</p>
         <!-- A load error its author reads, and copies into the editor: it stays
              as long as the file does not compile. -->
-        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure">
+        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure" :closable="false">
           {{ selectedEffect.error }}
         </FailureNote>
         <p class="cost">{{ cost(selectedEffect.nature) }}</p>

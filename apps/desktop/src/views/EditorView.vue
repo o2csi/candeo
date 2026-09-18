@@ -615,7 +615,7 @@ onBeforeUnmount(() => {
           {{ problem }}
         </FailureNote>
         <!-- The loop keeps raising: closing this would only hide what is happening. -->
-        <FailureNote v-else-if="effectError" class="failure">
+        <FailureNote v-else-if="effectError" class="failure" :closable="false">
           {{ t('editor.effectError', { error: effectError }) }}
         </FailureNote>
         <p v-else class="hint">
