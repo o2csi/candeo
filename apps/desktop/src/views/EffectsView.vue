@@ -1398,9 +1398,9 @@ onBeforeUnmount(() => {
         dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
         clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
       -->
-      <p v-if="previewError" class="notice warn" role="alert">
+      <FailureNote v-if="previewError" class="notice warn">
         {{ t('effects.previewError', { error: previewError }) }}
-      </p>
+      </FailureNote>
 
       <!--
         La bibliothèque se parcourt sans appareil : on doit pouvoir voir ce que

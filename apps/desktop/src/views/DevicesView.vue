@@ -4,11 +4,34 @@
  * details. What concerns the whole application lives in Settings.
  */
 
-import { onMounted } from 'vue'
+import { onMounted, reactive } from 'vue'
 
 import { message } from '../api/journal'
+import type { DeviceInfo } from '../api/types'
+import FailureNote from '../components/FailureNote.vue'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
+
+/**
+ * Ce qu'on a déjà lu, par appareil : fermer n'arrange rien, l'appareil continue
+ * d'échouer et le dirait à chaque relecture de la liste.
+ *
+ * Masqué **tant que le message ne change pas** : un appareil qui se met à
+ * échouer autrement a quelque chose de neuf à dire.
+ */
+const hushed = reactive<Record<string, string>>({})
+
+const deviceKey = (d: DeviceInfo) => `${d.vid}:${d.pid}`
+
+function trouble(d: DeviceInfo): string | null {
+  const said = d.error ? message(d.error) : null
+  return said === hushed[deviceKey(d)] ? null : said
+}
+
+function hush(d: DeviceInfo): void {
+  const said = trouble(d)
+  if (said) hushed[deviceKey(d)] = said
+}
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
 
@@ -111,7 +134,7 @@ onMounted(refresh)
           L'erreur appartient à l'appareil qui l'a produite : affichée sur sa
           ligne, elle ne laisse pas croire que les autres sont touchés.
         -->
-        <p v-if="d.error" class="err">{{ message(d.error) }}</p>
+        <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
         <!--
           Un avertissement, pas une erreur : rien n'est bloqué, l'appareil reste
           ouvert. Visible sur la ligne plutôt que dans le seul journal —
