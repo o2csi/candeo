@@ -95,8 +95,18 @@ export function useEngineFrames(layout: () => LayoutView | null) {
   /**
    * Tant que rien n'est arrivé, une image noire du bon gabarit — lequel vient
    * du Rust, donc plus tard que le premier rendu.
+   *
+   * **Une image d'une autre taille que le gabarit est écartée**, pas dessinée :
+   * en changeant d'appareil, le gabarit arrive avant la première image du
+   * nouveau, et la dernière du précédent décrit une matrice qui n'est plus là
+   * — 132 couleurs pour un clavier qui en attend 140. La dessiner laisserait
+   * des touches sans couleur et ferait crier `layoutProblems` à chaque bascule.
    */
-  const frame = computed<readonly Rgb[]>(() => received.value ?? dark(layout()))
+  const frame = computed<readonly Rgb[]>(() => {
+    const black = dark(layout())
+    const last = received.value
+    return last && last.length === black.length ? last : black
+  })
 
   /** Ce qui ferme le canal. `null` quand personne n'écoute. */
   let release: (() => void) | null = null

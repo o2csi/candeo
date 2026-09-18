@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { withSetup } from '../test/withSetup'
@@ -78,6 +79,30 @@ describe('useEngineFrames', () => {
     // remove the new one.
     expect(closes[0]).not.toHaveBeenCalled()
     expect(api.subscribeFrames).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * Switching device: the layout arrives before the new device's first frame,
+   * and the previous one describes a matrix that is no longer there.
+   */
+  it('drops a frame that does not fit the layout', async () => {
+    const wide: LayoutView = { ...layout, cols: 3, frameLen: 3 }
+    const shown = ref<LayoutView>(layout)
+    const { result } = withSetup(() => useEngineFrames(() => shown.value))
+
+    await result.listen(keyboard)
+    onFrame(new Uint8Array([1, 2, 3, 4, 5, 6]))
+    expect(result.frame.value).toEqual([
+      [1, 2, 3],
+      [4, 5, 6],
+    ])
+
+    shown.value = wide
+    expect(result.frame.value).toEqual([
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ])
   })
 
   it('closes a channel that opens after the screen is gone', async () => {
