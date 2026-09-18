@@ -162,6 +162,19 @@ pub enum Verdict {
 }
 
 impl Inspection {
+    /// What is known about a device of a family whose protocol has no read yet:
+    /// nothing — and it says so rather than pretending to have asked.
+    ///
+    /// No check either: [`Self::refuses`] then refuses nothing, which is right.
+    /// A device that has never answered has never declined anything.
+    pub fn unread() -> Self {
+        Self {
+            firmware: Err("no known command reads a version from this device".into()),
+            serial: Err("no known command reads a serial from this device".into()),
+            checks: Vec::new(),
+        }
+    }
+
     /// True if the device declared it does not know this command.
     ///
     /// Only [`Verdict::Unsupported`] refuses: an unverified command is not a refused
@@ -184,18 +197,21 @@ impl Inspection {
     /// likely not have changed; the warning turns a silent failure into a stated
     /// suspicion.
     pub fn warnings(&self, layout: &Layout) -> Vec<Warning> {
-        let surveyed = layout.surveyed_firmware;
         let mut out = Vec::new();
-        match &self.firmware {
-            Ok(read) if *read != surveyed => out.push(Warning::FirmwareDiffers {
-                read: *read,
-                surveyed,
-            }),
-            Ok(_) => {}
-            Err(reason) => out.push(Warning::FirmwareNotRead {
-                reason: reason.clone(),
-                surveyed,
-            }),
+        // A layout surveyed against no version has nothing to compare: warning
+        // about a difference would be inventing one.
+        if let Some(surveyed) = layout.surveyed_firmware {
+            match &self.firmware {
+                Ok(read) if *read != surveyed => out.push(Warning::FirmwareDiffers {
+                    read: *read,
+                    surveyed,
+                }),
+                Ok(_) => {}
+                Err(reason) => out.push(Warning::FirmwareNotRead {
+                    reason: reason.clone(),
+                    surveyed,
+                }),
+            }
         }
         for c in &self.checks {
             match &c.verdict {

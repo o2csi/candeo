@@ -37,6 +37,21 @@ const WAVE_SPEED = 0x28
  * dernière image, c'est-à-dire un effet qui ne fait rien, présenté comme un
  * effet. Il apparaîtra avec le moteur (issue #6).
  */
+/**
+ * Those a given device runs, **Off included**: a firmware that draws nothing of
+ * its own still goes dark, on a black frame.
+ *
+ * Without a layout — no device chosen — the whole catalogue comes back: the list
+ * is then a presentation, not a command.
+ */
+export function hardwareEffectsFor(
+  layout: { firmwareEffects?: string[] } | null | undefined,
+): readonly HardwareEffect[] {
+  const offered = layout?.firmwareEffects
+  if (!offered) return hardwareEffects
+  return hardwareEffects.filter((h) => h.key === 'off' || offered.includes(h.id))
+}
+
 export const hardwareEffects: readonly HardwareEffect[] = [
   { id: 'hardware:spectrumCycle', key: 'spectrumCycle', effect: { kind: 'spectrumCycle' } },
   {
@@ -99,9 +114,15 @@ export function useEffects() {
     posed.value = {}
   }
 
+  /** Closes the message: what failed is read, and the screen goes back to work. */
+  function dismissError() {
+    error.value = null
+  }
+
   return {
     appliedOn,
     error: readonly(error),
+    dismissError,
     apply,
     forgetPosed,
   }

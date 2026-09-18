@@ -3,13 +3,15 @@
 //! The transport layer is isolated here so that [`candeo_protocol`] stays pure,
 //! testable without hardware, and free of system dependencies.
 
-use candeo_protocol::{CommandId, Effect, Report, Rgb};
+use candeo_protocol::{CommandId, Effect, Rgb};
 
 pub mod inspection;
 pub mod layout;
+pub mod lighting;
 
 pub use inspection::{Check, Inspection, Verdict, Warning};
-pub use layout::{Key, Layout, DEATHSTALKER_V2_PRO, NO_SCANCODE};
+pub use layout::{Key, Layout, Port, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO, NO_SCANCODE};
+pub use lighting::{Lighting, Outgoing};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -23,6 +25,12 @@ pub enum Error {
         "command {command} not sent: on open, this firmware answered that it does not know it"
     )]
     Refused { command: CommandId },
+    /// Said rather than approximated: a device that draws nothing by itself must
+    /// not look like one running an effect.
+    #[error("{device} has no firmware effect of its own")]
+    NoFirmwareEffect { device: &'static str },
+    #[error("{device} is addressed key by key, not by rows")]
+    NoRowWrite { device: &'static str },
 }
 
 /// An open keyboard, ready to receive commands.
@@ -61,12 +69,18 @@ impl Keyboard {
     pub fn open_if(
         api: &hidapi::HidApi,
         layout: &'static Layout,
-        accept: impl FnOnce(Option<&str>) -> bool,
+        mut accept: impl FnMut(Option<&str>) -> bool,
     ) -> Result<Option<Self>, Error> {
         let info = api
             .device_list()
             .find(|d| {
-                layout.is_lighting_interface(d.vendor_id(), d.product_id(), d.interface_number())
+                layout.is_lighting_interface(
+                    d.vendor_id(),
+                    d.product_id(),
+                    d.interface_number(),
+                    d.usage_page(),
+                    d.usage(),
+                )
             })
             .ok_or(Error::NotFound {
                 vid: layout.vid,
@@ -74,13 +88,16 @@ impl Keyboard {
             })?;
 
         let device = info.open_device(api)?;
-        Ok(
-            inspection::inspect_if(&device, accept).map(|inspection| Self {
+        // What a device is asked on opening belongs to its family: a command of
+        // another maker's protocol is a guess, not a question.
+        Ok(layout
+            .lighting
+            .inspect(&device, &mut accept)
+            .map(|inspection| Self {
                 device,
                 layout,
                 inspection,
-            }),
-        )
+            }))
     }
 
     pub fn layout(&self) -> &'static Layout {
@@ -100,34 +117,52 @@ impl Keyboard {
     /// keyboard that discards everything. With it, the failure travels up the
     /// write error path the interface already displays. The cost is a lookup in
     /// three entries: nothing is read back.
-    fn send(&self, report: Report) -> Result<(), Error> {
-        let command = report.id();
-        if self.inspection.refuses(command) {
-            return Err(Error::Refused { command });
+    fn send(&self, report: &Outgoing) -> Result<(), Error> {
+        if let Some(command) = report.command {
+            if self.inspection.refuses(command) {
+                return Err(Error::Refused { command });
+            }
         }
-        self.device
-            .send_feature_report(&report.to_feature_buffer())?;
+        self.device.send_feature_report(&report.bytes)?;
         Ok(())
     }
 
+    /// Hands the lighting back to the firmware, where the firmware draws.
+    ///
+    /// A family whose firmware draws nothing has no such thing: *Off* is then a
+    /// black frame, and anything else is refused rather than approximated, so
+    /// that nobody believes the device runs an effect it does not.
     pub fn set_effect(&self, effect: Effect) -> Result<(), Error> {
-        self.send(Report::set_effect(effect))
+        match self.layout.lighting.firmware_effect(effect) {
+            Some(report) => self.send(&report),
+            None if effect == Effect::Off => {
+                self.present(&vec![Rgb::default(); self.layout.led_count()])
+            }
+            None => Err(Error::NoFirmwareEffect {
+                device: self.layout.name,
+            }),
+        }
     }
 
     /// The effect the firmware runs now, read back — the same read the inspection
     /// makes on opening. An automation reads it before interrupting a device no
     /// host loop drives, to give that effect back afterwards: nothing else
-    /// remembers a firmware effect. `None` for one it cannot describe.
+    /// remembers a firmware effect. `None` for one it cannot describe, and for a
+    /// device that runs none.
     pub fn current_effect(&self) -> Result<Option<Effect>, String> {
-        inspection::read_effect(&self.device)
+        self.layout.lighting.current_effect(&self.device)
     }
 
+    /// Dims the whole device, in whatever reports its family takes.
     pub fn set_brightness(&self, level: u8) -> Result<(), Error> {
-        self.send(Report::set_brightness(level))
+        for report in self.layout.lighting.brightness(level) {
+            self.send(&report)?;
+        }
+        Ok(())
     }
 
-    /// Writes a row segment. The device handles partial writes — verified on
-    /// hardware.
+    /// Writes a row segment, for a device addressed that way. The Razer handles
+    /// partial writes — verified on hardware.
     pub fn write_row(&self, row: u8, col_start: u8, colors: &[Rgb]) -> Result<(), Error> {
         if row >= self.layout.rows {
             return Err(Error::RowOutOfRange {
@@ -135,15 +170,19 @@ impl Keyboard {
                 rows: self.layout.rows,
             });
         }
-        self.send(Report::write_row(row, col_start, colors))
+        match self.layout.lighting.row(row, col_start, colors) {
+            Some(report) => self.send(&report),
+            None => Err(Error::NoRowWrite {
+                device: self.layout.name,
+            }),
+        }
     }
 
-    /// Pushes a full frame: one row per transfer, then switches to host-controlled
-    /// mode.
+    /// Pushes a full frame, in whatever reports the device's family takes.
     ///
     /// `frame` must cover the **whole** matrix, including positions without a
-    /// physical LED. Sending less leaves the last rows frozen on their previous
-    /// value.
+    /// physical LED. Sending less leaves a Razer's last rows frozen on their
+    /// previous value, and says nothing about the cells a per-key device skips.
     pub fn present(&self, frame: &[Rgb]) -> Result<(), Error> {
         let expected = self.layout.led_count();
         assert_eq!(
@@ -151,11 +190,9 @@ impl Keyboard {
             expected,
             "the frame must cover all {expected} positions of the matrix"
         );
-        let cols = self.layout.cols as usize;
-        for row in 0..self.layout.rows {
-            let start = row as usize * cols;
-            self.write_row(row, 0, &frame[start..start + cols])?;
+        for report in self.layout.lighting.frame(self.layout, frame) {
+            self.send(&report)?;
         }
-        self.set_effect(Effect::Custom)
+        Ok(())
     }
 }

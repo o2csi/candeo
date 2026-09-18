@@ -107,6 +107,7 @@ export interface KeyInfo {
   h: number
 }
 
+/** Miroir de `LayoutInfo`, dans `src-tauri/src/lib.rs`. */
 export interface LayoutInfo {
   name: string
   rows: number
@@ -128,6 +129,15 @@ export interface LayoutInfo {
    * d'espace une seule malgré ses 6,25 u.
    */
   keys: KeyInfo[]
+  /**
+   * The effects this device's **firmware** runs on its own, by their gallery
+   * ids — `hardware:spectrumCycle`, `hardware:wave`.
+   *
+   * *Off* is never listed and stays offered everywhere: a device that draws
+   * nothing of its own still goes dark, on a black frame. The gallery offers
+   * these only, so that nobody picks a mode the device would refuse.
+   */
+  firmwareEffects: string[]
 }
 
 export type Effect =

@@ -31,6 +31,7 @@ import {
   type LogLevel,
 } from '../api/candeo'
 import { erreur, message } from '../api/journal'
+import FailureNote from '../components/FailureNote.vue'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -314,7 +315,7 @@ onMounted(() => {
     <section v-if="language" class="block" aria-labelledby="language-title">
       <h2 id="language-title">{{ t('settings.language.title') }}</h2>
 
-      <p v-if="languageProblem" class="err" role="alert">{{ languageProblem }}</p>
+      <FailureNote v-if="languageProblem" class="err" @close="languageProblem = null">{{ languageProblem }}</FailureNote>
 
       <div class="level">
         <label for="language">{{ t('settings.language.label') }}</label>
@@ -336,7 +337,7 @@ onMounted(() => {
     <section v-if="resume !== null" class="block" aria-labelledby="startup-title">
       <h2 id="startup-title">{{ t('settings.startup.title') }}</h2>
 
-      <p v-if="startupProblem" class="err" role="alert">{{ startupProblem }}</p>
+      <FailureNote v-if="startupProblem" class="err" @close="startupProblem = null">{{ startupProblem }}</FailureNote>
 
       <label class="level">
         <input type="checkbox" :checked="resume" @change="chooseResume" />
@@ -364,7 +365,7 @@ onMounted(() => {
     <section v-if="update" class="block" aria-labelledby="version-title">
       <h2 id="version-title">{{ t('settings.version.title', { version: update.version }) }}</h2>
 
-      <p v-if="versionProblem" class="err" role="alert">{{ versionProblem }}</p>
+      <FailureNote v-if="versionProblem" class="err" @close="versionProblem = null">{{ versionProblem }}</FailureNote>
 
       <label class="level">
         <input
@@ -398,7 +399,7 @@ onMounted(() => {
     <section v-if="journal" class="block" aria-labelledby="journal-title">
       <h2 id="journal-title">{{ t('settings.log.title') }}</h2>
 
-      <p v-if="journalProblem" class="err" role="alert">{{ journalProblem }}</p>
+      <FailureNote v-if="journalProblem" class="err" @close="journalProblem = null">{{ journalProblem }}</FailureNote>
 
       <div class="level">
         <label for="log-level">{{ t('settings.log.level') }}</label>
@@ -457,7 +458,7 @@ onMounted(() => {
     <section class="block" aria-labelledby="config-title">
       <h2 id="config-title">{{ t('settings.config.title') }}</h2>
 
-      <p v-if="problem" class="err" role="alert">{{ problem }}</p>
+      <FailureNote v-if="problem" class="err" @close="problem = null">{{ problem }}</FailureNote>
 
       <!--
         The button stays in place and enabled while the question is asked:

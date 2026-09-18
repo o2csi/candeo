@@ -500,7 +500,9 @@ fn probe_inspection_on_open() {
     println!(
         "\nfirmware: {:?} (surveyed on {})",
         i.firmware.as_ref().map(ToString::to_string),
-        layout.surveyed_firmware
+        layout
+            .surveyed_firmware
+            .map_or_else(|| "nothing".to_string(), |f| f.to_string())
     );
     // The fingerprint, not the serial: the output of this probe ends up pasted
     // into an issue as often as a log does.

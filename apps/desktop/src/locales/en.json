@@ -12,7 +12,8 @@
       "system": "System theme",
       "light": "Light theme",
       "dark": "Dark theme"
-    }
+    },
+    "dismiss": "Close this message"
   },
   "effects": {
     "columns": {
@@ -296,6 +297,7 @@
     "deviceNotFound": "Keyboard not found: plug it in and try again.",
     "deviceAccess": "The keyboard cannot be reached: {detail}",
     "commandUnsupported": "This firmware does not support command {command}.",
+    "noFirmwareEffect": "“{device}” runs no effect of its own: choose one from the library.",
     "wrongUnit": "The plugged-in unit (serial {fingerprint}) is not the one that was controlled: it stays closed. “Control” adopts it too.",
     "deviceWrite": "Cannot write to the keyboard: {detail}",
     "deviceClosed": "Device closed: reconnect it from Devices."

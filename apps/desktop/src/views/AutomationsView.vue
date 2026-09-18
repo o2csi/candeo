@@ -20,6 +20,7 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamValue } from '@candeo/effects-api'
 
 import {
+  getLayout,
   getSettings,
   idleAvailable,
   listDevices,
@@ -33,12 +34,17 @@ import {
   type Rule,
 } from '../api/candeo'
 import { message } from '../api/journal'
-import type { DeviceInfo } from '../api/types'
+import type { DeviceInfo, LayoutInfo } from '../api/types'
 import DaysChip from '../components/DaysChip.vue'
 import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
+import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
-import { hardwareEffects } from '../composables/useEffects'
+import {
+  hardwareEffects,
+  hardwareEffectsFor,
+  type HardwareEffect,
+} from '../composables/useEffects'
 import {
   EVERY_DAY,
   FOR_PRESETS,
@@ -61,6 +67,13 @@ const rules = ref<unknown[]>([])
 const paused = ref(false)
 const library = ref<EffectEntry[]>([])
 const devices = ref<DeviceInfo[]>([])
+/**
+ * Each adopted device's layout, keyed "vid:pid".
+ *
+ * It says which effects its firmware runs: a rule's sentence must not offer a
+ * mode the device would refuse.
+ */
+const layouts = reactive<Record<string, LayoutInfo>>({})
 const problem = ref<string | null>(null)
 const loaded = ref(false)
 /** Whether this system says how long the computer has been idle. */
@@ -94,6 +107,12 @@ async function load(): Promise<void> {
     library.value = effects
     devices.value = found.filter((d) => d.state === 'adopted')
     idleHere.value = idle
+    // A layout that cannot be read is not a failure here: the whole catalogue is
+    // then offered, as it was before a device said what it runs.
+    for (const d of devices.value) {
+      const known = await getLayout({ vid: d.vid, pid: d.pid }).catch(() => null)
+      if (known) layouts[deviceKey(d)] = known
+    }
   } catch (e) {
     problem.value = message(e)
   } finally {
@@ -267,6 +286,15 @@ function effectLabel(rule: Rule): string {
   return manifest(rule)?.name ?? rule.show.effect
 }
 
+/**
+ * The firmware effects of the rule's **first device**: a mode its firmware does
+ * not know has no place in the sentence.
+ */
+function hardwareFor(rule: Rule): readonly HardwareEffect[] {
+  const target = rule.devices[0]
+  return hardwareEffectsFor(target ? layouts[deviceKey(target)] : null)
+}
+
 function hasSettings(rule: Rule): boolean {
   return Object.keys(manifest(rule)?.params ?? {}).length > 0
 }
@@ -313,7 +341,7 @@ function onDrop(to: number): void {
       </label>
     </header>
 
-    <p v-if="problem" class="err" role="alert">{{ problem }}</p>
+    <FailureNote v-if="problem" class="err" @close="problem = null">{{ problem }}</FailureNote>
     <p v-if="loaded && !devices.length" class="warn">{{ t('automations.noDevice') }}</p>
 
     <ol v-if="rules.length" class="list">
@@ -395,7 +423,7 @@ function onDrop(to: number): void {
               @change="chooseEffect(index, $event)"
             >
               <optgroup :label="t('automations.hardware')">
-                <option v-for="h in hardwareEffects" :key="h.id" :value="h.id">
+                <option v-for="h in hardwareFor(raw)" :key="h.id" :value="h.id">
                   {{ t(`effects.hardwareEffects.${h.key}.name`) }}
                 </option>
               </optgroup>

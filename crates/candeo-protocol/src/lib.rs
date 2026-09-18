@@ -1,9 +1,9 @@
-//! Builds the reports of the Razer lighting protocol, and reads the
-//! responses.
+//! Builds the reports of the lighting protocols, and reads the responses.
 //!
-//! Structure established by capturing the USB bus — see `docs/protocol/`.
-//! No third-party code was consulted: this module derives only from frames
-//! observed on the hardware.
+//! This module is the Razer one; [`alienware`] carries the Alienware m18 R1's,
+//! which shares nothing but the idea of a report. Both structures were
+//! established by capturing the USB bus — see `docs/protocol/`. No third-party
+//! code was consulted: they derive only from frames observed on the hardware.
 
 /// Report length, excluding the HID report id.
 ///
@@ -18,6 +18,8 @@
 /// and it is the only way to re-establish it the day a device answers
 /// differently. Cutting them to save a few characters of visibility would cost
 /// that ability, and the connection would not be spotted again.
+pub mod alienware;
+
 pub const REPORT_LEN: usize = 90;
 
 /// Size of the buffer passed to `HidD_SetFeature`: report id + data.

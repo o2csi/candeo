@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Inspection, Keyboard, Layout, Warning, DEATHSTALKER_V2_PRO};
+use candeo_device::{Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
 use candeo_protocol::{Effect, Rgb};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -42,7 +42,7 @@ mod update;
 /// Visible in the crate: the [`journal`] diagnostic lists the same devices as
 /// [`list_devices`], and copying them over there would make a second list that
 /// would diverge at the first added layout.
-pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO];
+pub(crate) const LAYOUTS: &[&Layout] = &[&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
 
 // ---------------------------------------------------------------- exposed types
 
@@ -166,6 +166,27 @@ pub struct LayoutInfo {
     pub frame_len: usize,
     /// Only the cells carrying an LED.
     pub keys: Vec<KeyInfo>,
+    /// The effects this device's **firmware** runs, by the gallery's ids —
+    /// `hardware:spectrumCycle`, `hardware:wave`.
+    ///
+    /// *Off* is never in it and is offered for every device: a firmware that
+    /// draws nothing still goes dark, on a frame of black. The gallery offers
+    /// these and no others, so that nobody picks an effect the device would
+    /// refuse.
+    pub firmware_effects: Vec<String>,
+}
+
+/// The gallery's id for a firmware effect, as `useEffects.ts` writes them.
+fn hardware_id(effect: candeo_protocol::Effect) -> Option<&'static str> {
+    use candeo_protocol::Effect;
+    match effect {
+        Effect::Off => Some("hardware:off"),
+        Effect::SpectrumCycle => Some("hardware:spectrumCycle"),
+        Effect::Wave { .. } => Some("hardware:wave"),
+        // Static and Breathing need a colour the gallery has no way to pass, and
+        // Custom is what the engine drives.
+        _ => None,
+    }
 }
 
 impl From<&'static Layout> for LayoutInfo {
@@ -199,6 +220,12 @@ impl From<&'static Layout> for LayoutInfo {
             cols: l.cols,
             frame_len: l.led_count(),
             keys,
+            firmware_effects: l
+                .firmware_effects
+                .iter()
+                .filter_map(|&e| hardware_id(e))
+                .map(str::to_owned)
+                .collect(),
         }
     }
 }
@@ -358,7 +385,15 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
 /// [`known_serial`].
 pub(crate) fn plugged(api: &hidapi::HidApi, layout: &Layout) -> Option<Option<String>> {
     api.device_list()
-        .find(|d| layout.is_lighting_interface(d.vendor_id(), d.product_id(), d.interface_number()))
+        .find(|d| {
+            layout.is_lighting_interface(
+                d.vendor_id(),
+                d.product_id(),
+                d.interface_number(),
+                d.usage_page(),
+                d.usage(),
+            )
+        })
         .map(|d| {
             d.serial_number()
                 .map(str::to_owned)
@@ -796,7 +831,10 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
                 error: failures.get(&device).cloned(),
-                surveyed_firmware: l.surveyed_firmware.to_string(),
+                surveyed_firmware: l
+                    .surveyed_firmware
+                    .map(|f| f.to_string())
+                    .unwrap_or_default(),
                 firmware: inspection
                     .as_ref()
                     .and_then(|i| i.firmware.as_ref().ok())
@@ -1408,8 +1446,10 @@ mod tests {
         name: "Premier",
         vid: 0x1532,
         pid: 0x1111,
-        interface: 3,
-        surveyed_firmware: candeo_protocol::Firmware { major: 1, minor: 0 },
+        port: candeo_device::Port::Interface(3),
+        lighting: &candeo_device::lighting::RazerRows,
+        surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
+        firmware_effects: &[],
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -1419,8 +1459,10 @@ mod tests {
         name: "Second",
         vid: 0x1532,
         pid: 0x2222,
-        interface: 3,
-        surveyed_firmware: candeo_protocol::Firmware { major: 1, minor: 0 },
+        port: candeo_device::Port::Interface(3),
+        lighting: &candeo_device::lighting::RazerRows,
+        surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
+        firmware_effects: &[],
         rows: 1,
         cols: 1,
         matrix: &[0],
