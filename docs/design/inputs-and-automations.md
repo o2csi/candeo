@@ -225,6 +225,21 @@ or false, `choice` takes one of its options. **A value that is missing or does
 not convert leaves the configured value in place** — so nothing goes dark,
 nothing needs a special case, and the preview and the swatch draw at rest.
 
+**That conversion belongs to the bootstrap, not to Rust**, and the storage
+module says why: `EffectParamsRecord.values` is a raw JSON map on purpose,
+because typing parameters there "would create a second source of truth, which
+would diverge at the first parameter type added". Rust therefore cannot turn
+`"#ff0000"` into a colour. The bootstrap can: `__candeo_manifest` already
+carries `effect.params`, so the specs are there, next to where presses and the
+clock are already decoded.
+
+So the host **never touches `params`**. It passes the bound values that exist
+alongside it, raw — `{ "colour": "#ff0000" }` — and a signal that is absent or
+expired is simply not in it. The bootstrap converts each against its spec: it
+replaces the value on success, and on failure or absence the configured value is
+still there, never having been overwritten. The fallback above falls out of that
+rather than being written.
+
 And every shipped effect becomes signal-driven without a line of code. There is
 no *Status* effect to write.
 
@@ -236,14 +251,37 @@ value, and travels as `#ff0000` into a bound parameter. **No mapping table in a
 binding** (`failed → red`): that would be a small language, and a second place
 where lighting is decided — the very thing this section refuses of the API.
 
+**Where a binding is written: in the parameter's own row, nowhere new.**
+`EffectParamsForm` is already the gallery's form *and* a rule's, so the
+affordance appears in both by existing once. The control is the pattern §3.2
+already settled for cron: **one of the two holds the parameter at a time**, a
+value or a signal, the other shown disabled. The name is picked from the signals
+held right now — the same list as the Settings panel — or typed, since a
+parameter is often bound before its sender ever runs; a name never received is
+shown as such and not as an error, as a rule naming a deleted effect stays and
+does nothing (§3.4).
+
+**A binding is not a rule, and must not grow into one.**
+
+| | A rule | A binding |
+|---|---|---|
+| Decides | **which** effect runs | **one value** of the effect already running |
+| Carries | a trigger, devices, a duration, a priority, an order | none of these |
+| Reads as | a sentence | a field |
+
+Giving bindings an ordered list with priorities would rebuild the scheduler to
+fill in a box. A binding **follows the effect, not the device**:
+`EffectParamsRecord` is already keyed on (vid, pid, effect), so bindings live in
+that same record beside `values`, created and erased with it. A rule carries its
+own in `show`, exactly as it already carries its own `params` (§3.2).
+
 **Where it costs.** Parameters are already read afresh on every frame, inside
-the render loop, so the binding is applied in that one place before the effect
-is called: no argument added to the host's render entry point, no decoder in the
-bootstrap, no manifest flag, no gallery badge, and **nothing at all in
-`packages/effects-api`**. The work is in the settings form, which has to offer
-"bound to signal …" per parameter and show it. Bindings are stored **beside**
-`effectParams`, not inside: the literal value stays what the preview and the
-swatch use, and the fallback above falls out of that rather than being written.
+the render loop, so the bound values are gathered in that one place. **One
+argument** is added to the host's render entry point, next to presses and the
+clock — an earlier draft of this section said none, and was wrong: the
+conversion needs the specs, which are in the bootstrap. Nothing else moves: no
+manifest flag, no gallery badge, and **nothing at all in
+`packages/effects-api`**. The work is in the settings form.
 
 The bag stays possible later, for an effect drawing sixteen values at once. It
 is not the answer here, and it must not be the main mechanism.
