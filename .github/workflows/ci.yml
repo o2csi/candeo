@@ -201,7 +201,7 @@ jobs:
       # Binaires officiels publiés par RustSec, somme de contrôle vérifiée :
       # quelques secondes, là où laisser `cargo install cargo-audit` compiler
       # l'outil coûtait six des 6 min 08 du job.
-      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+      - uses: taiki-e/install-action@76c2e6406e52637deed7160d77bded76bd83e06e # v2.87.14
         with: { tool: cargo-audit }
       # Appel direct plutôt que `rustsec/audit-check@v2.0.0` : l'enrobage tourne
       # sur un Node.js 20 déprécié, que GitHub force déjà sur Node 24 et finira
