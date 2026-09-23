@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.9.0](https://github.com/o2csi/candeo/compare/v0.8.0...v0.9.0) (2026-09-23)
+
+
+### Features
+
+* a rule can be written to wait for a signal ([eed0631](https://github.com/o2csi/candeo/commit/eed063109a011d1078f9929a87a4fc87ddcbd635))
+* a rule can wait for a signal ([cf624a2](https://github.com/o2csi/candeo/commit/cf624a2f4a35a311837a9771a9bf3e77fdddccd3))
+* other software sets named values over HTTP ([5b4eb9d](https://github.com/o2csi/candeo/commit/5b4eb9d6f67fcde8412bb37612b1d14ef40ccb17))
+* the Settings tab shows and sets the signals API ([f9caec4](https://github.com/o2csi/candeo/commit/f9caec4f1ff8577c5fab23f58aaf8b35c85376fb))
+
+
+### Bug Fixes
+
+* the reset confirmation says the rules go too ([615b303](https://github.com/o2csi/candeo/commit/615b303d5ba51941d8c452a9c33c3ed01ac424fd))
+
+
+### Documentation
+
+* how to send a signal, and the commands behind Settings ([0e11a42](https://github.com/o2csi/candeo/commit/0e11a42377ea1bb957f6f46930ce0a6b0731b398))
+* one signal trigger, a usable command, and the bag for authors ([e4ccd32](https://github.com/o2csi/candeo/commit/e4ccd326942894ede8eb50739b41984613fc1a1d))
+* signals arrive over HTTP only, on chosen interfaces ([816f71e](https://github.com/o2csi/candeo/commit/816f71e3b715c1bfc939183b005fa849e97fd11e))
+* the landing page shows signals ([16cf4d3](https://github.com/o2csi/candeo/commit/16cf4d3a0a15da42489c80f34cbe7169eecd2d90))
+* the privacy policy and the site describe signals ([8428c62](https://github.com/o2csi/candeo/commit/8428c626c0164e3ec7d09b9ed68c1932ccc47064))
+* the roadmap keeps what signals still lack ([59076ee](https://github.com/o2csi/candeo/commit/59076ee0241a8ad90f41ce2ded5b0c43a1937ee3))
+* the site offers the Microsoft Store ([35caa9d](https://github.com/o2csi/candeo/commit/35caa9d39037d6e629276a0f92936489a33b5320))
+* the Store listing describes 0.9.0 ([2a8d568](https://github.com/o2csi/candeo/commit/2a8d568ce514df7e54c01fb802edaa7758d8c26e))
+* the Store listing lists its features ([406f711](https://github.com/o2csi/candeo/commit/406f71126aa44dd05598734152def74faac6a625))
+
+
+### CI/CD
+
+* the Store features come from the listing too ([4d0f490](https://github.com/o2csi/candeo/commit/4d0f490da0b97e9383122780ff55031c16893222))
+
 ## [0.8.0](https://github.com/o2csi/candeo/compare/v0.7.0...v0.8.0) (2026-09-23)
 
 
