@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [lib]
-# Le suffixe `_lib` evite un conflit de nom avec le binaire sous Windows.
+# The `_lib` suffix avoids a name clash with the binary on Windows.
 name = "candeo_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -20,10 +20,10 @@ candeo-protocol.workspace = true
 candeo-device.workspace = true
 hidapi.workspace = true
 serde.workspace = true
-# `tray-icon` : l'icône de zone de notification — voir `src/tray.rs`. Ce n'est
-# pas un agrément d'interface, c'est ce qui rend vraie la promesse « un effet
-# tourne fenêtre fermée » : sans quelque chose qui survive à la dernière fenêtre,
-# la fermer arrête le processus, donc les fils de rendu.
+# `tray-icon`: the notification area icon — see `src/tray.rs`. It is not an
+# interface nicety, it is what makes the promise "an effect runs with the window
+# closed" true: without something that outlives the last window, closing it
+# stops the process, and therefore the render threads.
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 # `preserve_order`: a map keeps the order it was given (`indexmap`, already in the
@@ -31,35 +31,35 @@ tauri-plugin-opener = "2"
 # `settings.json` is written back in the order it was read rather than sorted.
 serde_json = { version = "1", features = ["preserve_order"] }
 
-# Une seule instance à la fois — voir `src/single_instance.rs`. Sans la
-# fonctionnalité `semver`, qui laisserait cohabiter deux versions incompatibles :
-# ce qui ne se partage pas ici, c'est le clavier et `settings.json`, et ni l'un
-# ni l'autre ne s'entend mieux avec un voisin d'une autre version.
+# One instance at a time — see `src/single_instance.rs`. Without the `semver`
+# feature, which would let two incompatible versions live side by side: what
+# cannot be shared here is the keyboard and `settings.json`, and neither gets
+# along any better with a neighbour of another version.
 tauri-plugin-single-instance = "2"
 
 # The system notification saying that closing hid the window (`src/tray.rs`).
 tauri-plugin-notification = "2"
 
-# Moteur d'effets. `loader` sert à résoudre `@candeo/effects-api` vers un
-# module interne, sans bundler ni `node_modules`.
+# Effects engine. `loader` resolves `@candeo/effects-api` to an internal
+# module, with no bundler and no `node_modules`.
 rquickjs = { version = "0.13", features = ["loader"] }
 
-# Journal — voir `src/journal.rs`. `tracing` plutôt que `tauri-plugin-log`, qui
-# est première partie et réglerait l'essentiel en quelques lignes : il y a une
-# boucle de rendu par appareil, et « écriture refusée » ne sert à rien sans
-# savoir laquelle. Un *span* par boucle attache l'appareil et l'effet à tout ce
-# qui s'y journalise, sans trimballer un identifiant dans chaque appel.
+# Log — see `src/journal.rs`. `tracing` rather than `tauri-plugin-log`, which is
+# first-party and would settle most of it in a few lines: there is one render
+# loop per device, and "write refused" is of no use without knowing which one.
+# One *span* per loop attaches the device and the effect to everything logged
+# inside it, without carrying an identifier through every call.
 #
-# Ici seulement, et pas dans l'espace de travail : `candeo-protocol` et
-# `candeo-device` n'ont aucune dépendance, et c'est ce qui rend leurs tests
-# exécutables sans rien installer. Le jour où l'une d'elles voudrait journaliser,
-# `tracing` monterait dans `[workspace.dependencies]`.
+# Here only, and not in the workspace: `candeo-protocol` and `candeo-device`
+# have no dependencies, and that is what makes their tests runnable without
+# installing anything. The day one of them wanted to log, `tracing` would move
+# up into `[workspace.dependencies]`.
 tracing = "0.1"
-# `env-filter` porte la directive et son analyse, `fmt` la mise en forme.
-# La recharge à chaud (`reload`) est dans le tronc, sans fonctionnalité à armer.
+# `env-filter` carries the directive and its parsing, `fmt` the formatting.
+# Hot reloading (`reload`) is in the core, with no feature to turn on.
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-# Rotation quotidienne et nombre de fichiers plafonné : une application
-# d'éclairage tourne des jours.
+# Daily rotation and a capped number of files: a lighting application runs for
+# days.
 tracing-appender = "0.2"
 # Content hash of an effect's source, pairing it with its compiled cache.
 # Already in the tree through Tauri.
@@ -113,6 +113,6 @@ features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation"]
 libc = "0.2"
 
 [dev-dependencies]
-# Le stockage se teste dans un dossier temporaire, jamais dans celui de
-# l'utilisateur — et sans lancer Tauri.
+# Storage is tested in a temporary folder, never in the user's — and without
+# starting Tauri.
 tempfile = "3"

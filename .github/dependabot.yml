@@ -6,8 +6,8 @@ updates:
     schedule: { interval: weekly }
     open-pull-requests-limit: 5
     groups:
-      # La pile Tauri bouge d'un bloc : la mettre à jour morceau par morceau
-      # produit des combinaisons que personne n'a testées.
+      # The Tauri stack moves as one block: updating it piece by piece
+      # produces combinations nobody has tested.
       tauri:
         patterns: ["tauri", "tauri-*", "wry", "tao"]
 
@@ -21,10 +21,10 @@ updates:
       vue:
         patterns: ["vue", "vue-*", "@vitejs/*", "vite"]
     ignore:
-      # vue-tsc 3.3 charge `typescript/lib/tsc`, que la réécriture native de
-      # TypeScript 7 n'expose plus. Vérifié le 12/09/2026 :
-      # ERR_PACKAGE_PATH_NOT_EXPORTED au premier `vue-tsc --noEmit`.
-      # À lever quand vue-tsc prendra en charge TS 7.
+      # vue-tsc 3.3 loads `typescript/lib/tsc`, which the native rewrite of
+      # TypeScript 7 no longer exposes. Checked on 2026-09-12:
+      # ERR_PACKAGE_PATH_NOT_EXPORTED on the first `vue-tsc --noEmit`.
+      # To be lifted when vue-tsc supports TS 7.
       - dependency-name: typescript
         versions: [">=7"]
 

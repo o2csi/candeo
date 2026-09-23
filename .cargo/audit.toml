@@ -1,28 +1,30 @@
-# Configuration de `cargo audit`.
+# Configuration for `cargo audit`.
 #
-# Toute entrée ici doit être justifiée et datée. Une exception non expliquée
-# est pire qu'un avertissement : elle se transmet en silence.
+# Every entry here must be justified and dated. An unexplained exception is
+# worse than a warning: it is passed on in silence.
 
 [advisories]
 ignore = [
-    # RUSTSEC-2024-0429 — glib < 0.20 : `Iterator` / `DoubleEndedIterator` non
-    # sûrs sur `VariantStrIter` (GHSA-wrw7-89jp-8q8g, sévérité modérée).
+    # RUSTSEC-2024-0429 — glib < 0.20: unsound `Iterator` /
+    # `DoubleEndedIterator` on `VariantStrIter` (GHSA-wrw7-89jp-8q8g, moderate
+    # severity).
     #
-    # Pourquoi ignoré, au 12/09/2026 :
+    # Why it is ignored, as of 2026-09-12:
     #
-    # 1. ~~Le code n'est jamais compilé.~~ **Plus vrai depuis le job `linux`.**
-    #    `glib` arrive par la pile GTK3, que Tauri n'utilise que sous Linux :
-    #    `cargo tree --invert glib` reste vide sur la cible Windows, mais le job
-    #    `linux` de la CI compile désormais cette pile, et les paquets deb et rpm
-    #    qu'il produit l'embarquent. Le point 1 est donc tombé — restent 2 et 3,
-    #    qui suffisent.
-    # 2. Aucune version corrigée n'est atteignable. Tauri 2.11.5 — la dernière —
-    #    épingle gtk 0.18 ; et gtk 0.19, la dernière publiée de gtk3-rs, reste
-    #    sur glib 0.19, donc toujours dans la plage vulnérable (< 0.20). Le
-    #    correctif vit dans la branche gtk4, où Tauri n'est pas.
-    # 3. Nous n'appelons pas `VariantStrIter`, ni directement ni indirectement.
+    # 1. ~~The code is never compiled.~~ **No longer true since the `linux`
+    #    job.** `glib` comes in through the GTK3 stack, which Tauri uses on
+    #    Linux only: `cargo tree --invert glib` stays empty on the Windows
+    #    target, but the CI `linux` job now compiles that stack, and the deb
+    #    and rpm packages it produces ship it. Point 1 has therefore fallen —
+    #    2 and 3 remain, and they are enough.
+    # 2. No fixed version can be reached. Tauri 2.11.5 — the latest — pins
+    #    gtk 0.18; and gtk 0.19, the last published release of gtk3-rs, stays
+    #    on glib 0.19, so still within the vulnerable range (< 0.20). The fix
+    #    lives in the gtk4 branch, where Tauri is not.
+    # 3. We do not call `VariantStrIter`, neither directly nor indirectly.
     #
-    # À rouvrir dès que l'un des deux points restants cesse d'être vrai — en
-    # pratique, dès que Tauri passera à gtk4 ou publiera un correctif glib.
+    # To be reopened as soon as either of the two remaining points stops being
+    # true — in practice, as soon as Tauri moves to gtk4 or publishes a glib
+    # fix.
     "RUSTSEC-2024-0429",
 ]
