@@ -443,6 +443,7 @@
       "stopped": "Les effets en cours s'arrêtent et le rétroéclairage s'éteint, plutôt que de rester figé sur la dernière image.",
       "forgetDevices": "L'effet appliqué et la luminosité retenue de chaque appareil sont oubliés : tout repart à pleine luminosité, sans effet.",
       "forgetParams": "Les réglages retenus pour chaque effet, sur chaque appareil, sont oubliés.",
+      "forgetRules": "Les règles d'automatisation sont supprimées.",
       "forgetSignals": "Les signaux ne sont plus reçus, et leur jeton est oublié.",
       "effectsKept": "Vos effets ne sont pas touchés.",
       "effectsKeptDetail": "Les supprimer est une autre action, une par effet, depuis la bibliothèque.",
