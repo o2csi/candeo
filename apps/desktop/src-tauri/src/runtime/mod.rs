@@ -255,7 +255,7 @@ struct Shared {
     /// True if the last frame was actually written to a device.
     ///
     /// Without it, starting an effect with no keyboard connected produced **no
-    /// sign at all**: the simulator animated, the "envoyer" (send) box stayed
+    /// sign at all**: the simulator animated, the "Send to keyboard" box stayed
     /// checked, and the keyboard kept its previous frame. A silence that reads
     /// as an engine failure.
     reaching: AtomicBool,
@@ -1422,7 +1422,7 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
         match out.present(&colors, abandon) {
             // **No device open.** Without this report, starting an effect with
             // no keyboard connected produced no sign at all: the simulator
-            // animated, the "envoyer" (send) box stayed checked, and the
+            // animated, the "Send to keyboard" box stayed checked, and the
             // keyboard kept its previous frame. It read as "only the first frame
             // got through".
             // Nothing to log: writing an effect **without owning the keyboard**
@@ -1573,7 +1573,7 @@ use tauri::{AppHandle, Manager, State};
 ///
 /// Previewing is the other path, and it does not go through here:
 /// [`start_preview`] opens no hardware output and writes nothing to disk.
-/// "Appliquer" (Apply) does both — it sends to the keyboard, and it
+/// "Apply" does both — it sends to the keyboard, and it
 /// **remembers** the effect for this device.
 #[tauri::command]
 pub fn start_effect(
@@ -1747,7 +1747,7 @@ pub fn stop_effect(app: AppHandle, state: State<'_, AppState>, device: DeviceRef
 ///
 /// # A failure is logged, not propagated
 ///
-/// The effect runs, the keyboard is lit: making "Appliquer" (Apply) fail because
+/// The effect runs, the keyboard is lit: making "Apply" fail because
 /// the disk did not take note would make the lighting pay for an incident that
 /// does not concern it. What is lost is bounded and fits in one line — the file
 /// will not resume this effect later.
@@ -2183,7 +2183,7 @@ mod tests {
     }
 
     /// Each device carries its own effect and output. Turning one off does not
-    /// turn off the other — otherwise "envoyer au clavier" (send to keyboard)
+    /// turn off the other — otherwise "Send to keyboard"
     /// would be a global switch disguised as a device setting.
     #[test]
     fn each_device_carries_its_own_effect_and_output() {
@@ -2769,8 +2769,8 @@ mod tests {
 
         // (0, 1) is a hole in the matrix — the effect iterates over
         // `layout.keys`, so it cannot reach it.
-        let trou = 1usize;
-        assert_eq!(&bytes[trou * 3..trou * 3 + 3], &[0, 0, 0]);
+        let hole = 1usize;
+        assert_eq!(&bytes[hole * 3..hole * 3 + 3], &[0, 0, 0]);
 
         // Escape, on the other hand, is lit.
         assert_ne!(&bytes[0..3], &[0, 0, 0]);
@@ -2828,8 +2828,8 @@ mod tests {
             export default {
               name: 'X',
               render({ frame }) {
-                const manquants = ['rgb','hsv','mix','lerp','BLACK','defineEffect','center','bounds'].filter(n => api[n] === undefined)
-                if (manquants.length) throw new Error('absents de api.js : ' + manquants.join(', '))
+                const missing = ['rgb','hsv','mix','lerp','BLACK','defineEffect','center','bounds'].filter(n => api[n] === undefined)
+                if (missing.length) throw new Error('missing from api.js: ' + missing.join(', '))
                 frame.fill(api.BLACK)
               },
             }
@@ -2938,11 +2938,11 @@ mod tests {
 
     /// A state that grows on every frame, and that nothing frees.
     const ENDLESS_ALLOCATION: &str = r#"
-        const garde = []
+        const kept = []
         export default {
           name: 'Fuite',
           render() {
-            garde.push(new Uint8Array(4 * 1024 * 1024))
+            kept.push(new Uint8Array(4 * 1024 * 1024))
           },
         }
     "#;
@@ -3128,24 +3128,24 @@ mod tests {
     #[test]
     fn the_limits_let_a_stateful_effect_through() {
         let js = r#"
-            const particules = Array.from({ length: 2000 }, (_, i) => ({
+            const particles = Array.from({ length: 2000 }, (_, i) => ({
               x: (i * 7) % 20,
               y: (i * 3) % 6,
               vx: 0.11,
               vy: 0.07,
             }))
-            const trainee = []
+            const trail = []
 
             export default {
               name: 'Particules',
               render({ layout, frame }) {
-                for (const p of particules) {
+                for (const p of particles) {
                   p.x = (p.x + p.vx) % layout.cols
                   p.y = (p.y + p.vy) % layout.rows
                 }
-                // Une seconde d'images conservées, la plus ancienne libérée.
-                trainee.push(particules.map((p) => (p.x + p.y) | 0))
-                if (trainee.length > 60) trainee.shift()
+                // One second of frames kept, the oldest one freed.
+                trail.push(particles.map((p) => (p.x + p.y) | 0))
+                if (trail.length > 60) trail.shift()
 
                 for (const key of layout.keys) {
                   frame.set(key, { r: (key.col * 8) % 256, g: (key.row * 40) % 256, b: 60 })
@@ -3343,7 +3343,7 @@ mod tests {
     fn the_radial_wave_places_the_space_bar_at_the_middle_of_its_keycap() {
         let radial = first_frame("Radial wave");
 
-        // Distances to the center of the drawing (11.25; 3.25): "Espace" (Space)
+        // Distances to the center of the drawing (11.25; 3.25): "Space"
         // at 5.17 u, "B" at 4.83 u — a 0.34 u gap, hence neighboring hues.
         // Measuring from the left edge of the keycap (3.75 u) would widen the
         // gap to 2.7 u, and the two colors would have nothing in common.

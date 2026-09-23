@@ -1396,7 +1396,7 @@ impl Store {
         }
         validate_name(to)?;
         if let Some(existing) = self.existing(Source::User, to)? {
-            // The same file under another case is a rename too: `Onde` → `onde`.
+            // The same file under another case is a rename too: `Wave` → `wave`.
             if existing != from.name {
                 return Err(Failure::new("effectExists").with("name", existing));
             }
@@ -3445,13 +3445,13 @@ mod tests {
     fn a_builtin_is_not_deleted_renamed_or_saved_over() {
         let (tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        let livre = shipped("Livré");
+        let effect = shipped("Livré");
 
         let codes = [
-            store.delete_effect(&livre).unwrap_err().code,
-            store.rename_effect(&livre, "Le mien").unwrap_err().code,
+            store.delete_effect(&effect).unwrap_err().code,
+            store.rename_effect(&effect, "Le mien").unwrap_err().code,
             store
-                .save_effect_source(&livre, "mine", false)
+                .save_effect_source(&effect, "mine", false)
                 .unwrap_err()
                 .code,
         ];
@@ -3465,7 +3465,7 @@ mod tests {
         );
 
         // Duplicating is how it becomes someone's own.
-        let copy = store.duplicate_effect(&livre).unwrap();
+        let copy = store.duplicate_effect(&effect).unwrap();
         store.save_effect_source(&copy, "mine", false).unwrap();
         let renamed = store.rename_effect(&copy, "Le mien").unwrap();
         store.delete_effect(&renamed).unwrap();
@@ -3680,8 +3680,8 @@ mod tests {
         let config = tmp.path().join("config");
         fs::create_dir_all(&config).unwrap();
         fs::create_dir_all(shipped_dir(&tmp)).unwrap();
-        let livre = shipped_v1()[0].source;
-        fs::write(shipped_dir(&tmp).join("Livré.ts"), livre).unwrap();
+        let shipped_source = shipped_v1()[0].source;
+        fs::write(shipped_dir(&tmp).join("Livré.ts"), shipped_source).unwrap();
         fs::write(shipped_dir(&tmp).join("Mon effet.ts"), "mine").unwrap();
         let old_cache = tmp.path().join("cache").join("effects");
         fs::create_dir_all(&old_cache).unwrap();
@@ -3698,7 +3698,7 @@ mod tests {
                   "effectParams": [{{ "vid": 5426, "pid": 658, "effect": "Livré", "values": {{ "speed": 2 }} }}],
                   "shippedEffects": {{ "Livré": "{}" }}
                 }}"#,
-                sha256_hex(livre.as_bytes())
+                sha256_hex(shipped_source.as_bytes())
             ),
         )
         .unwrap();
@@ -4556,15 +4556,15 @@ mod tests {
     /// `export interface X { … }` block. A comment line carries none — the filter
     /// on identifier characters rules it out, including when the sentence contains
     /// a colon.
-    fn ts_fields(nom: &str) -> BTreeSet<String> {
-        let header = format!("export interface {nom} {{");
+    fn ts_fields(name: &str) -> BTreeSet<String> {
+        let header = format!("export interface {name} {{");
         let begin = CANDEO_TS
             .find(&header)
             .unwrap_or_else(|| panic!("\"{header}\" not found in src/api/candeo.ts"));
         let body = &CANDEO_TS[begin..];
         let end = body
             .find("\n}")
-            .unwrap_or_else(|| panic!("interface \"{nom}\" is not closed"));
+            .unwrap_or_else(|| panic!("interface \"{name}\" is not closed"));
         body[..end]
             .lines()
             .skip(1)

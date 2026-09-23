@@ -169,9 +169,7 @@ enum Action {
     /// **The only clean exit.**
     QuitApp,
     /// Start this effect on this device.
-    ///
-    /// `effet` keeps its name: [`Action::to_id`] interpolates it by name.
-    Start { device: DeviceRef, effet: String },
+    Start { device: DeviceRef, effect: String },
     /// Toggle this device's keyboard output.
     ToggleOutput { device: DeviceRef },
     /// The firmware's `Effect::Off` on this device.
@@ -224,7 +222,9 @@ impl Action {
         match self {
             Self::OpenWindow => OUVRIR.to_owned(),
             Self::QuitApp => QUITTER.to_owned(),
-            Self::Start { device, effet } => format!("{EFFET}{SEP}{}{SEP}{effet}", hex_id(*device)),
+            Self::Start { device, effect } => {
+                format!("{EFFET}{SEP}{}{SEP}{effect}", hex_id(*device))
+            }
             Self::ToggleOutput { device } => format!("{SORTIE}{SEP}{}", hex_id(*device)),
             Self::TurnOff { device } => format!("{ETEINDRE}{SEP}{}", hex_id(*device)),
             Self::Resume { device } => format!("{RESUME}{SEP}{}", hex_id(*device)),
@@ -249,10 +249,10 @@ impl Action {
         let (vid, rest) = rest.split_once(SEP)?;
         match verb {
             EFFET => {
-                let (pid, effet) = rest.split_once(SEP)?;
+                let (pid, effect) = rest.split_once(SEP)?;
                 Some(Self::Start {
                     device: device(vid, pid)?,
-                    effet: effet.to_owned(),
+                    effect: effect.to_owned(),
                 })
             }
             SORTIE => Some(Self::ToggleOutput {
@@ -578,7 +578,7 @@ fn device_submenu(
                 app,
                 &Action::Start {
                     device: controlled.device,
-                    effet: entry.id.clone(),
+                    effect: entry.id.clone(),
                 },
                 &entry.manifest.name,
                 view.effects,
@@ -673,8 +673,8 @@ fn perform(app: &AppHandle, action: Action) {
         // [`quit`] does run.
         Action::OpenWindow => open_window(app),
         Action::QuitApp => quit(app),
-        Action::Start { device, effet } => {
-            start(app, device, &effet);
+        Action::Start { device, effect } => {
+            start(app, device, &effect);
             report_change(app);
         }
         Action::ToggleOutput { device } => {
@@ -735,7 +735,7 @@ fn open_window(app: &AppHandle) {
 /// Quitting does not turn the keyboard off. A firmware effect outlives the
 /// software shutting down anyway — the firmware runs it — and a keyboard that
 /// went dark on quit would surprise more than a keyboard that stays as it was
-/// left. "Éteindre" (Turn off) is in the menu, one click away, for anyone who
+/// left. "Turn off" is in the menu, one click away, for anyone who
 /// wants darkness.
 ///
 /// The consequence is accepted: a host-loop effect leaves the keyboard on its
@@ -859,7 +859,7 @@ fn place_icon(app: &AppHandle) -> Built<()> {
         .tooltip("Candeo")
         .menu(&initial_menu)
         // Left click opens the window, right click opens the menu: that is the
-        // system tray convention, and it puts "Ouvrir la fenêtre" one click
+        // system tray convention, and it puts "Open window" one click
         // away. On Linux no click is reported, only the right-click menu
         // responds — hence the item, which remains the safe path.
         .show_menu_on_left_click(false)
@@ -960,11 +960,11 @@ mod tests {
             Action::QuitApp,
             Action::Start {
                 device: DEVICE,
-                effet: "onde-circulaire".into(),
+                effect: "onde-circulaire".into(),
             },
             Action::Start {
                 device: OTHER,
-                effet: "a".into(),
+                effect: "a".into(),
             },
             Action::ToggleOutput { device: DEVICE },
             Action::TurnOff { device: OTHER },
@@ -1027,12 +1027,12 @@ mod tests {
     fn the_effect_alphabet_excludes_the_separator() {
         assert!(storage::validate_name(&format!("a{SEP}b")).is_err());
 
-        let effet = format!("Onde (copie) é{}", "a".repeat(50));
+        let effect = format!("Onde (copie) é{}", "a".repeat(50));
         let action = Action::Start {
             device: DEVICE,
-            effet: effet.clone(),
+            effect: effect.clone(),
         };
-        storage::validate_name(&effet).expect("name refused");
+        storage::validate_name(&effect).expect("name refused");
         assert_eq!(Action::from_id(&action.to_id()), Some(action));
     }
 
