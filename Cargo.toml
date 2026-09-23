@@ -21,18 +21,18 @@ lto = true
 codegen-units = 1
 strip = true
 
-# Les dépendances sont optimisées même en débogage. Notre code, lui, ne l'est
-# pas : on veut garder un débogueur utilisable là où l'on écrit.
+# Dependencies are optimised even in debug. Our own code is not: we want to
+# keep a usable debugger where we write.
 #
-# Le motif n'est pas le confort de compilation, c'est **la justesse de
-# l'aperçu**. QuickJS arrive par `rquickjs-sys`, qui compile du C au niveau
-# d'optimisation du profil courant : non optimisé, le même effet met 6,3 ms par
-# image au lieu de 0,23 ms — mesuré, un facteur 25. Or toute la conception
-# repose sur « l'aperçu EST la production » : un effet jugé fluide ou poussif
-# sous `tauri dev` doit se comporter pareil une fois installé. Sans cette ligne,
-# c'est faux, et ce qu'on juge en développement n'est pas ce qu'on livre.
+# The reason is not build comfort, it is **the accuracy of the preview**.
+# QuickJS comes in through `rquickjs-sys`, which compiles C at the current
+# profile's optimisation level: unoptimised, the same effect takes 6.3 ms per
+# frame instead of 0.23 ms — measured, a factor of 25. Yet the whole design
+# rests on "the preview IS production": an effect judged smooth or sluggish
+# under `tauri dev` must behave the same once installed. Without this line,
+# that is false, and what we judge in development is not what we ship.
 #
-# Le prix est une compilation initiale des dépendances plus longue, payée une
-# fois puis mise en cache. `hidapi` compile aussi du C et en profite.
+# The price is a longer first build of the dependencies, paid once then
+# cached. `hidapi` compiles C too and benefits from it.
 [profile.dev.package."*"]
 opt-level = 2
