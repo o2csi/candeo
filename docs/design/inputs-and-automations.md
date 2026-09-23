@@ -2,8 +2,9 @@
 
 Lighting that reacts to more than key presses — the time, the music playing,
 signals sent by other software — and rules that interrupt the configured effect
-for a while. Status: proposed. Each part lands in its own pull request, in the
-order at the end.
+for a while. Status: steps 1, 2, 3 and 6 of §4 are implemented (#102, #105,
+#106, #179); sound (#107) and external signals (#108) are proposed. Each part
+lands in its own pull request, in the order at the end.
 
 ## Why this needs a design
 
