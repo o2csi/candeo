@@ -15,13 +15,16 @@ License: GPL-3.0-only
 LicenseUrl: {{repository}}/blob/main/LICENSE
 Copyright: Copyright (c) O2CSI
 CopyrightUrl: {{repository}}/blob/main/LICENSE
-ShortDescription: Keyboard lighting control, through direct HID access.
+ShortDescription: Lighting control, through direct HID access.
+# The devices are linked rather than listed, as in the Store listing: the site's
+# list is the one kept up to date.
 Description: |-
-  Candeo controls a keyboard's lighting by talking to the device itself: no vendor runtime, no third-party service, no abstraction layer.
+  Candeo controls a device's lighting by talking to the hardware itself: no vendor runtime, no third-party service, no abstraction layer.
   Effects are written in TypeScript and run in the application, on the Rust side, so they keep running with the window closed.
-  Supports the Razer DeathStalker V2 Pro (wired).
+  The supported devices are listed at {{site}}devices.html.
 Moniker: candeo
 Tags:
+- alienware
 - hid
 - keyboard
 - lighting
