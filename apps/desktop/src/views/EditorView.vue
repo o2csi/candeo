@@ -75,7 +75,7 @@ import {
   type EngineReport,
 } from '../api/candeo'
 import { effectName, userKey } from '../api/effectKey'
-import { erreur, message } from '../api/journal'
+import { error, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -424,7 +424,7 @@ async function act(task: () => Promise<void>): Promise<void> {
     // in the window: without this line the refusal is gone from the screen by
     // the time the log is opened. The effect id goes with it, since a log read
     // an hour later does not know what was displayed.
-    erreur('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
+    error('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
   } finally {
     busy.value = false
     await refreshStatus()

@@ -13,7 +13,7 @@
 
 import example from '@candeo/effects-api/src/example.ts?raw'
 
-import { erreur } from '../api/journal'
+import { error } from '../api/journal'
 
 const LOCAL = "'./index'"
 const PUBLIC = "'@candeo/effects-api'"
@@ -25,7 +25,7 @@ export const NEW_EFFECT = example.replace(LOCAL, PUBLIC)
 // come when the effect starts. `import.meta.env.DEV` is replaced at build
 // time — none of this remains in the shipped application.
 if (import.meta.env.DEV && !example.includes(LOCAL)) {
-  erreur(
+  error(
     'template',
     `${LOCAL} not found in example.ts: the template imports a module the engine cannot resolve`,
   )

@@ -12,8 +12,8 @@ vi.mock('../api/candeo', () => api)
 const transpile = vi.hoisted(() => vi.fn())
 vi.mock('./effect', () => ({ transpile }))
 
-const alerte = vi.hoisted(() => vi.fn())
-vi.mock('../api/journal', () => ({ alerte, message: String }))
+const warn = vi.hoisted(() => vi.fn())
+vi.mock('../api/journal', () => ({ warn, message: String }))
 
 import { refreshLibrary } from './library'
 
@@ -49,7 +49,7 @@ describe('refreshLibrary', () => {
     const list = await refreshLibrary()
 
     expect(list.map((e) => `${e.id}:${e.state}`)).toEqual(['Gone:stale', 'Wave:ready'])
-    expect(alerte).toHaveBeenCalledWith('library', 'Gone: not compiled: file not found', 'file not found')
+    expect(warn).toHaveBeenCalledWith('library', 'Gone: not compiled: file not found', 'file not found')
   })
 
   it('shares a pass between calls made while it runs', async () => {

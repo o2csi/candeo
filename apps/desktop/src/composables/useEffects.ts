@@ -154,7 +154,7 @@ export function hardwareEffectsFor(
  * list that describes what **one** device does: it is not a simplification, it
  * is false information from the second keyboard on.
  */
-const posed = ref<Record<string, { id: string; colours: number[] }>>({})
+const applied = ref<Record<string, { id: string; colours: number[] }>>({})
 const error = ref<string | null>(null)
 
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
@@ -175,7 +175,7 @@ export function useEffects() {
       await api.setEffect(device, e.id, colours)
       // Replacement rather than mutation: `readonly()` forbids writing into the
       // exposed object, and reactivity no longer depends on the key being present.
-      posed.value = { ...posed.value, [key(device)]: { id: e.id, colours } }
+      applied.value = { ...applied.value, [key(device)]: { id: e.id, colours } }
     } catch (err) {
       error.value = message(err)
     }
@@ -183,7 +183,7 @@ export function useEffects() {
 
   /** The hardware effect this session has set on this device, if there is one. */
   function appliedOn(device: DeviceRef | null): string | null {
-    return device ? (posed.value[key(device)]?.id ?? null) : null
+    return device ? (applied.value[key(device)]?.id ?? null) : null
   }
 
 
@@ -196,8 +196,8 @@ export function useEffects() {
    * and this table does not correct itself, since the recorded protocol can
    * write an effect, not read it back.
    */
-  function forgetPosed() {
-    posed.value = {}
+  function forgetApplied() {
+    applied.value = {}
   }
 
   /** Closes the message: what failed is read, and the screen goes back to work. */
@@ -210,6 +210,6 @@ export function useEffects() {
     error: readonly(error),
     dismissError,
     apply,
-    forgetPosed,
+    forgetApplied,
   }
 }
