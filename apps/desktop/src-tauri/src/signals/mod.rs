@@ -363,3 +363,39 @@ pub fn erase_signal(app: AppHandle, name: String) {
         notify(&app);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Written on both sides of the IPC, like `tray::STATE_CHANGED`: renamed on
+    /// one side only, the Settings list would stop following what arrives, with
+    /// no error anywhere.
+    #[test]
+    fn the_event_has_the_same_name_on_both_sides() {
+        let ts = include_str!("../../../src/api/candeo.ts");
+        assert!(
+            ts.contains(CHANGED),
+            "\"{CHANGED}\" not found in src/api/candeo.ts"
+        );
+    }
+
+    /// A settings file written before signals existed reads as the API off, and
+    /// one never turned on keeps no `signals` key.
+    #[test]
+    fn the_api_is_off_until_turned_on() {
+        let config: SignalsConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config, SignalsConfig::default());
+        assert!(!config.enabled);
+        assert_eq!(config.port, DEFAULT_PORT);
+        assert!(config.is_default());
+    }
+
+    #[test]
+    fn a_token_is_32_random_bytes_in_hex() {
+        let (a, b) = (new_token().unwrap(), new_token().unwrap());
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+    }
+}
