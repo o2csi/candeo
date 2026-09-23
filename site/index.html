@@ -71,6 +71,12 @@
         <h2>Install</h2>
         <div class="ways">
           <div class="way">
+            <h3>Microsoft Store</h3>
+            <p>Signed by Microsoft, and updated by the Store.</p>
+            <a class="download" href="https://apps.microsoft.com/detail/9MXFM8QT1X7P">Get it from the Store</a>
+            <p class="note">It makes no network request of its own: the Store does the updating.</p>
+          </div>
+          <div class="way">
             <h3>Windows</h3>
             <p>Installs for your account, no administrator rights.</p>
             <a class="download" href="{{setupUrl}}">Download {{version}}</a>
@@ -185,12 +191,11 @@ export default defineEffect({
           </li>
           <li>
             <a href="https://github.com/o2csi/candeo/issues/108">Signals from other software</a> — a
-            local API and a command line, so a CI job or Home Assistant can light the keyboard.
+            local HTTP API, so a build script or Home Assistant can light a device through a rule.
           </li>
           <li>
-            <a href="https://github.com/o2csi/candeo/issues/126">The Microsoft Store</a> and
-            <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing without the
-            warning an unsigned installer earns.
+            <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing and updating
+            in one command.
           </li>
         </ul>
       </section>
