@@ -85,9 +85,9 @@ job submits it (#162):
 
 1. the package is uploaded to a **draft** submission;
 2. if `packaging/store/listing-*.md` describe this version — *Version described*
-   and the *What's new* heading both say it — their four texts replace those of
-   the draft (short description, description, what's new, search terms), and
-   the submission goes to certification;
+   and the *What's new* heading both say it — their five texts replace those of
+   the draft (short description, description, features, what's new, search
+   terms), and the submission goes to certification;
 3. otherwise the draft stays in Partner Center, with a warning on the run: write
    its *What's new* there and submit it by hand.
 

@@ -16,11 +16,13 @@ export const NOT_THIS_VERSION = 3
 
 // Partner Center's limits, checked here rather than discovered at certification.
 const RELEASE_NOTES_MAX = 1500
+const FEATURES_MAX = 20
+const FEATURE_LENGTH_MAX = 200
 const KEYWORDS_MAX = 7
 const KEYWORD_LENGTH_MAX = 30
 
 /**
- * One listing file: its locale, the version it describes, and the four texts
+ * One listing file: its locale, the version it describes, and the five texts
  * the submission carries. The sections are read by position, not by title: the
  * French file titles them in French.
  */
@@ -31,10 +33,12 @@ export function parseListing(markdown) {
   if (!described) throw new Error('no "Version described: **X.Y.Z**" line')
 
   const sections = markdown.split(/^## /m).slice(1)
-  if (sections.length !== 4) {
-    throw new Error(`4 sections expected (short description, description, what's new, search terms), found ${sections.length}`)
+  if (sections.length !== 5) {
+    throw new Error(
+      `5 sections expected (short description, description, features, what's new, search terms), found ${sections.length}`,
+    )
   }
-  const [shortDescription, description, releaseNotes, keywords] = sections.map((section) => {
+  const [shortDescription, description, features, releaseNotes, keywords] = sections.map((section) => {
     const newline = section.indexOf('\n')
     return { heading: section.slice(0, newline), body: section.slice(newline + 1).trim() }
   })
@@ -48,6 +52,17 @@ export function parseListing(markdown) {
   if (releaseNotes.body.length > RELEASE_NOTES_MAX) {
     throw new Error(`what's new holds ${releaseNotes.body.length} characters, the Store takes ${RELEASE_NOTES_MAX}`)
   }
+  // One feature per list item, as Partner Center shows them.
+  const items = features.body
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[-•]\s/.test(line))
+    .map((line) => line.replace(/^[-•]\s+/, ''))
+  if (items.length === 0) throw new Error('the features section lists nothing')
+  if (items.length > FEATURES_MAX) throw new Error(`${items.length} features, the Store takes ${FEATURES_MAX}`)
+  const longFeature = items.find((item) => item.length > FEATURE_LENGTH_MAX)
+  if (longFeature) throw new Error(`feature "${longFeature}" is over ${FEATURE_LENGTH_MAX} characters`)
+
   const terms = keywords.body.split(',').map((term) => term.trim()).filter(Boolean)
   if (terms.length > KEYWORDS_MAX) throw new Error(`${terms.length} search terms, the Store takes ${KEYWORDS_MAX}`)
   const long = terms.find((term) => term.length > KEYWORD_LENGTH_MAX)
@@ -59,6 +74,7 @@ export function parseListing(markdown) {
     fields: {
       shortDescription: shortDescription.body,
       description: description.body,
+      features: items,
       releaseNotes: releaseNotes.body,
       keywords: terms,
     },
