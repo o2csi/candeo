@@ -165,66 +165,70 @@ place.
   - **Nothing is whitelisted.** A signal no rule and no effect mentions lights
     nothing — and still shows in the panel below. That is the discovery loop:
     send it, see it, then write the rule.
-- **A signal's lifetime**: 60 s by default, set per send (`--ttl`), `0`
-  meaning "until erased"; an empty value erases it. The default protects against
-  a sender that dies, which is right for a watcher that re-sends in a loop
-  anyway, and wrong on its own for a state pushed once — `build=failed` must not
-  go out by itself while the build is still broken: that sender says `--ttl 0`.
-  The time left is shown beside each signal in Settings, so an expiry is never a
-  surprise.
-- **The local API**:
-  - **Off by default**, enabled in Settings, and on loopback when it is.
-  - One endpoint, `POST /signals`, taking a flat object. No path naming a
-    device.
-  - Every request carries a token, shown in Settings with a button to generate
-    a new one.
-  - **Listening on the local network is the main path, not an afterthought**:
-    Home Assistant runs on another machine. It stays a separate switch, and on
-    Windows the inbound rule is scoped to the **Private** profile, so a public
-    network refuses the port without anyone remembering to turn the switch off —
-    which matters on a laptop.
+- **A signal's lifetime**: 60 s by default, set per request (`?ttl=`), `0`
+  meaning "until erased"; an empty string erases it. The default protects
+  against a sender that dies, which is right for a watcher that re-sends in a
+  loop anyway, and wrong on its own for a state pushed once — `build=failed` must
+  not go out by itself while the build is still broken: that sender says
+  `?ttl=0`. The time left is shown beside each signal in Settings, so an expiry
+  is never a surprise.
+- **The API is the only way in, and HTTP is enough for every sender.** `curl`
+  ships with Windows, PowerShell has `Invoke-RestMethod`, Home Assistant has
+  `rest_command`. An earlier version of this section put a command line first,
+  `candeo signal name=value`, relayed through the single-instance channel so
+  that no port would open. Writing it showed what it would cost: the release
+  binary is a Windows GUI program, which PowerShell does not wait for — the
+  command would return at once, with no exit code a script can read and no
+  message — so it needed a second, console binary, put on `PATH` by every
+  installer and aliased in the MSIX; and that channel joins arguments with `|`,
+  so a value holding one would be cut. HTTP answers with a status a script can
+  test, from any machine, with no binary to ship. A command line can come back
+  later as a thin client of this API, if anyone asks.
+- **The request**: `POST /signals`, a flat JSON object, `?ttl=` optional.
+  - `200` with each accepted name and when it expires; `400` for a value or a
+    name out of bounds, with the reason; `401` without the right token; `413`
+    beyond the bounds.
+  - `GET /signals` answers what is held, for a script that wants to check.
+  - No path names a device.
+- **Off by default**, enabled in Settings. The port is 7317, editable there
+  should something else hold it.
+- **A token on every request**, `Authorization: Bearer …`, shown in Settings
+  with Copy and a button to make a new one — **loopback included**. A port is
+  no barrier: a web page can send a request to any port of `127.0.0.1`, the
+  default one is documented, and a page can try many in seconds. For the same
+  reason a request carrying an `Origin` header — a browser's — is refused, and
+  the API answers no CORS preflight. It does not check `Host`: Home Assistant
+  may call this machine by its name, and the token already covers what that
+  check would add.
+- **Where it listens is chosen by interface, not by address.** Settings lists
+  the interfaces that are up, each with its name and its current address —
+  *Wi-Fi — 192.168.1.23*, *Ethernet*, *vEthernet (WSL)* — and loopback, always
+  ticked. Ticking another one says, once, that other machines on that network
+  can send signals, with the token. The choice is kept **by name**: an address
+  changes with DHCP, another Wi-Fi or a dock, and the listeners follow the
+  addresses of the ticked interfaces when they change. Home Assistant on
+  another machine is the main reason this exists, not an afterthought.
+- **The firewall**: listening on loopback only, Windows asks nothing. The first
+  time another interface is ticked, Windows asks once whether to allow Candeo,
+  on private networks by default; nothing in the installers changes.
 - **Seeing what arrived**: Settings lists the signals held right now — name,
-  value, time left — and sends a test one. Without it, a rule names a signal
-  nobody can see, and nothing is debuggable.
-- **Also from the command line**: `candeo signal ci=failed`, which talks to the
-  running instance through the single-instance channel, for scripts that would
-  rather not handle HTTP. It needs no port, no token and no firewall rule, and
-  **it covers every sender running on this machine** — which is most of them.
-  A hosted CI runner is not one of them: it cannot reach this loopback, so the
-  sender there is a local watcher, not the job.
-
-  `candeo signal name=value [name=value…] [--ttl seconds]`; `name=` erases. Three
-  things make it usable from a script, and none is given by the single-instance
-  channel alone:
-  - **It never starts Candeo.** With no instance running, it says so and exits
-    non-zero: a build script must not open a window, and a value held by an
-    application nobody launched would light nothing anyway.
-  - **It answers in the caller's console.** The release binary is a Windows GUI
-    program, with no console of its own: without attaching to its caller's, the
-    command would return at once, silent, and a script could not tell a refused
-    value from an accepted one. It attaches, prints one line, and exits `0` only
-    when the running instance took the values.
-  - **`candeo` is found by name.** The NSIS installer adds its folder to the
-    user's `PATH`; the MSIX declares an app execution alias, `candeo.exe`; the
-    Linux packages already install to `/usr/bin`. Without it every script would
-    carry an install path.
-- **Home Assistant**: the HTTP API is enough for its `rest_command`. MQTT, with
-  Candeo as a client of the broker Home Assistant already runs, needs no inbound
-  port and could expose Candeo as an entity. It is a later step, if HTTP proves
-  awkward there.
+  value, time left — and sends a test one, so a rule can be tried before any
+  sender exists. Without it, a rule names a signal nobody can see, and nothing
+  is debuggable.
+- **Home Assistant**: its `rest_command` is enough, and the documentation gives
+  the example. MQTT, with Candeo as a client of the broker Home Assistant
+  already runs, needs no inbound port and could expose Candeo as an entity. It
+  is a later step, if HTTP proves awkward there.
 - Signals are also **automation triggers** (§3.2): "when `build` equals
   `failed`", held while it does or flashed for a few seconds at each send.
 
-**Three pull requests, in this order.**
+**Two pull requests, in this order.**
 
-1. **The command line and the trigger**: the store, `candeo signal`, the
-   `signal` trigger in the Automations tab, and the list of held signals in
-   Settings, read only. It makes signals work end to end with no port open, and
-   it answers "a long job has finished" straight away.
-2. **The HTTP API**: the listener, its token, the local-network switch and its
-   firewall rule, a button sending a test signal, and the Home Assistant
-   example — what Home Assistant on another machine needs.
-3. **Signals in effects**: the parameter bindings of §2.3.1, and the bag for
+1. **Signals and their API**: the store, the HTTP API with its token and its
+   interfaces, the `signal` trigger in the Automations tab, the Signals block in
+   Settings, and the Home Assistant example. After it, any sender on this
+   machine or the local network lights a device through a rule.
+2. **Signals in effects**: the parameter bindings of §2.3.1, and the bag for
    effect authors that closes it.
 
 #### 2.3.1 How a signal reaches an effect: it binds to a parameter
@@ -537,10 +541,10 @@ Each step is one pull request, with its issue:
    card and in the tray. The periodic clock and the night window come with it
    (#106).
 4. **Sound input** and two shipped effects (#107).
-5. **External signals** (#108), in three pull requests (§2.3): the store, the
-   `signal` trigger, `candeo signal name=value` and the list in Settings; then
-   the HTTP API, its token, the test button and the Home Assistant example;
-   then the parameter bindings of §2.3.1 and the bag for effect authors.
+5. **External signals** (#108), in two pull requests (§2.3): the store, the
+   HTTP API with its token and its interfaces, the `signal` trigger, the Signals
+   block in Settings and the Home Assistant example; then the parameter bindings
+   of §2.3.1 and the bag for effect authors.
 6. **`idle` trigger** (#179), on Windows; Linux follows (#183). Then system
    metrics, if asked.
 
