@@ -12,7 +12,7 @@ Everything the application writes stays on the computer it runs on:
 
 | What | Where |
 |---|---|
-| Settings, including which keyboards you chose to control | `settings.json`, in the application's configuration folder |
+| Settings, including which keyboards you chose to control and the signals token | `settings.json`, in the application's configuration folder |
 | The effects you write, duplicate or drop in | `Documents\candeo\effects`, yours to open, move or delete |
 | The effects the application ships, and their compiled form | the application's data and cache folders |
 | The log | the application's log folder, one file a day, the last seven kept |
@@ -47,6 +47,22 @@ happens on the computer.
   covers what it does with that.
 
 Nothing is downloaded or installed by that check: it shows a version and a link.
+
+## Signals, if you turn them on
+
+Settings offers *Receive signals from other software*: a local API through which
+a script or a home-automation system sets named values — `build` is `failed` —
+that your automation rules can react to. It is **off** until you turn it on.
+
+- On, the application **listens** for requests on this computer, and on the
+  network interfaces you tick, if any. It makes no request itself.
+- Every request must carry a token shown in Settings, and a request coming from a
+  web page is refused.
+- The values received are **kept in memory only**, for their lifetime — a minute
+  unless the sender says otherwise. They are never written to disk, never
+  written to the log, and never sent anywhere.
+- What a sender can do is set such values, and nothing else: it cannot choose a
+  device, an effect or a colour, nor read your settings.
 
 ## What you send, if you choose to
 

@@ -512,6 +512,10 @@ pub struct Settings {
     /// silent at startup. A broken rule stays as it was written, and does
     /// nothing.
     pub rules: Vec<serde_json::Value>,
+    /// The signals API (#108): whether it listens, where, and its token. Absent
+    /// from the file until someone turns it on. See [`crate::signals`].
+    #[serde(skip_serializing_if = "crate::signals::SignalsConfig::is_default")]
+    pub signals: crate::signals::SignalsConfig,
     /// The log level as an earlier version wrote it, **at the root**.
     ///
     /// Read, never written back (`skip_serializing`): [`Store::read_settings`]
@@ -546,6 +550,7 @@ impl Default for Settings {
             effect_params: Vec::new(),
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
+            signals: crate::signals::SignalsConfig::default(),
             legacy_log_level: None,
         }
     }
@@ -2455,6 +2460,9 @@ pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<(
     crate::release_devices(&state);
     store.reset_settings()?;
     crate::journal::reset_level_to_default();
+    // The API goes off with the rest, and stops listening now rather than at
+    // the next look.
+    crate::signals::reconcile(&app);
     Ok(())
 }
 
@@ -3826,6 +3834,12 @@ mod tests {
                 "show": { "effect": "shipped:Clock", "params": {} },
                 "for": { "seconds": 10 }
             })],
+            signals: crate::signals::SignalsConfig {
+                enabled: true,
+                port: 7400,
+                token: "0f".repeat(32),
+                interfaces: vec!["Wi-Fi".into()],
+            },
             legacy_log_level: None,
         };
 

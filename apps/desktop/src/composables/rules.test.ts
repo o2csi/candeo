@@ -9,13 +9,28 @@ import {
   editable,
   examples,
   expression,
+  flashedFor,
+  holds,
   moved,
   readSimple,
   ruleValues,
+  signalTrigger,
+  validSignalName,
+  whileItHolds,
   writeSimple,
 } from './rules'
+import type { HeldSignal, Rule } from '../api/candeo'
 
 const KEYBOARD = { vid: 0x1532, pid: 0x0292 }
+
+/** A rule waiting for `build` to equal `failed`. */
+function signalRule(hold?: boolean): Rule {
+  const when = { kind: 'signal' as const, name: 'build', equals: 'failed' }
+  return {
+    ...blankRule(KEYBOARD, 'hardware:off'),
+    when: hold === undefined ? when : { ...when, hold },
+  }
+}
 
 describe('simple chips and cron', () => {
   it('reads the shapes the chips write', () => {
@@ -99,9 +114,10 @@ describe('new rules', () => {
 })
 
 describe('expression', () => {
-  it('is the cron expression, and nothing for a rule waiting for idleness', () => {
+  it('is the cron expression, and nothing for a rule waiting for idleness or a signal', () => {
     expect(expression(blankRule(KEYBOARD, 'x'))).toBe('0 * * * *')
     expect(expression({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'idle', minutes: 5 } })).toBeNull()
+    expect(expression(signalRule())).toBeNull()
   })
 })
 
@@ -113,6 +129,89 @@ describe('editable', () => {
     expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'schedule', every: 60 } })).toBe(false)
     expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'idle' } })).toBe(false)
     expect(editable(null)).toBe(false)
+  })
+
+  it('accepts a signal rule with or without `hold`, as Rust reads it', () => {
+    expect(editable(signalRule(false))).toBe(true)
+    expect(editable(signalRule())).toBe(true)
+    const when = { kind: 'signal', name: 'build', equals: 'failed' }
+    expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { ...when, hold: 'yes' } })).toBe(false)
+    expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { kind: 'signal', name: 'build' } })).toBe(
+      false,
+    )
+    expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { ...when, equals: 1 } })).toBe(false)
+  })
+})
+
+describe('validSignalName', () => {
+  it('takes letters, digits and _ - . : up to 64 characters, as Rust does', () => {
+    for (const name of ['build', 'ci.status', 'home:door-bell_1', 'A'.repeat(64)]) {
+      expect(validSignalName(name), name).toBe(true)
+    }
+  })
+
+  it('refuses what could hide a control character or pass for another name', () => {
+    for (const name of ['', 'A'.repeat(65), 'door bell', 'café', 'a/b', 'a"b', ' build']) {
+      expect(validSignalName(name), name).toBe(false)
+    }
+  })
+})
+
+describe('signalTrigger', () => {
+  const held: HeldSignal[] = [
+    { name: 'build', value: 'failed', received: 0, expires: null },
+    { name: 'volume', value: 1, received: 0, expires: null },
+  ]
+  const cron = blankRule(KEYBOARD, 'x').when
+
+  it('is nothing for a name that cannot be one', () => {
+    expect(signalTrigger('', 'x', cron, held)).toBeNull()
+    expect(signalTrigger('door bell', 'ring', cron, held)).toBeNull()
+  })
+
+  it('holds by default, with the name trimmed and the value as typed', () => {
+    expect(signalTrigger(' doorbell ', 'ring', cron, held)).toEqual({
+      kind: 'signal',
+      name: 'doorbell',
+      equals: 'ring',
+      hold: true,
+    })
+  })
+
+  it('takes the value held now when none is typed: send it, see it, then write the rule', () => {
+    expect(signalTrigger('build', '', cron, held)?.equals).toBe('failed')
+    expect(signalTrigger('volume', '', null, held)?.equals).toBe('1')
+    expect(signalTrigger('build', 'passed', cron, held)?.equals).toBe('passed')
+    expect(signalTrigger('doorbell', '', cron, held)?.equals).toBe('')
+  })
+
+  it('keeps the duration a signal rule already had', () => {
+    expect(signalTrigger('ci', 'red', signalRule(false).when, held)?.hold).toBe(false)
+    expect(signalTrigger('ci', 'red', signalRule().when, held)?.hold).toBe(true)
+  })
+})
+
+describe('signal durations', () => {
+  it('holds unless said otherwise, as Rust reads a rule without `hold`', () => {
+    expect(holds(signalRule().when)).toBe(true)
+    expect(holds(signalRule(true).when)).toBe(true)
+    expect(holds(signalRule(false).when)).toBe(false)
+    expect(holds(blankRule(KEYBOARD, 'x').when)).toBe(false)
+  })
+
+  it('turns a held rule into a flash of so many seconds, and back, keeping them for Try', () => {
+    const flash = flashedFor(signalRule(), 5)
+    expect(flash.when).toEqual({ kind: 'signal', name: 'build', equals: 'failed', hold: false })
+    expect(flash.for).toEqual({ seconds: 5 })
+    const held = whileItHolds(flash)
+    expect(held.when).toEqual({ kind: 'signal', name: 'build', equals: 'failed', hold: true })
+    expect(held.for).toEqual({ seconds: 5 })
+  })
+
+  it('leaves a rule that waits for no signal as it is', () => {
+    const rule = blankRule(KEYBOARD, 'x')
+    expect(flashedFor(rule, 5)).toBe(rule)
+    expect(whileItHolds(rule)).toBe(rule)
   })
 })
 

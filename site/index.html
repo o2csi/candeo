@@ -152,6 +152,23 @@ export default defineEffect({
       </section>
 
       <section>
+        <h2>Your other tools can say what happened</h2>
+        <p>
+          A build that failed, the doorbell, a call starting: a script or Home Assistant sends a
+          named value to a local API, and your rules decide what it lights — <em>when</em>
+          <code>build</code> <em>is</em> <code>failed</code>, <em>show a red gradient, while it
+          holds</em>. The sender never names a device or a colour. Off until you turn it on, and
+          every request carries a token.
+        </p>
+        <div class="command">curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"build":"failed"}' http://127.0.0.1:7317/signals</div>
+        <p class="note">
+          PowerShell and Home Assistant examples are in
+          <a href="https://github.com/o2csi/candeo/blob/main/docs/api/signals.md">the signals
+          documentation</a>.
+        </p>
+      </section>
+
+      <section>
         <h2>How it is built</h2>
         <ul>
           <li>
@@ -190,8 +207,8 @@ export default defineEffect({
             what the computer plays, analysed on the Rust side, never recorded.
           </li>
           <li>
-            <a href="https://github.com/o2csi/candeo/issues/108">Signals from other software</a> — a
-            local HTTP API, so a build script or Home Assistant can light a device through a rule.
+            <a href="https://github.com/o2csi/candeo/issues/108">Signals in effects</a> — an effect's
+            setting read from a signal, so any effect follows what another program sends.
           </li>
           <li>
             <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing and updating

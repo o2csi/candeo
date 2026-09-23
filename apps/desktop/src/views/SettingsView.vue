@@ -2,7 +2,8 @@
 /**
  * Settings: what concerns the application as a whole, and no device.
  *
- * The language, the log and the configuration reset.
+ * The language, startup, the version, the signals other software sends, the log
+ * and the configuration reset.
  *
  * The reset stays **out of the library**: the neighbouring gesture there deletes
  * hand-written code.
@@ -32,6 +33,7 @@ import {
 } from '../api/candeo'
 import { error, message } from '../api/journal'
 import FailureNote from '../components/FailureNote.vue'
+import SignalsSettings from '../components/SignalsSettings.vue'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -264,6 +266,11 @@ const asking = ref(false)
 const working = ref(false)
 /** What kept the reset from happening, as Rust says it. */
 const problem = ref<string | null>(null)
+/**
+ * Counts resets, to key the signals block: a reset turns the API off, and the
+ * block reads it all again by starting afresh.
+ */
+const resets = ref(0)
 
 /**
  * Resets `settings.json`. Rust stops the loops, turns the backlight off and
@@ -291,6 +298,7 @@ async function reset(): Promise<void> {
     await readLanguage()
     await readResume()
     await loadTheme()
+    resets.value++
     if (language.value) showIn(language.value.language)
   }
 }
@@ -361,6 +369,8 @@ onMounted(() => {
         </p>
       </template>
     </section>
+
+    <SignalsSettings :key="resets" />
 
     <section v-if="update" class="block" aria-labelledby="version-title">
       <h2 id="version-title">{{ t('settings.version.title', { version: update.version }) }}</h2>
@@ -479,6 +489,8 @@ onMounted(() => {
           <li>{{ t('settings.config.stopped') }}</li>
           <li>{{ t('settings.config.forgetDevices') }}</li>
           <li>{{ t('settings.config.forgetParams') }}</li>
+          <li>{{ t('settings.config.forgetRules') }}</li>
+          <li>{{ t('settings.config.forgetSignals') }}</li>
           <li>
             <strong>{{ t('settings.config.effectsKept') }}</strong>
             {{ t('settings.config.effectsKeptDetail') }}

@@ -103,6 +103,10 @@ render({ audio }) // { level, peak, bands: number[16], beat }
   cannot tell "nothing plays" from "capture unavailable", and does not need to.
   The gallery says when capture failed.
 - **Shipped effects**: a spectrum across the columns, and a pulse on the beat.
+- **Every other effect, without code**: once bindings exist (§2.3.1), `level`
+  and `beat` bind to a parameter the way a signal does — *Ripples*, its speed
+  from the sound level. What is sound's own is the capture and the analysis;
+  the path to a parameter is shared.
 
 The microphone is the same pipeline on an input device; it comes only if an
 effect needs it (a "microphone muted" light is better served by signals, §2.3).
@@ -115,31 +119,217 @@ Named values that other software sends to Candeo:
 POST http://127.0.0.1:<port>/signals   { "doorbell": "ring", "ci": "failed", "volume": 0.4 }
 ```
 
-```ts
-render({ signals }) // { doorbell: 'ring', ci: 'failed', volume: 0.4 }
+They reach an effect **through its parameters**, not as a bag of names it has to
+read (§2.3.1):
+
+```text
+Fixed gradient · colour ← signal "status"   ·   Ripples · speed ← signal "volume"
 ```
 
-- **Why it matters most**: once other software can push values, every
-  integration Candeo does not write becomes a script — Home Assistant, a CI job,
-  a mute state, a recording state.
-- **The local API**:
-  - **Off by default**, enabled in Settings.
-  - Listens on loopback only.
-  - Every request carries a token, shown in Settings with a button to generate
-    a new one.
-  - Listening on the local network is a second, explicit choice, for Home
-    Assistant on another machine.
-  - Values are strings, numbers or booleans; a signal expires after a lifetime
-    its sender can set (default 60 s), so a crashed sender does not leave the
-    keyboard red forever.
-- **Also from the command line**: `candeo signal ci=failed`, which talks to the
-  running instance through the single-instance channel, for scripts that would
-  rather not handle HTTP.
-- **Home Assistant**: the HTTP API is enough for its `rest_command`. MQTT, with
-  Candeo as a client of the broker Home Assistant already runs, needs no inbound
-  port and could expose Candeo as an entity. It is a later step, if HTTP proves
-  awkward there.
-- Signals are also **automation triggers** (§3): "when `doorbell` becomes `ring`".
+**Why it matters most**: once other software can push values, every integration
+Candeo does not write becomes a script — Home Assistant, a mute state, a
+recording state, a machine joining the network.
+
+**The sender says *what*, Candeo says *where*.** A request names values and
+nothing else: no device, no zone, no effect, no colour. Five reasons, and they
+all point the same way.
+
+- A signal is **a fact about the world**, not a lighting instruction. The sender
+  knows the fact; it knows nothing of which keyboard is plugged in, which effect
+  is running or which zone is free. Home Assistant has no idea what `1532:658`
+  is, and must not have to learn.
+- **The mapping from fact to light already exists**: it is the rule (§3), which
+  names the devices, the effect, its settings, the duration and the priority. A
+  sender choosing the device would put the decision in two places, and the rule
+  list would stop being the single readable answer to "why is my keyboard red".
+- It **survives the hardware**. Unplug one keyboard, buy another: the sender is
+  unchanged. A rule naming a device that is not there simply does not fire.
+- The **blast radius of the token** is not the same. A token that protects
+  "set a named value" is not a token that protects "drive my hardware from the
+  network" — which would also mean validating effect names, parameters and
+  geometry over HTTP, the whole gallery exposed.
+- A signal naming a device would **bypass the resolver**, and with it the
+  priority between rules that §3.1 exists to keep.
+
+Whoever wants direct control is served by §2.3.1, without giving any of this up:
+a parameter of the running effect reads the value, and the person chose which
+effect and which device. The sender supplies the value, the person supplies the
+place.
+
+- **What a request may carry**:
+  - Strings, numbers and booleans, **flat**. No objects, no arrays: a rule
+    compares one equality and an effect reads one scalar; nested, both would
+    need a path language nobody asked for.
+  - Bounds, so a broken sender cannot grow the process: at most 64 signals, a
+    name of at most 64 characters, a string value of at most 256.
+  - **Nothing is whitelisted.** A signal no rule and no effect mentions lights
+    nothing — and still shows in the panel below. That is the discovery loop:
+    send it, see it, then write the rule.
+- **A signal's lifetime**: 60 s by default, set per request (`?ttl=`), `0`
+  meaning "until erased"; an empty string erases it. The default protects
+  against a sender that dies, which is right for a watcher that re-sends in a
+  loop anyway, and wrong on its own for a state pushed once — `build=failed` must
+  not go out by itself while the build is still broken: that sender says
+  `?ttl=0`. The time left is shown beside each signal in Settings, so an expiry
+  is never a surprise.
+- **The API is the only way in, and HTTP is enough for every sender.** `curl`
+  ships with Windows, PowerShell has `Invoke-RestMethod`, Home Assistant has
+  `rest_command`. An earlier version of this section put a command line first,
+  `candeo signal name=value`, relayed through the single-instance channel so
+  that no port would open. Writing it showed what it would cost: the release
+  binary is a Windows GUI program, which PowerShell does not wait for — the
+  command would return at once, with no exit code a script can read and no
+  message — so it needed a second, console binary, put on `PATH` by every
+  installer and aliased in the MSIX; and that channel joins arguments with `|`,
+  so a value holding one would be cut. HTTP answers with a status a script can
+  test, from any machine, with no binary to ship. A command line can come back
+  later as a thin client of this API, if anyone asks.
+- **The request**: `POST /signals`, a flat JSON object, `?ttl=` optional.
+  - `200` with each accepted name and when it expires; `400` for a value or a
+    name out of bounds, with the reason; `401` without the right token; `413`
+    beyond the bounds.
+  - `GET /signals` answers what is held, for a script that wants to check.
+  - No path names a device.
+- **Off by default**, enabled in Settings. The port is 7317, editable there
+  should something else hold it.
+- **A token on every request**, `Authorization: Bearer …`, shown in Settings
+  with Copy and a button to make a new one — **loopback included**. A port is
+  no barrier: a web page can send a request to any port of `127.0.0.1`, the
+  default one is documented, and a page can try many in seconds. For the same
+  reason a request carrying an `Origin` header — a browser's — is refused, and
+  the API answers no CORS preflight. It does not check `Host`: Home Assistant
+  may call this machine by its name, and the token already covers what that
+  check would add.
+- **Where it listens is chosen by interface, not by address.** Settings lists
+  the interfaces that are up, each with its name and its current address —
+  *Wi-Fi — 192.0.2.23*, *Ethernet*, *vEthernet (WSL)* — and loopback, always
+  ticked. Ticking another one says, once, that other machines on that network
+  can send signals, with the token. The choice is kept **by name**: an address
+  changes with DHCP, another Wi-Fi or a dock, and the listeners follow the
+  addresses of the ticked interfaces when they change. Home Assistant on
+  another machine is the main reason this exists, not an afterthought.
+- **The firewall**: listening on loopback only, Windows asks nothing. The first
+  time another interface is ticked, Windows asks once whether to allow Candeo,
+  on private networks by default; nothing in the installers changes.
+- **Seeing what arrived**: Settings lists the signals held right now — name,
+  value, time left — and sends a test one, so a rule can be tried before any
+  sender exists. Without it, a rule names a signal nobody can see, and nothing
+  is debuggable.
+- **Home Assistant**: its `rest_command` is enough, and the documentation gives
+  the example. MQTT, with Candeo as a client of the broker Home Assistant
+  already runs, needs no inbound port and could expose Candeo as an entity. It
+  is a later step, if HTTP proves awkward there.
+- Signals are also **automation triggers** (§3.2): "when `build` equals
+  `failed`", held while it does or flashed for a few seconds at each send.
+
+**Two pull requests, in this order.**
+
+1. **Signals and their API**: the store, the HTTP API with its token and its
+   interfaces, the `signal` trigger in the Automations tab, the Signals block in
+   Settings, and the Home Assistant example. After it, any sender on this
+   machine or the local network lights a device through a rule.
+2. **Signals in effects**: the parameter bindings of §2.3.1, and the bag for
+   effect authors that closes it.
+
+#### 2.3.1 How a signal reaches an effect: it binds to a parameter
+
+**Through a binding, signals do not follow §1**, and this is why: an effect
+declares nothing, reads nothing and is not marked in the gallery. (The bag for
+effect authors, at the end of this section, does.)
+
+**The arrow points from the effect to the signal.** A signal does not find an
+effect to drive; a **parameter of an effect names the signal it reads**. Instead
+of a fixed value, a parameter is bound: *Fixed gradient*, whose colour reads
+`status`; *Ripples*, whose speed reads `volume`.
+
+A first version of this section gave the effect the whole bag —
+`inputs: ['signals']`, `render({ signals })` — and it was wrong in three ways:
+
+- **The effect's author chose the names.** Someone would have to send `status`
+  because it is written in that effect's source. The coupling is invisible and
+  it points the wrong way.
+- **Every effect would parse strings.** What is `"red"`? Each one would carry
+  its own vocabulary, its own conversion and its own handling of nonsense.
+- **Nothing would be typed**, so the gallery could show nothing and the preview
+  could draw nothing.
+
+Binding a parameter puts the conversion **in one place, once, typed**, against
+the four `ParamSpec` kinds that already exist: `color` takes `#rrggbb`, `number`
+takes a number and is clamped to its declared `min`/`max`, `boolean` takes true
+or false, `choice` takes one of its options. **A value that is missing or does
+not convert leaves the configured value in place** — so nothing goes dark,
+nothing needs a special case, and the preview and the swatch draw at rest.
+
+**That conversion belongs to the bootstrap, not to Rust**, and the storage
+module says why: `EffectParamsRecord.values` is a raw JSON map on purpose,
+because typing parameters there "would create a second source of truth, which
+would diverge at the first parameter type added". Rust therefore cannot turn
+`"#ff0000"` into a colour. The bootstrap can: `__candeo_manifest` already
+carries `effect.params`, so the specs are there, next to where presses and the
+clock are already decoded.
+
+So the host **never touches `params`**. It passes the bound values that exist
+alongside it, raw — `{ "colour": "#ff0000" }` — and a signal that is absent or
+expired is simply not in it. The bootstrap converts each against its spec: it
+replaces the value on success, and on failure or absence the configured value is
+still there, never having been overwritten. The fallback above falls out of that
+rather than being written.
+
+And every shipped effect becomes signal-driven without a line of code. There is
+no *Status* effect to write.
+
+**Words belong to rules, values belong to bindings.** `{"status": "red"}` where
+red is a state someone chose is a rule — *when `status` is `red`, show a red
+Fixed gradient on the ring* — where the word is written by the person who reads
+it, and where priority between rules applies. A colour the sender computed is a
+value, and travels as `#ff0000` into a bound parameter. **No mapping table in a
+binding** (`failed → red`): that would be a small language, and a second place
+where lighting is decided — the very thing this section refuses of the API.
+
+**Where a binding is written: in the parameter's own row, nowhere new.**
+`EffectParamsForm` is already the gallery's form *and* a rule's, so the
+affordance appears in both by existing once. The control is the pattern §3.2
+already settled for cron: **one of the two holds the parameter at a time**, a
+value or a signal, the other shown disabled. The name is picked from the signals
+held right now — the same list as the Settings panel — or typed, since a
+parameter is often bound before its sender ever runs; a name never received is
+shown as such and not as an error, as a rule naming a deleted effect stays and
+does nothing (§3.4).
+
+**A binding is not a rule, and must not grow into one.**
+
+| | A rule | A binding |
+|---|---|---|
+| Decides | **which** effect runs | **one value** of the effect already running |
+| Carries | a trigger, devices, a duration, a priority, an order | none of these |
+| Reads as | a sentence | a field |
+
+Giving bindings an ordered list with priorities would rebuild the scheduler to
+fill in a box. A binding **follows the effect, not the device**:
+`EffectParamsRecord` is already keyed on (vid, pid, effect), so bindings live in
+that same record beside `values`, created and erased with it. A rule carries its
+own in `show`, exactly as it already carries its own `params` (§3.2).
+
+**Where it costs.** Parameters are already read afresh on every frame, inside
+the render loop, so the bound values are gathered in that one place. **One
+argument** is added to the host's render entry point, next to presses and the
+clock — an earlier draft of this section said none, and was wrong: the
+conversion needs the specs, which are in the bootstrap. Nothing else moves: no
+manifest flag, no gallery badge, and **nothing at all in
+`packages/effects-api`**. The work is in the settings form.
+
+**A binding names its source, not only a signal.** It is written `signal:status`
+rather than `status`, so another per-frame value binds the same way: the sound
+level and the beat of §2.2 need no second mechanism to drive a shipped effect.
+
+**The bag, for effect authors.** `inputs: ['signals']` gives an effect every
+held value, as it already receives key presses and the clock — and that part
+does follow §1. It is the way out for an effect drawing many values at once,
+not the main mechanism: an effect reading `signals.build` works only for whoever
+sends exactly `build`, cannot be shared as it is, and draws nothing at rest in
+the gallery. It is not a safety question: the effect runs in the QuickJS
+sandbox, the values are flat and bounded, and nothing lets a sender choose a
+device or an effect. The effects API documents it as an author's tool.
 
 ### 2.4 Later, if asked
 
@@ -220,14 +410,26 @@ A rule is one sentence someone can read back:
 
   | Trigger | Examples |
   |---|---|
-  | `signal` | `doorbell` becomes `ring`; `ci` equals `failed` while it does |
+  | `signal` | `build` equals `failed`, while it does; `doorbell` equals `ring`, for 5 seconds at each ring |
   | `idle` | nobody has used the computer for 10 minutes — shipped (#179), see §3.6 |
   | `app` | an application in the foreground (later) |
 
-- **Duration for these triggers**:
-  - `for: { seconds }` ends the interruption after a time (a flash);
-  - `while` lasts as long as the trigger holds (a signal that keeps its value,
-    idleness).
+- **Duration for these triggers**: `for: { seconds }` ends the interruption
+  after a time (a flash). **There is no second duration.** A first version of
+  this section announced a `while`, and the implementation of `idle` (#179)
+  found it was not needed: "as long as the trigger holds" is a property of the
+  occurrence, not of the rule — the resolver answers with an **open**
+  occurrence, known to last only until the next look, and the scheduler reads a
+  string of them as one run (§3.6). A `signal` trigger says "while `build` is
+  `failed`" exactly that way, and adds no field to a rule.
+
+  **A `signal` rule takes either.** Without `for`, its occurrence is open and
+  lasts while the value holds, since the value was first set. With `for`, it
+  starts at **each receipt** of the value and lasts that long: a doorbell rung
+  again flashes again, and rung during the flash lengthens it — one run, as
+  back-to-back occurrences always are (§3.6). **There is no "becomes"**: the sender already chooses when to send,
+  and the rule chooses how long it shows. The only comparison is equality;
+  thresholds on numbers belong to bindings (§2.3.1).
 - **Action**: any effect of the library or a hardware effect, including *Off*,
   with its own settings. A rule does not borrow the device's saved settings for
   that effect: the hourly clock and the clock applied by hand need not look the
@@ -339,8 +541,10 @@ Each step is one pull request, with its issue:
    card and in the tray. The periodic clock and the night window come with it
    (#106).
 4. **Sound input** and two shipped effects (#107).
-5. **External signals**: the local API, the command line, `signal` triggers,
-   the Home Assistant example (#108).
+5. **External signals** (#108), in two pull requests (§2.3): the store, the
+   HTTP API with its token and its interfaces, the `signal` trigger, the Signals
+   block in Settings and the Home Assistant example; then the parameter bindings
+   of §2.3.1 and the bag for effect authors.
 6. **`idle` trigger** (#179), on Windows; Linux follows (#183). Then system
    metrics, if asked.
 

@@ -31,6 +31,7 @@ mod msix;
 mod paths;
 mod runtime;
 mod shipped;
+mod signals;
 mod single_instance;
 /// Hardware probes, all `#[ignore]` — see the module.
 #[cfg(test)]
@@ -1288,6 +1289,8 @@ pub fn run() {
             // Before anything starts an effect: starting one asks whether a
             // rule interrupts the device.
             app.manage(automations::Automations::default());
+            // Before the automations start: a tick reads what is held.
+            app.manage(signals::Signals::default());
 
             // After `manage`, since starting goes through the command path, which
             // reads the state from the manager; before the tray, so its first menu
@@ -1306,6 +1309,8 @@ pub fn run() {
             // Last: a rule acts on open devices and refreshes the tray, so both
             // must exist first.
             automations::start(app.handle());
+            // After the automations, which a request wakes.
+            signals::start(app.handle());
 
             // The window is declared `create: false`, and built here once the
             // state it reads is managed. Launched at login, no window is built
@@ -1385,6 +1390,13 @@ pub fn run() {
             automations::set_automations_paused,
             automations::set_rules,
             automations::try_rule,
+            signals::get_signals_api,
+            signals::set_signals_api,
+            signals::renew_signals_token,
+            signals::list_network_interfaces,
+            signals::list_signals,
+            signals::send_signal,
+            signals::erase_signal,
             idle::idle_available,
             storage::list_effects,
             storage::save_effect_source,

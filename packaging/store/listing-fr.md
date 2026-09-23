@@ -4,7 +4,7 @@ The French listing for the Microsoft Store submission (#126), the translation of
 `listing-en.md`. It uses the words the French interface uses: *piloter*,
 *appareil*, *effets*, *paramètres*.
 
-Version described: **0.8.0**. Its *What's new* covers everything since 0.7.0.
+Version described: **0.9.0**. Its *What's new* covers everything since 0.8.0.
 
 ## Description courte (affichée dans les résultats de recherche)
 
@@ -21,6 +21,7 @@ POINTS FORTS
 • Chaque touche, sa couleur : toute la matrice, des dégradés, et les effets intégrés au micrologiciel de votre appareil.
 • Un éclairage qui suit votre journée : l'heure à chaque heure pile, le clavier éteint la nuit ou quand vous vous absentez — puis votre effet revient tout seul.
 • Écrivez les vôtres : un effet est un petit fichier TypeScript, prévisualisé en direct sur un simulateur de clavier avant d'atteindre le matériel. Modifiez-le dans Candeo ou dans l'éditeur dont vous avez l'habitude.
+• Des signaux venus de vos autres outils : un script de compilation ou Home Assistant dit à Candeo ce qui se passe, et vos règles décident de ce qui s'allume. Désactivé tant que vous ne l'activez pas.
 • Toujours là, jamais encombrant : les effets continuent fenêtre fermée, depuis la zone de notification.
 • Respect de la vie privée : aucun compte, rien de collecté, rien d'envoyé — cette version du Store ne fait aucune requête réseau, et les mises à jour viennent du Store.
 • Démarrage avec Windows si vous le souhaitez. Thème clair et sombre. Français et anglais.
@@ -34,17 +35,17 @@ Open source, sous licence GPL-3.0.
 - Automatisations : l'heure à chaque heure pile, éteint la nuit ou pendant votre absence
 - Écrivez vos propres effets en TypeScript, avec aperçu en direct
 - Continue de tourner fenêtre fermée, depuis la zone de notification
+- Des signaux venus de scripts et de Home Assistant, par une API locale
 - Aucun compte, rien de collecté, aucune requête réseau
 - Français et anglais, thème clair et sombre
 
-## Nouveautés de cette version (0.8.0)
+## Nouveautés de cette version (0.9.0)
 
-• Un deuxième appareil : l'Alienware m18 R1. Candeo pilote son clavier touche par touche, et l'anneau et le logo qui l'entourent en trois zones.
-• Les sept effets du micrologiciel du m18 R1, sous les noms qu'Alienware leur donne, avec une couleur pour ceux qui en prennent une. Le simulateur les dessine aussi.
-• Un paramètre modifié atteint aussitôt l'effet en cours, y compris les effets de l'appareil lui-même.
-• Les effets qui réagissent aux touches ne sont plus proposés pour les zones lumineuses, où aucune touche n'est jamais pressée.
-• Les messages d'erreur nomment l'appareil concerné, et chacun peut être sélectionné et fermé.
+• Les signaux : d'autres programmes — un script de compilation, Home Assistant — peuvent désormais dire à Candeo ce qui se passe, par une API HTTP locale, et vos règles décident de ce que ça allume. Désactivé tant que vous ne l'activez pas dans les Réglages.
+• Une règle peut attendre un signal : tant que c'est le cas, pour un état, ou un flash de quelques secondes à chaque réception, pour un événement.
+• Les Réglages listent les signaux reçus et leur durée restante, et en envoient un de test pour essayer une règle.
+• La confirmation de réinitialisation indique désormais que les règles d'automatisation sont aussi supprimées.
 
 ## Termes de recherche (7 au maximum, 30 caractères chacun)
 
-alienware, rgb, éclairage clavier, razer, deathstalker, effets typescript, open source
+alienware, rgb, éclairage clavier, razer, deathstalker, effets typescript, home assistant

@@ -1376,9 +1376,11 @@ Rule = {
   devices: { vid: number, pid: number }[],
   when:
     | { kind: 'cron', expr: string }    // 5 fields, or 6 with seconds first, local time
-    | { kind: 'idle', minutes: number }, // nobody has used the computer for that long
+    | { kind: 'idle', minutes: number } // nobody has used the computer for that long
+    | { kind: 'signal', name: string, equals: string, hold: boolean }, // absent hold: true
   show: { effect: string, params: Record<string, ParamValue> },
-  for: { seconds: number }              // absent: 10; an idle rule's applies to Try only
+  for: { seconds: number }              // absent: 10; an idle or held signal rule's
+                                        // applies to Try only
 }
 ```
 
@@ -1393,6 +1395,13 @@ for `minutes`, and lasts until the next input (#179). The time comes from the
 system (`GetLastInputInfo` on Windows), never from key capture; where the system
 does not say, an idle rule does nothing (#183). Its `until` is absent from
 `engine_status`: nobody knows when someone comes back.
+
+A signal occurrence applies while the signal `name` — a value another program
+sent, see [Signals](#signals) — equals `equals`, compared as text: a sender's `1`
+matches `"1"`. With `hold`, it starts when that value was set and lasts while it
+holds, like idle; without, it starts at **each receipt** of the value and lasts
+`for` seconds, so a doorbell rung again flashes again, and rung during the flash
+lengthens it. An expired or erased value applies no more.
 
 Rules live in Rust and run with the window closed. A scheduler thread decides every
 second, on the second, and at once when a rule is saved, tried, or the pause
@@ -1449,13 +1458,80 @@ a restart. Also a check item in the tray, above *Open window*, once a rule exist
 
 ---
 
-## The only event: `candeo://etat-change`
+## Signals
+
+Named values other software sends over HTTP, which rules read (#108). The design
+is [`inputs-and-automations.md`](../design/inputs-and-automations.md) §2.3; what a
+sender needs is [`signals.md`](signals.md). Values live in memory only: never
+written, never logged.
 
 ```ts
-listen('candeo://etat-change', () => { /* charge utile vide */ })
+SignalsApi = {
+  enabled: boolean,
+  port: number,              // 7317 unless changed
+  token: string,             // empty until the API is first turned on
+  interfaces: string[],      // listened on besides loopback, by name
+  listening: string[],       // the addresses actually listened on now
+  portInUse: boolean         // loopback could not take the port
+}
+HeldSignal = {
+  name: string,
+  value: string | number | boolean,
+  received: number,          // epoch ms
+  expires: number | null     // epoch ms; null until erased
+}
 ```
 
-Everything else on this page is **polled**. This one is pushed, and it is pushed
+The settings live in `signals` at the root of `settings.json`, absent until the API
+is turned on. A thread follows them and the addresses of the ticked interfaces
+every ten seconds — an address changed by DHCP, a port freed — and a change made
+here applies at once.
+
+### `get_signals_api() → SignalsApi`
+
+### `set_signals_api(enabled, port, interfaces) → SignalsApi`
+
+Turns the API on or off and says where it listens: loopback always, and the
+interfaces named. The token is made the first time it is turned on.
+`signalsPortInvalid { port }` below 1024, which Linux reserves.
+
+### `renew_signals_token() → SignalsApi`
+
+A new token, 32 random bytes in hexadecimal. Senders holding the old one are
+refused from the next request.
+
+### `list_network_interfaces() → { name: string, addresses: string[] }[]`
+
+The interfaces that are up, loopback aside, with their addresses now, IPv4 first
+and without link-local IPv6. Names are the system's: *Wi-Fi*, *Ethernet* on
+Windows, `eth0` on Linux.
+
+### `list_signals() → HeldSignal[]`
+
+What is held now, by name.
+
+### `send_signal(name, value)`
+
+Sets a value as a sender would, with the default lifetime of 60 s: to try a rule
+before any sender exists. `signalNameInvalid { name }`, `signalValueTooLong
+{ name, max }`, `signalsFull { max }`.
+
+### `erase_signal(name)`
+
+Erases a value whatever its lifetime: the way out of one sent until erased by a
+sender that is gone.
+
+---
+
+## Events
+
+### `candeo://etat-change`
+
+```ts
+listen('candeo://etat-change', () => { /* empty payload */ })
+```
+
+Everything else on this page is **polled**, `candeo://signals-changed` aside. This one is pushed, and it is pushed
 for a precise reason: from the system tray icon
 ([`src/tray.rs`](../../apps/desktop/src-tauri/src/tray.rs)), the state can change
 **without the window** — an effect started, an output cut, a keyboard turned off — and
@@ -1482,3 +1558,9 @@ includes, already grants `listen`.
 The name is written on both sides — `tray::STATE_CHANGED` and `src/api/candeo.ts` — and
 a Rust test checks the two against each other: nothing else ties them together, and letting them
 drift apart would produce a window that no longer resynchronizes, without a single error anywhere.
+
+### `candeo://signals-changed`
+
+Emitted when what is held changes — a request, `send_signal`, `erase_signal` — and
+when a value expires, so the Settings list follows without polling. Empty payload,
+for the same reason as above: the window reads the list again.

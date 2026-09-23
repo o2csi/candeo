@@ -8,7 +8,9 @@
  * it. When is a cron expression: the chips write the common ones, and the
  * advanced field takes any, with the format explained beside it. One of the two
  * holds the rule at a time; the other is shown disabled. Or when is "after 10 min
- * idle" (#179), which lasts until someone is back: no days, no duration.
+ * idle" (#179), which lasts until someone is back: no days, no duration. Or when
+ * is a signal equal to a value (#108), shown while it holds or flashed for a
+ * duration at each receipt.
  *
  * Rules are saved as soon as a gesture ends: there is no Save button to forget,
  * and the scheduler, in Rust, sees the change within a second, window closed or
@@ -22,16 +24,21 @@ import type { ParamValue } from '@candeo/effects-api'
 import {
   getLayout,
   getSettings,
+  getSignalsApi,
   idleAvailable,
   listDevices,
   listEffects,
+  listSignals,
+  onSignalsChanged,
   onStateChanged,
   setAutomationsPaused,
   setRules,
   tryRule,
   type EffectEntry,
   type EffectParams,
+  type HeldSignal,
   type Rule,
+  type SignalTrigger,
 } from '../api/candeo'
 import { message } from '../api/journal'
 import type { DeviceInfo, LayoutInfo } from '../api/types'
@@ -48,9 +55,12 @@ import {
   editable,
   examples,
   expression,
+  flashedFor,
+  holds,
   moved,
   readSimple,
   ruleValues,
+  whileItHolds,
   writeSimple,
   type Days,
   type Frequency,
@@ -74,6 +84,13 @@ const problem = ref<string | null>(null)
 const loaded = ref(false)
 /** Whether this system says how long the computer has been idle. */
 const idleHere = ref(false)
+/** The signals held now: their names are suggested to a signal rule. */
+const held = ref<HeldSignal[]>([])
+/**
+ * Whether Candeo receives signals. Assumed until read, so that no rule is said
+ * to wait in vain before anyone knows.
+ */
+const receiving = ref(true)
 
 /**
  * Settings being dragged, per rule, before the gesture ends: the form streams
@@ -89,6 +106,20 @@ const drafts = reactive<Record<string, EffectParams>>({})
 const advancedChosen = reactive<Record<string, boolean>>({})
 
 let unlisten: UnlistenFn | null = null
+let unlistenSignals: UnlistenFn | null = null
+
+/**
+ * What the signals add to the tab: suggestions and a warning. Neither is needed
+ * to edit a rule, so neither failing stops the tab.
+ */
+async function loadSignals(): Promise<void> {
+  const [api, now] = await Promise.all([
+    getSignalsApi().catch(() => null),
+    listSignals().catch(() => [] as HeldSignal[]),
+  ])
+  receiving.value = api?.enabled ?? true
+  held.value = now
+}
 
 async function load(): Promise<void> {
   try {
@@ -117,12 +148,18 @@ async function load(): Promise<void> {
 }
 
 onMounted(async () => {
-  await load()
+  await Promise.all([load(), loadSignals()])
   // The tray pauses automations too: what this screen shows follows.
-  unlisten = await onStateChanged(() => void load()).catch(() => null)
+  unlisten = await onStateChanged(() => void Promise.all([load(), loadSignals()])).catch(
+    () => null,
+  )
+  unlistenSignals = await onSignalsChanged(() => void loadSignals()).catch(() => null)
 })
 
-onBeforeUnmount(() => unlisten?.())
+onBeforeUnmount(() => {
+  unlisten?.()
+  unlistenSignals?.()
+})
 
 // ---------------------------------------------------------------- saving
 
@@ -203,7 +240,8 @@ function addExamples(): void {
 
 /**
  * What the chips show for a rule: its expression, or the default they start from
- * — which is also what an idle rule becomes when a time is chosen instead.
+ * — which is also what an idle or a signal rule becomes when a time is chosen
+ * instead.
  */
 function simple(rule: Rule): Simple {
   return readSimple(expression(rule) ?? '') ?? { frequency: { kind: 'hour' }, days: [...EVERY_DAY] }
@@ -223,6 +261,12 @@ function chooseIdle(index: number, rule: Rule, minutes: number): void {
   // Back to a time later, the rule opens in the chips, not in an old advanced field.
   delete advancedChosen[rule.id]
   update(index, (r) => ({ ...r, when: { kind: 'idle', minutes } }))
+}
+
+function chooseSignal(index: number, rule: Rule, trigger: SignalTrigger): void {
+  // Back to a time later, the rule opens in the chips, not in an old advanced field.
+  delete advancedChosen[rule.id]
+  update(index, (r) => ({ ...r, when: trigger }))
 }
 
 function chooseDays(index: number, rule: Rule, days: Days): void {
@@ -386,8 +430,11 @@ function onDrop(to: number): void {
                 :disabled="advanced(raw)"
                 :idle="raw.when.kind === 'idle' ? raw.when.minutes : null"
                 :idle-available="idleHere"
+                :signal="raw.when.kind === 'signal' ? raw.when : null"
+                :signals="held"
                 @change="(f) => chooseFrequency(index, raw, f)"
                 @idle="(m) => chooseIdle(index, raw, m)"
+                @signal="(s) => chooseSignal(index, raw, s)"
               />
               <DaysChip
                 v-if="raw.when.kind === 'cron'"
@@ -438,6 +485,18 @@ function onDrop(to: number): void {
                 :presets="FOR_PRESETS"
                 :label="t('automations.for')"
                 @change="(s) => update(index, (r) => ({ ...r, for: { seconds: s } }))"
+              />
+            </template>
+            <template v-else-if="raw.when.kind === 'signal'">
+              <span v-if="!holds(raw.when)" class="word">{{ t('automations.for') }}</span>
+              <DurationChip
+                :seconds="raw.for?.seconds ?? 10"
+                :presets="FOR_PRESETS"
+                :label="t('automations.for')"
+                holdable
+                :holding="holds(raw.when)"
+                @change="(s) => update(index, (r) => flashedFor(r, s))"
+                @hold="update(index, whileItHolds)"
               />
             </template>
             <span v-else class="word">{{ t('automations.untilBack') }}</span>
@@ -527,6 +586,9 @@ function onDrop(to: number): void {
           </p>
           <p v-if="raw.when.kind === 'idle' && !idleHere" class="warn">
             {{ t('automations.idleRuleUnavailable') }}
+          </p>
+          <p v-if="raw.when.kind === 'signal' && !receiving" class="warn">
+            {{ t('automations.signalsOff') }}
           </p>
         </template>
 
