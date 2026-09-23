@@ -5,8 +5,15 @@
 // are tested without mounting anything.
 
 import type { DeviceRef } from '../api/types'
-import type { EffectManifest, EffectParams, Rule } from '../api/candeo'
+import type {
+  EffectManifest,
+  EffectParams,
+  HeldSignal,
+  Rule,
+  SignalTrigger,
+} from '../api/candeo'
 import { startingParams } from '../api/candeo'
+import { signalText } from './signals'
 
 // ---------------------------------------------------------------- when
 
@@ -105,13 +112,68 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-/** The rule's cron expression, or `null` for a rule that waits for idleness. */
+/** The rule's cron expression, or `null` for a rule that waits for idleness or a signal. */
 export function expression(rule: Rule): string | null {
   return rule.when.kind === 'cron' ? rule.when.expr : null
 }
 
 /** What the idle choice offers, in minutes; any number of minutes stays possible. */
 export const IDLE_PRESETS: readonly number[] = [1, 5, 10, 15, 30, 60]
+
+// ---------------------------------------------------------------- signals
+
+/**
+ * What can name a signal: 1 to 64 letters, digits or `_ - . :`, ASCII only.
+ * The same rule as `valid_name` in `src-tauri/src/signals/store.rs`, so that a
+ * name the tab accepts is never refused on saving.
+ */
+const SIGNAL_NAME = /^[A-Za-z0-9_.:-]{1,64}$/
+
+export function validSignalName(name: string): boolean {
+  return SIGNAL_NAME.test(name)
+}
+
+/** Whether a rule holds while its signal does, rather than flashing at each receipt. */
+export function holds(when: Rule['when']): boolean {
+  return when.kind === 'signal' && when.hold !== false
+}
+
+/**
+ * The trigger for a signal someone named in a rule, or `null` when the name
+ * cannot be one.
+ *
+ * Left empty, the value is the one that signal holds now: send it, see it, then
+ * write the rule. A rule that already waited for a signal keeps its duration;
+ * otherwise it holds, as a state someone pushes once is meant to.
+ */
+export function signalTrigger(
+  name: string,
+  equals: string,
+  current: Rule['when'] | null,
+  held: readonly HeldSignal[],
+): SignalTrigger | null {
+  const named = name.trim()
+  if (!validSignalName(named)) return null
+  const now = held.find((s) => s.name === named)
+  return {
+    kind: 'signal',
+    name: named,
+    equals: equals === '' && now ? signalText(now.value) : equals,
+    hold: current?.kind === 'signal' ? holds(current) : true,
+  }
+}
+
+/** A signal rule shown for as long as the value holds. Its `for` stays, for Try. */
+export function whileItHolds(rule: Rule): Rule {
+  return rule.when.kind === 'signal' ? { ...rule, when: { ...rule.when, hold: true } } : rule
+}
+
+/** A signal rule flashed for `seconds` at each receipt of the value. */
+export function flashedFor(rule: Rule, seconds: number): Rule {
+  return rule.when.kind === 'signal'
+    ? { ...rule, when: { ...rule.when, hold: false }, for: { seconds } }
+    : rule
+}
 
 // ---------------------------------------------------------------- for
 
@@ -152,7 +214,11 @@ export function editable(rule: unknown): rule is Rule {
     typeof r.when === 'object' &&
     r.when !== null &&
     ((r.when.kind === 'cron' && typeof r.when.expr === 'string') ||
-      (r.when.kind === 'idle' && typeof r.when.minutes === 'number')) &&
+      (r.when.kind === 'idle' && typeof r.when.minutes === 'number') ||
+      (r.when.kind === 'signal' &&
+        typeof r.when.name === 'string' &&
+        typeof r.when.equals === 'string' &&
+        (r.when.hold === undefined || typeof r.when.hold === 'boolean'))) &&
     typeof r.show === 'object' &&
     r.show !== null &&
     typeof r.show.effect === 'string'

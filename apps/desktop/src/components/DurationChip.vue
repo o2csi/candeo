@@ -5,20 +5,30 @@
  *
  * A `<details>`: opening, closing and the keyboard come with the element, and
  * choosing a preset closes it.
+ *
+ * A signal rule's duration may also be "while it holds" (#108): the chip then
+ * reads that alone, and a number of seconds makes the rule a flash again.
  */
 import { ref, useId } from 'vue'
 
 import { duration } from '../composables/rules'
 import { t } from '../i18n'
 
-const props = defineProps<{
-  seconds: number
-  presets: readonly number[]
-  /** What the chip stands for, for a screen reader: "Every", "For". */
-  label: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    seconds: number
+    presets: readonly number[]
+    /** What the chip stands for, for a screen reader: "Every", "For". */
+    label: string
+    /** Offers "while it holds" besides the durations. */
+    holdable?: boolean
+    /** "While it holds" is chosen: `seconds` is kept, and only Try uses it. */
+    holding?: boolean
+  }>(),
+  { holdable: false, holding: false },
+)
 
-const emit = defineEmits<{ change: [seconds: number] }>()
+const emit = defineEmits<{ change: [seconds: number]; hold: [] }>()
 
 const uid = useId()
 const box = ref<HTMLDetailsElement | null>(null)
@@ -31,7 +41,12 @@ function text(seconds: number): string {
 function choose(seconds: number): void {
   if (!Number.isInteger(seconds) || seconds < 1) return
   if (box.value) box.value.open = false
-  if (seconds !== props.seconds) emit('change', seconds)
+  if (seconds !== props.seconds || props.holding) emit('change', seconds)
+}
+
+function hold(): void {
+  if (box.value) box.value.open = false
+  if (!props.holding) emit('hold')
 }
 
 function typed(event: Event): void {
@@ -41,15 +56,25 @@ function typed(event: Event): void {
 
 <template>
   <details ref="box" class="chip">
-    <summary :aria-label="`${label} ${text(seconds)}`">{{ text(seconds) }}</summary>
+    <summary v-if="holding">{{ t('automations.whileHolds') }}</summary>
+    <summary v-else :aria-label="`${label} ${text(seconds)}`">{{ text(seconds) }}</summary>
     <div class="picker">
       <div class="presets">
+        <button
+          v-if="holdable"
+          type="button"
+          class="preset"
+          :aria-pressed="holding"
+          @click="hold"
+        >
+          {{ t('automations.whileHolds') }}
+        </button>
         <button
           v-for="p in presets"
           :key="p"
           type="button"
           class="preset"
-          :aria-pressed="p === seconds"
+          :aria-pressed="!holding && p === seconds"
           @click="choose(p)"
         >
           {{ text(p) }}

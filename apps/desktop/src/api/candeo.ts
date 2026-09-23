@@ -560,7 +560,7 @@ export interface Rule {
   /** Off until someone switches it on. */
   enabled: boolean
   devices: DeviceRef[]
-  when: CronTrigger | IdleTrigger
+  when: CronTrigger | IdleTrigger | SignalTrigger
   show: RuleShow
   /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
   for: RuleDuration
@@ -582,6 +582,20 @@ export interface CronTrigger {
 export interface IdleTrigger {
   kind: 'idle'
   minutes: number
+}
+
+/**
+ * Under way while the signal `name` equals `equals`, compared as text: a
+ * sender's `1` equals `"1"` (#108). Held while it does, like idleness, and the
+ * rule's `for` only applies to Try; with `hold` off, a flash for `for` from each
+ * receipt of that value.
+ */
+export interface SignalTrigger {
+  kind: 'signal'
+  name: string
+  equals: string
+  /** Absent from a rule written by hand: it holds, as Rust reads it. */
+  hold?: boolean
 }
 
 /** The effect a rule shows, with its own settings rather than the device's. */
