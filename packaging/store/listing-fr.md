@@ -21,11 +21,11 @@ POINTS FORTS
 • Chaque touche, sa couleur : toute la matrice, des dégradés, et les effets intégrés au micrologiciel de votre appareil.
 • Un éclairage qui suit votre journée : l'heure à chaque heure pile, le clavier éteint la nuit ou quand vous vous absentez — puis votre effet revient tout seul.
 • Écrivez les vôtres : un effet est un petit fichier TypeScript, prévisualisé en direct sur un simulateur de clavier avant d'atteindre le matériel. Modifiez-le dans Candeo ou dans l'éditeur dont vous avez l'habitude.
-• Toujours là, jamais encombrant : les effets continuent fenêtre fermée, depuis la zone de notification. Quittez Candeo : votre clavier garde son éclairage.
+• Toujours là, jamais encombrant : les effets continuent fenêtre fermée, depuis la zone de notification.
 • Respect de la vie privée : aucun compte, rien de collecté, rien d'envoyé — cette version du Store ne fait aucune requête réseau, et les mises à jour viennent du Store.
 • Démarrage avec Windows si vous le souhaitez. Thème clair et sombre. Français et anglais.
 
-Open source, sous licence GPL-3.0. Le protocole de chaque appareil est relevé sur le vrai matériel et documenté publiquement.
+Open source, sous licence GPL-3.0.
 
 ## Nouveautés de cette version (0.8.0)
 

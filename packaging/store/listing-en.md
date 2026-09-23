@@ -22,11 +22,11 @@ HIGHLIGHTS
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
-• Always on, never in the way: effects keep running with the window closed, from the notification area. Quit Candeo and your keyboard keeps its lighting.
+• Always on, never in the way: effects keep running with the window closed, from the notification area.
 • Private by design: no account, nothing collected, nothing sent — this Store version makes no network request at all, and updates come from the Store.
 • Starts with Windows if you want it to. Light and dark themes. English and French.
 
-Open source, under the GPL-3.0. Each device's protocol is surveyed on the real hardware and documented in the open.
+Open source, under the GPL-3.0.
 
 ## What's new in this version (0.8.0)
 
