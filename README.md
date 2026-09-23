@@ -24,7 +24,7 @@ software running.
 | `candeo-device` — HID transport and layouts | done, verified on hardware |
 | Tauri commands | wired and documented — see [`docs/api/`](docs/api/commands.md) |
 | Vue interface | three screens — library, devices, editor; decisions in [`docs/design/`](docs/design/studio.md) |
-| User effects engine | single `rquickjs` engine on the Rust side; storage, settings and **five shipped effects** done |
+| User effects engine | single `rquickjs` engine on the Rust side; storage, settings and **fifteen shipped effects** done |
 
 ---
 
@@ -84,19 +84,19 @@ capture method, is in [`docs/protocol/`](docs/protocol/).
 ```
 candeo/
 ├── crates/
-│   ├── candeo-protocol/   construction des rapports — pur, sans I/O, testable
-│   └── candeo-device/     transport HID et gabarits de périphériques
+│   ├── candeo-protocol/   report construction — pure, no I/O, testable
+│   └── candeo-device/     HID transport and device layouts
 ├── apps/
-│   └── desktop/           application Tauri (Vue 3 + TypeScript)
-│       └── src-tauri/     liaison Rust, boucle de rendu
+│   └── desktop/           the Tauri application (Vue 3 + TypeScript)
+│       └── src-tauri/     Rust side, render loop
 ├── packages/
-│   └── effects-api/       types TypeScript pour l'écriture d'effets
+│   └── effects-api/       TypeScript types for effect authors
 ├── packaging/
-│   └── linux/             règle udev, livrée par les paquets deb et rpm
+│   └── linux/             udev rule, shipped in the deb and rpm packages
 └── docs/
-    ├── protocol/          relevé du protocole et méthode de capture
-    ├── api/               commandes exposées au front
-    └── design/            décisions d'interface et d'exécution, prises avant code
+    ├── protocol/          protocol surveys and capture method
+    ├── api/               commands exposed to the front end
+    └── design/            interface and runtime decisions, made before the code
 ```
 
 The `protocol` / `device` split is deliberate: report construction and the
@@ -254,21 +254,21 @@ why **YAML does not fit**: it would describe a configuration, not a behavior.
 ```ts
 import { defineEffect, hsv } from '@candeo/effects-api'
 
-// Un export par défaut, et rien d'autre : c'est tout ce que le moteur cherche.
-// `defineEffect` ne fait rien à l'exécution — elle donne un type contextuel,
-// ce qui type `layout`, `time`, `frame`, et `params` d'après sa déclaration.
+// A default export, and nothing else: that is all the engine looks for.
+// `defineEffect` does nothing at run time — it gives a contextual type, which
+// types `layout`, `time`, `frame`, and `params` from its declaration.
 export default defineEffect({
-  name: 'Onde',
+  name: 'Wave',
   params: {
-    speed: { kind: 'number', label: 'Vitesse', min: 0, max: 400, default: 120 },
+    speed: { kind: 'number', label: 'Speed', min: 0, max: 400, default: 120 },
   },
   render({ layout, time, frame, params }) {
     const cx = (layout.cols - 1) / 2
     const cy = (layout.rows - 1) / 2
-    // `layout.keys` : les 106 positions éclairées, pas les 132 cases.
+    // `layout.keys`: the lit positions — 106 on the DeathStalker, not its 132 cells.
     for (const key of layout.keys) {
       const d = Math.hypot(key.col - cx, key.row - cy)
-      // `params.speed` est un `number`, déduit de sa déclaration ci-dessus.
+      // `params.speed` is a `number`, inferred from its declaration above.
       frame.set(key, hsv(time * params.speed + d * 18, 1, 1))
     }
   },
@@ -277,7 +277,7 @@ export default defineEffect({
 
 The effects shipped with the application — Radial wave, Diagonal wave,
 Breathing, Sweep, Fixed gradient, Color wheel, Noise map, Rain, Starry night,
-Bubbles, Lightning, Crossing beams, Swirl circles, Ripples — are written against
+Bubbles, Lightning, Crossing beams, Swirl circles, Ripples, Clock — are written against
 this same API, in
 [`packages/effects/`](packages/effects/). They are copied into your effects folder
 at first launch and kept up to date. The application does not change them:
