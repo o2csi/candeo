@@ -120,6 +120,33 @@ device, show an effect —
 **Send a test signal**, in Settings, tries a rule before any sender exists; the
 list above it shows what arrived, and when each value expires.
 
+## Driving a setting with it
+
+A rule decides *which* effect runs. A signal can also drive **one setting of the
+effect already running**: in the gallery, a setting's **Signal** switch makes it
+read a signal instead of its value — *Fixed gradient*, its colour from `status`;
+*Ripples*, its speed from `volume`. A rule's settings bind the same way.
+
+What the sender sends is converted to the setting's kind:
+
+| Setting | Accepted |
+|---|---|
+| colour | `#rrggbb` or `#rgb`, the `#` optional |
+| number | a number or its text, kept within the setting's range |
+| on/off | `true`, `false`, `1`, `0` |
+| choice | one of the choices, by its value |
+
+Anything else — and a signal absent or expired — leaves the setting's own value,
+which is what the effect shows meanwhile. So a sender computing a colour sends
+`{"status": "#ff0000"}` and the colour follows; a word like `failed` is for a
+rule.
+
+## Reading signals in an effect you write
+
+An effect declaring `inputs: ['signals']` receives every value held, by name, in
+`ctx.signals` — for an effect drawing many at once. It then works only with
+senders using those exact names; binding a setting, above, works with any effect.
+
 ## What the token protects
 
 Whoever holds the token can set values, and nothing else: not choose a device, an

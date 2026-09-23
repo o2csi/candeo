@@ -2,9 +2,9 @@
 
 Lighting that reacts to more than key presses — the time, the music playing,
 signals sent by other software — and rules that interrupt the configured effect
-for a while. Status: steps 1, 2, 3 and 6 of §4 are implemented (#102, #105,
-#106, #179); sound (#107) and external signals (#108) are proposed. Each part
-lands in its own pull request, in the order at the end.
+for a while. Status: steps 1, 2, 3, 5 and 6 of §4 are implemented (#102, #105,
+#106, #108, #179); sound (#107) is proposed. Each part lands in its own pull
+request, in the order at the end.
 
 ## Why this needs a design
 
@@ -311,12 +311,21 @@ that same record beside `values`, created and erased with it. A rule carries its
 own in `show`, exactly as it already carries its own `params` (§3.2).
 
 **Where it costs.** Parameters are already read afresh on every frame, inside
-the render loop, so the bound values are gathered in that one place. **One
-argument** is added to the host's render entry point, next to presses and the
-clock — an earlier draft of this section said none, and was wrong: the
-conversion needs the specs, which are in the bootstrap. Nothing else moves: no
-manifest flag, no gallery badge, and **nothing at all in
-`packages/effects-api`**. The work is in the settings form.
+the render loop, so the bound values are gathered in that one place — the loop
+holds the signal store the API writes to, as it holds key presses, and touches
+it only when something is bound or declared. **Two arguments** are added to the
+host's render entry point, next to presses and the clock: the raw values bound
+to parameters, and the bag below. An earlier draft of this section said none,
+and was wrong: the conversion needs the specs, which are in the bootstrap. For
+bindings nothing else moves: no manifest flag, no gallery badge. The work is in
+the settings form.
+
+**What converts**, as implemented: `color` takes `#rrggbb` or `#rgb`, the `#`
+optional; `number` takes a number or its text, clamped to `min`/`max`;
+`boolean` takes `true`/`false`, `1`/`0`, or their text; `choice` takes one of
+its options' values. Anything else — and a parameter the effect does not
+declare — leaves the configured value. Restoring an effect's declared settings
+unbinds its parameters too: it starts again from the effect as written.
 
 **A binding names its source, not only a signal.** It is written `signal:status`
 rather than `status`, so another per-frame value binds the same way: the sound
@@ -329,7 +338,9 @@ not the main mechanism: an effect reading `signals.build` works only for whoever
 sends exactly `build`, cannot be shared as it is, and draws nothing at rest in
 the gallery. It is not a safety question: the effect runs in the QuickJS
 sandbox, the values are flat and bounded, and nothing lets a sender choose a
-device or an effect. The effects API documents it as an author's tool.
+device or an effect. The effects API documents it as an author's tool. The bag
+is frozen, like presses; an effect declaring it gets its error text kept out of
+the log, as one reading key presses does, since a value can end up in it.
 
 ### 2.4 Later, if asked
 
