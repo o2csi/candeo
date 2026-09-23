@@ -4,8 +4,7 @@ For the Microsoft Store submission (#126). Text is pasted into Partner Center by
 hand until #162 automates it. **What's new** is rewritten at every release; the
 rest changes only when the application does.
 
-Version described: **0.7.0**. Its *What's new* covers everything since 0.5.1, the
-version the Store still carries: 0.6.0 was never submitted.
+Version described: **0.8.0**. Its *What's new* covers everything since 0.7.0.
 
 ## Short description (shown in search results)
 
@@ -15,7 +14,7 @@ Lighting control, by talking straight to the device.
 
 Candeo controls your device's lighting by talking to the hardware itself. No vendor runtime, no background service, no account: the application writes over the HID interface Windows already exposes, and the effects you write run inside it — so they keep going with the window closed.
 
-Works with the Razer DeathStalker V2 Pro (wired); a supported device is required. Each device Candeo drives comes from a protocol read off the hardware and checked write by write. The list is at https://o2csi.github.io/candeo/devices.html.
+Works with the Razer DeathStalker V2 Pro (wired), and with the Alienware m18 R1's keyboard and lighting zones; a supported device is required. Each device Candeo drives comes from a protocol read off the hardware and checked write by write. The list is at https://o2csi.github.io/candeo/devices.html.
 
 WHAT IT DOES
 • The whole matrix: solid colours, per-row gradients, and the effects the device's own firmware runs.
@@ -32,15 +31,14 @@ WHAT IT DOES NOT DO
 
 The protocol it speaks was established by observing the hardware, and is documented in the open with the firmware version each fact was checked against. The source is available under the GPL-3.0.
 
-## What's new in this version (0.7.0)
+## What's new in this version (0.8.0)
 
-• Automations, in their own tab: a rule interrupts the effect on a device for a while, then gives it back. Every hour, on weekdays, at a set time — or any cron expression under Advanced.
-• A rule can wait for you to step away instead: after 10 minutes without a key or the mouse, show Off, until someone is back.
-• Try runs a rule once, right away. Resume, on the device and in the notification area, gives your effect back at once. Pause automations holds every rule, for a meeting or a game.
-• Clock, a new effect: the time scrolls across the keyboard, with the seconds if you want them.
-• Effects can read the clock: write your own clock face in TypeScript.
-• An effect's settings appear in the order its author wrote them.
+• A second device: the Alienware m18 R1. Candeo lights its keyboard key by key, and the ring and the logo around it as three zones.
+• The seven effects the m18 R1's firmware runs, under the names Alienware gives them, with a colour for those that take one. The simulator draws them too.
+• A setting you change reaches the running effect at once, the device's own effects included.
+• Effects that react to key presses are no longer offered for lighting zones, where no key is ever pressed.
+• Error messages name the device concerned, and each one can be selected and closed.
 
 ## Search terms (7 at most, 30 characters each)
 
-hid, rgb, keyboard lighting, razer, deathstalker, typescript effects, open source
+alienware, rgb, keyboard lighting, razer, deathstalker, typescript effects, open source
