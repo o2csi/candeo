@@ -1,43 +1,42 @@
 /**
- * Les images du moteur, telles qu'elles partent vers le clavier.
+ * The engine's frames, as they go out to the keyboard.
  *
- * Ce module remplace les images de démonstration : plus rien n'est calculé ici.
- * Le simulateur affiche ce que le moteur produit, octet pour octet — c'est ce
- * qui fait que l'aperçu **est** la production, et non sa ressemblance
+ * This module replaces the demo frames: nothing is computed here any more. The
+ * simulator shows what the engine produces, byte for byte — it is what makes
+ * the preview **be** the production, and not a likeness of it
  * (`docs/design/studio.md` §3).
  *
- * ## Le canal ne s'ouvre qu'une fois l'effet lancé, et sur **un** appareil
+ * ## The channel only opens once the effect is started, and on **one** device
  *
- * `subscribe_frames` dépose le canal dans l'état de la boucle en cours, celle
- * de l'appareil visé. Sans boucle, il n'y a pas d'état où le déposer, et
- * `start_effect` en crée un neuf à chaque démarrage : il faut donc se réabonner
- * **après** chaque lancement, pas une fois pour toutes à l'ouverture de
- * l'éditeur.
+ * `subscribe_frames` puts the channel into the state of the running loop, that
+ * of the targeted device. Without a loop, there is no state to put it in, and
+ * `start_effect` creates a new one at every start: one must therefore subscribe
+ * again **after** every start, not once and for all when the editor opens.
  *
- * Chaque appareil a sa boucle et son canal : le simulateur suit celui qu'on a
- * sélectionné, changer de sélection ferme un canal et en ouvre un autre.
+ * Each device has its loop and its channel: the simulator follows the one that
+ * was selected, changing the selection closes one channel and opens another.
  *
- * ## Deux sources, jamais les deux à la fois
+ * ## Two sources, never both at once
  *
- * Le moteur produit deux flux distincts : celui d'un **appareil**, qui est
- * exactement ce qui part vers ses LED, et celui de l'**aperçu**, qui ne part
- * nulle part. Le simulateur n'en dessine qu'un, et l'écran dit lequel — sans
- * quoi on regarderait un aperçu en croyant voir son clavier, ce que l'issue #63
- * refuse. C'est ce que tient {@link Source} : basculer de l'un à l'autre ferme
- * le précédent, il n'y a jamais deux canaux ouverts sur ce composant.
+ * The engine produces two distinct streams: that of a **device**, which is
+ * exactly what goes out to its LEDs, and that of the **preview**, which goes
+ * nowhere. The simulator draws only one, and the screen says which — otherwise
+ * one would look at a preview believing it to be one's keyboard, which issue
+ * #63 refuses. It is what {@link Source} holds: switching from one to the other
+ * closes the previous one, there are never two channels open on this component.
  *
- * ## Se désabonner n'arrête pas l'effet
+ * ## Unsubscribing does not stop the effect
  *
- * Quitter l'éditeur libère le canal et le flux s'arrête ; la boucle, elle,
- * continue d'alimenter le clavier. C'est le comportement voulu : un effet
- * tourne fenêtre fermée.
+ * Leaving the editor releases the channel and the stream stops; the loop, for
+ * its part, keeps feeding the keyboard. It is the intended behaviour: an effect
+ * runs with the window closed.
  *
- * ## Et `prefers-reduced-motion` ?
+ * ## And `prefers-reduced-motion`?
  *
- * Rien n'est neutralisé ici, et c'est délibéré : ce n'est pas une décoration
- * qui bouge toute seule, c'est le sujet de l'écran, et il ne s'anime qu'après
- * que l'utilisateur a lancé l'effet. Les animations d'interface, elles, restent
- * couvertes par `styles/base.css`.
+ * Nothing is neutralised here, and it is deliberate: it is not a decoration
+ * that moves on its own, it is the subject of the screen, and it only animates
+ * after the user has started the effect. Interface animations, for their part,
+ * remain covered by `styles/base.css`.
  */
 
 import { computed, onBeforeUnmount, shallowRef } from 'vue'
@@ -49,11 +48,11 @@ import type { LayoutView } from './layout'
 const BLACK: Rgb = [0, 0, 0]
 
 /**
- * D'où viennent les images affichées : un appareil, ou l'aperçu.
+ * Where the displayed frames come from: a device, or the preview.
  *
- * `'preview'` plutôt qu'un second drapeau à côté du `DeviceRef` : les deux
- * s'excluent, et un type qui le dit vaut mieux qu'une paire de variables dont
- * une combinaison sur quatre n'a pas de sens.
+ * `'preview'` rather than a second flag next to the `DeviceRef`: the two are
+ * mutually exclusive, and a type that says so is better than a pair of variables
+ * of which one combination in four makes no sense.
  */
 type Source = DeviceRef | 'preview'
 
@@ -63,23 +62,23 @@ function sameSource(a: Source, b: Source): boolean {
 }
 
 /**
- * Une image noire complète.
+ * A complete black frame.
  *
- * `frameLen` positions, pas `keys.length` : une image couvre toute la matrice,
- * trous compris. Un tableau vide ferait un simulateur tout aussi noir, mais
- * violerait l'invariant que `layoutProblems` vérifie — autant le respecter dès
- * la première image.
+ * `frameLen` positions, not `keys.length`: a frame covers the whole matrix,
+ * gaps included. An empty array would make a simulator just as black, but would
+ * violate the invariant `layoutProblems` checks — might as well respect it from
+ * the first frame.
  */
 function dark(layout: LayoutView | null): readonly Rgb[] {
   return layout ? new Array<Rgb>(layout.frameLen).fill(BLACK) : []
 }
 
 /**
- * Une image brute vers les triplets qu'attend le simulateur.
+ * A raw frame into the triplets the simulator expects.
  *
- * `shallowRef` côté appelant : l'image est remplacée en bloc, jamais modifiée
- * en place. Un `ref` profond envelopperait 132 triplets dans autant de
- * mandataires réactifs, trente fois par seconde.
+ * `shallowRef` on the caller's side: the frame is replaced as a whole, never
+ * modified in place. A deep `ref` would wrap 132 triplets in as many reactive
+ * proxies, thirty times per second.
  */
 function colors(bytes: Uint8Array): Rgb[] {
   const out = new Array<Rgb>(Math.floor(bytes.length / 3))
@@ -93,14 +92,14 @@ export function useEngineFrames(layout: () => LayoutView | null) {
   const received = shallowRef<readonly Rgb[] | null>(null)
 
   /**
-   * Tant que rien n'est arrivé, une image noire du bon gabarit — lequel vient
-   * du Rust, donc plus tard que le premier rendu.
+   * As long as nothing has arrived, a black frame of the right layout — which
+   * comes from Rust, so later than the first render.
    *
-   * **Une image d'une autre taille que le gabarit est écartée**, pas dessinée :
-   * en changeant d'appareil, le gabarit arrive avant la première image du
-   * nouveau, et la dernière du précédent décrit une matrice qui n'est plus là
-   * — 132 couleurs pour un clavier qui en attend 140. La dessiner laisserait
-   * des touches sans couleur et ferait crier `layoutProblems` à chaque bascule.
+   * **A frame of another size than the layout is discarded**, not drawn: when
+   * changing devices, the layout arrives before the new one's first frame, and
+   * the previous one's last frame describes a matrix that is no longer there —
+   * 132 colors for a keyboard that expects 140. Drawing it would leave keys
+   * without a color and make `layoutProblems` cry out at every switch.
    */
   const frame = computed<readonly Rgb[]>(() => {
     const black = dark(layout())
@@ -108,57 +107,57 @@ export function useEngineFrames(layout: () => LayoutView | null) {
     return last && last.length === black.length ? last : black
   })
 
-  /** Ce qui ferme le canal. `null` quand personne n'écoute. */
+  /** What closes the channel. `null` when nobody listens. */
   let release: (() => void) | null = null
-  /** Ce à quoi ce canal est abonné, pour savoir quand il faut le fermer. */
+  /** What this channel is subscribed to, to know when it must be closed. */
   let source: Source | null = null
-  /** Faux dès la destruction : l'abonnement est asynchrone, il peut aboutir après. */
+  /** False from destruction on: the subscription is asynchronous, it may complete after. */
   let alive = true
 
   /**
-   * S'abonne au flux d'une source. Réabonnable : le moteur ne retient qu'un
-   * canal **par boucle**, le nouveau remplace l'ancien.
+   * Subscribes to a source's stream. Re-subscribable: the engine keeps only one
+   * channel **per loop**, the new one replaces the old one.
    *
-   * Sur la même source, on ne se **désabonne pas d'abord** : ce serait deux
-   * commandes en vol dont l'ordre d'arrivée n'est pas garanti, et un
-   * désabonnement qui arriverait le second effacerait le canal qu'on vient
-   * d'ouvrir — le simulateur resterait figé sans que rien ne le signale.
+   * On the same source, we do **not unsubscribe first**: that would be two
+   * commands in flight whose order of arrival is not guaranteed, and an
+   * unsubscription arriving second would erase the channel just opened — the
+   * simulator would stay frozen without anything reporting it.
    *
-   * Changer de source, en revanche, exige de fermer l'ancienne : le moteur ne
-   * remplacerait pas un canal posé sur une autre boucle, et les deux flux
-   * alimenteraient le même simulateur.
+   * Changing source, on the other hand, requires closing the old one: the engine
+   * would not replace a channel set on another loop, and both streams would feed
+   * the same simulator.
    */
-  async function subscribe(voulue: Source): Promise<void> {
-    if (source !== null && !sameSource(source, voulue)) stop()
+  async function subscribe(wanted: Source): Promise<void> {
+    if (source !== null && !sameSource(source, wanted)) stop()
 
-    source = voulue
+    source = wanted
     const close =
-      voulue === 'preview'
+      wanted === 'preview'
         ? await subscribePreviewFrames((bytes) => {
             received.value = colors(bytes)
           })
-        : await subscribeFrames(voulue, (bytes) => {
+        : await subscribeFrames(wanted, (bytes) => {
             received.value = colors(bytes)
           })
-    // Le composant a pu disparaître pendant l'aller-retour. Fermer tout de
-    // suite plutôt que de laisser un canal alimenter une vue détruite.
+    // The component may have disappeared during the round trip. Close right
+    // away rather than let a channel feed a destroyed view.
     if (alive) release = close
     else close()
   }
 
-  /** Les images qui partent vers **cet appareil**, octet pour octet. */
+  /** The frames going out to **this device**, byte for byte. */
   function listen(device: DeviceRef): Promise<void> {
     return subscribe(device)
   }
 
-  /** Les images de l'aperçu, qui ne partent nulle part. */
+  /** The preview's frames, which go nowhere. */
   function listenPreview(): Promise<void> {
     return subscribe('preview')
   }
 
   /**
-   * Ferme le canal. La dernière image reste affichée : c'est encore celle que
-   * le clavier éclaire — arrêter la boucle n'éteint pas les LED.
+   * Closes the channel. The last frame stays displayed: it is still the one the
+   * keyboard lights — stopping the loop does not turn the LEDs off.
    */
   function stop(): void {
     release?.()
