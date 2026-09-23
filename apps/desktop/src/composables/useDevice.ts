@@ -1,20 +1,20 @@
 /**
- * État des périphériques, partagé par toute l'application.
+ * Device state, shared by the whole application.
  *
- * État au niveau du module plutôt qu'un magasin dédié : une liste et une poignée
- * de champs. Ajouter Pinia pour ça serait une dépendance de plus sans rien
- * résoudre.
+ * Module-level state rather than a dedicated store: a list and a handful of
+ * fields. Adding Pinia for that would be one more dependency without solving
+ * anything.
  *
- * ## Il n'y a plus d'appareil implicite
+ * ## There is no implicit device any more
  *
- * Côté Rust, chaque appareil porte sa poignée, sa boucle et son effet : toute
- * commande qui agit sur un appareil en prend un ([`DeviceRef`]). L'interface
- * doit donc toujours savoir lequel elle vise — d'où {@link current}.
+ * On the Rust side, each device carries its handle, its loop and its effect:
+ * every command that acts on a device takes one ([`DeviceRef`]). The interface
+ * must therefore always know which one it targets — hence {@link current}.
  *
- * La colonne des appareils le désigne explicitement, par {@link select} ; les
- * écrans qui n'ont pas de colonne — l'éditeur — reprennent ce même choix. C'est
- * ce qui fait qu'ouvrir l'éditeur depuis la troisième colonne travaille bien sur
- * l'appareil qu'on regardait, sans que l'éditeur ait à poser la question.
+ * The devices column designates it explicitly, through {@link select}; the
+ * screens that have no column — the editor — take up that same choice. It is
+ * what makes opening the editor from the third column work on the device that
+ * was being looked at, without the editor having to ask.
  */
 
 import { computed, readonly, ref } from 'vue'
@@ -29,38 +29,37 @@ const busy = ref(false)
 const error = ref<string | null>(null)
 
 /**
- * Ce que la colonne des appareils a désigné. `null` tant que personne n'a choisi.
+ * What the devices column designated. `null` as long as nobody has chosen.
  *
- * Au niveau du module, comme le reste : passer à l'éditeur et revenir ne doit
- * pas ramener la sélection au premier de la liste.
+ * At module level, like the rest: moving to the editor and coming back must not
+ * bring the selection back to the first in the list.
  */
 const chosen = ref<DeviceRef | null>(null)
 
 const same = (a: DeviceRef, b: DeviceRef) => a.vid === b.vid && a.pid === b.pid
 
 /**
- * L'appareil visé par les commandes du moteur.
+ * The device targeted by the engine's commands.
  *
- * Le choix explicite d'abord — mais seulement s'il désigne encore un appareil
- * connu : un gabarit peut disparaître de la liste entre deux relectures, et
- * viser un appareil qui n'existe plus ferait échouer chaque commande sans que
- * rien n'explique pourquoi.
+ * The explicit choice first — but only if it still designates a known device: a
+ * layout can disappear from the list between two reads, and targeting a device
+ * that no longer exists would make every command fail without anything
+ * explaining why.
  *
- * À défaut, celui qui est ouvert ; puis le premier branché ; puis le premier
- * gabarit connu. Ce dernier repli n'est pas un pis-aller : un effet se lance et
- * se prévisualise sans clavier branché, et il faut bien un gabarit pour le
- * dessiner.
+ * Failing that, the one that is open; then the first plugged in; then the first
+ * known layout. This last fallback is not a makeshift: an effect starts and is
+ * previewed without a keyboard plugged in, and a layout is needed to draw it.
  */
 const current = computed<DeviceRef | null>(() => {
   const list = devices.value
-  const voulu = chosen.value
-  if (voulu && list.some((d) => same(d, voulu))) return voulu
+  const wanted = chosen.value
+  if (wanted && list.some((d) => same(d, wanted))) return wanted
 
-  const choisi = list.find((d) => d.open) ?? list.find((d) => d.present) ?? list[0]
-  return choisi ? { vid: choisi.vid, pid: choisi.pid } : null
+  const picked = list.find((d) => d.open) ?? list.find((d) => d.present) ?? list[0]
+  return picked ? { vid: picked.vid, pid: picked.pid } : null
 })
 
-/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
+/** Errors raised by Rust are already readable: they are shown as they are. */
 async function run<T>(task: () => Promise<T>): Promise<T | null> {
   busy.value = true
   error.value = null
@@ -76,59 +75,58 @@ async function run<T>(task: () => Promise<T>): Promise<T | null> {
 
 export function useDevice() {
   /**
-   * Désigne l'appareil qu'on configure. C'est le geste de la première colonne.
+   * Designates the device being configured. It is the first column's gesture.
    *
-   * Ne touche à rien côté Rust : aucun appareil n'est ouvert ni refermé, on dit
-   * seulement lequel les écrans visent. Ouvrir, c'est `adopt`.
+   * Touches nothing on the Rust side: no device is opened or closed, it only
+   * says which one the screens target. Opening is `adopt`.
    */
   function select(device: DeviceRef | null) {
     chosen.value = device
   }
 
   /**
-   * Relit la liste, puis le gabarit de l'appareil ouvert.
+   * Reads the list again, then the layout of the open device.
    *
-   * Le gabarit ne se déduit pas de la liste : il porte la géométrie des 106
-   * touches, que `list_devices` n'a aucune raison de transporter pour chaque
-   * appareil branché ou non.
+   * The layout cannot be derived from the list: it carries the geometry of the
+   * 106 keys, which `list_devices` has no reason to carry for every device,
+   * plugged in or not.
    *
-   * Tout passe par ici — adopter, ignorer, connecter s'y ramènent. L'état et le
-   * message d'erreur de chaque appareil viennent du Rust, qui seul sait ce que
-   * l'ouverture a donné ; les rafistoler sur place inventerait une seconde
-   * vérité.
+   * Everything goes through here — adopt, ignore, connect come down to it. Each
+   * device's state and error message come from Rust, which alone knows what
+   * opening produced; patching them up on the spot would invent a second truth.
    *
-   * Le gabarit retenu est celui de l'appareil **désigné** quand il est ouvert,
-   * et à défaut celui du premier ouvert. Sans cette préférence, l'éditeur
-   * dessinerait un appareil pendant que les commandes en viseraient un autre : un
-   * seul gabarit est connu aujourd'hui, les deux se confondent, mais l'accord ne
-   * doit pas tenir à cette coïncidence.
+   * The layout kept is that of the **designated** device when it is open, and
+   * failing that that of the first open one. Without this preference, the
+   * editor would draw one device while the commands targeted another: a single
+   * layout is known today, the two coincide, but the agreement must not rest on
+   * that coincidence.
    */
   async function refresh() {
     const list = await run(api.listDevices)
     if (!list) return
     devices.value = list
 
-    const voulu = chosen.value
-    const ouvert =
-      (voulu ? list.find((d) => same(d, voulu) && d.open) : undefined) ?? list.find((d) => d.open)
-    if (!ouvert) {
+    const wanted = chosen.value
+    const open =
+      (wanted ? list.find((d) => same(d, wanted) && d.open) : undefined) ?? list.find((d) => d.open)
+    if (!open) {
       layout.value = null
       return
     }
-    const info = await run(() => api.getLayout({ vid: ouvert.vid, pid: ouvert.pid }))
+    const info = await run(() => api.getLayout({ vid: open.vid, pid: open.pid }))
     if (info) layout.value = info
   }
 
-  /** Ouverture ponctuelle, sans rien décider. */
+  /** One-off opening, without deciding anything. */
   async function connect(device: DeviceInfo) {
     const info = await run(() => api.connect(device.vid, device.pid))
     await refresh()
     return info
   }
 
-  /** Décide de piloter cet appareil — une fois, et pour les fois suivantes. */
+  /** Decides to control this device — once, and for the times after. */
   async function adopt(device: DeviceInfo) {
-    // `null` : adopté mais débranché. Ce n'est pas une erreur.
+    // `null`: adopted but unplugged. It is not an error.
     const info = await run(() => api.adoptDevice(device.vid, device.pid))
     await refresh()
     return info
@@ -139,13 +137,13 @@ export function useDevice() {
     await refresh()
   }
 
-  /** Referme **un** appareil. Les autres restent ouverts. */
+  /** Closes **one** device. The others stay open. */
   async function disconnect(device: DeviceInfo) {
     await run(() => api.disconnect({ vid: device.vid, pid: device.pid }))
     await refresh()
   }
 
-  /** Rétablit l'état après un rechargement à chaud de l'interface. */
+  /** Restores the state after a hot reload of the interface. */
   const restore = refresh
 
   return {
