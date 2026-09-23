@@ -1,12 +1,12 @@
 /**
- * Routage.
+ * Routing.
  *
- * Historique en mémoire et non dans l'URL : c'est une fenêtre d'application,
- * pas une page. Il n'y a ni barre d'adresse, ni lien à partager, ni bouton
- * « précédent » du navigateur à respecter.
+ * History in memory and not in the URL: it is an application window, not a
+ * page. There is no address bar, no link to share, no browser "back" button to
+ * honour.
  *
- * **La galerie est la racine**, pas l'éditeur : la plupart des lancements
- * servent à choisir un effet, pas à en écrire un.
+ * **The gallery is the root**, not the editor: most launches are for choosing
+ * an effect, not for writing one.
  */
 
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -35,8 +35,8 @@ export const router = createRouter({
       component: () => import('../views/SettingsView.vue'),
     },
     {
-      // L'éditeur est un **mode** : il remplace le contenu de la fenêtre.
-      // `:id` absent = nouvel effet.
+      // The editor is a **mode**: it replaces the window's content.
+      // `:id` absent = new effect.
       path: '/editor/:id?',
       name: 'editor',
       component: () => import('../views/EditorView.vue'),

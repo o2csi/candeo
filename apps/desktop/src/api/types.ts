@@ -1,26 +1,26 @@
 /**
- * Miroir TypeScript des types sérialisés par la couche Tauri.
+ * TypeScript mirror of the types serialized by the Tauri layer.
  *
- * La référence est `apps/desktop/src-tauri/src/lib.rs` : tout écart ici est un
- * bug qui ne se verra qu'à l'exécution. Les noms de champs suivent ceux de
- * Rust — serde ne les renomme pas.
+ * The reference is `apps/desktop/src-tauri/src/lib.rs`: any gap here is a bug
+ * that will only show at run time. The field names follow Rust's — serde does
+ * not rename them.
  */
 
 /**
- * Décision prise pour un appareil, retenue dans `settings.json`.
+ * Decision made for a device, remembered in `settings.json`.
  *
- * `detected` est le défaut : **un appareil jamais vu n'est pas piloté**. Écrire
- * sur un périphérique USB qu'on comprend mal n'est pas anodin, et adopter par
- * défaut est la façon de casser le matériel de quelqu'un.
+ * `detected` is the default: **a device never seen is not controlled**. Writing
+ * to a USB device that is poorly understood is not harmless, and adopting by
+ * default is the way to break someone's hardware.
  */
 export type DeviceState = 'detected' | 'adopted' | 'ignored'
 
 /**
- * Désigne un appareil, et rien d'autre.
+ * Designates a device, and nothing else.
  *
- * VID et PID, comme l'adoption les identifie : c'est la clé de la table des
- * appareils ouverts côté Rust, et celle des boucles de rendu. Toute commande qui
- * agit sur **un** appareil en prend un — il n'y a plus d'appareil implicite.
+ * VID and PID, as adoption identifies them: it is the key of the table of open
+ * devices on the Rust side, and that of the render loops. Every command that
+ * acts on **one** device takes one — there is no implicit device any more.
  */
 export interface DeviceRef {
   vid: number
@@ -40,41 +40,41 @@ export interface DeviceInfo {
   name: string
   vid: number
   pid: number
-  /** Vrai si le périphérique est effectivement branché. */
+  /** True if the device is actually plugged in. */
   present: boolean
   /**
-   * Ce que l'utilisateur a décidé — indépendant de {@link present}. Un appareil
-   * piloté peut être débranché, un appareil branché peut être ignoré.
+   * What the user decided — independent of {@link present}. A controlled device
+   * can be unplugged, a plugged-in device can be ignored.
    */
   state: DeviceState
-  /** Vrai si c'est **cet** appareil qui est ouvert en ce moment. */
+  /** True if it is **this** device that is open right now. */
   open: boolean
   /**
-   * Dernier échec d'ouverture **de cet appareil**.
+   * Last opening failure **of this device**.
    *
-   * Chacun porte le sien : une ouverture qui échoue n'empêche pas les autres de
-   * fonctionner, et ne leur fait pas porter son message.
+   * Each carries its own: an opening that fails does not prevent the others from
+   * working, and does not make them carry its message.
    */
   error: Failure | null
   /**
-   * Micrologiciel contre lequel le gabarit a été relevé, `v1.5`. Connu sans rien
-   * ouvrir : c'est une donnée du gabarit.
+   * Firmware against which the layout was surveyed, `v1.5`. Known without
+   * opening anything: it is a piece of the layout's data.
    */
   surveyedFirmware: string
   /**
-   * Micrologiciel **lu** à l'ouverture. `null` quand l'appareil n'est pas ouvert,
-   * ou quand la lecture a échoué — ce que {@link warnings} dit alors.
+   * Firmware **read** on opening. `null` when the device is not open, or when
+   * the read failed — which {@link warnings} then says.
    */
   firmware: string | null
   /**
-   * Ce que l'inspection à l'ouverture a trouvé qui mérite d'être vu.
+   * What the inspection on opening found that deserves to be seen.
    *
-   * **Vide veut dire « rien à signaler », pas « compatible »** : l'appareil
-   * confirme qu'une commande existe, jamais que ses arguments sont bons. Aucun de
-   * ces avertissements ne bloque quoi que ce soit.
+   * **Empty means "nothing to report", not "compatible"**: the device confirms
+   * that a command exists, never that its arguments are right. None of these
+   * warnings blocks anything.
    *
-   * `readonly` : la liste des appareils est exposée en lecture seule par
-   * `useDevice`, et un appareil se repasse tel quel aux commandes d'adoption.
+   * `readonly`: the list of devices is exposed read-only by `useDevice`, and a
+   * device is passed as it is to the adoption commands.
    *
    * Already in the interface language: Rust renders them when listing.
    */
@@ -82,12 +82,12 @@ export interface DeviceInfo {
 }
 
 /**
- * Une touche, telle que le simulateur doit la dessiner.
+ * A key, as the simulator must draw it.
  *
- * Deux systèmes de coordonnées cohabitent, et ils ne disent pas la même chose :
- * `row`/`col` situent la LED dans la matrice, donc son rang dans une image ;
- * `x`/`y`/`w`/`h` donnent le rectangle physique. Le second ne se déduit pas du
- * premier — le périphérique ne déclare aucune dimension.
+ * Two coordinate systems coexist, and they do not say the same thing:
+ * `row`/`col` locate the LED in the matrix, hence its rank in a frame;
+ * `x`/`y`/`w`/`h` give the physical rectangle. The second cannot be derived
+ * from the first — the device declares no dimension.
  */
 export interface KeyInfo {
   index: number
@@ -100,33 +100,33 @@ export interface KeyInfo {
   scancode?: number
   /** The key's name in the system's keyboard layout, when the system gives one. */
   label?: string
-  /** En unités de pas de clavier : 1 u = une touche alphabétique. */
+  /** In keyboard pitch units: 1 u = one letter key. */
   x: number
   y: number
   w: number
   h: number
 }
 
-/** Miroir de `LayoutInfo`, dans `src-tauri/src/lib.rs`. */
+/** Mirror of `LayoutInfo`, in `src-tauri/src/lib.rs`. */
 export interface LayoutInfo {
   name: string
   rows: number
   cols: number
   /**
-   * Taille d'une image : **toutes** les cases de la matrice, trous compris.
-   * Vaut 132 sur le DeathStalker.
+   * Size of a frame: **all** the cells of the matrix, gaps included.
+   * 132 on the DeathStalker.
    */
   frameLen: number
   /**
-   * Uniquement les cases portant une LED. 106 sur le DeathStalker.
+   * Only the cells carrying an LED. 106 on the DeathStalker.
    *
-   * `keys.length` et {@link frameLen} diffèrent, et c'est voulu : une image
-   * doit couvrir `frameLen` positions, pas `keys.length`. En envoyer moins
-   * laisse les dernières rangées figées sur leur valeur précédente.
+   * `keys.length` and {@link frameLen} differ, and that is intended: a frame
+   * must cover `frameLen` positions, not `keys.length`. Sending fewer leaves
+   * the last rows frozen on their previous value.
    *
-   * ⚠️ Une touche ≠ une LED, dans les deux sens : l'Entrée ISO apparaît **deux
-   * fois** sous le même `name` (index 57 et 79, les deux bras du L), et la barre
-   * d'espace une seule malgré ses 6,25 u.
+   * ⚠️ A key ≠ an LED, in both directions: the ISO Enter appears **twice**
+   * under the same `name` (index 57 and 79, the two arms of the L), and the
+   * space bar only once despite its 6.25 u.
    */
   keys: KeyInfo[]
   /**
@@ -149,11 +149,11 @@ export interface LayoutInfo {
 }
 
 /**
- * Un effet exécuté par le micrologiciel, tel que la galerie en a besoin.
+ * An effect run by the firmware, as the gallery needs it.
  *
- * `colours` dit combien de couleurs il peint : zéro pour ceux qui ont leur
- * propre palette — un spectre, un arc-en-ciel — et la galerie ne demande alors
- * rien, plutôt que d'offrir un réglage sans effet.
+ * `colours` says how many colors it paints with: zero for those that have their
+ * own palette — a spectrum, a rainbow — and the gallery then asks for nothing,
+ * rather than offering a setting with no effect.
  */
 export interface FirmwareEffectInfo {
   id: string
@@ -166,5 +166,5 @@ export type Effect =
   | { kind: 'wave'; direction: number; speed: number }
   | { kind: 'custom' }
 
-/** Une couleur, composantes dans l'ordre RVB. */
+/** A color, components in RGB order. */
 export type Rgb = readonly [r: number, g: number, b: number]

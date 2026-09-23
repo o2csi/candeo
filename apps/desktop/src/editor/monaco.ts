@@ -1,38 +1,38 @@
 /**
- * Mise en route de Monaco : ouvriers, thème, service de langage TypeScript.
+ * Setting Monaco up: workers, theme, TypeScript language service.
  *
- * ## Pourquoi Monaco
+ * ## Why Monaco
  *
- * Pour son service de langage. En lui donnant la déclaration de
- * `@candeo/effects-api`, on obtient types, autocomplétion et erreurs en ligne
- * sans écrire la moindre règle (`docs/design/studio.md` §2).
+ * For its language service. By giving it the declaration of
+ * `@candeo/effects-api`, we get types, autocompletion and inline errors without
+ * writing a single rule (`docs/design/studio.md` §2).
  *
- * ## Comment la déclaration lui parvient — sans copie
+ * ## How the declaration reaches it — without a copy
  *
- * `?raw` lit `packages/effects-api/src/index.ts` **à la construction** et
- * l'inscrit dans le paquet sous forme de chaîne. Le fichier reste donc la seule
- * source : il n'est ni recopié, ni régénéré, ni converti en `.d.ts`. Monaco
- * n'exige pas une déclaration — `addExtraLib` accepte n'importe quel
- * TypeScript, et le service en tire la même chose. Corps de fonctions compris,
- * ce qui vaut mieux : l'infobulle de `hsv` montre alors le code réel.
+ * `?raw` reads `packages/effects-api/src/index.ts` **at build time** and writes
+ * it into the bundle as a string. The file therefore stays the only source: it
+ * is neither copied, nor regenerated, nor converted to `.d.ts`. Monaco does not
+ * require a declaration — `addExtraLib` accepts any TypeScript, and the service
+ * draws the same from it. Function bodies included, which is better: the
+ * tooltip of `hsv` then shows the real code.
  *
- * Le fichier est déposé là où un paquet vit, `node_modules/<nom>/index.ts`, et
- * `paths` l'y envoie directement : la résolution ne dépend alors d'aucune
- * subtilité de la recherche dans `node_modules` à l'intérieur de l'ouvrier.
+ * The file is placed where a package lives, `node_modules/<name>/index.ts`, and
+ * `paths` sends it there directly: resolution then depends on no subtlety of
+ * the search in `node_modules` inside the worker.
  *
- * ## Les ouvriers ne viennent pas d'un CDN
+ * ## The workers do not come from a CDN
  *
- * `?worker` de Vite empaquette chaque ouvrier comme un actif du projet, en
- * développement comme dans l'application livrée. Rien n'est téléchargé à
- * l'usage : l'application s'ouvre hors ligne.
+ * Vite's `?worker` bundles each worker as a project asset, in development as in
+ * the shipped application. Nothing is downloaded during use: the application
+ * opens offline.
  */
 
 import * as monaco from 'monaco-editor/editor/editor.api.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
-// Enregistre l'identifiant de langage « typescript » et sa coloration. Sans
-// lui, `languages.onLanguage('typescript')` n'est jamais déclenché et le
-// service de langage ne démarre pas.
+// Registers the "typescript" language identifier and its highlighting. Without
+// it, `languages.onLanguage('typescript')` is never triggered and the language
+// service does not start.
 import 'monaco-editor/languages/definitions/typescript/register.js'
 import {
   getTypeScriptWorker,
@@ -44,12 +44,12 @@ import {
 
 import effectsApiSource from '@candeo/effects-api/src/index.ts?raw'
 
-/** Là où le service de langage trouve `@candeo/effects-api`. */
+/** Where the language service finds `@candeo/effects-api`. */
 const API_PATH = 'node_modules/@candeo/effects-api/index.ts'
 const API_URI = `file:///${API_PATH}`
 
-/** Le fichier qu'on édite, vu par le service de langage. */
-export const EFFECT_URI = monaco.Uri.parse('file:///effet.ts')
+/** The file being edited, as the language service sees it. */
+export const EFFECT_URI = monaco.Uri.parse('file:///effect.ts')
 
 const THEME = 'candeo'
 
@@ -60,12 +60,12 @@ self.MonacoEnvironment = {
 }
 
 /**
- * Couleurs de l'éditeur, lues dans les jetons de style.
+ * The editor's colors, read from the style tokens.
  *
- * Monaco veut des couleurs en clair : il ne sait pas lire une variable CSS. On
- * les lui donne donc résolues, mais elles restent définies au seul endroit qui
- * les définit — `styles/tokens.css`. Un jeton renommé fait disparaître une
- * couleur de l'éditeur, il ne le fait pas tomber.
+ * Monaco wants plain colors: it cannot read a CSS variable. They are therefore
+ * given to it resolved, but they stay defined in the one place that defines
+ * them — `styles/tokens.css`. A renamed token makes a color disappear from the
+ * editor, it does not bring it down.
  */
 function palette(style: CSSStyleDeclaration): Record<string, string> {
   const wanted: Record<string, string> = {
@@ -99,11 +99,11 @@ function palette(style: CSSStyleDeclaration): Record<string, string> {
 }
 
 /**
- * Accorde l'éditeur au thème de l'application.
+ * Matches the editor to the application's theme.
  *
- * Le sens clair/sombre n'est pas redevine ici : `tokens.css` pose déjà
- * `color-scheme` sur la racine, en tenant compte du réglage système **et** de
- * `data-theme`. On le lit, on ne le recalcule pas.
+ * Light or dark is not guessed again here: `tokens.css` already sets
+ * `color-scheme` on the root, taking into account the system setting **and**
+ * `data-theme`. It is read, not recomputed.
  */
 function applyTheme(): void {
   const style = getComputedStyle(document.documentElement)
@@ -123,8 +123,8 @@ function applyTheme(): void {
 let started = false
 
 /**
- * Configure le service de langage. Idempotent : les réglages sont globaux à
- * Monaco, les poser deux fois n'aurait pas de sens.
+ * Configures the language service. Idempotent: the settings are global to
+ * Monaco, setting them twice would make no sense.
  */
 export function setupMonaco(): void {
   if (started) return
@@ -132,26 +132,26 @@ export function setupMonaco(): void {
 
   typescriptDefaults.setCompilerOptions({
     target: ScriptTarget.ES2020,
-    // **ESNext, jamais CommonJS** : `import { hsv } from '@candeo/effects-api'`
-    // doit rester un import à la sortie, c'est le chargeur de modules de
-    // rquickjs qui le résout vers le module interne de l'hôte.
+    // **ESNext, never CommonJS**: `import { hsv } from '@candeo/effects-api'`
+    // must stay an import in the output, it is rquickjs's module loader that
+    // resolves it to the host's internal module.
     module: ModuleKind.ESNext,
     moduleResolution: ModuleResolutionKind.NodeJs,
-    // `strict` entier, `noImplicitAny` compris.
+    // `strict` in full, `noImplicitAny` included.
     //
-    // Le désactiver rendrait `layout`, `time` et `frame` implicitement `any`
-    // dès que l'auteur retire le `satisfies EffectModule` du modèle — c'est-à-
-    // dire qu'il **supprimerait l'autocomplétion** dans le seul cas où elle
-    // manque, et sans rien dire. Or c'est elle qui justifie Monaco.
+    // Disabling it would make `layout`, `time` and `frame` implicitly `any` as
+    // soon as the author removes the `satisfies EffectModule` from the template
+    // — that is, it would **remove autocompletion** in the only case where it
+    // is missing, and without saying anything. Yet it is what justifies Monaco.
     //
-    // `satisfies EffectModule` fait donc partie du contrat, et le modèle de
-    // départ comme la documentation l'écrivent. Un auteur qui l'enlève voit une
-    // erreur explicite plutôt qu'un typage qui s'évapore.
+    // `satisfies EffectModule` is therefore part of the contract, and the
+    // starting template as well as the documentation write it. An author who
+    // removes it sees an explicit error rather than typing that evaporates.
     strict: true,
     allowNonTsExtensions: true,
-    // Ni DOM ni Node : un effet tourne dans QuickJS, côté Rust. Ni `document`,
-    // ni `fetch`, ni même `console` n'y existent — les proposer en
-    // autocomplétion serait promettre ce que le moteur ne fournit pas.
+    // Neither DOM nor Node: an effect runs in QuickJS, on the Rust side. Neither
+    // `document`, nor `fetch`, nor even `console` exist there — offering them in
+    // autocompletion would promise what the engine does not provide.
     lib: ['es2020'],
     baseUrl: 'file:///',
     paths: { '@candeo/effects-api': [API_PATH] },
@@ -159,9 +159,9 @@ export function setupMonaco(): void {
 
   typescriptDefaults.addExtraLib(effectsApiSource, API_URI)
 
-  // L'ouvrier reçoit les modèles dès leur création, sans attendre que l'éditeur
-  // les lui pousse. Sans cela, interroger le service juste après l'ouverture
-  // peut porter sur un fichier qu'il n'a pas encore.
+  // The worker receives the models as soon as they are created, without waiting
+  // for the editor to push them. Without this, querying the service right after
+  // opening may be about a file it does not have yet.
   typescriptDefaults.setEagerModelSync(true)
 
   applyTheme()
@@ -174,11 +174,11 @@ export function setupMonaco(): void {
 }
 
 /**
- * Le modèle du fichier édité.
+ * The model of the edited file.
  *
- * Un seul, réutilisé : l'URI est ce qui relie l'éditeur au service de langage,
- * et deux modèles ne peuvent pas porter la même. Rouvrir l'éditeur remplace
- * donc le contenu plutôt que de créer un second fichier.
+ * A single one, reused: the URI is what links the editor to the language
+ * service, and two models cannot carry the same one. Reopening the editor
+ * therefore replaces the content rather than creating a second file.
  */
 export function effectModel(source: string): monaco.editor.ITextModel {
   const existing = monaco.editor.getModel(EFFECT_URI)
@@ -189,25 +189,24 @@ export function effectModel(source: string): monaco.editor.ITextModel {
   return monaco.editor.createModel(source, 'typescript', EFFECT_URI)
 }
 
-/** Une erreur du service de langage, réduite à ce que l'interface affiche. */
+/** An error from the language service, reduced to what the interface shows. */
 export interface EffectError {
   line: number
   message: string
 }
 
 /**
- * Les erreurs que le service de langage voit dans le fichier.
+ * The errors the language service sees in the file.
  *
- * **Demandées à l'ouvrier, et non lues dans les marqueurs de l'éditeur.** Les
- * marqueurs sont posés de façon asynchrone : une validation lancée peu après
- * l'ouverture pouvait lire ceux d'une passe antérieure, effectuée avant que la
- * déclaration de `@candeo/effects-api` n'ait atteint l'ouvrier. Le service
- * annonçait alors des paramètres implicitement `any` — donc un refus, sur un
- * effet parfaitement correct, avec un message qui ne correspondait à rien de
- * visible à l'écran.
+ * **Asked of the worker, and not read from the editor's markers.** Markers are
+ * set asynchronously: a validation started shortly after opening could read
+ * those of an earlier pass, made before the declaration of
+ * `@candeo/effects-api` had reached the worker. The service then reported
+ * implicitly `any` parameters — hence a refusal, on a perfectly correct effect,
+ * with a message that matched nothing visible on screen.
  *
- * L'ouvrier, lui, répond sur l'état courant. Il n'y a plus de fenêtre pendant
- * laquelle la réponse est fausse.
+ * The worker, for its part, answers on the current state. There is no longer a
+ * window during which the answer is wrong.
  */
 export async function errors(): Promise<EffectError[]> {
   const uri = EFFECT_URI.toString()

@@ -1,51 +1,51 @@
 /**
- * Ce que `settings.json` retient, et comment la fenêtre l'écrit.
+ * What `settings.json` remembers, and how the window writes it.
  *
- * Trois sortes de décisions y vivent, et elles n'ont ni la même forme ni le même
- * chemin vers le disque :
+ * Three kinds of decisions live there, and they have neither the same shape nor
+ * the same path to disk:
  *
- * - les **réglages d'un effet**, par paire appareil / effet ;
- * - la **luminosité** d'un appareil, réappliquée à chaque branchement ;
- * - l'**effet appliqué** sur un appareil, écrit par le Rust au lancement.
+ * - an **effect's settings**, per device / effect pair;
+ * - a device's **brightness**, reapplied on every plug-in;
+ * - the **applied effect** on a device, written by Rust at startup.
  *
- * Le module portait le nom du premier seul — `useEffectParams` — et c'était le
- * même défaut de forme que les trois champs mono-appareil retirés de
- * `settings.json` : un nom qui décrit une part et un contenu qui en couvre
- * trois. Une **seule** lecture du fichier alimente les trois, ce qui est aussi
- * la raison de ne pas les séparer en trois composables.
+ * The module used to carry the name of the first one only — `useEffectParams` —
+ * and it was the same flaw of shape as the three single-device fields removed
+ * from `settings.json`: a name that describes one part and a content that
+ * covers three. A **single** read of the file feeds all three, which is also the
+ * reason not to split them into three composables.
  *
- * ## Les réglages d'un effet : trois destinations pour un même geste
+ * ## An effect's settings: three destinations for one gesture
  *
- * Bouger un curseur écrit à trois endroits, et ils n'ont ni la même cadence ni
- * la même durée de vie :
+ * Moving a slider writes to three places, and they have neither the same pace
+ * nor the same lifetime:
  *
- * 1. **La mémoire de la fenêtre**, immédiate : c'est elle que le formulaire
- *    affiche, et changer d'effet puis revenir la relit ;
- * 2. **la boucle de rendu**, à chaud, quelques dizaines de fois par seconde au
- *    plus (`set_effect_params`, `set_preview_params`) ;
- * 3. **`settings.json`**, quand le curseur s'arrête (`remember_effect_params`).
+ * 1. **The window's memory**, immediate: it is what the form displays, and
+ *    switching effects then coming back reads it again;
+ * 2. **the render loop**, live, a few dozen times per second at most
+ *    (`set_effect_params`, `set_preview_params`);
+ * 3. **`settings.json`**, when the slider stops (`remember_effect_params`).
  *
- * ## Pourquoi le disque et pas la seule session
+ * ## Why disk and not the session alone
  *
- * Ce formulaire sert celui qui n'écrira jamais d'effet. Il règle « la vague,
- * mais plus lente » **une fois** ; le lui refaire régler à chaque lancement
- * reviendrait à livrer un réglage qu'on ne peut pas garder, c'est-à-dire une
- * démonstration. Celui qui écrit du code itère et n'a rien à retenir — c'est
- * l'autre public qui paie une mémoire de session, et c'est justement celui que
- * l'issue #28 vise.
+ * This form serves the person who will never write an effect. They set "the
+ * wave, but slower" **once**; making them set it again at every launch would
+ * amount to shipping a setting that cannot be kept, that is, a demo. The person
+ * who writes code iterates and has nothing to remember — it is the other
+ * audience that pays for a session-only memory, and it is precisely the one
+ * issue #28 targets.
  *
- * L'adoption d'un appareil est déjà persistante pour la même raison : une
- * décision prise une fois ne se redemande pas.
+ * Adopting a device is already persistent for the same reason: a decision made
+ * once is not asked again.
  *
- * ## Ce qui est retenu, et ce qui ne l'est pas
+ * ## What is remembered, and what is not
  *
- * **Uniquement ce qui diffère de ce que l'effet déclare.** Un paramètre laissé à
- * sa valeur de départ n'est pas écrit, et suivra donc le manifeste si une
- * version ultérieure de l'effet en change le défaut. Même économie que les
- * décisions d'adoption, qui n'écrivent que ce qui s'écarte du défaut.
+ * **Only what differs from what the effect declares.** A parameter left at its
+ * starting value is not written, and will therefore follow the manifest if a
+ * later version of the effect changes its default. Same economy as the adoption
+ * decisions, which only write what departs from the default.
  *
- * État au niveau du module, comme `useDevice` et `useEffects` : passer à
- * l'éditeur détruit la vue, et les réglages en vol ne doivent pas partir avec.
+ * Module-level state, like `useDevice` and `useEffects`: moving to the editor
+ * destroys the view, and settings in flight must not go with it.
  */
 
 import { computed, readonly, ref } from 'vue'
@@ -57,93 +57,93 @@ import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 
 /**
- * Cadence maximale des envois à chaud, en millisecondes.
+ * Maximum pace of live sends, in milliseconds.
  *
- * Un glissement de souris produit des dizaines d'événements par seconde, et le
- * `pointermove` d'un écran à 144 Hz bien davantage. La boucle, elle, relit les
- * paramètres **à chaque image** — 30 fois par seconde. Envoyer plus vite qu'elle
- * ne lit, c'est remplacer un JSON que personne n'a encore regardé.
+ * A mouse drag produces dozens of events per second, and the `pointermove` of a
+ * 144 Hz screen far more. The loop, for its part, reads the parameters again
+ * **on every frame** — 30 times per second. Sending faster than it reads means
+ * replacing a JSON nobody has looked at yet.
  *
- * 40 ms, soit 25 envois par seconde au plus : toujours sous la cadence de rendu,
- * donc invisible à l'œil, et un ordre de grandeur sous ce qu'un curseur produit.
+ * 40 ms, that is 25 sends per second at most: always under the render pace,
+ * therefore invisible to the eye, and an order of magnitude under what a slider
+ * produces.
  *
- * ⚠️ **La marge s'est resserrée avec la cadence.** Contre les 16,7 ms d'une
- * boucle à 60, ces 40 ms laissaient un facteur deux ; contre les 33,3 ms d'une
- * boucle à 30, il ne reste que 7 ms. L'invariant tient — on écrit toujours moins
- * souvent que la boucle ne lit — mais il tient de peu : **descendre cette valeur
- * sous 34 ms le casserait**, et on se remettrait à remplacer des JSON non lus.
- * C'est le plancher, pas un réglage de confort.
+ * ⚠️ **The margin tightened with the pace.** Against the 16.7 ms of a loop at
+ * 60, these 40 ms left a factor of two; against the 33.3 ms of a loop at 30,
+ * only 7 ms remain. The invariant holds — we always write less often than the
+ * loop reads — but it holds narrowly: **lowering this value under 34 ms would
+ * break it**, and we would go back to replacing unread JSON. It is the floor,
+ * not a comfort setting.
  */
 const HOT_PERIOD = 40
 
 /**
- * Repos du curseur avant l'écriture disque, en millisecondes.
+ * Slider rest before the disk write, in milliseconds.
  *
- * C'est un filet, pas le chemin nominal : l'écriture part normalement à la **fin
- * du geste** — `change` sur un curseur, c'est-à-dire au relâchement — et ce
- * repos ne sert qu'aux cas où cet événement n'arrive pas.
+ * It is a safety net, not the nominal path: the write normally goes out at the
+ * **end of the gesture** — `change` on a slider, that is, on release — and this
+ * rest only serves the cases where that event does not arrive.
  */
 const DISK_DELAY = 600
 
 /**
- * Écart minimal entre deux écritures d'une même paire, en millisecondes.
+ * Minimum gap between two writes of the same pair, in milliseconds.
  *
- * La fin du geste n'est pas toujours rare : une flèche du clavier maintenue
- * enfoncée sur un curseur émet `change` **à chaque répétition**, soit une
- * trentaine par seconde. Écrire sans condition ferait donc trente écritures
- * disque par seconde, exactement ce que la temporisation évitait.
+ * The end of the gesture is not always rare: a keyboard arrow held down on a
+ * slider emits `change` **on every repeat**, about thirty per second. Writing
+ * unconditionally would therefore make thirty disk writes per second, exactly
+ * what the debounce avoided.
  *
- * Passé ce délai, la temporisation reprend la main et écrit le dernier état à la
- * relâche — on ne perd rien, on décale.
+ * Past this delay, the debounce takes over again and writes the last state on
+ * release — nothing is lost, it is shifted.
  */
 const DISK_PERIOD = 250
 
-/** Ce qui diffère du manifeste, par appareil et par effet. Clé `vid:pid/effet`. */
+/** What differs from the manifest, per device and per effect. Key `vid:pid/effect`. */
 const remembered = ref<Record<string, EffectParams>>({})
 
 /**
- * L'effet **appliqué** sur chaque appareil, tel que le fichier le retient.
- * Clé `vid:pid`.
+ * The effect **applied** on each device, as the file remembers it.
+ * Key `vid:pid`.
  *
- * Relu, jamais écrit d'ici : c'est le Rust qui le retient, au moment où l'effet
- * démarre pour de bon. La fenêtre n'aurait pas de quoi le faire honnêtement —
- * l'icône de zone de notification lance des effets sans elle.
+ * Read back, never written from here: it is Rust that remembers it, at the
+ * moment the effect really starts. The window would have no honest way to do
+ * it — the notification area icon starts effects without it.
  *
- * Ce qui en dépend : dire qu'un appareil au repos **se souvient** de son dernier
- * effet, plutôt que d'afficher « aucun effet » et laisser croire que rien n'a
- * été retenu.
+ * What depends on it: saying that an idle device **remembers** its last effect,
+ * rather than showing "no effect" and suggesting that nothing was remembered.
  */
 const applied = ref<Record<string, string>>({})
 
-/** La luminosité retenue par appareil, clé `vid:pid`. Absente = le défaut. */
+/** The brightness remembered per device, key `vid:pid`. Absent = the default. */
 const brightness = ref<Record<string, number>>({})
 
-/** Ce qui a empêché de lire, d'ajuster ou de retenir. Déjà lisible. */
+/** What prevented reading, adjusting or remembering. Already readable. */
 const error = ref<string | null>(null)
 
-/** La lecture **en vol**, partagée : deux écrans qui montent ensemble ne lisent qu'une fois. */
+/** The read **in flight**, shared: two screens mounting together read only once. */
 let reading: Promise<void> | null = null
 
-/** Vrai dès qu'une lecture a abouti. C'est lui, et lui seul, qui évite de relire à chaque montage. */
+/** True as soon as a read has succeeded. It, and it alone, avoids reading again on every mount. */
 let loaded = false
 
 /**
- * Numéro de la dernière lecture lancée.
+ * Number of the last read started.
  *
- * `reload` peut partir pendant qu'une lecture est déjà en vol, et rien ne
- * garantit que les deux reviennent dans l'ordre où elles sont parties. Sans ce
- * compte, la plus ancienne pourrait atterrir en dernier et réinstaller
- * exactement l'état qu'on venait de partir remplacer.
+ * `reload` can start while a read is already in flight, and nothing guarantees
+ * that both come back in the order they left. Without this count, the older one
+ * could land last and reinstall exactly the state we had just set out to
+ * replace.
  */
 let generation = 0
 
 const deviceKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
 const key = (d: DeviceRef, effect: string) => `${deviceKey(d)}/${effect}`
 
-/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-// ---------------------------------------------------------------- valeurs
+/** Errors raised by Rust are already readable: they are shown as they are. */
+// ---------------------------------------------------------------- values
 
-/** Vrai si cette valeur est une couleur, au sens de `ParamSpec`. */
+/** True if this value is a color, in the sense of `ParamSpec`. */
 function isRgb(v: unknown): v is Rgb {
   if (typeof v !== 'object' || v === null) return false
   const c = v as Record<string, unknown>
@@ -151,12 +151,12 @@ function isRgb(v: unknown): v is Rgb {
 }
 
 /**
- * Vrai si la valeur relue correspond à ce que l'effet déclare **aujourd'hui**.
+ * True if the value read back matches what the effect declares **today**.
  *
- * `settings.json` est un fichier, donc il se modifie à la main, et un effet
- * réenregistré peut avoir changé la sorte d'un paramètre. Une valeur qui ne
- * correspond plus retombe sur le défaut, plutôt que de faire produire à un
- * curseur un `NaN` ou à une liste une option qui n'existe pas.
+ * `settings.json` is a file, so it gets edited by hand, and a re-saved effect
+ * may have changed the kind of a parameter. A value that no longer matches falls
+ * back to the default, rather than making a slider produce a `NaN` or a list an
+ * option that does not exist.
  */
 function fits(spec: ParamSpec, v: ParamValue): boolean {
   switch (spec.kind) {
@@ -171,19 +171,19 @@ function fits(spec: ParamSpec, v: ParamValue): boolean {
   }
 }
 
-/** Égalité de valeurs de paramètre, couleurs comprises. */
+/** Equality of parameter values, colors included. */
 export function sameValue(a: ParamValue, b: ParamValue): boolean {
   if (isRgb(a) && isRgb(b)) return a.r === b.r && a.g === b.g && a.b === b.b
   return a === b
 }
 
 /**
- * Les valeurs complètes d'un effet : son manifeste, recouvert par ce qu'on a
- * retenu.
+ * An effect's complete values: its manifest, overlaid with what was
+ * remembered.
  *
- * Bornée aux paramètres **déclarés** : un réglage retenu pour un paramètre que
- * l'effet n'a plus disparaît de lui-même, au lieu de voyager indéfiniment vers
- * une boucle qui ne le lit plus.
+ * Limited to the **declared** parameters: a setting remembered for a parameter
+ * the effect no longer has disappears on its own, instead of travelling
+ * indefinitely to a loop that no longer reads it.
  */
 function merge(specs: Record<string, ParamSpec>, kept: EffectParams): EffectParams {
   const out: EffectParams = {}
@@ -194,7 +194,7 @@ function merge(specs: Record<string, ParamSpec>, kept: EffectParams): EffectPara
   return out
 }
 
-/** Ce qui s'écarte du manifeste, et rien d'autre — c'est ce qui part sur disque. */
+/** What departs from the manifest, and nothing else — it is what goes to disk. */
 function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectParams {
   const out: EffectParams = {}
   for (const [id, spec] of Object.entries(specs)) {
@@ -204,50 +204,51 @@ function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectPa
   return out
 }
 
-// ------------------------------------------------------------ envois à chaud
+// ------------------------------------------------------------ live sends
 
 /**
- * Ce qu'il reste à envoyer à **une** boucle de rendu.
+ * What remains to send to **one** render loop.
  *
- * Un seul envoi en vol à la fois, et jamais deux à moins de {@link HOT_PERIOD}
- * d'intervalle : les mouvements intermédiaires sont **écrasés**, pas empilés.
- * C'est la bonne façon de les perdre — la boucle ne lit que le dernier état, une
- * file d'attente ne ferait que le lui livrer en retard.
+ * A single send in flight at a time, and never two less than {@link HOT_PERIOD}
+ * apart: intermediate moves are **overwritten**, not stacked. It is the right
+ * way to lose them — the loop only reads the last state, a queue would only
+ * deliver it late.
  *
- * `pending` garantit qu'aucune valeur finale ne se perd : le dernier état
- * demandé repart toujours, une fois l'envoi en cours revenu.
+ * `pending` guarantees that no final value is lost: the last requested state
+ * always goes out again, once the current send has come back.
  */
 interface Sender {
-  /** Dernier état demandé, pas encore parti. `null` si tout est à jour. */
+  /** Last requested state, not yet sent. `null` if everything is up to date. */
   pending: EffectParams | null
-  /** Un envoi est en vol : à son retour, on repart si `pending` a bougé. */
+  /** A send is in flight: on its return, we go again if `pending` moved. */
   inFlight: boolean
-  /** Date du dernier départ, pour tenir la cadence. */
+  /** Time of the last departure, to keep the pace. */
   last: number
-  /** Minuterie d'attente de cadence, `0` s'il n'y en a pas. */
+  /** Pace wait timer, `0` if there is none. */
   timer: number
-  /** Où ces valeurs vont. Voir {@link hot}. */
+  /** Where these values go. See {@link hot}. */
   send: (params: EffectParams) => Promise<void>
 }
 
 /**
- * Un émetteur par boucle : deux claviers réglés à la suite ne se gênent pas, et
- * l'aperçu a le sien.
+ * One sender per loop: two keyboards adjusted one after the other do not get in
+ * each other's way, and the preview has its own.
  *
- * La clé de l'aperçu ne peut pas entrer en collision avec celle d'un appareil :
- * `vid:pid` est fait de deux nombres.
+ * The preview's key cannot collide with a device's: `vid:pid` is made of two
+ * numbers.
  */
 const senders = new Map<string, Sender>()
 
-/** La clé de l'émetteur de l'aperçu, qui n'est la boucle d'aucun appareil. */
-const PREVIEW = 'apercu'
+/** The key of the preview's sender, which is no device's loop. */
+const PREVIEW = 'preview'
 
 /**
- * Pousse des valeurs vers une boucle, à cadence bornée.
+ * Pushes values to a loop, at a bounded pace.
  *
- * `send` est fourni par l'appelant plutôt que déduit d'un `DeviceRef` : l'aperçu
- * n'a pas d'appareil, et lui inventer un identifiant d'appareil factice aurait
- * remis dans ce module la confusion que le moteur vient d'en sortir.
+ * `send` is provided by the caller rather than derived from a `DeviceRef`: the
+ * preview has no device, and inventing a fake device identifier for it would
+ * have put back into this module the confusion the engine has just taken out of
+ * it.
  */
 function hot(k: string, send: Sender['send'], params: EffectParams): void {
   let s = senders.get(k)
@@ -255,16 +256,16 @@ function hot(k: string, send: Sender['send'], params: EffectParams): void {
     s = { pending: null, inFlight: false, last: 0, timer: 0, send }
     senders.set(k, s)
   }
-  // L'aperçu change de boucle à chaque sélection : l'envoi doit suivre la
-  // dernière, pas celle qui vivait quand l'émetteur a été créé.
+  // The preview changes loop on every selection: the send must follow the
+  // latest, not the one that lived when the sender was created.
   s.send = send
   s.pending = params
   pump(s)
 }
 
 function pump(s: Sender): void {
-  // Rien à envoyer, ou quelqu'un s'en charge déjà : le retour de l'envoi en
-  // cours, ou l'expiration de la minuterie, rappellera cette fonction.
+  // Nothing to send, or someone already handles it: the return of the current
+  // send, or the timer expiring, will call this function again.
   if (s.pending === null || s.inFlight || s.timer !== 0) return
 
   const wait = HOT_PERIOD - (Date.now() - s.last)
@@ -292,9 +293,9 @@ function pump(s: Sender): void {
     })
 }
 
-// ------------------------------------------------------------ écriture disque
+// ------------------------------------------------------------ disk writes
 
-/** Une écriture différée, et de quoi la déclencher tout de suite. */
+/** A deferred write, and the means to trigger it right away. */
 interface Write {
   timer: number
   run: () => void
@@ -302,49 +303,48 @@ interface Write {
 
 const writes = new Map<string, Write>()
 
-/** Date de la dernière écriture partie, par paire. Voir {@link DISK_PERIOD}. */
+/** Time of the last write sent, per pair. See {@link DISK_PERIOD}. */
 const written = new Map<string, number>()
 
 /**
- * Écritures **parties vers le Rust et pas encore confirmées**, par paire.
+ * Writes **sent to Rust and not yet confirmed**, per pair.
  *
- * C'est le second morceau de ce que {@link read} doit protéger, et il ne se
- * déduit pas de {@link writes} : `persist` retire l'entrée de la table des
- * écritures en attente **avant** l'aller-retour, sans quoi un `flushAll` ou un
- * `settleOne` la referait partir une seconde fois. Entre ce retrait et le retour
- * du Rust, la paire n'apparaît donc nulle part — et une relecture qui tomberait
- * dans cette fenêtre rendrait la valeur d'avant l'écriture, c'est-à-dire
- * défaisant sous les yeux de l'utilisateur le réglage qu'il vient de poser.
+ * It is the second piece of what {@link read} must protect, and it cannot be
+ * derived from {@link writes}: `persist` removes the entry from the pending
+ * writes table **before** the round trip, otherwise a `flushAll` or a
+ * `settleOne` would send it a second time. Between that removal and Rust's
+ * return, the pair therefore appears nowhere — and a read landing in that window
+ * would return the value from before the write, that is, undoing before the
+ * user's eyes the setting they just made.
  *
- * Inobservable tant que rien n'appelait {@link reload}. L'icône de zone de
- * notification est le premier à l'appeler, et elle le fait précisément quand
- * quelque chose vient de bouger — donc au pire moment.
+ * Unobservable as long as nothing called {@link reload}. The notification area
+ * icon is the first to call it, and it does so precisely when something has just
+ * moved — so at the worst moment.
  *
- * Un **compte** et non un drapeau : deux écritures de la même paire peuvent se
- * chevaucher — la temporisation part, un `settle` en déclenche une autre aussitôt
- * — et un drapeau baissé par la première rouvrirait la fenêtre pendant que la
- * seconde vole encore.
+ * A **count** and not a flag: two writes of the same pair can overlap — the
+ * debounce fires, a `settle` triggers another right away — and a flag lowered by
+ * the first would reopen the window while the second is still in flight.
  */
 const inflight = new Map<string, number>()
 
-/** Retient qu'une écriture part, et de quoi savoir quand elle est revenue. */
+/** Records that a write is leaving, and the means to know when it has come back. */
 function takeOff(k: string): void {
   inflight.set(k, (inflight.get(k) ?? 0) + 1)
 }
 
 function landed(k: string): void {
-  const reste = (inflight.get(k) ?? 1) - 1
-  if (reste > 0) inflight.set(k, reste)
+  const remaining = (inflight.get(k) ?? 1) - 1
+  if (remaining > 0) inflight.set(k, remaining)
   else inflight.delete(k)
 }
 
 /**
- * Écrit au plus tard après {@link DISK_DELAY} sans mouvement.
+ * Writes at the latest after {@link DISK_DELAY} without movement.
  *
- * Chaque nouvelle valeur remplace la précédente : un glissement de deux
- * secondes ne produit qu'une écriture, celle de la valeur à laquelle on
- * s'arrête. Le repos n'est pas une optimisation de confort — `settings.json`
- * s'écrit par fichier temporaire puis renommage, c'est un geste disque complet.
+ * Each new value replaces the previous one: a two-second drag produces only one
+ * write, that of the value where it stops. The rest is not a comfort
+ * optimisation — `settings.json` is written through a temporary file then a
+ * rename, it is a complete disk operation.
  */
 function persist(device: DeviceRef, effect: string, values: EffectParams): void {
   const k = key(device, effect)
@@ -352,9 +352,9 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
   if (previous) window.clearTimeout(previous.timer)
 
   const run = () => {
-    // Retirée d'abord, pour qu'un `flushAll` ou un `settleOne` ne la refasse pas
-    // partir ; comptée comme en vol dans la foulée, pour qu'elle ne disparaisse
-    // pas de ce que {@link read} protège entre les deux. Voir {@link inflight}.
+    // Removed first, so that a `flushAll` or a `settleOne` does not send it
+    // again; counted as in flight right after, so that it does not disappear
+    // from what {@link read} protects in between. See {@link inflight}.
     writes.delete(k)
     written.set(k, Date.now())
     takeOff(k)
@@ -371,15 +371,14 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
 }
 
 /**
- * Déclenche l'écriture en attente pour cette paire, si elle peut partir.
+ * Triggers the pending write for this pair, if it can go.
  *
- * Trop tôt après la précédente, on ne fait rien : la temporisation armée par
- * `persist` est toujours là et écrira le dernier état. Rien ne se perd, l'ordre
- * est seulement décalé — voir {@link DISK_PERIOD}.
+ * Too soon after the previous one, nothing happens: the debounce armed by
+ * `persist` is still there and will write the last state. Nothing is lost, the
+ * order is only shifted — see {@link DISK_PERIOD}.
  *
- * `now` lève cet écart, pour les gestes qui ne se répètent pas : un clic sur
- * « Rétablir » n'a aucune raison d'attendre parce qu'un curseur vient d'être
- * relâché.
+ * `now` lifts this gap, for gestures that do not repeat: a click on "Restore"
+ * has no reason to wait because a slider has just been released.
  */
 function settleOne(device: DeviceRef, effect: string, now = false): void {
   const k = key(device, effect)
@@ -392,9 +391,9 @@ function settleOne(device: DeviceRef, effect: string, now = false): void {
 }
 
 /**
- * Déclenche toutes les écritures en attente sans attendre le repos.
+ * Triggers every pending write without waiting for the rest.
  *
- * L'itération porte sur un instantané : `run` se retire lui-même de la table.
+ * The iteration runs over a snapshot: `run` removes itself from the table.
  */
 function flushAll(): void {
   for (const w of [...writes.values()]) {
@@ -404,18 +403,19 @@ function flushAll(): void {
 }
 
 /**
- * Annule les écritures en attente dont la clé passe le crible, **sans les
- * exécuter**.
+ * Cancels the pending writes whose key passes the filter, **without running
+ * them**.
  *
- * L'inverse exact de {@link flushAll}, et le seul geste correct quand le Rust
- * vient de retirer ces entrées de `settings.json` : une temporisation qui
- * partirait après coup les y réécrirait, ressuscitant précisément ce qu'on
- * venait d'effacer.
+ * The exact opposite of {@link flushAll}, and the only correct move when Rust
+ * has just removed these entries from `settings.json`: a debounce firing
+ * afterwards would write them back, resurrecting precisely what had just been
+ * erased.
  *
- * Ne rappelle pas ce qui est déjà parti — rien ne le peut, l'appel est en vol.
- * Une écriture qui atterrit juste après une remise à zéro réécrit donc sa paire ;
- * la fenêtre, elle, ne s'en souvient plus ({@link inflight} ne protège que ce que
- * `remembered` porte encore), et le prochain lancement repart du fichier.
+ * Does not recall what has already left — nothing can, the call is in flight. A
+ * write that lands just after a reset therefore writes its pair again; the
+ * window, for its part, no longer remembers it ({@link inflight} only protects
+ * what `remembered` still holds), and the next launch starts again from the
+ * file.
  */
 function cancelWrites(keep: (key: string) => boolean): void {
   for (const [k, w] of [...writes.entries()]) {
@@ -427,27 +427,27 @@ function cancelWrites(keep: (key: string) => boolean): void {
 }
 
 /**
- * Dernier filet : fermer la fenêtre détruit la vue web **sans passer par les
- * crochets de Vue**.
+ * Last safety net: closing the window destroys the web view **without going
+ * through Vue's hooks**.
  *
- * `onBeforeUnmount` ne couvre que le changement d'écran ; or on ferme la fenêtre
- * pendant qu'un effet tourne, c'est même le mode d'emploi. Une minuterie de
- * 600 ms n'y survivrait pas.
+ * `onBeforeUnmount` only covers a change of screen; yet the window is closed
+ * while an effect runs, it is even how the app is meant to be used. A 600 ms
+ * timer would not survive it.
  *
- * Ce n'est qu'un filet, et volontairement : rien ne garantit qu'un aller-retour
- * vers le Rust aboutisse pendant que la vue web s'éteint. Le chemin sûr est
- * ailleurs — l'écriture part **à la fin du geste**, au relâchement du curseur,
- * donc bien avant qu'on approche de la croix de fermeture.
+ * It is only a safety net, and deliberately so: nothing guarantees that a round
+ * trip to Rust completes while the web view shuts down. The safe path is
+ * elsewhere — the write goes out **at the end of the gesture**, on slider
+ * release, so well before anyone gets near the close button.
  */
 window.addEventListener('pagehide', flushAll)
 
-// ------------------------------------------------------------------- lecture
+// ------------------------------------------------------------------- reading
 
 /**
- * Lit `settings.json` et remplace ce qu'on retient.
+ * Reads `settings.json` and replaces what is remembered.
  *
- * Un échec ne marque pas la lecture comme faite : il la laisse à retenter, pour
- * qu'un second écran ne se contente pas d'hériter d'un refus définitif.
+ * A failure does not mark the read as done: it leaves it to be retried, so that
+ * a second screen does not merely inherit a permanent refusal.
  */
 function read(): Promise<void> {
   const mine = ++generation
@@ -455,18 +455,18 @@ function read(): Promise<void> {
   const run = api
     .getSettings()
     .then((s) => {
-      // Une lecture plus récente est passée devant : la nôtre est périmée, et
-      // l'appliquer reviendrait à défaire ce qu'elle vient d'installer.
+      // A more recent read got ahead: ours is stale, and applying it would undo
+      // what that one has just installed.
       if (mine !== generation) return
 
-      const disque: Record<string, EffectParams> = Object.fromEntries(
+      const onDisk: Record<string, EffectParams> = Object.fromEntries(
         s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
       )
 
-      // Les deux autres tables sont reprises telles quelles : la fenêtre ne les
-      // écrit pas — le Rust retient l'effet appliqué au lancement, et la
-      // luminosité repart par sa propre commande —, il n'y a donc rien à
-      // protéger d'une écriture en vol comme pour les réglages ci-dessous.
+      // The two other tables are taken as they are: the window does not write
+      // them — Rust remembers the applied effect at startup, and the
+      // brightness goes out through its own command —, so there is nothing to
+      // protect from a write in flight as for the settings below.
       applied.value = Object.fromEntries(
         s.activeEffects.map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.effect]),
       )
@@ -476,24 +476,24 @@ function read(): Promise<void> {
           .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.brightness as number]),
       )
 
-      // Ce qui attend encore le disque est plus récent que le disque : l'écriture
-      // ne part qu'au repos du curseur, et `reload` ne choisit pas son moment.
-      // Reprendre le fichier tel quel ferait donc reculer un curseur sous la main
-      // de celui qui le tient.
+      // What is still waiting for the disk is more recent than the disk: the
+      // write only goes out when the slider rests, and `reload` does not choose
+      // its moment. Taking the file as it is would therefore move a slider back
+      // under the hand of the person holding it.
       //
-      // **Les deux tables, et c'est la correction que #46 imposait** : ce qui
-      // attend ({@link writes}) et ce qui est parti sans être confirmé
-      // ({@link inflight}). `persist` retire l'entrée de la première avant
-      // l'aller-retour ; sans la seconde, une relecture tombant dans cette
-      // fenêtre rendrait la valeur d'avant l'écriture. Inobservable tant que rien
-      // n'appelait `reload` — l'icône de zone de notification l'appelle, et
-      // justement quand quelque chose vient de bouger.
+      // **Both tables, and it is the fix #46 required**: what is waiting
+      // ({@link writes}) and what has left without being confirmed
+      // ({@link inflight}). `persist` removes the entry from the first before
+      // the round trip; without the second, a read landing in that window would
+      // return the value from before the write. Unobservable as long as nothing
+      // called `reload` — the notification area icon calls it, and precisely
+      // when something has just moved.
       for (const k of [...writes.keys(), ...inflight.keys()]) {
-        const aNous = remembered.value[k]
-        if (aNous !== undefined) disque[k] = aNous
+        const ours = remembered.value[k]
+        if (ours !== undefined) onDisk[k] = ours
       }
 
-      remembered.value = disque
+      remembered.value = onDisk
       loaded = true
     })
     .catch((e: unknown) => {
@@ -501,8 +501,8 @@ function read(): Promise<void> {
       error.value = message(e)
     })
     .finally(() => {
-      // Pas d'effacement inconditionnel : une lecture plus récente a pu prendre
-      // la place, et la retirer la rendrait invisible à qui appelle `load`.
+      // No unconditional clearing: a more recent read may have taken the place,
+      // and removing it would make it invisible to whoever calls `load`.
       if (reading === run) reading = null
     })
 
@@ -512,13 +512,14 @@ function read(): Promise<void> {
 
 export function useSettings() {
   /**
-   * S'assure que `settings.json` a été lu — une fois par session, pas une fois
-   * par montage.
+   * Makes sure `settings.json` has been read — once per session, not once per
+   * mount.
    *
-   * Revenir sur cet écran ne relit pas, et c'est voulu : le disque ne bouge pas
-   * du seul fait qu'on navigue, et c'est la fenêtre elle-même qui l'écrit, donc
-   * elle en sait déjà plus que lui. Le jour où ce n'est plus vrai, c'est
-   * {@link reload} qu'il faut appeler — pas cette économie qu'il faut retirer.
+   * Coming back to this screen does not read again, and that is intended: the
+   * disk does not change merely because we navigate, and it is the window itself
+   * that writes it, so it already knows more than the disk. The day this is no
+   * longer true, it is {@link reload} that must be called — not this economy
+   * that must be removed.
    */
   function load(): Promise<void> {
     if (loaded) return Promise.resolve()
@@ -526,18 +527,18 @@ export function useSettings() {
   }
 
   /**
-   * Relit `settings.json`, mémoïsation comprise.
+   * Reads `settings.json` again, memoisation included.
    *
-   * Pour ce qui bouge **hors de la fenêtre** : l'icône de zone de notification
-   * commande les effets sans elle, et la fenêtre lui survit désormais repliée —
-   * son instantané peut donc vieillir des jours. Sans ce point d'entrée, `load`
-   * ne relirait jamais après un premier succès.
+   * For what moves **outside the window**: the notification area icon controls
+   * effects without it, and the window now outlives it folded away — its
+   * snapshot can therefore age for days. Without this entry point, `load` would
+   * never read again after a first success.
    *
-   * Ne rejoint pas une lecture déjà en vol : celle-ci a pu partir **avant**
-   * l'écriture qu'on vient d'apprendre, et rendrait alors le contenu même qu'on
-   * cherche à remplacer. Ce que la fenêtre n'a pas fini d'écrire est préservé
-   * par {@link read} — voir {@link inflight}, qui est la moitié de cette
-   * protection que l'appel de `reload` a rendue nécessaire.
+   * Does not join a read already in flight: that one may have left **before**
+   * the write we have just learned about, and would then return the very
+   * content we are trying to replace. What the window has not finished writing
+   * is preserved by {@link read} — see {@link inflight}, which is the half of
+   * this protection that calling `reload` made necessary.
    */
   function reload(): Promise<void> {
     loaded = false
@@ -545,11 +546,10 @@ export function useSettings() {
   }
 
   /**
-   * Les valeurs sur lesquelles cet effet tourne — ou tournerait — sur cet
-   * appareil.
+   * The values this effect runs — or would run — with on this device.
    *
-   * Sans appareil, ce que l'effet déclare : il faut bien montrer quelque chose,
-   * et ces valeurs-là sont vraies pour n'importe quel appareil.
+   * Without a device, what the effect declares: something has to be shown, and
+   * those values hold for any device.
    */
   function valuesFor(
     device: DeviceRef | null,
@@ -561,11 +561,11 @@ export function useSettings() {
   }
 
   /**
-   * Vrai si quelque chose est **retenu** pour cette paire.
+   * True if something is **remembered** for this pair.
    *
-   * Sert à le dire à l'écran. C'était le défaut réel de la persistance livrée
-   * par l'issue #28 : les réglages tenaient, et rien ne laissait le deviner — on
-   * règle, on ferme, et on n'a aucune raison de croire que ça a survécu.
+   * Used to say so on screen. It was the real flaw of the persistence shipped
+   * by issue #28: the settings held, and nothing hinted at it — you adjust, you
+   * close, and you have no reason to believe it survived.
    */
   function keptFor(device: DeviceRef | null, effect: string): boolean {
     if (!device) return false
@@ -573,15 +573,15 @@ export function useSettings() {
   }
 
   /**
-   * Change **un** réglage : mémoire, boucle de l'appareil, disque.
+   * Changes **one** setting: memory, the device's loop, disk.
    *
-   * Le tout est envoyé à la boucle, pas le seul champ modifié : `set_params`
-   * remplace le JSON des paramètres, il ne le fusionne pas.
+   * The whole set is sent to the loop, not only the modified field: `set_params`
+   * replaces the parameters JSON, it does not merge it.
    *
-   * Rend les valeurs complètes, pour que l'appelant puisse les pousser aussi
-   * vers l'aperçu ({@link adjustPreview}). Les envoyer ici sans condition
-   * ajusterait un aperçu qui ne montre peut-être pas cet effet-là — seul
-   * l'appelant sait ce qu'il regarde.
+   * Returns the complete values, so that the caller can also push them to the
+   * preview ({@link adjustPreview}). Sending them here unconditionally would
+   * adjust a preview that may not be showing this effect — only the caller
+   * knows what it is looking at.
    */
   function adjust(
     device: DeviceRef,
@@ -591,116 +591,116 @@ export function useSettings() {
     value: ParamValue,
     applied: boolean,
   ): EffectParams {
-    // Comme `useEffects.apply` : l'échec précédent s'efface à la tentative
-    // suivante. Sans cela un incident passager laisserait un bandeau rouge
-    // jusqu'à la fermeture, longtemps après que tout est rentré dans l'ordre.
+    // Like `useEffects.apply`: the previous failure is cleared on the next
+    // attempt. Without this a passing incident would leave a red banner until
+    // closing, long after everything is back in order.
     error.value = null
 
     const complete = { ...valuesFor(device, effect, specs), [id]: value }
     const kept = apart(specs, complete)
 
-    // Remplacement plutôt que mutation, comme dans `useEffects` : la réactivité
-    // ne dépend plus de la présence de la clé.
+    // Replacement rather than mutation, as in `useEffects`: reactivity no
+    // longer depends on the key being present.
     remembered.value = { ...remembered.value, [key(device, effect)]: kept }
-    // ⚠️ Vers l'appareil **seulement si c'est cet effet-là qui y tourne**.
+    // ⚠️ To the device **only if it is this effect that runs there**.
     //
-    // La boucle d'un appareil n'a qu'un effet, et elle relit un JSON de
-    // paramètres sans savoir de quel effet il vient. Pousser les valeurs de
-    // l'effet qu'on règle vers une boucle qui en exécute un autre lui fait
-    // appliquer des réglages qui ne sont pas les siens : un nom de paramètre qui
-    // coïncide — `couleur` — change l'éclairage sous les yeux de l'utilisateur,
-    // et une forme qui ne convient pas fait échouer le rendu jusqu'à l'arrêt au
-    // bout de [`MAX_CONSECUTIVE_ERRORS`] images.
+    // A device's loop has only one effect, and it reads a parameters JSON
+    // without knowing which effect it comes from. Pushing the values of the
+    // effect being adjusted to a loop that runs another one makes it apply
+    // settings that are not its own: a parameter name that coincides — `color` —
+    // changes the lighting before the user's eyes, and a shape that does not
+    // fit makes rendering fail until it stops after
+    // [`MAX_CONSECUTIVE_ERRORS`] frames.
     //
-    // Régler un effet qu'on prévisualise ne doit donc rien envoyer au clavier —
-    // c'est tout l'objet de l'aperçu. On retient quand même : le réglage est
-    // celui de la paire appareil/effet, il vaudra au prochain lancement.
+    // Adjusting an effect being previewed must therefore send nothing to the
+    // keyboard — that is the whole point of the preview. It is still
+    // remembered: the setting belongs to the device/effect pair, it will apply
+    // at the next start.
     if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), complete)
     persist(device, effect, kept)
     return complete
   }
 
   /**
-   * Pousse des valeurs vers la boucle d'**aperçu**, à la même cadence.
+   * Pushes values to the **preview** loop, at the same pace.
    *
-   * C'est ce qui fait qu'un réglage agit à chaud sur ce qu'on regarde, sans
-   * l'avoir appliqué : la boucle d'aperçu relit son JSON à chaque image, comme
-   * celle d'un appareil. Rien n'est écrit sur disque ici — c'est {@link adjust}
-   * qui retient, et il retient pour la paire appareil / effet, pas pour l'aperçu
-   * qui n'appartient à aucun appareil.
+   * It is what makes a setting act live on what is being looked at, without
+   * having applied it: the preview loop reads its JSON again on every frame,
+   * like a device's. Nothing is written to disk here — it is {@link adjust}
+   * that remembers, and it remembers for the device / effect pair, not for the
+   * preview, which belongs to no device.
    */
   function adjustPreview(values: EffectParams): void {
     hot(PREVIEW, api.setPreviewParams, values)
   }
 
-  /** La luminosité retenue pour cet appareil, ou le défaut. */
+  /** The brightness remembered for this device, or the default. */
   function brightnessOf(device: DeviceRef | null): number {
     if (!device) return api.BRIGHTNESS_DEFAULT
     return brightness.value[deviceKey(device)] ?? api.BRIGHTNESS_DEFAULT
   }
 
   /**
-   * Change la luminosité d'un appareil : mémoire, clavier, et disque si demandé.
+   * Changes a device's brightness: memory, keyboard, and disk if asked.
    *
-   * Deux commandes et non une, comme pour les réglages d'effet : `setBrightness`
-   * écrit sur le clavier à chaque mouvement, `rememberBrightness` n'écrit sur
-   * disque qu'à la fin du geste. `commit` dit lequel des deux on est en train de
-   * faire — un glissement produit des dizaines de `setBrightness` et une seule
-   * écriture disque.
+   * Two commands and not one, as for effect settings: `setBrightness` writes to
+   * the keyboard on every move, `rememberBrightness` only writes to disk at the
+   * end of the gesture. `commit` says which of the two is being done — a drag
+   * produces dozens of `setBrightness` and a single disk write.
    */
   function setBrightness(device: DeviceRef, level: number, commit: boolean): void {
     error.value = null
     const k = deviceKey(device)
-    // Le défaut ne se retient pas : l'absence d'entrée **est** le défaut, ici
-    // comme dans le fichier.
-    const suite = { ...brightness.value }
-    if (level === api.BRIGHTNESS_DEFAULT) delete suite[k]
-    else suite[k] = level
-    brightness.value = suite
+    // The default is not remembered: the absence of an entry **is** the
+    // default, here as in the file.
+    const next = { ...brightness.value }
+    if (level === api.BRIGHTNESS_DEFAULT) delete next[k]
+    else next[k] = level
+    brightness.value = next
 
-    const echoue = (e: unknown) => {
+    const fail = (e: unknown) => {
       error.value = message(e)
     }
-    // L'appareil peut être fermé — débranché, ignoré : l'écriture HID échoue
-    // alors, et ce n'est pas une raison de ne pas retenir le niveau. Il sera
-    // réappliqué au branchement suivant, c'est tout l'objet de le retenir.
-    void api.setBrightness(device, level).catch(echoue)
-    if (commit) void api.rememberBrightness(device, level).catch(echoue)
+    // The device may be closed — unplugged, ignored: the HID write then fails,
+    // and that is no reason not to remember the level. It will be reapplied on
+    // the next plug-in, which is the whole point of remembering it.
+    void api.setBrightness(device, level).catch(fail)
+    if (commit) void api.rememberBrightness(device, level).catch(fail)
   }
 
   /**
-   * L'effet que `settings.json` retient comme appliqué sur cet appareil.
+   * The effect `settings.json` remembers as applied on this device.
    *
-   * Ce n'est **pas** ce qui tourne — ça, c'est `engine_status`. C'est ce qui a
-   * été appliqué la dernière fois, et ce qui permet à un appareil au repos de
-   * dire qu'il s'en souvient plutôt que d'afficher « aucun effet ».
+   * It is **not** what is running — that is `engine_status`. It is what was
+   * applied last time, and what lets an idle device say it remembers it rather
+   * than showing "no effect".
    */
   function lastAppliedOn(device: DeviceRef | null): string | null {
     return device ? (applied.value[deviceKey(device)] ?? null) : null
   }
 
   /**
-   * Le geste est terminé — relâchement d'un curseur, case cochée, option
-   * choisie : on écrit maintenant.
+   * The gesture is over — slider released, box ticked, option chosen: write
+   * now.
    *
-   * C'est **le** chemin nominal vers le disque. Sans lui, la seule garantie
-   * serait une minuterie de 600 ms, que fermer la fenêtre emporterait — or on
-   * ferme la fenêtre pendant qu'un effet tourne, c'est le mode d'emploi.
+   * It is **the** nominal path to disk. Without it, the only guarantee would be
+   * a 600 ms timer, which closing the window would take away — yet the window
+   * is closed while an effect runs, it is how the app is meant to be used.
    */
   function settle(device: DeviceRef, effect: string): void {
     settleOne(device, effect)
   }
 
   /**
-   * Rétablit ce que l'effet déclare, et **oublie** — l'entrée disparaît de
-   * `settings.json` au lieu d'y garder une copie des défauts.
+   * Restores what the effect declares, and **forgets** — the entry disappears
+   * from `settings.json` instead of keeping a copy of the defaults there.
    *
-   * Écrit sans attendre : c'est un clic, pas un glissement, il n'y a rien à
-   * regrouper.
+   * Writes without waiting: it is a click, not a drag, there is nothing to
+   * group.
    *
-   * Rend les valeurs déclarées, pour la même raison qu'{@link adjust} rend les
-   * siennes : l'aperçu doit revenir avec, et seul l'appelant sait ce qu'il
-   * regarde.
+   * Returns the declared values, for the same reason {@link adjust} returns
+   * its own: the preview must come back with them, and only the caller knows
+   * what it is looking at.
    */
   function forget(
     device: DeviceRef,
@@ -709,62 +709,61 @@ export function useSettings() {
     applied: boolean,
   ): EffectParams {
     error.value = null
-    const declarees = merge(specs, {})
+    const declared = merge(specs, {})
     remembered.value = { ...remembered.value, [key(device, effect)]: {} }
-    // Même condition qu'{@link adjust}, et pour la même raison : rétablir les
-    // valeurs d'un effet qu'on prévisualise n'a aucune raison de toucher au
-    // clavier, qui exécute peut-être autre chose.
-    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), declarees)
+    // Same condition as {@link adjust}, and for the same reason: restoring the
+    // values of an effect being previewed has no reason to touch the keyboard,
+    // which may be running something else.
+    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), declared)
     persist(device, effect, {})
     settleOne(device, effect, true)
-    return declarees
+    return declared
   }
 
   /**
-   * Oublie ce qu'on retenait pour un effet, sur **tous** les appareils.
+   * Forgets what was remembered for an effect, on **every** device.
    *
-   * Le pendant, en mémoire, de ce que `delete_effect` fait dans `settings.json`.
-   * Sans lui, la fenêtre garderait des réglages désignant un identifiant que plus
-   * rien ne nomme, et un effet réenregistré sous le même nom **dans la même
-   * session** en hériterait — exactement ce que la purge côté Rust évite d'un
-   * lancement à l'autre.
+   * The in-memory counterpart of what `delete_effect` does in `settings.json`.
+   * Without it, the window would keep settings pointing to an identifier that
+   * nothing names any more, and an effect re-saved under the same name **in the
+   * same session** would inherit them — exactly what the purge on the Rust side
+   * avoids from one launch to the next.
    *
-   * Rien n'est envoyé au Rust : il a déjà oublié. Ce qui est en vol est annulé,
-   * pas déclenché.
+   * Nothing is sent to Rust: it has already forgotten. What is in flight is
+   * cancelled, not triggered.
    */
   function dropEffect(effect: string): void {
     // An effect name cannot contain `/`, which Windows forbids in file names: the
     // suffix cannot designate the wrong pair.
     const suffix = `/${effect}`
-    const autres = (k: string) => !k.endsWith(suffix)
-    cancelWrites(autres)
+    const others = (k: string) => !k.endsWith(suffix)
+    cancelWrites(others)
     remembered.value = Object.fromEntries(
-      Object.entries(remembered.value).filter(([k]) => autres(k)),
+      Object.entries(remembered.value).filter(([k]) => others(k)),
     )
-    // Le pendant de ce que `Settings::forget_effect` vient de faire sur disque :
-    // l'identifiant ne désigne plus rien, et le laisser ici ferait annoncer par
-    // la colonne des appareils un effet « retenu » que la bibliothèque ne
-    // connaît plus.
+    // The counterpart of what `Settings::forget_effect` has just done on disk:
+    // the identifier no longer designates anything, and leaving it here would
+    // make the devices column announce a "remembered" effect that the library
+    // no longer knows.
     applied.value = Object.fromEntries(
       Object.entries(applied.value).filter(([, id]) => id !== effect),
     )
   }
 
   /**
-   * Oublie **tout**, comme la remise à zéro de la configuration vient de le faire
-   * sur disque.
+   * Forgets **everything**, as the configuration reset has just done on disk.
    *
-   * Sans cela le premier mouvement de curseur réécrirait les réglages qu'on
-   * venait d'effacer : la fenêtre les tient en mémoire, et n'envoie au Rust que
-   * ce qui diffère du manifeste — c'est-à-dire ce qu'elle croit savoir.
+   * Without this the first slider move would write back the settings that had
+   * just been erased: the window holds them in memory, and only sends Rust
+   * what differs from the manifest — that is, what it believes it knows.
    */
   function dropAll(): void {
     cancelWrites(() => false)
     remembered.value = {}
-    // Les deux autres tables décrivaient un fichier qui vient d'être remis à
-    // plat : les garder ferait dire à l'écran qu'un effet reste appliqué et
-    // qu'une luminosité reste retenue, alors que le Rust a tout éteint et tout
-    // refermé.
+    // The two other tables described a file that has just been reset: keeping
+    // them would make the screen say that an effect is still applied and a
+    // brightness still remembered, while Rust has turned everything off and
+    // closed everything.
     applied.value = {}
     brightness.value = {}
   }
