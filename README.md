@@ -13,10 +13,10 @@ device.
 
 ## Status
 
-Working proof of concept on the **Razer DeathStalker V2 Pro (wired)**.
-The protocol was surveyed by capturing the USB bus, then **validated by direct
-writes** — solid colors, per-row gradient, partial row writes and firmware
-effect switching, all with no third-party software running.
+Drives the **Razer DeathStalker V2 Pro (wired)** and the **Alienware m18 R1**,
+its keyboard key by key and its lighting zones. Each protocol was surveyed by
+capturing the USB bus, then **validated by direct writes**, with no third-party
+software running.
 
 | Layer | Status |
 |---|---|
