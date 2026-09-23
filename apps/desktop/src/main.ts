@@ -1,10 +1,10 @@
 import { createApp } from 'vue'
 
-// Polices empaquetées, pas chargées depuis le réseau : une application de
-// bureau doit s'ouvrir correctement hors ligne.
+// Bundled fonts, not loaded from the network: a desktop application must open
+// properly offline.
 //
-// Tous les sous-ensembles sont inclus (~200 ko). Les découper serait un
-// réflexe web sans objet ici : rien n'est téléchargé à l'usage.
+// Every subset is included (~200 kB). Splitting them would be a web reflex
+// with no purpose here: nothing is downloaded during use.
 import '@fontsource-variable/ibm-plex-sans'
 import '@fontsource-variable/jetbrains-mono'
 
@@ -12,7 +12,7 @@ import './styles/tokens.css'
 import './styles/base.css'
 
 import { getLanguage } from './api/candeo'
-import { erreur, message } from './api/journal'
+import { error, message } from './api/journal'
 import App from './App.vue'
 import { useTheme } from './composables/useTheme'
 import { i18n, showIn } from './i18n'
@@ -21,23 +21,23 @@ import { router } from './router'
 const app = createApp(App)
 
 /**
- * Le filet de Vue, relié au journal.
+ * Vue's safety net, wired to the log.
  *
- * Ce que Vue attrape ici, c'est ce qu'aucun composant n'a rattrapé : une erreur
- * dans un `setup`, un `watch` ou un gestionnaire d'événement. Sans destination,
- * elle allait dans la console — invisible en `release`, où le binaire est compilé
- * sans console — et la fenêtre restait figée sans que rien n'en garde trace.
+ * What Vue catches here is what no component caught: an error in a `setup`, a
+ * `watch` or an event handler. With no destination, it went to the console —
+ * invisible in `release`, where the binary is built without a console — and the
+ * window stayed frozen without anything keeping a trace of it.
  *
- * `info` porte le crochet de Vue (« render function », « watcher callback »…) :
- * c'est ce qui distingue une erreur de rendu d'une erreur de gestionnaire, et
- * c'est la première question qu'on se pose en lisant le fichier.
+ * `info` carries Vue's hook ("render function", "watcher callback"…): it is
+ * what tells a render error from a handler error, and it is the first question
+ * one asks when reading the file.
  *
- * Le gestionnaire n'affiche rien : il journalise. Ce que l'utilisateur doit voir
- * est déjà porté par les écrans, qui rattrapent leurs propres erreurs ; ce qui
- * arrive ici est précisément ce que personne n'a su présenter.
+ * The handler shows nothing: it logs. What the user must see is already
+ * carried by the screens, which catch their own errors; what arrives here is
+ * precisely what nobody knew how to present.
  */
 app.config.errorHandler = (e, _instance, info) => {
-  erreur('vue', `${info}: ${message(e, 'en')}`, e)
+  error('vue', `${info}: ${message(e, 'en')}`, e)
 }
 
 // The language and the theme first, so that the window does not show English or
@@ -46,6 +46,6 @@ app.config.errorHandler = (e, _instance, info) => {
 void Promise.all([
   getLanguage()
     .then((status) => showIn(status.language))
-    .catch((e: unknown) => erreur('i18n', `interface language not read: ${message(e, 'en')}`, e)),
+    .catch((e: unknown) => error('i18n', `interface language not read: ${message(e, 'en')}`, e)),
   useTheme().load(),
 ]).finally(() => app.use(i18n).use(router).mount('#app'))

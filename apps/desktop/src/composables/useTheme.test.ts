@@ -5,7 +5,7 @@ const api = vi.hoisted(() => ({
   setTheme: vi.fn(),
 }))
 vi.mock('../api/candeo', () => api)
-vi.mock('../api/journal', () => ({ alerte: vi.fn(), message: (e: unknown) => String(e) }))
+vi.mock('../api/journal', () => ({ warn: vi.fn(), message: (e: unknown) => String(e) }))
 
 /** The document root, as the composable sees it: the tests run without a DOM. */
 const root = { dataset: {} as Record<string, string> }

@@ -1,27 +1,27 @@
-# Accès non privilégié au clavier, sous Linux.
+# Unprivileged access to the keyboard, on Linux.
 #
-# Le noyau crée les nœuds /dev/hidraw* en 0600 root:root. Sans cette règle,
-# Candeo ne voit le clavier qu'en étant lancé en root — ce qu'une application
-# de bureau n'a aucune raison d'exiger.
+# The kernel creates the /dev/hidraw* nodes as 0600 root:root. Without this
+# rule, Candeo only sees the keyboard when started as root — which a desktop
+# application has no reason to require.
 #
-# `TAG+="uaccess"` délègue l'autorisation à systemd-logind : il pose une ACL
-# sur le nœud pour l'utilisateur de la session locale active, et la retire à la
-# déconnexion. C'est plus juste qu'un groupe fixe (`plugdev`), qui donnerait
-# aussi l'accès à une session distante et à des comptes qui ne sont pas devant
-# la machine.
+# `TAG+="uaccess"` hands the permission over to systemd-logind: it sets an ACL
+# on the node for the user of the active local session, and removes it at
+# logout. That is more precise than a fixed group (`plugdev`), which would also
+# give access to a remote session and to accounts that are not sitting at the
+# machine.
 #
-# Le préfixe 60 n'est pas décoratif. La règle qui applique réellement l'ACL est
-# `70-uaccess.rules`, fournie par systemd ; une règle qui poserait le marqueur
-# après elle n'aurait aucun effet. Tout nombre inférieur à 70 convient.
+# The 60 prefix is not decorative. The rule that actually applies the ACL is
+# `70-uaccess.rules`, shipped by systemd; a rule that set the tag after it
+# would have no effect. Any number below 70 will do.
 #
-# Le filtre porte sur le seul identifiant fabricant (0x1532, Razer) : le PID
-# change d'un modèle à l'autre, et c'est Candeo qui choisit ensuite son
-# périphérique sur VID / PID / interface. `ATTRS{}` — au pluriel — remonte la
-# chaîne des parents jusqu'au périphérique USB, seul endroit où `idVendor`
-# existe ; `ATTR{}` sur le nœud hidraw ne le trouverait pas.
+# The filter is on the vendor ID alone (0x1532, Razer): the PID changes from
+# one model to the next, and it is Candeo that then picks its device by VID /
+# PID / interface. `ATTRS{}` — plural — walks up the chain of parents to the
+# USB device, the only place where `idVendor` exists; `ATTR{}` on the hidraw
+# node would not find it.
 #
-# Le paquet installe ce fichier dans /usr/lib/udev/rules.d/, réservé aux
-# fournisseurs. /etc/udev/rules.d/ appartient à l'administrateur : c'est là
-# qu'il place une règle concurrente pour nous contredire, et c'est là qu'il
-# faut copier ce fichier à la main quand on lance Candeo depuis les sources.
+# The package installs this file in /usr/lib/udev/rules.d/, reserved for
+# vendors. /etc/udev/rules.d/ belongs to the administrator: that is where they
+# put a competing rule to overrule us, and that is where this file has to be
+# copied by hand when Candeo is run from source.
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", MODE="0660", TAG+="uaccess"

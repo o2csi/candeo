@@ -75,7 +75,7 @@ import {
   type EngineReport,
 } from '../api/candeo'
 import { effectName, userKey } from '../api/effectKey'
-import { erreur, message } from '../api/journal'
+import { error, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -91,9 +91,9 @@ import { NEW_EFFECT } from '../editor/template'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
-/** Délai d'inactivité avant d'enregistrer le brouillon. */
+/** Idle delay before saving the draft. */
 const DRAFT_DELAY = 400
-/** Période d'interrogation du moteur, en millisecondes. */
+/** Engine polling period, in milliseconds. */
 const STATUS_PERIOD = 1000
 
 const route = useRoute()
@@ -101,14 +101,14 @@ const router = useRouter()
 const { devices, layout, current, refresh } = useDevice()
 const { load: loadSettings, reload: reloadSettings, valuesFor } = useSettings()
 
-/** `/editor` sans identifiant = nouvel effet ; avec = effet installé. */
+/** `/editor` without an identifier = new effect; with one = installed effect. */
 const id = computed<string | null>(() => {
   const raw = route.params.id
   return typeof raw === 'string' && raw !== '' ? raw : null
 })
 
 const source = ref('')
-/** La dernière version connue sur disque, pour pouvoir y revenir. */
+/** The last version known on disk, to be able to go back to it. */
 const saved = ref('')
 const loading = ref(true)
 const restored = ref(false)
@@ -130,8 +130,8 @@ const builtin = ref(false)
 /** What this screen is about: the effect being written, or that it is new. */
 const heading = computed(() => (name.value.trim() ? name.value : t('editor.new')))
 
-/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-// ---------------------------------------------------------------- ouverture
+/** Errors coming up from Rust are already readable: they are shown as they are. */
+// ---------------------------------------------------------------- opening
 
 /** Opens the effect in place; a built-in opens read-only. */
 async function open(): Promise<void> {
@@ -153,8 +153,8 @@ async function open(): Promise<void> {
     restored.value = draft !== null && draft !== disk
     source.value = restored.value && draft !== null ? draft : disk
   } catch (e) {
-    // Un effet illisible ne doit pas laisser un éditeur vide : s'il reste un
-    // brouillon, c'est lui qu'on montre, et on dit ce qui a échoué.
+    // An unreadable effect must not leave an empty editor: if a draft is left,
+    // that is what is shown, along with what failed.
     problem.value = message(e)
     saved.value = draft ?? ''
     source.value = draft ?? ''
@@ -164,14 +164,14 @@ async function open(): Promise<void> {
   }
 }
 
-/** Reprend la version enregistrée et jette le brouillon. */
+/** Takes the saved version back and throws the draft away. */
 function discard(): void {
   source.value = saved.value
   restored.value = false
   clearDraft(id.value)
 }
 
-// ---------------------------------------------------------------- nom
+// ---------------------------------------------------------------- name
 
 /**
  * The effect's name, which is its file name.
@@ -216,18 +216,18 @@ async function rename(): Promise<void> {
   })
 }
 
-// ---------------------------------------------------------------- brouillon
+// ---------------------------------------------------------------- draft
 
 let draftTimer = 0
 
 /**
- * Enregistrement continu, après une pause de frappe.
+ * Continuous saving, after a pause in typing.
  *
- * **Un texte identique à la version enregistrée n'est pas un brouillon** : on
- * efface alors au lieu d'écrire. Sans cette règle, revenir à la version du
- * disque — ou simplement défaire ses modifications — laisserait un brouillon
- * fantôme qui ressurgirait à la prochaine ouverture, et l'éditeur annoncerait
- * une restauration qui ne restaure rien.
+ * **A text identical to the saved version is not a draft**: it is then cleared
+ * instead of written. Without this rule, going back to the version on disk, or
+ * simply undoing one's changes, would leave a ghost draft that would resurface
+ * at the next opening, and the editor would announce a restore that restores
+ * nothing.
  */
 watch(source, (value) => {
   window.clearTimeout(draftTimer)
@@ -320,8 +320,8 @@ const applied = computed(() => showsDevice.value && !unsaved.value)
 const ready = ref(false)
 
 /**
- * Gabarit de repli, demandé au Rust plutôt que recopié ici : on écrit un effet
- * avant d'avoir branché quoi que ce soit, ou sans posséder le clavier.
+ * Fallback layout, asked of Rust rather than copied here: an effect gets written
+ * before anything is plugged in, or without owning the keyboard.
  */
 const fallback = ref<LayoutView | null>(null)
 const board = computed<LayoutView | null>(() => layout.value ?? fallback.value)
@@ -424,7 +424,7 @@ async function act(task: () => Promise<void>): Promise<void> {
     // in the window: without this line the refusal is gone from the screen by
     // the time the log is opened. The effect id goes with it, since a log read
     // an hour later does not know what was displayed.
-    erreur('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
+    error('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
   } finally {
     busy.value = false
     await refreshStatus()
@@ -631,8 +631,8 @@ onBeforeUnmount(() => {
         </div>
 
         <!--
-          Le gabarit vient du Rust : il est nul le temps d'un aller-retour.
-          On ne dessine pas un clavier vide en attendant.
+          The layout comes from Rust: it is null for the length of a round trip.
+          No empty keyboard is drawn in the meantime.
         -->
         <KeyboardSimulator v-if="board" class="sim-board" :layout="board" :frame="frame" />
       </div>
@@ -664,11 +664,11 @@ onBeforeUnmount(() => {
   color: var(--text);
   font: inherit;
   font-weight: 600;
-  /* Assez large pour un nom, sans pousser le reste de la barre. */
+  /* Wide enough for a name, without pushing the rest of the bar. */
   width: 22ch;
 }
 
-/* La bordure n'apparaît qu'au survol ou à la saisie : au repos, c'est un titre. */
+/* The border only appears on hover or while typing: at rest, it is a title. */
 .name input:hover:not(:disabled),
 .name input:focus {
   border-color: var(--line-strong);
@@ -728,9 +728,9 @@ onBeforeUnmount(() => {
   }
 }
 
-/* `min-width` et `min-height` à zéro : sans eux, une cellule de grille refuse
-   de descendre sous la taille intrinsèque de son contenu et déborde la
-   fenêtre — ce que Monaco, qui mesure son conteneur, amplifierait. */
+/* `min-width` and `min-height` at zero: without them, a grid cell refuses to
+   shrink below its content's intrinsic size and overflows the window, which
+   Monaco, measuring its container, would amplify. */
 .pane {
   background: var(--ground);
   min-width: 0;
@@ -789,8 +789,8 @@ onBeforeUnmount(() => {
 }
 
 /*
- * Un écart entre ce qu'on a demandé et ce qui se passe — pas une simple
- * information. La couleur ne porte pas seule : le texte le dit aussi.
+ * A gap between what was asked and what is happening, not mere information.
+ * Color does not carry it alone: the text says it too.
  */
 .notice.warn {
   background: color-mix(in srgb, var(--warn) 12%, var(--raised));

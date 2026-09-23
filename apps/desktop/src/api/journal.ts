@@ -1,25 +1,26 @@
 /**
- * La façade de journalisation, côté fenêtre.
+ * The logging facade, on the window's side.
  *
- * Avant elle, tout ce que la fenêtre avait à dire partait dans une console que
- * personne n'ouvre — et qui, en `release`, n'existe même pas : le binaire est
- * compilé sans console. Les enregistrements rejoignent désormais le **même
- * fichier** que ceux du Rust : une panne se lit d'un bout à l'autre, et l'ordre
- * entre ce qu'a vu la fenêtre et ce qu'a vu le moteur est celui du fichier.
+ * Before it, everything the window had to say went to a console nobody opens —
+ * and which, in `release`, does not even exist: the binary is built without a
+ * console. The records now join the **same file** as Rust's: a failure reads
+ * from one end to the other, and the order between what the window saw and
+ * what the engine saw is the file's.
  *
- * ## `source` plutôt qu'une cible
+ * ## `source` rather than a target
  *
- * Chaque appel nomme d'où il vient — un composant, un module. `tracing` exige
- * une cible constante à la compilation, donc tout ce qui vient d'ici arrive sous
- * une seule cible, `candeo_webview`, et `source` est un champ. C'est aussi ce
- * qu'on veut : « tout ce qui vient de la fenêtre » se filtre alors d'un mot.
+ * Each call names where it comes from — a component, a module. `tracing`
+ * requires a target that is constant at compile time, so everything coming from
+ * here arrives under a single target, `candeo_webview`, and `source` is a field.
+ * It is also what we want: "everything coming from the window" is then filtered
+ * with one word.
  *
- * ## Journaliser ne peut pas échouer
+ * ## Logging cannot fail
  *
- * Rien n'est rendu, rien ne lève. La première utilisatrice de ce module est
- * `app.config.errorHandler` : une façade qui rejette y produirait une seconde
- * panne à traiter dans le gestionnaire de la première, et l'application
- * tournerait en rond.
+ * Nothing is returned, nothing throws. The first user of this module is
+ * `app.config.errorHandler`: a facade that rejects would produce there a second
+ * failure to handle inside the handler of the first, and the application would
+ * go round in circles.
  */
 
 import { i18n, type MessageKey } from '../i18n'
@@ -27,37 +28,37 @@ import { logFromWebview, type WebviewLevel } from './candeo'
 import type { Failure } from './types'
 
 /**
- * Envoie au Rust, et **double sur la console en développement**.
+ * Sends to Rust, and **doubles on the console in development**.
  *
- * Ce n'est pas une redondance : un fichier ne reçoit qu'une chaîne, alors que la
- * console garde l'objet — donc la pile d'appels, qui est l'essentiel quand
- * l'erreur vient d'un composant. En `release` il ne reste que le fichier, qui est
- * précisément ce que le rapport de bogue transporte.
+ * It is not a redundancy: a file only receives a string, whereas the console
+ * keeps the object — hence the call stack, which is the essential part when the
+ * error comes from a component. In `release` only the file remains, which is
+ * precisely what the bug report carries.
  */
-function consigner(level: WebviewLevel, source: string, message: string, detail?: unknown): void {
+function record(level: WebviewLevel, source: string, message: string, detail?: unknown): void {
   void logFromWebview(level, source, message).catch(() => {
-    // Le Rust est injoignable : il n'y a personne de plus à prévenir, et
-    // insister ferait de la journalisation la panne suivante.
+    // Rust is unreachable: there is nobody further to warn, and insisting would
+    // make logging the next failure.
   })
   if (import.meta.env.DEV) {
-    const ecrire = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info
-    ecrire(`[${source}] ${message}`, ...(detail === undefined ? [] : [detail]))
+    const write = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info
+    write(`[${source}] ${message}`, ...(detail === undefined ? [] : [detail]))
   }
 }
 
-/** L'éclairage de l'utilisateur est cassé. */
-export function erreur(source: string, message: string, detail?: unknown): void {
-  consigner('error', source, message, detail)
+/** The user's lighting is broken. */
+export function error(source: string, message: string, detail?: unknown): void {
+  record('error', source, message, detail)
 }
 
-/** Dégradé mais fonctionnel. */
-export function alerte(source: string, message: string, detail?: unknown): void {
-  consigner('warn', source, message, detail)
+/** Degraded but working. */
+export function warn(source: string, message: string, detail?: unknown): void {
+  record('warn', source, message, detail)
 }
 
-/** Cycle de vie : ce qui a démarré, ce qui s'est arrêté. */
+/** Lifecycle: what started, what stopped. */
 export function info(source: string, message: string, detail?: unknown): void {
-  consigner('info', source, message, detail)
+  record('info', source, message, detail)
 }
 
 function isFailure(e: unknown): e is Failure {

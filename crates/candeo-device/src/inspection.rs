@@ -66,7 +66,7 @@ use crate::Layout;
 /// Never observed during the survey — immediate reads returned their status
 /// straight away — but provided for by the protocol. Bounded: an open must not hang
 /// on a device that would claim to be busy indefinitely.
-const RELECTURES: u32 = 5;
+const REREADS: u32 = 5;
 
 /// Wait between two "busy" re-reads. Five times ten milliseconds stays under a frame
 /// period, and is only paid once per open.
@@ -454,7 +454,7 @@ fn read(t: &impl Transport, request: &Report) -> Result<Response, String> {
 fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
     t.send(&request.to_feature_buffer())
         .map_err(|e| format!("write refused: {e}"))?;
-    for _ in 0..RELECTURES {
+    for _ in 0..REREADS {
         let mut buf = Response::buffer();
         let received = t
             .receive(&mut buf)
@@ -479,7 +479,7 @@ fn exchange(t: &impl Transport, request: &Report) -> Result<Response, String> {
         }
         return Ok(r);
     }
-    Err(format!("still busy after {RELECTURES} reads"))
+    Err(format!("still busy after {REREADS} reads"))
 }
 
 // ---------------------------------------------------------------- tests

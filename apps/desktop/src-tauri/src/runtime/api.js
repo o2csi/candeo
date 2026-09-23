@@ -1,18 +1,19 @@
-// Module interne `@candeo/effects-api`, fourni par l'hôte au moteur QuickJS.
+// Internal module `@candeo/effects-api`, provided by the host to the QuickJS
+// engine.
 //
-// ⚠️ Ce fichier et `packages/effects-api/src/index.ts` décrivent la MÊME API :
-// le `.d.ts` est ce que l'éditeur montre en autocomplétion, ceci est ce que le
-// moteur fournit réellement. S'ils divergent, l'éditeur promet une fonction qui
-// n'existe pas, et l'erreur ne se voit qu'à la première image.
+// ⚠️ This file and `packages/effects-api/src/index.ts` describe the SAME API:
+// the `.d.ts` is what the editor shows in autocompletion, this is what the
+// engine actually provides. If they diverge, the editor promises a function that
+// does not exist, and the error only shows at the first frame.
 //
-// Le test `api_js_exports_match_the_typescript_surface` échoue si un nom
-// disparaît d'ici. Toute modification doit toucher les deux fichiers.
+// The test `api_js_exports_match_the_typescript_surface` fails if a name
+// disappears from here. Any change must touch both files.
 
 export const BLACK = { r: 0, g: 0, b: 0 }
 
 /**
- * Déclare un effet. Identité à l'exécution — elle n'existe que pour donner un
- * type contextuel côté éditeur, et éviter à l'auteur d'écrire
+ * Declares an effect. Identity at run time — it only exists to give a
+ * contextual type on the editor side, and to spare the author from writing
  * `satisfies EffectModule`.
  */
 export function defineEffect(effect) {
@@ -20,8 +21,8 @@ export function defineEffect(effect) {
 }
 
 function clampByte(v) {
-  // `| 0` tronque vers zéro et écarte NaN — un effet qui produit NaN doit
-  // donner du noir, pas une couleur indéterminée.
+  // `| 0` truncates toward zero and discards NaN — an effect that produces NaN
+  // must give black, not an indeterminate color.
   const n = Math.round(v)
   if (!(n >= 0)) return 0
   return n > 255 ? 255 : n | 0
@@ -31,7 +32,7 @@ export function rgb(r, g, b) {
   return { r: clampByte(r), g: clampByte(g), b: clampByte(b) }
 }
 
-/** Teinte 0-360, saturation et valeur 0-1. */
+/** Hue 0-360, saturation and value 0-1. */
 export function hsv(h, s, v) {
   const c = v * s
   const hp = (((h % 360) + 360) % 360) / 60
@@ -55,13 +56,13 @@ export function mix(a, b, t) {
   return rgb(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t))
 }
 
-// ------------------------------------------------------------------ géométrie
+// ------------------------------------------------------------------- geometry
 //
-// Les deux lisent un rectangle **ou lèvent**. Un gabarit sans géométrie relevée
-// donnerait `undefined`, donc NaN, donc du noir borné à zéro sans une erreur :
-// c'est le silence qu'on refuse ici.
+// Both read a rectangle **or throw**. A layout without surveyed geometry would
+// give `undefined`, hence NaN, hence black clamped to zero without an error:
+// that is the silence refused here.
 
-function sansRectangle(key) {
+function noRectangle(key) {
   const which = key?.label === undefined ? `position ${key?.index}` : `“${key.label}”`
   return (
     `${which} has no rectangle: this layout has no surveyed geometry, ` +
@@ -69,16 +70,16 @@ function sansRectangle(key) {
   )
 }
 
-/** Le centre du capuchon — là où est la LED, et non son coin. */
+/** The center of the keycap — where the LED is, not its corner. */
 export function center(key) {
   const { x, y, w, h } = key ?? {}
   if (x === undefined || y === undefined || w === undefined || h === undefined) {
-    throw new TypeError(sansRectangle(key))
+    throw new TypeError(noRectangle(key))
   }
   return { x: x + w / 2, y: y + h / 2 }
 }
 
-/** L'encombrement du dessin, en unités de pas. */
+/** The footprint of the drawing, in pitch units. */
 export function bounds(layout) {
   const keys = layout?.keys ?? []
   if (keys.length === 0) return { x: 0, y: 0, w: 0, h: 0 }
@@ -91,7 +92,7 @@ export function bounds(layout) {
   for (const key of keys) {
     const { x, y, w, h } = key ?? {}
     if (x === undefined || y === undefined || w === undefined || h === undefined) {
-      throw new TypeError(sansRectangle(key))
+      throw new TypeError(noRectangle(key))
     }
     if (x < x0) x0 = x
     if (y < y0) y0 = y

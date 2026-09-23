@@ -8,6 +8,24 @@
       "lights": "132 positions, 106 under a key",
       "surveyed": "Firmware v1.5, 09/2026",
       "protocol": "docs/protocol/deathstalker-v2-pro.md"
+    },
+    {
+      "maker": "Alienware",
+      "model": "m18 R1",
+      "kind": "Laptop keyboard",
+      "connection": "Built in",
+      "lights": "103 keys, one colour each",
+      "surveyed": "Firmware not read, 09/2026",
+      "protocol": "docs/protocol/alienware-m18-r1.md"
+    },
+    {
+      "maker": "Alienware",
+      "model": "m18 R1",
+      "kind": "Lighting zones",
+      "connection": "Built in",
+      "lights": "3 zones: the ring in two halves, the logo",
+      "surveyed": "Firmware not read, 09/2026",
+      "protocol": "docs/protocol/alienware-m18-r1.md"
     }
   ]
 }

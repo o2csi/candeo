@@ -14,9 +14,12 @@ For maintainers. Installing is in the README.
    tags the merge commit `vX.Y.Z`, opens a **draft** release carrying the
    changelog, and calls `release.yml`.
 4. **`release.yml` builds and publishes**:
-   - Windows: NSIS and MSI;
+   - Windows: NSIS and MSI, and the Store's MSIX package;
    - Linux: `.deb` and `.rpm`, each checked to contain the udev rule;
    - then `SHA256SUMS`, and the draft is published.
+5. **Once it is public, it goes to the stores**: the MSIX to the Microsoft Store,
+   the manifests to winget (below). Each step does nothing until what it needs
+   is set up.
 
 One version for the whole application, in `package.json`,
 `apps/desktop/package.json`, `packages/effects-api/package.json`,
@@ -73,10 +76,47 @@ The draft stays a draft; nothing is public.
   command above. A run that published and then reported a failure has finished:
   check its assets rather than re-running.
 
+## After publishing: the Microsoft Store
+
+The `windows` job builds the MSIX package from the executable it just built
+(`packaging/windows/msix.mjs`, `docs/design/msix.md`) and keeps it as the run's
+`msix` artifact, not as a release file. Once the release is public, the `store`
+job submits it (#162):
+
+1. the package is uploaded to a **draft** submission;
+2. if `packaging/store/listing-*.md` describe this version — *Version described*
+   and the *What's new* heading both say it — their four texts replace those of
+   the draft (short description, description, what's new, search terms), and
+   the submission goes to certification;
+3. otherwise the draft stays in Partner Center, with a warning on the run: write
+   its *What's new* there and submit it by hand.
+
+So **the listing for a version is written before its release pull request is
+merged**, in both languages; `node packaging/store/listing.mjs X.Y.Z` prints what
+would be sent, or says which file is behind.
+
+What the job needs, set once under *Settings → Secrets and variables → Actions*:
+
+| Name | Kind | Where it comes from |
+|---|---|---|
+| `MSIX_IDENTITY_NAME` | variable | Partner Center, *Product identity*: `Package/Identity/Name` |
+| `MSIX_PUBLISHER` | variable | the same page: `Package/Identity/Publisher`, the `CN=` string |
+| `MSIX_PUBLISHER_DISPLAY_NAME` | variable | the same page: `Package/Properties/PublisherDisplayName` |
+| `STORE_PRODUCT_ID` | variable | the Store ID, `9…`, on the same page |
+| `PARTNER_CENTER_TENANT_ID` | secret | the Microsoft Entra tenant associated with Partner Center |
+| `PARTNER_CENTER_CLIENT_ID` | secret | an Entra application added in Partner Center, *User management → Microsoft Entra applications*, with the **Manager** role |
+| `PARTNER_CENTER_CLIENT_SECRET` | secret | a client secret of that application |
+| `PARTNER_CENTER_SELLER_ID` | secret | Partner Center, *Account settings → Identifiers* |
+
+Without the `MSIX_*` variables no package is built; without `STORE_PRODUCT_ID`
+nothing is submitted. A client secret expires: renew it before it does, or the
+job fails at the next release. A failed `store` job is re-run on its own from the
+run's page; the artifact stays with the run.
+
 ## After publishing: Windows Package Manager
 
-A release is what winget installs, so the manifests are written once it is
-published (#138):
+A release is what winget installs, so the manifests are rendered once it is
+published (#138), by `packaging/winget/winget.mjs`:
 
 ```powershell
 node packaging/winget/winget.mjs X.Y.Z
@@ -84,15 +124,24 @@ winget validate --manifest target\winget\manifests\o\O2CSI\Candeo\X.Y.Z
 ```
 
 The checksums come from the `SHA256SUMS` of the release itself, never from a
-file downloaded and hashed again. Submitting is copying that folder into a fork
-of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) and opening
-a pull request there; its checks run the same validation, and a release that is
-not published yet has nothing to point at.
+file downloaded and hashed again.
+
+`winget.yml` does this after every release (#180), then opens the pull request
+on [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) with
+`wingetcreate submit`. It needs a `WINGET_TOKEN` secret: a classic personal
+access token with the `public_repo` scope, from an account that has a fork of
+winget-pkgs. It stops, saying why, when there is no token, when winget already
+has the version or a pull request proposes it, and **while the package itself is
+not in winget yet**: the first submission is a new-package pull request, made
+by hand and reviewed by a moderator. Once it is accepted, send the versions
+released since:
+
+```bash
+gh workflow run winget.yml -f tag=vX.Y.Z
+```
 
 ## Not yet
 
 - **Authenticode signing** (#145): Windows warns about an unknown publisher on
   the files published here. The Microsoft Store signs the package it distributes
   (#126), and that signature covers the package, not these files.
-- **Submitting to winget from the workflow**: by hand for now, which is also how
-  the first submission of a package has to go.

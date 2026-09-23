@@ -1,32 +1,32 @@
 name: CI
 
-# Les minutes d'un dépôt privé sont facturées, et ce fichier les dépense. Trois
-# garde-fous sont posés ici, après une journée à 60 exécutions qui a épuisé le
-# quota et coupé Actions.
+# A private repository's minutes are billed, and this file spends them. Three
+# safeguards are set here, after a day of 60 runs that used up the quota and
+# cut Actions off.
 on:
   push: { branches: [main] }
   pull_request:
-    # Une modification qui ne touche que de la prose ne casse ni la compilation,
-    # ni les tests, ni l'empaquetage. Plusieurs propositions d'une même journée
-    # sont purement rédactionnelles — relevé de protocole, README, documents de
-    # conception — et déclenchaient l'ensemble.
+    # A change that touches only prose breaks neither the build, nor the tests,
+    # nor the packaging. Several pull requests on a single day are purely
+    # editorial — a protocol survey, the README, design documents — and used to
+    # set off the whole run.
     #
-    # ⚠️ Ne filtre QUE les propositions de fusion. Sur `main`, tout s'exécute :
-    # c'est là que les caches se sauvegardent, et un `main` qui saute des
-    # exécutions laisserait les caches vieillir.
+    # ⚠️ Filters pull requests ONLY. On `main`, everything runs: that is where
+    # the caches are saved, and a `main` that skipped runs would let the caches
+    # go stale.
     paths-ignore: ["**/*.md", "docs/**", "LICENSE*"]
-  # Permet de lancer le job `linux` à la demande sur une branche donnée, sans
-  # attendre la fusion. Voir la condition portée par ce job.
+  # Lets the `linux` job run on demand on a given branch, without waiting for
+  # the merge. See the condition that job carries.
   workflow_dispatch:
 
-# Une exécution rendue caduque par la suivante ne prouve plus rien, et coûte
-# autant. Une même proposition reçoit souvent trois à quatre poussées, et
-# chaque exécution dépassée allait jusqu'au bout.
+# A run made obsolete by the next one no longer proves anything, and costs just
+# as much. A single pull request often gets three or four pushes, and every
+# superseded run went all the way to the end.
 #
-# ⚠️ Jamais sur `main` : une exécution annulée **ne sauvegarde pas son cache**,
-# et deux fusions rapprochées suffiraient à ne jamais en écrire un seul. C'est
-# exactement le mécanisme qui a déjà gelé le cache du job `rust` pendant une
-# demi-journée.
+# ⚠️ Never on `main`: a cancelled run **does not save its cache**, and two
+# merges close together would be enough never to write a single one. That is
+# exactly the mechanism that already froze the `rust` job's cache for half a
+# day.
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -37,51 +37,51 @@ permissions:
   contents: read
 
 jobs:
-  # ⚠️ Sur Ubuntu, et non plus Windows — c'est le poste le plus lourd du fichier
-  # et le coureur Windows est **facturé au double**.
+  # ⚠️ On Ubuntu, no longer Windows — this is the heaviest item in the file,
+  # and the Windows runner is **billed double**.
   #
-  # Ce qu'on garde : rien ici n'est spécifique à un système. `fmt` et `clippy`
-  # lisent du code, et aucun test ne touche au matériel — il n'y a pas d'USB
-  # derrière un coureur GitHub, quel que soit son système.
+  # What we keep: nothing here is specific to one system. `fmt` and `clippy`
+  # read code, and no test touches the hardware — there is no USB behind a
+  # GitHub runner, whatever its system.
   #
-  # Ce qu'on perd, et c'est nommé plutôt que passé sous silence : les tests ne
-  # s'exécutent plus sous Windows à chaque proposition. La **compilation**
-  # Windows, elle, reste prouvée par le job `build`, qui construit l'application
-  # entière en `release`. Et le développement se fait sous Windows : ces tests y
-  # tournent en local en permanence, ce qui est précisément le seul endroit où
-  # une divergence de chemins se verrait d'abord.
+  # What we lose, named rather than passed over in silence: the tests no longer
+  # run on Windows for every pull request. The Windows **build**, for its part,
+  # is still proven by the `build` job, which builds the whole application in
+  # `release`. And development happens on Windows: these tests run there
+  # locally all the time, which is precisely the one place where a divergence
+  # in paths would show first.
   #
-  # Si une régression propre à Windows passait un jour au travers, la réponse
-  # est une exécution périodique ou à la demande — pas un coureur facturé double
-  # sur chaque poussée.
+  # If a Windows-specific regression ever slipped through, the answer is a
+  # scheduled or on-demand run — not a runner billed double on every push.
   rust:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Guillemets indispensables : en notation compacte, la virgule sépare deux
-      # clés. `{ components: rustfmt, clippy }` donnait `components: rustfmt`
-      # plus une entrée parasite `clippy`, et clippy n'était installé que parce
-      # que l'image du coureur le contient déjà.
+      # The quotes are required: in compact notation, the comma separates two
+      # keys. `{ components: rustfmt, clippy }` gave `components: rustfmt` plus
+      # a stray `clippy` entry, and clippy was installed only because the
+      # runner image already contains it.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with: { components: "rustfmt, clippy" }
-      # `rust-cache` bâtit sa clé sur `Cargo.lock` et la chaîne d'outils — **pas**
-      # sur les profils de compilation. Quand `[profile.dev.package."*"]` est passé
-      # à `opt-level = 2` sans que `Cargo.lock` bouge, la clé n'a donc pas changé :
-      # chaque exécution restaurait des dépendances non optimisées, les
-      # recompilait toutes, puis renonçait à sauvegarder — clé déjà présente, donc
-      # « Cache up-to-date ». Un cache périmé que rien ne remplace, et un job passé
-      # de 2 à 30 minutes sans que le cache paraisse en cause.
+      # `rust-cache` bases its key on `Cargo.lock` and the toolchain — **not**
+      # on the build profiles. When `[profile.dev.package."*"]` moved to
+      # `opt-level = 2` without `Cargo.lock` changing, the key therefore did not
+      # change: every run restored unoptimised dependencies, recompiled them
+      # all, then gave up on saving — key already present, hence "Cache
+      # up-to-date". A stale cache that nothing replaces, and a job that went
+      # from 2 to 30 minutes without the cache seeming to be the cause.
       #
-      # L'empreinte du `Cargo.toml` racine referme le trou : c'est le seul fichier
-      # où cargo lit les profils, donc toucher un profil ouvre un espace de noms
-      # neuf, payé une fois puis réutilisé. À ne pas retirer en la prenant pour du
-      # bruit — cette clé est tout ce qui relie le cache aux profils.
+      # The hash of the root `Cargo.toml` closes the gap: it is the only file
+      # where cargo reads the profiles, so touching a profile opens a fresh
+      # namespace, paid for once then reused. Do not remove it, taking it for
+      # noise — this key is all that ties the cache to the profiles.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with: { key: "${{ hashFiles('Cargo.toml') }}" }
-      # `clippy --all-targets` compile `candeo-desktop`, donc lie webkit2gtk :
-      # sans ces paquets, il échoue à l'édition de liens et non à l'analyse.
-      # Même liste que le job `linux`, moins `rpm` — on n'empaquette rien ici.
-      - name: Dépendances système
+      # `clippy --all-targets` compiles `candeo-desktop`, and so links
+      # webkit2gtk: without these packages, it fails at link time, not at
+      # analysis. Same list as the `linux` job, minus `rpm` — nothing is
+      # packaged here.
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -89,54 +89,52 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev \
             libudev-dev build-essential pkg-config file
       - run: cargo fmt --all -- --check
-      # Tout l'espace de travail, et non les deux seules crates sans Tauri :
-      # les effets livrés avec l'application sont du JavaScript compilé dans le
-      # binaire, et leurs tests — chargement, taille d'image, image non noire —
-      # vivent dans `candeo-desktop`. Les laisser hors de l'intégration continue
-      # reviendrait à découvrir un effet intégré cassé chez l'utilisateur qui
-      # l'ouvre en premier. Le job `build` compile cette crate mais n'exécute
-      # aucun test.
+      # The whole workspace, not only the two crates without Tauri: the effects
+      # shipped with the application are JavaScript compiled into the binary,
+      # and their tests — loading, frame size, a frame that is not black — live
+      # in `candeo-desktop`. Leaving them out of continuous integration would
+      # mean finding a broken built-in effect at the first user who opens it.
+      # The `build` job compiles this crate but runs no test.
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-  # Tout le développement se fait sous Windows, et personne n'a de machine Linux
-  # dans la boucle : sans ce job, la portabilité ne serait qu'une intention. Il
-  # établit ce qu'aucune relecture ne peut établir — que la dorsale `hidraw`
-  # d'`hidapi` se construit, que rien dans l'espace de travail ne dépend de
-  # Windows, et que la règle udev atterrit vraiment dans le paquet.
+  # All development happens on Windows, and nobody has a Linux machine in the
+  # loop: without this job, portability would be no more than an intention. It
+  # establishes what no review can — that the `hidraw` backend of `hidapi`
+  # builds, that nothing in the workspace depends on Windows, and that the udev
+  # rule really lands in the package.
   #
-  # Ce qu'il ne prouve pas, et ne peut pas prouver : qu'un clavier réponde. Il
-  # n'y a pas d'USB derrière un coureur GitHub.
-  # Pas sur les propositions de fusion : ce job coûte un quart d'heure, dont une
-  # dizaine de minutes passées à recompresser un `.rpm` de débogage (voir plus
-  # bas). Le développement se fait sous Windows, et un Linux est disponible en
-  # local via WSL — payer ce prix à chaque itération n'achète rien.
+  # What it does not prove, and cannot prove: that a keyboard answers. There is
+  # no USB behind a GitHub runner.
+  # Not on pull requests: this job costs a quarter of an hour, about ten minutes
+  # of it spent recompressing a debug `.rpm` (see below). Development happens
+  # on Windows, and a Linux is available locally through WSL — paying that
+  # price on every iteration buys nothing.
   #
-  # Il reste **obligatoire sur `main`** : c'est le seul endroit qui atteste que
-  # la règle udev est réellement livrée par les paquets. Le filet se déplace donc
-  # de « avant la fusion » à « juste après », et `workflow_dispatch` permet de le
-  # lancer sur une branche quand un changement touche l'empaquetage, les I/O HID
-  # ou les dépendances système.
+  # It stays **mandatory on `main`**: that is the only place that attests the
+  # udev rule is really shipped by the packages. The safety net therefore moves
+  # from "before the merge" to "just after", and `workflow_dispatch` lets it
+  # run on a branch when a change touches packaging, HID I/O or system
+  # dependencies.
   linux:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      # Même clé d'empreinte des profils que le job `rust`, et pour la même
-      # raison : ce job compile lui aussi en débogage, donc sous
-      # `[profile.dev.package."*"]`. Notation développée et non compacte — deux
-      # clés dont les valeurs portent déjà des guillemets, c'est là que ce fichier
-      # s'est fait piéger une fois.
+      # Same profile-hash key as the `rust` job, and for the same reason: this
+      # job also compiles in debug, so under `[profile.dev.package."*"]`.
+      # Expanded notation, not compact — two keys whose values already carry
+      # quotes, which is where this file got caught once.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
           key: "${{ hashFiles('Cargo.toml') }}"
-      # Liste de Tauri 2 pour Debian, plus trois ajouts : `libudev-dev`, qu'une
-      # dorsale `hidapi` résout par pkg-config quelle qu'elle soit ; `pkg-config`
-      # lui-même ; et `rpm`, pour relire le paquet produit — aucun des trois
-      # n'est préinstallé sur l'image.
-      - name: Dépendances système
+      # Tauri 2's list for Debian, plus three additions: `libudev-dev`, which
+      # every `hidapi` backend resolves through pkg-config, whichever it is;
+      # `pkg-config` itself; and `rpm`, to read the produced package back —
+      # none of the three is preinstalled on the image.
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -146,96 +144,98 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: 24, cache: pnpm }
-      # `tauri build` construit le front lui-même par `beforeBuildCommand` ; il
-      # ne manque que `node_modules`. `cargo check`, lui, n'a besoin de rien :
-      # `tauri-build` se contente d'un `frontendDist` absent — c'est pourquoi le
-      # job `rust`, sous Windows, compile `candeo-desktop` sans jamais voir pnpm.
+      # `tauri build` builds the front end itself through `beforeBuildCommand`;
+      # only `node_modules` is missing. `cargo check`, for its part, needs
+      # nothing: `tauri-build` makes do with a missing `frontendDist` — which is
+      # why the `rust` job, on Windows, compiles `candeo-desktop` without ever
+      # seeing pnpm.
       - run: pnpm install --frozen-lockfile
-      # Ni `cargo check` ni `cargo test` ici : depuis que le job `rust` tourne
-      # sous Ubuntu, il les a déjà exécutés **sur ce même système**, y compris la
-      # sensibilité à la casse du système de fichiers qui était l'argument de les
-      # rejouer. Les refaire coûterait le temps de compilation deux fois pour la
-      # même preuve.
+      # Neither `cargo check` nor `cargo test` here: since the `rust` job moved
+      # to Ubuntu, it has already run them **on this same system**, including
+      # the case sensitivity of the file system that was the argument for
+      # running them again. Redoing them would cost the compile time twice for
+      # the same proof.
       #
-      # Ce job garde donc ce que lui seul établit : que l'application
-      # s'**empaquette**, et que la règle udev est dans les paquets produits.
-      # Empaquetage en profil `debug` : on ne mesure pas le binaire, on lit le
-      # contenu du paquet. Le profil `release` (lto, codegen-units = 1) coûterait
-      # plusieurs minutes pour la même preuve. AppImage est écarté — il télécharge
-      # ses propres outils, ce qui n'ajoute rien ici et casse sans prévenir.
+      # This job therefore keeps what it alone establishes: that the application
+      # **packages**, and that the udev rule is in the packages produced.
+      # Packaging in the `debug` profile: we do not measure the binary, we read
+      # the package's contents. The `release` profile (lto, codegen-units = 1)
+      # would cost several minutes for the same proof. AppImage is left out — it
+      # downloads its own tools, which adds nothing here and breaks without
+      # warning.
       #
-      # Le prix est connu et mesuré : le `.deb` sort en une dizaine de secondes,
-      # le `.rpm` demande une dizaine de minutes — il recompresse un binaire de
-      # débogage non dépouillé. C'est ce qui fait la durée du job. On le paie
-      # parce que `deb` et `rpm` sont deux déclarations distinctes dans
-      # `tauri.conf.json` : ne vérifier que la première laisserait la seconde se
-      # tromper en silence.
+      # The price is known and measured: the `.deb` comes out in about ten
+      # seconds, the `.rpm` takes about ten minutes — it recompresses an
+      # unstripped debug binary. That is what makes the job's duration. We pay
+      # it because `deb` and `rpm` are two separate declarations in
+      # `tauri.conf.json`: checking only the first would let the second go
+      # wrong in silence.
       - run: pnpm --filter @candeo/desktop exec tauri build --debug --bundles deb,rpm
-      # La preuve : la règle est dans les deux paquets, à l'emplacement attendu.
-      # On lit les paquets produits — sans cela, `bundle.linux.*.files` resterait
-      # une déclaration que rien ne confronte au résultat.
-      - name: La règle udev est livrée par les paquets
+      # The proof: the rule is in both packages, at the expected location. The
+      # packages produced are read — without that, `bundle.linux.*.files` would
+      # remain a declaration that nothing holds up against the result.
+      - name: The packages ship the udev rule
         run: |
-          regle='usr/lib/udev/rules.d/60-candeo.rules'
-          dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$regle"
-          rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$regle"
+          rule='usr/lib/udev/rules.d/60-candeo.rules'
+          dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$rule"
+          rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$rule"
 
-  # Avis de sécurité des dépendances Rust. Séparé du job `rust` pour que
-  # l'apparition d'un avis ne masque pas une régression de code.
+  # Security advisories for the Rust dependencies. Kept apart from the `rust`
+  # job so that a new advisory does not hide a code regression.
   audit:
     runs-on: ubuntu-latest
-    # Lecture seule : plus rien ici ne crée de check run depuis l'appel direct
-    # à `cargo audit`. La trace de ce que `checks: write` a coûté reste, parce
-    # que le jour où l'on revient à `rustsec/audit-check`, la panne revient
-    # avec. Sans cette permission la création du check run répond 403, et
-    # l'action se trompe de diagnostic : elle teste `GITHUB_HEAD_REF` pour
-    # savoir si elle tourne depuis un fork, or cette variable est renseignée
-    # pour *toute* pull request. Sur une PR elle retombait donc sur un message
-    # trompeur — « executed from the forked repository » — et sur un push vers
-    # `main`, où la variable est vide, elle relançait l'erreur et faisait
-    # échouer le job. C'est la cause des CI rouges sur `main`.
+    # Read only: nothing here creates a check run any more since `cargo audit`
+    # is called directly. The record of what `checks: write` cost stays,
+    # because the day we go back to `rustsec/audit-check`, the failure comes
+    # back with it. Without that permission, creating the check run answers
+    # 403, and the action gets the diagnosis wrong: it tests `GITHUB_HEAD_REF`
+    # to find out whether it runs from a fork, yet that variable is set for
+    # *every* pull request. On a PR it therefore fell back on a misleading
+    # message — "executed from the forked repository" — and on a push to
+    # `main`, where the variable is empty, it rethrew the error and failed the
+    # job. That is the cause of the red CI runs on `main`.
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Binaires officiels publiés par RustSec, somme de contrôle vérifiée :
-      # quelques secondes, là où laisser `cargo install cargo-audit` compiler
-      # l'outil coûtait six des 6 min 08 du job.
-      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2.87.13
+      # Official binaries published by RustSec, checksum verified: a few
+      # seconds, where letting `cargo install cargo-audit` compile the tool
+      # cost six of the job's 6 min 08.
+      - uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # v2.87.17
         with: { tool: cargo-audit }
-      # Appel direct plutôt que `rustsec/audit-check@v2.0.0` : l'enrobage tourne
-      # sur un Node.js 20 déprécié, que GitHub force déjà sur Node 24 et finira
-      # par couper. L'amont l'a corrigé — « Update to use Node 24 », 20/03/2026
-      # — mais ne l'a jamais publié : la dernière version reste v2.0.0 de
-      # septembre 2024, la branche `v2` est restée sur ce commit, et il n'existe
-      # aucun tag plus récent. Il n'y avait donc pas de version où aller, et
-      # s'accrocher à un commit non publié aurait acheté le risque d'une branche
-      # mouvante sans la garantie d'une publication.
+      # A direct call rather than `rustsec/audit-check@v2.0.0`: the wrapper runs
+      # on a deprecated Node.js 20, which GitHub already forces onto Node 24
+      # and will end up cutting off. Upstream fixed it — "Update to use Node
+      # 24", 2026-03-20 — but never released it: the latest version is still
+      # v2.0.0 from September 2024, the `v2` branch stayed on that commit, and
+      # there is no newer tag. There was therefore no version to move to, and
+      # hanging on to an unreleased commit would have bought the risk of a
+      # moving branch without the guarantee of a release.
       #
-      # Ce qu'on perd, et c'est le seul apport de l'action : le verdict n'est
-      # plus publié dans un *check run* distinct — « Security audit », lisible
-      # depuis l'onglet « Checks » sans ouvrir le journal. Il se lit désormais
-      # dans la sortie du job.
+      # What we lose, and it is the only thing the action brought: the verdict
+      # is no longer published in a separate *check run* — "Security audit",
+      # readable from the "Checks" tab without opening the log. It is now read
+      # in the job's output.
       #
-      # Ce qui ne bouge pas : même binaire — l'action ne faisait que l'appeler —,
-      # même `.cargo/audit.toml`, c'est lui qui porte l'exception
-      # RUSTSEC-2024-0429, même base d'avis retéléchargée à chaque exécution, et
-      # les avertissements « non maintenu » (six à ce jour) restent non bloquants.
+      # What does not change: the same binary — the action only called it —,
+      # the same `.cargo/audit.toml`, which carries the RUSTSEC-2024-0429
+      # exception, the same advisory database downloaded again on every run,
+      # and the "unmaintained" warnings (six to date) stay non-blocking.
       #
-      # Ce qui se resserre, délibérément : l'action passait `ignoreReturnCode` et
-      # ne faisait échouer le job que sur une sévérité **critique** — une
-      # vulnérabilité élevée ou modérée n'était qu'un avertissement, et le job
-      # restait vert. C'est maintenant le code de retour qui tranche, donc toute
-      # vulnérabilité. Il n'y en a aucune à ce jour ; le jour où il y en a une,
-      # elle se corrige, ou elle se justifie et se date dans `.cargo/audit.toml`.
+      # What tightens, deliberately: the action passed `ignoreReturnCode` and
+      # failed the job only on a **critical** severity — a high or moderate
+      # vulnerability was only a warning, and the job stayed green. The exit
+      # code now decides, so any vulnerability fails it. There is none to date;
+      # the day there is one, it gets fixed, or it gets justified and dated in
+      # `.cargo/audit.toml`.
       - run: cargo audit
 
   web:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # La version de pnpm vient du champ `packageManager` de package.json :
-      # une seule source de vérité, locale et en intégration continue.
+      # The pnpm version comes from the `packageManager` field of package.json:
+      # a single source of truth, locally and in continuous integration.
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: 24, cache: pnpm }
@@ -245,27 +245,26 @@ jobs:
       # browser: a few seconds on top of the job.
       - run: pnpm --filter @candeo/desktop test
 
-  # Seul job qui construit réellement l'application. `fmt`, `clippy`, les tests
-  # et `vue-tsc` ne compilent jamais `candeo-desktop` : une rupture de la
-  # liaison Tauri — commande renommée, `invoke` sans destinataire, plugin mal
-  # déclaré — ne se voyait donc qu'à la main.
+  # The only job that actually builds the application. `fmt`, `clippy`, the
+  # tests and `vue-tsc` never compile `candeo-desktop`: a break in the Tauri
+  # binding — a renamed command, an `invoke` with no receiver, a plugin
+  # declared wrong — was therefore only seen by hand.
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      # Cache distinct de celui du job `rust` : le profil `release` (lto,
-      # codegen-units = 1) ne partage aucun artefact avec les tests en debug.
-      # L'écriture est réservée à `main` : une branche ne peut relire que le
-      # cache de sa base, et les caches de PR ne feraient qu'évincer celui dont
-      # tout le monde repart.
+      # A cache separate from the `rust` job's: the `release` profile (lto,
+      # codegen-units = 1) shares no artefact with the debug tests. Writing is
+      # reserved for `main`: a branch can only read back its base's cache, and
+      # PR caches would only evict the one everybody starts from.
       #
-      # Même empreinte des profils que les jobs `rust` et `linux`. Elle n'était
-      # pas nécessaire ici sur le moment — seul `[profile.dev.package."*"]` avait
-      # bougé, et ce job est resté à six minutes pendant que les deux autres
-      # passaient à trente — mais `[profile.release]` vit dans le **même**
-      # `Cargo.toml` : le jour où il change, ce cache se figerait exactement de la
-      # même façon, et personne ne ferait le lien une seconde fois.
+      # Same profile hash as the `rust` and `linux` jobs. It was not needed here
+      # at the time — only `[profile.dev.package."*"]` had moved, and this job
+      # stayed at six minutes while the other two went to thirty — but
+      # `[profile.release]` lives in the **same** `Cargo.toml`: the day it
+      # changes, this cache would freeze in exactly the same way, and nobody
+      # would make the connection a second time.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
@@ -274,12 +273,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: 24, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      # `tauri build` enchaîne `beforeBuildCommand` (vue-tsc puis vite build),
-      # la compilation Rust en release, et l'empaquetage MSI et NSIS.
+      # `tauri build` chains `beforeBuildCommand` (vue-tsc then vite build), the
+      # Rust release build, and the MSI and NSIS packaging.
       - run: pnpm --filter @candeo/desktop exec tauri build
-      # Le binaire nu pour un essai immédiat, les installeurs pour une
-      # installation complète. `error` plutôt que le défaut `warn` : un
-      # empaquetage qui ne produit rien est un échec, pas un avertissement.
+      # The bare binary for an immediate try, the installers for a full
+      # installation. `error` rather than the default `warn`: packaging that
+      # produces nothing is a failure, not a warning.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: candeo-windows

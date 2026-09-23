@@ -1,9 +1,9 @@
 /**
- * Seul point de passage vers le Rust.
+ * The single way through to Rust.
  *
- * Aucun composant n'appelle `invoke` directement : tout transite par ici, pour
- * que la surface soit typée en un seul endroit et que le jour où une commande
- * change de forme, le compilateur désigne les appelants.
+ * No component calls `invoke` directly: everything goes through here, so that
+ * the surface is typed in a single place and, the day a command changes shape,
+ * the compiler points at the callers.
  */
 
 import { Channel, invoke } from '@tauri-apps/api/core'
@@ -12,95 +12,96 @@ import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
 import type { DeviceInfo, DeviceRef, DeviceState, Failure, LayoutInfo, Rgb } from './types'
 
-/** Liste les gabarits connus, branchés ou non, avec l'état de chacun. */
+/** Lists the known layouts, plugged in or not, with the state of each. */
 export function listDevices(): Promise<DeviceInfo[]> {
   return invoke('list_devices')
 }
 
 /**
- * Retient « piloté » pour cet appareil, et l'ouvre s'il est là.
+ * Remembers "controlled" for this device, and opens it if it is there.
  *
- * La décision est écrite **avant** l'ouverture et tient même si celle-ci
- * échoue : les démarrages suivants la rejoueront. Rend le gabarit quand
- * l'appareil a été ouvert, `null` quand il est adopté mais débranché — ce n'est
- * pas une erreur.
+ * The decision is written **before** opening and holds even if opening fails:
+ * the following startups will replay it. Returns the layout when the device was
+ * opened, `null` when it is adopted but unplugged — it is not an error.
  */
 export function adoptDevice(vid: number, pid: number): Promise<LayoutInfo | null> {
   return invoke('adopt_device', { vid, pid })
 }
 
-/** Retient « ignoré », et referme l'appareil s'il était ouvert. */
+/** Remembers "ignored", and closes the device if it was open. */
 export function ignoreDevice(vid: number, pid: number): Promise<void> {
   return invoke('ignore_device', { vid, pid })
 }
 
 /**
- * Ouverture ponctuelle, sans rien décider.
+ * One-off opening, without deciding anything.
  *
- * Ne touche pas à `settings.json`, donc ne survit pas au redémarrage —
- * contrairement à {@link adoptDevice}.
+ * Does not touch `settings.json`, so does not survive a restart — unlike
+ * {@link adoptDevice}.
  */
 export function connect(vid: number, pid: number): Promise<LayoutInfo> {
   return invoke('connect', { vid, pid })
 }
 
 /**
- * Referme **un** appareil. Les autres ne sont pas touchés.
+ * Closes **one** device. The others are not touched.
  *
- * Avec {@link connect}, la paire qui ouvre et referme **sans décider** — là où
- * {@link adoptDevice} et {@link ignoreDevice} écrivent dans `settings.json`.
- * `useDevice` les enveloppe toutes deux ; aucun écran ne les appelle encore.
+ * With {@link connect}, the pair that opens and closes **without deciding** —
+ * whereas {@link adoptDevice} and {@link ignoreDevice} write to `settings.json`.
+ * `useDevice` wraps both; no screen calls them yet.
  */
 export function disconnect(device: DeviceRef): Promise<void> {
   return invoke('disconnect', { device })
 }
 
-/** Gabarit d'un appareil ouvert. Échoue s'il ne l'est pas. */
+/** Layout of an open device. Fails if it is not open. */
 export function getLayout(device: DeviceRef): Promise<LayoutInfo> {
   return invoke('get_layout', { device })
 }
 
 /**
- * Gabarit de repli, quand rien n'est connecté.
+ * Fallback layout, when nothing is connected.
  *
- * `getLayout` refuse hors connexion, et c'est le cas qu'il faut servir : on
- * dessine le clavier et on écrit un effet avant d'avoir branché quoi que ce
- * soit. La géométrie reste ainsi définie **au seul endroit** où elle est
- * testée, dans `crates/candeo-device`.
+ * `getLayout` refuses when disconnected, and that is the case to serve: the
+ * keyboard is drawn and an effect written before anything is plugged in. The
+ * geometry thus stays defined **in the one place** where it is tested, in
+ * `crates/candeo-device`.
  */
 export function getDefaultLayout(): Promise<LayoutInfo> {
   return invoke('get_default_layout')
 }
 
 /**
- * Luminosité **pleine** : le défaut d'un clavier qu'on vient de brancher.
+ * **Full** brightness: the default of a keyboard just plugged in.
  *
- * Miroir de `BRIGHTNESS_DEFAUT` dans `src-tauri/src/storage.rs`. C'est aussi la
- * valeur que `settings.json` n'écrit pas — la retenir revient à retirer l'entrée.
+ * Mirror of `DEFAULT_BRIGHTNESS` in `src-tauri/src/storage.rs`. It is also the
+ * value `settings.json` does not write — remembering it amounts to removing the
+ * entry.
  */
 export const BRIGHTNESS_DEFAULT = 255
 
 /**
- * Écrit la luminosité **sur le clavier**, et rien d'autre. `level` de 0 à 255.
+ * Writes the brightness **to the keyboard**, and nothing else. `level` from 0 to
+ * 255.
  *
- * Ne retient rien : c'est {@link rememberBrightness}. Même séparation que
- * {@link setEffectParams} et {@link rememberEffectParams}, pour la même raison —
- * un curseur qu'on glisse produit des dizaines d'écritures HID et une seule
- * écriture disque, quand il s'arrête.
+ * Remembers nothing: that is {@link rememberBrightness}. Same separation as
+ * {@link setEffectParams} and {@link rememberEffectParams}, for the same reason —
+ * a slider being dragged produces dozens of HID writes and a single disk write,
+ * when it stops.
  */
 export function setBrightness(device: DeviceRef, level: number): Promise<void> {
   return invoke('set_brightness', { device, level })
 }
 
 /**
- * Retient la luminosité de cet appareil, sans toucher au clavier.
+ * Remembers this device's brightness, without touching the keyboard.
  *
- * Elle est réappliquée à l'adoption et au démarrage : un niveau retenu qui ne se
- * réapplique pas au branchement ne servirait à rien, et le protocole relevé sait
- * écrire la luminosité mais pas la relire.
+ * It is reapplied on adoption and at startup: a remembered level that is not
+ * reapplied on plug-in would be of no use, and the recorded protocol can write
+ * the brightness but not read it back.
  *
- * {@link BRIGHTNESS_DEFAULT} **efface** l'entrée, comme une table de paramètres
- * vide efface les réglages d'un effet.
+ * {@link BRIGHTNESS_DEFAULT} **erases** the entry, as an empty parameters table
+ * erases an effect's settings.
  */
 export function rememberBrightness(device: DeviceRef, level: number): Promise<void> {
   return invoke('remember_brightness', { device, level })
@@ -118,18 +119,18 @@ export function setEffect(device: DeviceRef, effect: string, colours: number[] =
 }
 
 /**
- * Pousse une image complète.
+ * Pushes a complete frame.
  *
- * `frame` doit compter exactement `layout.frameLen` couleurs — **toutes** les
- * cases de la matrice, y compris celles sans LED. En envoyer moins laisse les
- * dernières rangées figées sur leur valeur précédente.
+ * `frame` must hold exactly `layout.frameLen` colors — **all** the cells of the
+ * matrix, including those without an LED. Sending fewer leaves the last rows
+ * frozen on their previous value.
  *
- * ⚠️ **La fenêtre n'envoie pas d'images.** C'est la boucle Rust qui les produit
- * et les écrit ; le simulateur les **reçoit** par canal. Cette enveloppe et
- * {@link writeRow} sont les primitives de bas niveau qui ont servi à établir le
- * protocole, gardées pour pouvoir le refaire — le pourquoi est écrit sur les
- * commandes, dans `src-tauri/src/lib.rs`. Les appeler depuis un écran
- * entrerait en concurrence avec la boucle sur la même poignée HID.
+ * ⚠️ **The window does not send frames.** It is the Rust loop that produces and
+ * writes them; the simulator **receives** them over a channel. This wrapper and
+ * {@link writeRow} are the low-level primitives that served to establish the
+ * protocol, kept so it can be done again — the why is written on the commands,
+ * in `src-tauri/src/lib.rs`. Calling them from a screen would compete with the
+ * loop over the same HID handle.
  */
 export function present(device: DeviceRef, frame: readonly Rgb[]): Promise<void> {
   const flat = new Array<number>(frame.length * 3)
@@ -141,7 +142,7 @@ export function present(device: DeviceRef, frame: readonly Rgb[]): Promise<void>
   return invoke('present', { device, frame: flat })
 }
 
-/** Écrit un segment de rangée, sans toucher au reste. */
+/** Writes a row segment, without touching the rest. */
 export function writeRow(
   device: DeviceRef,
   row: number,
@@ -152,20 +153,19 @@ export function writeRow(
   return invoke('write_row', { device, row, colStart, colors: flat })
 }
 
-// ---------------------------------------------------------------- bibliothèque
+// ---------------------------------------------------------------- library
 
 /**
- * Version de l'API d'effets que cette application sait servir.
+ * Version of the effects API this application can serve.
  *
- * Miroir de `EFFECTS_API_VERSION` dans `src-tauri/src/storage.rs`, au même
- * titre que les types de `api/types.ts` le sont de `lib.rs`. La divergence n'est
- * pas silencieuse : un manifeste qui annonce une version plus récente que celle
- * du Rust est **refusé à l'installation**, avec un message qui le dit.
+ * Mirror of `EFFECTS_API_VERSION` in `src-tauri/src/storage.rs`, just as the
+ * types of `api/types.ts` are of `lib.rs`. The divergence is not silent: a
+ * manifest announcing a version more recent than Rust's is **refused at
+ * install**, with a message that says so.
  *
- * Elle ne vient pas de `@candeo/effects-api` : ce module décrit l'API, il ne se
- * numérote pas lui-même — et tout ce qu'il exporte doit exister dans le jumeau
- * `src-tauri/src/runtime/api.js`, ce qu'une constante de version n'a aucune
- * raison de faire.
+ * It does not come from `@candeo/effects-api`: that module describes the API, it
+ * does not number itself — and everything it exports must exist in its twin
+ * `src-tauri/src/runtime/api.js`, which a version constant has no reason to do.
  */
 export const EFFECTS_API_VERSION = 1
 
@@ -229,7 +229,7 @@ export function legacyEffectIds(): Promise<Record<string, string>> {
   return invoke('legacy_effect_ids')
 }
 
-/** La source TypeScript d'un effet installé, pour la rouvrir dans l'éditeur. */
+/** The TypeScript source of an installed effect, to reopen it in the editor. */
 export function readEffectSource(id: string): Promise<string> {
   return invoke('read_effect_source', { id })
 }
@@ -314,18 +314,18 @@ export interface EffectEntry extends EffectManifest {
   /** A built-in whose file was edited outside the application. */
   modified: boolean
   /**
-   * Repère de couleurs, **prélevé en exécutant l'effet** — jamais déclaré.
+   * Color swatch, **sampled by running the effect** — never declared.
    *
-   * Quelques couleurs `#rrggbb`, rendues à des instants différents et à des
-   * endroits différents du clavier : un effet uniforme et un effet spatial ne
-   * peuvent donc pas se ressembler. Le Rust les calcule à l'installation et les
-   * range à côté du manifeste ; elles arrivent avec la liste, sans second appel.
+   * A few `#rrggbb` colors, rendered at different moments and at different
+   * places on the keyboard: a uniform effect and a spatial effect therefore
+   * cannot look alike. Rust computes them at install and stores them next to
+   * the manifest; they arrive with the list, without a second call.
    *
-   * **Le tableau peut être vide** — un effet qui lève pendant l'échantillonnage
-   * s'installe quand même. L'interface montre alors une pastille neutre.
+   * **The array can be empty** — an effect that throws during sampling is
+   * installed anyway. The interface then shows a neutral dot.
    *
-   * Sa longueur n'est pas garantie : le jour où la galerie voudra des vignettes
-   * animées, ce sera le même champ, avec plus d'images.
+   * Its length is not guaranteed: the day the gallery wants animated
+   * thumbnails, it will be the same field, with more frames.
    */
   swatch: string[]
 }
@@ -336,19 +336,18 @@ export function listEffects(): Promise<EffectEntry[]> {
 }
 
 /**
- * Valeurs de départ d'un effet : le `default` de chaque paramètre déclaré.
+ * An effect's starting values: the `default` of each declared parameter.
  *
- * Ici, avec le manifeste qui les porte, et non dans l'éditeur : la galerie lance
- * désormais un effet, et elle n'a aucune raison de charger le module d'analyse
- * syntaxique pour recopier quatre valeurs par défaut.
+ * Here, with the manifest that carries them, and not in the editor: the gallery
+ * now starts an effect, and it has no reason to load the syntax analysis module
+ * to copy four default values.
  *
- * ⚠️ **La même règle est écrite en Rust**, dans `storage::starting_params` :
- * l'icône de zone de notification lance un effet sans fenêtre, elle ne peut donc
- * rien emprunter d'ici. Ce que les deux doivent dire pareil : les défauts du
- * manifeste, recouverts par ce qu'on a retenu (`merge`, dans
- * `useSettings`), et **bornés aux paramètres déclarés**. Les désaccorder
- * donnerait deux éclairages différents pour le même effet selon l'endroit d'où
- * on l'a lancé.
+ * ⚠️ **The same rule is written in Rust**, in `storage::starting_params`: the
+ * notification area icon starts an effect without a window, so it cannot borrow
+ * anything from here. What both must say the same way: the manifest's defaults,
+ * overlaid with what was remembered (`merge`, in `useSettings`), and **limited
+ * to the declared parameters**. Letting them disagree would give two different
+ * lightings for the same effect depending on where it was started from.
  */
 export function startingParams(declaring: Pick<EffectManifest, 'params'>): EffectParams {
   const out: EffectParams = {}
@@ -356,36 +355,36 @@ export function startingParams(declaring: Pick<EffectManifest, 'params'>): Effec
   return out
 }
 
-// ---------------------------------------------------------------- réglages
+// ---------------------------------------------------------------- settings
 
 export type EffectParams = Record<string, ParamValue>
 
-/** Une décision d'adoption, telle que `settings.json` la retient. */
+/** An adoption decision, as `settings.json` remembers it. */
 export interface DeviceRecord {
   vid: number
   pid: number
-  /** Absent quand le système n'en déclare pas — pas `null`. */
+  /** Absent when the system declares none — not `null`. */
   serial?: string
   state: DeviceState
   /**
-   * Luminosité retenue pour **cet** appareil. Absente = {@link BRIGHTNESS_DEFAULT}.
+   * Brightness remembered for **this** device. Absent = {@link BRIGHTNESS_DEFAULT}.
    *
-   * Ici et non à la racine : `set_brightness(device, level)` prend un `DeviceRef`
-   * depuis le premier jour, et le protocole en fait une commande de l'appareil
-   * distincte de l'effet en cours. Deux claviers n'ont aucune raison de partager
-   * un niveau.
+   * Here and not at the root: `set_brightness(device, level)` has taken a
+   * `DeviceRef` since day one, and the protocol makes it a device command
+   * separate from the current effect. Two keyboards have no reason to share a
+   * level.
    */
   brightness?: number
 }
 
 /**
- * L'effet **appliqué** sur un appareil — celui qui pilote ses LED.
+ * The effect **applied** on a device — the one driving its LEDs.
  *
- * Une liste indexée, pas un scalaire : le moteur fait tourner un effet par
- * appareil, et un champ unique ne pouvait pas décrire ça.
+ * An indexed list, not a scalar: the engine runs one effect per device, and a
+ * single field could not describe that.
  *
- * **L'aperçu n'écrit jamais ici.** Regarder un effet ne le retient pas ; c'est
- * « Appliquer » qui décide.
+ * **The preview never writes here.** Looking at an effect does not remember it;
+ * it is "Apply" that decides.
  */
 export interface ActiveEffectRecord {
   vid: number
@@ -394,15 +393,15 @@ export interface ActiveEffectRecord {
 }
 
 /**
- * Ce qui vaut pour l'application entière, et pour aucun appareil en particulier.
+ * What holds for the whole application, and for no device in particular.
  *
- * Un objet à part : tout ce qui dépend d'un clavier vit dans une liste indexée,
- * ce qui n'en dépend pas vit ici. C'est le rangement qui empêche la confusion
- * dont `settings.json` vient de sortir — et la langue, quand elle arrivera,
- * n'aura rien à arbitrer.
+ * A separate object: everything that depends on a keyboard lives in an indexed
+ * list, what does not lives here. It is the arrangement that prevents the
+ * confusion `settings.json` has just come out of — and the language, when it
+ * arrives, will have nothing to arbitrate.
  */
 export interface Preferences {
-  /** Le niveau du journal, quand quelqu'un l'a changé. Absent = le défaut. */
+  /** The log level, when someone changed it. Absent = the default. */
   logLevel?: LogLevel
   /** The interface language someone chose. Absent = the system's. */
   language?: LanguageSetting
@@ -504,16 +503,16 @@ export function setLanguage(setting: LanguageSetting): Promise<LanguageStatus> {
 }
 
 /**
- * Les réglages retenus pour un effet, sur un appareil.
+ * The settings remembered for an effect, on a device.
  *
- * `values` ne porte que ce qui **diffère** de ce que l'effet déclare : un
- * paramètre laissé à sa valeur de départ n'y figure pas, et suivra donc le
- * manifeste si une version ultérieure de l'effet en change le défaut.
+ * `values` carries only what **differs** from what the effect declares: a
+ * parameter left at its starting value does not appear, and will therefore
+ * follow the manifest if a later version of the effect changes its default.
  *
- * La clé est la paire appareil / effet, **sans numéro de série** : toutes les
- * commandes du moteur visent un `DeviceRef`, deux exemplaires du même modèle
- * partagent déjà leur boucle de rendu, et les distinguer ici promettrait une
- * séparation que le reste de l'application ne tient pas.
+ * The key is the device / effect pair, **without a serial number**: every
+ * engine command targets a `DeviceRef`, two units of the same model already
+ * share their render loop, and telling them apart here would promise a
+ * separation the rest of the application does not keep.
  */
 export interface EffectParamsRecord {
   vid: number
@@ -523,12 +522,12 @@ export interface EffectParamsRecord {
 }
 
 /**
- * Miroir de `Settings`, dans `src-tauri/src/storage.rs`.
+ * Mirror of `Settings`, in `src-tauri/src/storage.rs`.
  *
- * Une préférence globale dans `preferences`, tout ce qui dépend d'un clavier dans
- * une liste indexée. Chacune ne porte que ce qui **diffère du défaut** : un
- * appareil absent de `devices` est détecté et à pleine luminosité, et un appareil
- * absent d'`activeEffects` ne s'est vu appliquer aucun effet.
+ * A global preference in `preferences`, everything that depends on a keyboard in
+ * an indexed list. Each carries only what **differs from the default**: a
+ * device absent from `devices` is detected and at full brightness, and a device
+ * absent from `activeEffects` has had no effect applied.
  */
 export interface Settings {
   /** Shape of the file: 3 since every effect is referenced by its key, `<source>:<name>`. */
@@ -596,50 +595,49 @@ export interface RuleDuration {
 }
 
 /**
- * Lit `settings.json`.
+ * Reads `settings.json`.
  *
- * Au premier lancement il n'y a pas de fichier : ce sont les **défauts** qui
- * arrivent, ce n'est pas une erreur.
+ * On first launch there is no file: it is the **defaults** that arrive, it is
+ * not an error.
  */
 export function getSettings(): Promise<Settings> {
   return invoke('get_settings')
 }
 
 /**
- * Remet `settings.json` au défaut, et repose les appareils.
+ * Resets `settings.json` to the default, and puts the devices down.
  *
- * Ce qui part : les décisions d'adoption — tout repasse en `detected` —, la
- * luminosité retenue de chaque appareil, l'effet appliqué sur chacun, et les
- * réglages retenus par paire appareil / effet. Le Rust arrête d'abord les
- * boucles en cours, éteint le rétroéclairage et referme les appareils : remettre
- * la table des appareils à zéro pendant qu'un effet tourne laisserait des
- * boucles que plus aucune décision ne désigne.
+ * What goes: the adoption decisions — everything goes back to `detected` —, each
+ * device's remembered brightness, the effect applied on each, and the settings
+ * remembered per device / effect pair. Rust first stops the running loops,
+ * turns the backlight off and closes the devices: resetting the devices table
+ * while an effect runs would leave loops that no decision designates any more.
  *
- * **Aucun effet n'est touché.** Les effets écrits vivent dans le dossier de
- * données, pas dans `settings.json` ; les retirer est une autre action, une par
- * effet ({@link deleteEffect}). Les confondre ferait perdre du code écrit à la
- * main à qui voulait seulement désadopter un clavier.
+ * **No effect is touched.** Written effects live in the data folder, not in
+ * `settings.json`; removing them is another action, one per effect
+ * ({@link deleteEffect}). Mixing them up would lose hand-written code for
+ * someone who only wanted to un-adopt a keyboard.
  *
- * La fenêtre garde, elle, ce qu'elle avait lu : c'est à l'appelant d'oublier les
- * réglages tenus en mémoire, sans quoi le premier mouvement de curseur les
- * réécrirait.
+ * The window, for its part, keeps what it had read: it is up to the caller to
+ * forget the settings held in memory, otherwise the first slider move would
+ * write them back.
  */
 export function resetSettings(): Promise<void> {
   return invoke('reset_settings')
 }
 
 /**
- * Retient les réglages d'un effet pour un appareil, sans toucher au reste.
+ * Remembers an effect's settings for a device, without touching the rest.
  *
- * À ne pas confondre avec {@link setEffectParams}, qui ajuste la boucle en
- * cours : celle-ci écrit sur disque, et ne change rien à ce qui tourne. Les deux
- * n'ont ni la même cadence ni la même destination.
+ * Not to be confused with {@link setEffectParams}, which adjusts the running
+ * loop: this one writes to disk, and changes nothing in what is running. The two
+ * have neither the same pace nor the same destination.
  *
- * Une commande dédiée plutôt qu'un `set_settings` : le Rust relit, modifie et
- * réécrit d'un seul tenant. Renvoyer tout le fichier depuis la fenêtre
- * écraserait au passage une adoption décidée entre-temps.
+ * A dedicated command rather than a `set_settings`: Rust reads, modifies and
+ * writes back in one go. Sending the whole file back from the window would
+ * overwrite in passing an adoption decided in the meantime.
  *
- * Une table **vide** efface l'entrée : c'est « rétablir les valeurs déclarées ».
+ * An **empty** table erases the entry: it is "restore the declared values".
  */
 export function rememberEffectParams(
   device: DeviceRef,
@@ -649,27 +647,27 @@ export function rememberEffectParams(
   return invoke('remember_effect_params', { device, effect, params })
 }
 
-// ---------------------------------------------------------------- moteur
+// ---------------------------------------------------------------- engine
 
 export interface EngineStatus {
   running: boolean
   effectId: string | null
-  /** Erreur venant du code de l'effet. Déjà lisible : à afficher telle quelle. */
+  /** Error coming from the effect's code. Already readable: to be shown as it is. */
   error: string | null
   /**
-   * Échec d'écriture vers le clavier — sans rapport avec le code de l'effet.
+   * Write failure towards the keyboard — unrelated to the effect's code.
    *
-   * Les deux sont distincts parce qu'ils n'ont ni la même cause ni le même
-   * remède : un effet impeccable peut n'atteindre aucune LED.
+   * The two are distinct because they have neither the same cause nor the same
+   * remedy: a flawless effect may reach no LED.
    */
   deviceError: Failure | null
   /**
-   * Vrai si les images parviennent effectivement à un clavier.
+   * True if the frames actually reach a keyboard.
    *
-   * Faux avec la sortie coupée, mais aussi — et c'est le cas piégeux —
-   * quand aucun périphérique n'est connecté : le simulateur s'anime, la case
-   * « envoyer » reste cochée, et le clavier garde son image. On lit ça comme
-   * « seule la première image est passée ».
+   * False with output cut, but also — and it is the tricky case — when no
+   * device is connected: the simulator animates, the "send" box stays ticked,
+   * and the keyboard keeps its frame. That reads as "only the first frame got
+   * through".
    */
   reachingKeyboard: boolean
   toKeyboard: boolean
@@ -714,59 +712,59 @@ export function idleAvailable(): Promise<boolean> {
   return invoke('idle_available')
 }
 
-/** L'état d'un appareil, et à qui il appartient. */
+/** A device's state, and whom it belongs to. */
 export interface DeviceEngineStatus extends EngineStatus {
   device: DeviceRef
 }
 
 /**
- * Ce que la fenêtre **regarde**, et qui n'atteint aucun clavier.
+ * What the window **looks at**, and which reaches no keyboard.
  *
- * Un type distinct, dans un champ distinct : c'est la quatrième fois dans ce
- * projet qu'un état qui ment coûte une session de diagnostic, et un drapeau à
- * filtrer se filtre mal. Ici il n'y a rien à filtrer — l'aperçu n'est pas dans
- * la liste des appareils, et personne ne peut l'y trouver par mégarde.
+ * A distinct type, in a distinct field: it is the fourth time in this project
+ * that a lying state costs a diagnosis session, and a flag to filter filters
+ * poorly. Here there is nothing to filter — the preview is not in the list of
+ * devices, and nobody can find it there by mistake.
  *
- * Il ne porte ni `toKeyboard`, ni `reachingKeyboard`, ni `deviceError` : une
- * boucle d'aperçu n'a aucune sortie matérielle, et ces champs à faux se liraient
- * comme une panne là où il n'y a qu'un choix.
+ * It carries neither `toKeyboard`, nor `reachingKeyboard`, nor `deviceError`: a
+ * preview loop has no hardware output, and those fields set to false would read
+ * as a failure where there is only a choice.
  */
 export interface PreviewStatus {
   /**
-   * L'appareil dont l'aperçu **emprunte** le gabarit.
+   * The device whose layout the preview **borrows**.
    *
-   * Il n'est ni piloté ni forcément branché : c'est une géométrie, pas une
+   * It is neither controlled nor necessarily plugged in: it is a geometry, not a
    * destination.
    */
   layoutOf: DeviceRef
   running: boolean
   effectId: string | null
-  /** Erreur venant du code de l'effet. Déjà lisible : à afficher telle quelle. */
+  /** Error coming from the effect's code. Already readable: to be shown as it is. */
   error: string | null
 }
 
 /**
- * Tout ce que le moteur sait, **rangé de façon à ne pas se confondre**.
+ * Everything the engine knows, **arranged so as not to be confused**.
  *
- * `devices` décrit ce qui tourne sur le matériel — c'est ce que liste l'icône de
- * zone de notification. `preview` décrit ce qu'on regarde.
+ * `devices` describes what runs on the hardware — it is what the notification
+ * area icon lists. `preview` describes what is being looked at.
  */
 export interface EngineReport {
   devices: DeviceEngineStatus[]
-  /** `null` quand rien n'est prévisualisé — dont dès que la fenêtre est repliée. */
+  /** `null` when nothing is previewed — including as soon as the window is folded away. */
   preview: PreviewStatus | null
 }
 
 /**
- * Démarre un effet installé **sur un appareil**.
+ * Starts an installed effect **on a device**.
  *
- * Le moteur tourne dans un fil Rust par appareil, indépendant de la fenêtre :
- * fermer l'application n'éteint pas l'effet. Démarrer ici ne touche à aucun
- * autre appareil — chacun porte son effet et ses réglages.
+ * The engine runs in one Rust thread per device, independent of the window:
+ * closing the application does not turn the effect off. Starting here touches
+ * no other device — each carries its effect and its settings.
  *
- * Viser un appareil débranché n'est pas une erreur : la boucle tourne, le
- * simulateur s'anime, et `reachingKeyboard` reste faux jusqu'à l'ouverture.
- * C'est ce qui permet d'écrire un effet **sans posséder le clavier**.
+ * Targeting an unplugged device is not an error: the loop runs, the simulator
+ * animates, and `reachingKeyboard` stays false until the device opens. It is
+ * what makes it possible to write an effect **without owning the keyboard**.
  */
 export function startEffect(
   device: DeviceRef,
@@ -781,21 +779,22 @@ export function stopEffect(device: DeviceRef): Promise<void> {
 }
 
 /**
- * Démarre l'aperçu d'un effet, **sans toucher au clavier ni au disque**.
+ * Starts the preview of an effect, **without touching the keyboard or the
+ * disk**.
  *
- * Le pendant exact de {@link startEffect}, moins tout ce qui engage : aucune
- * sortie matérielle, rien d'écrit dans `settings.json`, et surtout **aucune
- * boucle d'appareil arrêtée**. C'est ce qui permet de parcourir la galerie
- * pendant qu'un effet tourne sur le clavier : sans cette boucle séparée,
- * sélectionner un effet éteindrait l'éclairage en cours.
+ * The exact counterpart of {@link startEffect}, minus everything that commits:
+ * no hardware output, nothing written to `settings.json`, and above all **no
+ * device loop stopped**. It is what makes it possible to browse the gallery
+ * while an effect runs on the keyboard: without this separate loop, selecting
+ * an effect would turn off the current lighting.
  *
- * `device` désigne l'appareil dont on **emprunte le gabarit** ; `null` retombe
- * sur le gabarit par défaut, pour prévisualiser sans posséder de clavier.
+ * `device` designates the device whose **layout is borrowed**; `null` falls
+ * back on the default layout, to preview without owning a keyboard.
  *
- * Il n'y a qu'un aperçu : appeler à nouveau **remplace** le précédent. Chaque
- * appel construit un contexte QuickJS et en détruit un, d'où la temporisation
- * côté appelant — la borner ici obligerait à choisir entre faire attendre la
- * dernière sélection et la perdre.
+ * There is only one preview: calling again **replaces** the previous one. Each
+ * call builds a QuickJS context and destroys one, hence the debounce on the
+ * caller's side — bounding it here would force a choice between making the
+ * last selection wait and losing it.
  */
 export function startPreview(
   device: DeviceRef | null,
@@ -805,22 +804,22 @@ export function startPreview(
   return invoke('start_preview', { device, id, params })
 }
 
-/** Arrête l'aperçu. Aucun effet d'appareil n'est touché. */
+/** Stops the preview. No device effect is touched. */
 export function stopPreview(): Promise<void> {
   return invoke('stop_preview')
 }
 
-/** Ajuste les paramètres de l'aperçu à chaud, sans redémarrer sa boucle. */
+/** Adjusts the preview's parameters live, without restarting its loop. */
 export function setPreviewParams(params: EffectParams): Promise<void> {
   return invoke('set_preview_params', { params })
 }
 
 /**
- * Ouvre le flux d'images de l'aperçu vers le simulateur.
+ * Opens the preview's frame stream to the simulator.
  *
- * Un canal distinct de celui des appareils, et c'est ce qui permet de regarder un
- * effet pendant qu'un autre tourne sur le clavier : les deux flux existent en
- * même temps, et la fenêtre choisit lequel elle dessine.
+ * A channel distinct from the devices' one, and it is what makes it possible to
+ * look at an effect while another runs on the keyboard: both streams exist at
+ * the same time, and the window chooses which one it draws.
  */
 export function subscribePreviewFrames(
   onFrame: (frame: Uint8Array) => void,
@@ -834,31 +833,31 @@ export function subscribePreviewFrames(
   )
 }
 
-/** Ajuste les paramètres à chaud, sans redémarrer la boucle. */
+/** Adjusts the parameters live, without restarting the loop. */
 export function setEffectParams(device: DeviceRef, params: EffectParams): Promise<void> {
   return invoke('set_effect_params', { device, params })
 }
 
 /**
- * Active ou coupe l'écriture vers un appareil, **sans** toucher au simulateur.
+ * Turns writing to a device on or off, **without** touching the simulator.
  *
- * C'est ce qui permet d'écrire un effet sans posséder le clavier. La coupure
- * est propre à l'appareil visé : les autres continuent d'être alimentés.
+ * It is what makes it possible to write an effect without owning the keyboard.
+ * The cut is specific to the targeted device: the others keep being fed.
  */
 export function setOutputToKeyboard(device: DeviceRef, on: boolean): Promise<void> {
   return invoke('set_output_to_keyboard', { device, on })
 }
 
 /**
- * Ouvre le flux d'images d'**un appareil** vers le simulateur.
+ * Opens the frame stream of **one device** to the simulator.
  *
- * Chaque message est une image brute : `frameLen × 3` octets, dans l'ordre RVB.
- * Un canal, et non un événement global — la portée est explicite et le binaire
- * passe sans détour par un tableau JSON d'entiers.
+ * Each message is a raw frame: `frameLen × 3` bytes, in RGB order. A channel,
+ * and not a global event — the scope is explicit and the binary goes through
+ * without a detour through a JSON array of integers.
  *
- * Le simulateur suit l'appareil sélectionné : en changer, c'est fermer ce canal
- * et s'abonner ailleurs. Fermer le canal arrête le flux **sans arrêter
- * l'effet**, qui continue d'alimenter le clavier.
+ * The simulator follows the selected device: changing it means closing this
+ * channel and subscribing elsewhere. Closing the channel stops the stream
+ * **without stopping the effect**, which keeps feeding the keyboard.
  */
 export function subscribeFrames(
   device: DeviceRef,
@@ -874,113 +873,113 @@ export function subscribeFrames(
 }
 
 /**
- * État du moteur : ce qui tourne **sur les appareils**, et ce qu'on **regarde**.
+ * Engine state: what runs **on the devices**, and what is **being looked at**.
  *
- * Interrogé plutôt que poussé : une erreur survenue fenêtre fermée doit se lire
- * à la réouverture, ce qu'un événement ponctuel ne permet pas.
+ * Polled rather than pushed: an error that occurred while the window was closed
+ * must be readable on reopening, which a one-off event does not allow.
  *
- * `devices` porte une entrée par appareil visé depuis le démarrage, pas seulement
- * par appareil ouvert : un appareil sans ligne est un appareil dont on ne sait
- * rien, ce qui n'est pas la même chose qu'un appareil qui ne fait rien.
+ * `devices` carries one entry per device targeted since startup, not only per
+ * open device: a device without a row is a device we know nothing about, which
+ * is not the same thing as a device that does nothing.
  *
- * `preview` est à part — voir {@link PreviewStatus}.
+ * `preview` is separate — see {@link PreviewStatus}.
  */
 export function engineStatus(): Promise<EngineReport> {
   return invoke('engine_status')
 }
 
-// ------------------------------------------------------- changements hors fenêtre
+// ------------------------------------------------------- changes outside the window
 
 /**
- * L'état a changé **sans la fenêtre**.
+ * The state changed **without the window**.
  *
- * Écrit ici *et* dans `src-tauri/src/tray.rs`, qui confronte les deux par un
- * test : rien ne relie ces deux chaînes à la compilation, et les désaccorder
- * donnerait une fenêtre qui ne se resynchronise plus jamais, sans une erreur
- * nulle part.
+ * Written here *and* in `src-tauri/src/tray.rs`, which compares the two in a
+ * test: nothing links these two strings at compile time, and letting them
+ * disagree would give a window that never resynchronizes again, without an
+ * error anywhere.
  */
-const ETAT_CHANGE = 'candeo://etat-change'
+const STATE_CHANGED = 'candeo://etat-change'
 
 /**
- * Prévient quand l'icône de zone de notification a commandé quelque chose, ou
- * quand la fenêtre revient après avoir été repliée.
+ * Tells when the notification area icon has commanded something, or when the
+ * window comes back after being folded away.
  *
- * # Pourquoi un événement, ici, alors que tout le reste est interrogé
+ * # Why an event, here, when everything else is polled
  *
- * Ce qui est **interrogeable** l'est resté : l'état du moteur se relit toutes
- * les secondes, précisément parce qu'une erreur survenue fenêtre fermée doit se
- * lire à la réouverture. Ce qui ne l'est pas, c'est ce que la fenêtre ne lit
- * qu'**une fois**, au montage — la liste des appareils, `settings.json` — parce
- * qu'elle en était jusqu'ici la seule source.
+ * What **can be polled** has stayed so: the engine state is read again every
+ * second, precisely because an error that occurred while the window was closed
+ * must be readable on reopening. What cannot is what the window reads only
+ * **once**, on mount — the list of devices, `settings.json` — because until now
+ * it was their only source.
  *
- * Elle ne l'est plus, et surtout elle ne meurt plus : fermer la fenêtre la
- * replie, son instantané peut donc vieillir des jours pendant que le menu
- * commande les effets. Sonder le disque en boucle pour cela serait payer à
- * chaque seconde ce qui arrive quelques fois par session.
+ * It no longer is, and above all it no longer dies: closing the window folds it
+ * away, so its snapshot can age for days while the menu controls the effects.
+ * Polling the disk in a loop for that would mean paying every second for what
+ * happens a few times per session.
  *
- * Rend de quoi se désabonner, comme {@link subscribeFrames}.
+ * Returns the means to unsubscribe, like {@link subscribeFrames}.
  */
 export function onStateChanged(handler: () => void): Promise<UnlistenFn> {
-  return listen(ETAT_CHANGE, () => {
+  return listen(STATE_CHANGED, () => {
     handler()
   })
 }
 
-// ---------------------------------------------------------------- journal
+// ---------------------------------------------------------------- log
 
-/** Miroir de `LogLevel`, dans `src-tauri/src/journal.rs`. */
+/** Mirror of `LogLevel`, in `src-tauri/src/journal.rs`. */
 export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace'
 
 /**
- * Les niveaux que la fenêtre sait produire.
+ * The levels the window can produce.
  *
- * Sans `trace` : le par-image vient du moteur, pas d'ici, et un niveau qu'on ne
- * sait pas écrire n'a pas à être acceptable en argument.
+ * Without `trace`: the per-frame logging comes from the engine, not from here,
+ * and a level that cannot be written has no business being accepted as an
+ * argument.
  */
 export type WebviewLevel = Exclude<LogLevel, 'trace'>
 
-/** Miroir de `JournalStatus`, dans `src-tauri/src/journal.rs`. */
+/** Mirror of `JournalStatus`, in `src-tauri/src/journal.rs`. */
 export interface JournalStatus {
   /**
-   * Le niveau appliqué. `null` quand `CANDEO_LOG` porte une directive qu'aucun
-   * niveau ne résume — à afficher tel quel plutôt qu'en inventer un.
+   * The level applied. `null` when `CANDEO_LOG` carries a directive no level
+   * sums up — to be shown as it is rather than inventing one.
    */
   level: LogLevel | null
-  /** Le niveau retenu dans `settings.json`. `null` = le défaut. */
+  /** The level remembered in `settings.json`. `null` = the default. */
   setting: LogLevel | null
   /**
-   * Vrai si `CANDEO_LOG` impose le niveau. Le réglage est alors **écrit mais pas
-   * appliqué** : il vaudra au prochain lancement sans la variable.
+   * True if `CANDEO_LOG` imposes the level. The setting is then **written but
+   * not applied**: it will hold at the next launch without the variable.
    */
   forcedByEnv: boolean
-  /** Le dossier des journaux, `null` si le journal n'écrit pas sur disque. */
+  /** The log folder, `null` if the log does not write to disk. */
   dir: string | null
   /**
-   * Vrai si le niveau actif porte du **par-image**.
+   * True if the active level carries **per-frame** logging.
    *
-   * ⚠️ C'est ce qui rend visible qu'un niveau élevé est actif : laissé en place
-   * et oublié, il remplit le disque en silence.
+   * ⚠️ It is what makes visible that a high level is active: left in place and
+   * forgotten, it fills the disk silently.
    */
   verbose: boolean
   /** Log files kept, one per day; `0` keeps them all. */
   filesKept: number
 }
 
-/** L'état du journal : niveau appliqué, niveau retenu, dossier. */
+/** The log's state: level applied, level remembered, folder. */
 export function getJournal(): Promise<JournalStatus> {
   return invoke('get_journal')
 }
 
 /**
- * Change le niveau **sans redémarrer**, et le retient.
+ * Changes the level **without restarting**, and remembers it.
  *
- * Le défaut qu'on cherche peut ne pas survivre au redémarrage — un clavier qui
- * décroche après deux heures, un appareil qui disparaît par intermittence :
- * « relancez en mode détaillé » revient à demander de reproduire ce qu'on vient
- * d'observer.
+ * The flaw being hunted may not survive a restart — a keyboard that drops out
+ * after two hours, a device that disappears intermittently: "restart in verbose
+ * mode" amounts to asking to reproduce what has just been observed.
  *
- * Il **survit au redémarrage**, et c'est un choix : un défaut qui ne se produit
- * qu'au lancement existe. D'où `verbose`, qui sert à le dire.
+ * It **survives a restart**, and that is a choice: a flaw that only occurs at
+ * launch exists. Hence `verbose`, which serves to say so.
  */
 export function setLogLevel(level: LogLevel): Promise<JournalStatus> {
   return invoke('set_log_level', { level })
@@ -991,27 +990,27 @@ export function setLogFilesKept(keep: number): Promise<JournalStatus> {
   return invoke('set_log_files_kept', { keep })
 }
 
-/** Ouvre le dossier des journaux dans le gestionnaire de fichiers du système. */
+/** Opens the log folder in the system file manager. */
 export function openLogDir(): Promise<void> {
   return invoke('open_log_dir')
 }
 
 /**
- * Le diagnostic, prêt à coller dans un rapport de bogue : version, système,
- * appareils, état du moteur.
+ * The diagnostic, ready to paste into a bug report: version, system, devices,
+ * engine state.
  *
- * Le numéro de série n'y figure pas — une empreinte stable le remplace, qui
- * distingue deux exemplaires du même modèle sans divulguer lequel.
+ * The serial number does not appear in it — a stable fingerprint replaces it,
+ * which tells two units of the same model apart without disclosing which.
  */
 export function diagnostic(): Promise<string> {
   return invoke('diagnostic')
 }
 
 /**
- * Consigne un enregistrement venu de la fenêtre dans le journal du Rust.
+ * Records an entry coming from the window in Rust's log.
  *
- * À n'appeler que par la façade de `api/journal.ts` : elle seule sait qu'un
- * échec de journalisation doit être avalé.
+ * To be called only by the facade in `api/journal.ts`: it alone knows that a
+ * logging failure must be swallowed.
  */
 export function logFromWebview(
   level: WebviewLevel,

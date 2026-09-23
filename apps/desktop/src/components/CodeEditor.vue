@@ -1,11 +1,11 @@
 <script setup lang="ts">
 /**
- * L'éditeur de code — une enveloppe Vue autour de Monaco, et rien de plus.
+ * The code editor: a Vue wrapper around Monaco, and nothing more.
  *
- * Monaco gère lui-même son DOM : ce composant ne fait que le monter, tenir sa
- * valeur en phase avec `v-model`, et le démonter proprement. Tout ce qui
- * concerne le **service de langage** vit dans `editor/monaco.ts` — c'est un
- * réglage global de Monaco, pas une propriété d'un composant.
+ * Monaco manages its own DOM: this component only mounts it, keeps its value in
+ * step with `v-model`, and unmounts it cleanly. Everything about the **language
+ * service** lives in `editor/monaco.ts`: it is a global Monaco setting, not a
+ * property of a component.
  */
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -14,7 +14,7 @@ import { effectModel, monaco, setupMonaco } from '../editor/monaco'
 
 const props = defineProps<{
   modelValue: string
-  /** Pendant le chargement d'un effet installé, on n'édite pas un texte vide. */
+  /** While an installed effect is loading, an empty text is not edited. */
   disabled?: boolean
 }>()
 
@@ -31,24 +31,24 @@ onMounted(() => {
 
   editor = monaco.editor.create(host.value as HTMLElement, {
     model,
-    // Suit la taille du conteneur sans qu'on ait à l'observer nous-mêmes : le
-    // panneau se redimensionne avec la fenêtre et avec l'autre volet.
+    // Follows the container's size without us having to observe it: the panel
+    // resizes with the window and with the other pane.
     automaticLayout: true,
     readOnly: props.disabled === true,
-    // La police de l'application, par son jeton : Monaco écrit la valeur telle
-    // quelle dans le style, la variable CSS y est donc résolue normalement.
+    // The application's font, by its token: Monaco writes the value as is into
+    // the style, so the CSS variable resolves there normally.
     fontFamily: 'var(--font-mono)',
     fontSize: 13,
     lineHeight: 20,
     tabSize: 2,
     insertSpaces: true,
     minimap: { enabled: false },
-    // Un effet tient en un écran : la vue d'ensemble ne compense pas la place
-    // qu'elle prend sur un panneau déjà partagé avec le simulateur.
+    // An effect fits on one screen: the overview does not make up for the room
+    // it takes on a panel already shared with the simulator.
     scrollBeyondLastLine: false,
     padding: { top: 12, bottom: 12 },
-    // Les menus du système d'exploitation n'ont pas cours dans une fenêtre
-    // d'application qui n'offre ni copier-coller de fichiers ni navigation.
+    // The operating system's menus have no place in an application window that
+    // offers neither file copy and paste nor navigation.
     contextmenu: false,
     smoothScrolling: false,
     renderLineHighlight: 'line',
@@ -59,12 +59,13 @@ onMounted(() => {
 })
 
 /**
- * Le texte peut aussi changer de l'extérieur : brouillon restauré, source relue
- * au disque.
+ * The text can also change from outside: a restored draft, a source read back
+ * from disk.
  *
- * La comparaison n'est pas une optimisation, c'est ce qui empêche la boucle :
- * chaque frappe remonte par `update:modelValue` et redescend ici, et un
- * `setValue` inconditionnel replacerait le curseur au début à chaque caractère.
+ * The comparison is not an optimization, it is what prevents the loop: every
+ * keystroke goes up through `update:modelValue` and comes back down here, and an
+ * unconditional `setValue` would put the cursor back at the start on every
+ * character.
  */
 watch(
   () => props.modelValue,
@@ -81,8 +82,8 @@ watch(
 onBeforeUnmount(() => {
   editor?.dispose()
   editor = null
-  // Le modèle est disposé avec l'éditeur : son URI doit redevenir libre, sinon
-  // rouvrir l'éditeur échouerait à en créer un second sous la même.
+  // The model is disposed with the editor: its URI must be free again, or
+  // reopening the editor would fail to create a second one under the same URI.
   model?.dispose()
   model = null
 })
@@ -100,9 +101,9 @@ onBeforeUnmount(() => {
 }
 
 /*
- * `base.css` interdit la sélection dans toute l'application — une fenêtre
- * d'application ne se sélectionne pas comme une page. L'éditeur est l'exception
- * qui le justifie : on y sélectionne du texte pour le déplacer.
+ * `base.css` forbids selection across the whole application: an application
+ * window is not selected like a page. The editor is the exception that warrants
+ * it: text is selected there to move it.
  */
 .code :deep(.monaco-editor),
 .code :deep(.monaco-editor) * {

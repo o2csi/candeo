@@ -880,7 +880,7 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
         .collect())
 }
 
-/// Stores "piloté" (controlled) for this device, and opens it if it is there.
+/// Stores "controlled" for this device, and opens it if it is there.
 ///
 /// The decision is written **whatever the outcome of the opening**: it is a
 /// decision, not the report of an attempt. The next startup will replay it,
@@ -967,7 +967,7 @@ fn adopt_device(
     }
 }
 
-/// Stores "ignoré" (ignored), and closes the device if it was open.
+/// Stores "ignored", and closes the device if it was open.
 ///
 /// Does not go through HID: ignoring a device must stay possible when HID
 /// access is precisely what is failing. The serial is therefore only picked up
@@ -1433,7 +1433,7 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
                 // `None` designates an exit requested by the user — the last
                 // window closing — and `Some` an exit requested by the code,
-                // that is, our own "Quitter" (Quit). The distinction is the
+                // that is, our own "Quit Candeo". The distinction is the
                 // whole mechanism: preventing without making it would make
                 // Candeo impossible to quit, even through its only menu item
                 // meant for that.

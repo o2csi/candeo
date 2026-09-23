@@ -4,7 +4,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import * as api from './api/candeo'
-import { alerte, message } from './api/journal'
+import { warn, message } from './api/journal'
 import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
@@ -35,12 +35,12 @@ watch(
   (summary) => {
     getCurrentWindow()
       .setTitle(t('app.title', { summary }))
-      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e, 'en')}`, e))
+      .catch((e: unknown) => warn('App', `window title not updated: ${message(e, 'en')}`, e))
   },
   { immediate: true },
 )
 
-/** L'éditeur occupe toute la fenêtre : c'est un mode, pas un onglet. */
+/** The editor takes the whole window: it is a mode, not a tab. */
 const full = computed(() => route.meta.full === true)
 
 
@@ -50,34 +50,34 @@ onMounted(() => {
   // what it is for is telling someone who would not have gone looking (#139).
   // It says nothing when the setting is off, and never interrupts.
   startUpdateCheck().catch((e: unknown) =>
-    alerte('App', `version not checked: ${message(e, 'en')}`, e),
+    warn('App', `version not checked: ${message(e, 'en')}`, e),
   )
   // Effects dropped in the folder are compiled now, not when the gallery opens:
   // the tray only offers what is compiled, and it may be all someone uses.
   refreshLibrary().catch((e: unknown) =>
-    alerte('App', `library not compiled: ${message(e, 'en')}`, e),
+    warn('App', `library not compiled: ${message(e, 'en')}`, e),
   )
 
-  // L'état peut changer **sans la fenêtre** : l'icône de zone de notification
-  // lance, arrête et éteint sans elle. Et la fenêtre lui survit maintenant
-  // repliée — son instantané peut donc vieillir des jours avant de revenir à
-  // l'écran. Ce que le moteur dit est déjà réinterrogé chaque seconde ; ce qui
-  // ne l'est pas, c'est ce qu'on ne lit qu'au montage.
+  // The state can change **without the window**: the notification area icon
+  // starts, stops and turns off without it. And the window now outlives it
+  // folded away — its snapshot can therefore age for days before coming back
+  // on screen. What the engine says is already polled again every second; what
+  // is not is what is only read on mount.
   //
-  // Aucun désabonnement : ce composant vit aussi longtemps que la vue web, et
-  // une vue web détruite emporte ses écouteurs. En poser un ici, c'est en poser
-  // un par page chargée, donc un.
+  // No unsubscription: this component lives as long as the web view, and a
+  // destroyed web view takes its listeners with it. Setting one here means
+  // setting one per page loaded, so one.
   void api
     .onStateChanged(() => {
       void restore()
       void reload()
     })
     .catch((e: unknown) => {
-      // Dégradé mais fonctionnel : la fenêtre affichera l'état de son montage
-      // jusqu'à ce qu'on la rouvre. Rien à montrer à l'écran — l'utilisateur ne
-      // peut rien en faire —, mais un journal qui l'explique évite de chercher
-      // une panne d'écriture là où il n'y a qu'un écouteur manquant.
-      alerte('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
+      // Degraded but working: the window will show the state from its mount
+      // until it is reopened. Nothing to show on screen — the user can do
+      // nothing about it —, but a log that explains it avoids hunting for a
+      // write failure where there is only a missing listener.
+      warn('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
     })
 })
 </script>

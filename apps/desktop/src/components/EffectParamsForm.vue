@@ -1,36 +1,36 @@
 <script setup lang="ts">
 /**
- * Les réglages d'un effet, en formulaire.
+ * An effect's settings, as a form.
  *
- * **Un contrôle par sorte de `ParamSpec`, engendré depuis le manifeste** — rien
- * n'est écrit ici pour un effet en particulier. C'est ce qui sert le public qui
- * n'écrira jamais de code : « la vague, mais plus lente » demande un curseur,
- * pas un éditeur.
+ * **One control per kind of `ParamSpec`, generated from the manifest**: nothing
+ * here is written for a particular effect. That is what serves the audience who
+ * will never write code: "the wave, but slower" calls for a slider, not an
+ * editor.
  *
- * | Sorte | Contrôle | Ce qui l'accompagne |
+ * | Kind | Control | What goes with it |
  * |---|---|---|
- * | `number` | curseur `min`/`max`/`step` | la valeur, en chiffres |
- * | `color` | sélecteur de couleur | le code `#rrggbb`, en toutes lettres |
- * | `boolean` | case à cocher | « activé » / « désactivé » |
- * | `choice` | liste | l'option retenue |
+ * | `number` | `min`/`max`/`step` slider | the value, in figures |
+ * | `color` | color picker | the `#rrggbb` code, spelled out |
+ * | `boolean` | checkbox | "on" / "off" |
+ * | `choice` | list | the selected option |
  *
- * ## La couleur ne porte jamais l'information seule
+ * ## Color never carries the information alone
  *
- * Un sélecteur de couleur *est* une couleur — c'est le seul endroit où elle est
- * le sujet, et non un code. Le code hexadécimal l'accompagne donc toujours : il
- * se lit, se relève et se dicte, ce qu'une pastille ne permet pas.
+ * A color picker *is* a color: it is the only place where color is the subject,
+ * and not a code. So the hexadecimal code always goes with it: it can be read,
+ * noted down and dictated, which a patch of color does not allow.
  *
- * ## Pourquoi un `fieldset`, et pourquoi il porte `min-width: 0`
+ * ## Why a `fieldset`, and why it carries `min-width: 0`
  *
- * L'état inerte se décide **une fois**, sur le groupe : `<fieldset disabled>`
- * neutralise tous les contrôles descendants, le bouton de rétablissement
- * compris, et un champ ajouté demain l'est sans que personne y pense — même
- * forme que le repliement des colonnes.
+ * The inert state is decided **once**, on the group: `<fieldset disabled>`
+ * disables every descendant control, the restore button included, and a field
+ * added tomorrow is too without anyone thinking about it: the same shape as the
+ * column collapsing.
  *
- * Le piège est ailleurs : un `fieldset` a une largeur minimale implicite
- * (`min-width: min-content`) qu'aucune remise à plat ne supprime. Sans
- * `min-width: 0`, le plus long libellé impose sa largeur au groupe, et la
- * colonne de droite déborde au lieu de se comprimer.
+ * The trap is elsewhere: a `fieldset` has an implicit minimum width
+ * (`min-width: min-content`) that no reset removes. Without `min-width: 0`, the
+ * longest label imposes its width on the group, and the right-hand column
+ * overflows instead of shrinking.
  */
 
 import { computed, useId } from 'vue'
@@ -41,40 +41,41 @@ import { t } from '../i18n'
 import { localized } from '../i18n/text'
 
 const props = defineProps<{
-  /** Les paramètres déclarés par l'effet. Vide est un cas normal. */
+  /** The parameters the effect declares. Empty is a normal case. */
   specs: Record<string, ParamSpec>
-  /** Leurs valeurs courantes, déjà complètes — voir `useSettings`. */
+  /** Their current values, already complete: see `useSettings`. */
   values: EffectParams
   /**
-   * Pourquoi les contrôles sont inertes, ou `null` s'ils sont vivants.
+   * Why the controls are inert, or `null` if they are live.
    *
-   * La raison **est** le message : un formulaire grisé sans explication laisse
-   * chercher ce qu'on a mal fait. Le texte dit ce qui manque et ce qui le lève.
+   * The reason **is** the message: a greyed-out form with no explanation leaves
+   * people looking for what they did wrong. The text says what is missing and
+   * what lifts it.
    */
   frozen: string | null
-  /** Ce qu'on affiche quand l'effet ne déclare aucun paramètre. */
+  /** What is shown when the effect declares no parameter. */
   empty: string
 }>()
 
 const emit = defineEmits<{
-  /** La valeur bouge — en continu pendant qu'on glisse un curseur. */
+  /** The value moves: continuously while a slider is dragged. */
   change: [id: string, value: ParamValue]
   /**
-   * Le geste est terminé : curseur relâché, case cochée, option choisie.
+   * The gesture is over: slider released, box checked, option chosen.
    *
-   * Séparé de `change` parce que les deux ne s'adressent pas au même endroit :
-   * `change` alimente la boucle de rendu à la volée, `commit` dit qu'il est
-   * temps d'écrire sur disque. Sans lui, la seule garantie serait une minuterie
-   * que fermer la fenêtre emporterait.
+   * Separate from `change` because the two are not addressed to the same place:
+   * `change` feeds the render loop on the fly, `commit` says it is time to write
+   * to disk. Without it, the only guarantee would be a timer that closing the
+   * window would take away.
    */
   commit: []
   reset: []
 }>()
 
-/** Préfixe d'identifiant unique : les `for` d'un formulaire doivent l'être. */
+/** Unique identifier prefix: a form's `for` attributes must be unique. */
 const uid = useId()
 
-// ---------------------------------------------------------------- couleurs
+// ---------------------------------------------------------------- colors
 
 const byte = (n: number) =>
   Math.max(0, Math.min(255, Math.round(n)))
@@ -90,15 +91,14 @@ const fromHex = (hex: string): Rgb => ({
 })
 
 /**
- * Autant de décimales que le pas en demande, pas une de plus.
+ * As many decimals as the step calls for, not one more.
  *
- * Un pas de `0.5` affiche « 2.5 » ; un pas entier affiche « 120 ». Sans cela,
- * les arrondis du binaire finissent par écrire « 2.5000000000000004 » sous un
- * curseur.
+ * A step of `0.5` shows "2.5"; an integer step shows "120". Without this, binary
+ * rounding ends up writing "2.5000000000000004" under a slider.
  *
- * Le point et non la virgule : c'est le nombre tel que l'effet l'écrit dans son
- * manifeste, et tel qu'on le relit dans l'éditeur. Une virgule ici obligerait à
- * traduire mentalement entre les deux écrans.
+ * A dot and not a comma: it is the number as the effect writes it in its
+ * manifest, and as it is read back in the editor. A comma here would force a
+ * mental translation between the two screens.
  */
 function decimals(step: number): number {
   const written = String(step)
@@ -106,19 +106,19 @@ function decimals(step: number): number {
   return dot === -1 ? 0 : written.length - dot - 1
 }
 
-// ---------------------------------------------------------------- champs
+// ---------------------------------------------------------------- fields
 
 /**
- * Un champ prêt à dessiner, la sorte déjà tranchée.
+ * A field ready to draw, its kind already settled.
  *
- * Le tri se fait ici et non dans le patron : `ParamSpec` est une union
- * discriminée, et la restreindre dans un `v-if` de gabarit revient à écrire
- * quatre transtypages pour retrouver ce que le type disait déjà.
+ * The sorting happens here and not in the template: `ParamSpec` is a
+ * discriminated union, and narrowing it in a template `v-if` amounts to writing
+ * four casts to get back what the type already said.
  */
 interface Common {
   id: string
   label: string
-  /** La valeur courante, en toutes lettres. */
+  /** The current value, spelled out. */
   shown: string
 }
 
@@ -169,14 +169,14 @@ const fields = computed<Field[]>(() =>
 )
 
 /**
- * Ce que la région d'annonce dit, ou rien.
+ * What the live region says, or nothing.
  *
- * Vide quand l'effet ne déclare aucun paramètre : le message d'absence est là au
- * chargement de l'écran, il n'a rien d'un changement à signaler.
+ * Empty when the effect declares no parameter: the "none" message is there when
+ * the screen loads, it is nothing like a change to announce.
  */
 const announced = computed(() => (fields.value.length ? (props.frozen ?? '') : ''))
 
-/** Vrai dès qu'un réglage s'écarte du manifeste : c'est ce qu'on peut rétablir. */
+/** True as soon as a setting departs from the manifest: that is what can be restored. */
 const touched = computed(() =>
   Object.entries(props.specs).some(([id, spec]) => {
     const v = props.values[id]
@@ -184,7 +184,7 @@ const touched = computed(() =>
   }),
 )
 
-// ---------------------------------------------------------------- saisies
+// ---------------------------------------------------------------- inputs
 
 const input = (e: Event) => e.target as HTMLInputElement
 
@@ -196,10 +196,10 @@ function onColor(id: string, e: Event) {
   emit('change', id, fromHex(input(e).value))
 }
 
-// La fin d'un geste relit la valeur avant de dire « écris ». Émettre `commit`
-// seul supposerait qu'un `input` vient de passer — vrai pour un glissement, pas
-// garanti pour un sélecteur de couleur, dont la boîte de dialogue système peut
-// ne rendre son verdict qu'au `change`.
+// The end of a gesture reads the value again before saying "write". Emitting
+// `commit` alone would assume an `input` has just gone by: true for a drag, not
+// guaranteed for a color picker, whose system dialog may only give its verdict
+// on `change`.
 function onNumberEnd(id: string, e: Event) {
   onNumber(id, e)
   emit('commit')
@@ -210,8 +210,8 @@ function onColorEnd(id: string, e: Event) {
   emit('commit')
 }
 
-// Une case et une liste n'ont pas d'état intermédiaire : leur `change` est à la
-// fois le mouvement et la fin du geste.
+// A checkbox and a list have no intermediate state: their `change` is both the
+// movement and the end of the gesture.
 function onBoolean(id: string, e: Event) {
   emit('change', id, input(e).checked)
   emit('commit')
@@ -225,25 +225,25 @@ function onChoice(id: string, e: Event) {
 
 <template>
   <!--
-    Sans nom accessible : la colonne qui porte ce bloc s'appelle déjà
-    « Réglages », et une région imbriquée du même nom n'ajouterait qu'un doublon
-    à parcourir. Le `h2` suffit à situer le bloc dans le plan du document.
+    No accessible name: the column holding this block is already called
+    "Settings", and a nested region of the same name would only add a duplicate
+    to go through. The `h2` is enough to place the block in the document outline.
   -->
   <section class="settings">
     <h2>{{ t('effects.params.title') }}</h2>
 
     <!--
-      La région d'annonce, **montée en permanence** — hors de tout `v-if`, y
-      compris celui qui distingue « aucun paramètre » du formulaire.
+      The live region, **always mounted**: outside any `v-if`, including the one
+      that tells "no parameter" apart from the form.
 
-      Un lecteur d'écran n'annonce de façon fiable qu'une région vivante déjà
-      présente dans le document, dont le contenu change ; insérée en même temps
-      que son texte, elle reste souvent muette. La placer sous le `v-else` la
-      remontait à chaque passage d'un effet sans paramètre à un effet qui en
-      déclare — exactement le cas qu'elle devait servir.
+      A screen reader only reliably announces a live region already present in
+      the document whose content changes; inserted at the same time as its text,
+      it often stays silent. Placing it under the `v-else` remounted it on every
+      switch from an effect without parameters to one that declares some:
+      exactly the case it was meant to serve.
 
-      Elle ne coûte rien en mise en page : `.sr-only` est en `position: absolute`,
-      donc ce n'est même pas un élément flexible et aucun espacement ne s'ajoute.
+      It costs nothing in layout: `.sr-only` is `position: absolute`, so it is
+      not even a flex item and no spacing is added.
     -->
     <p class="sr-only" role="status">{{ announced }}</p>
 
@@ -251,9 +251,8 @@ function onChoice(id: string, e: Event) {
 
     <template v-else>
       <!--
-        La phrase visible, et rien de plus : `aria-hidden` parce que la région
-        d'annonce ci-dessus porte déjà le même texte, et qu'il serait lu deux
-        fois.
+        The visible sentence, and nothing more: `aria-hidden` because the live
+        region above already carries the same text, and it would be read twice.
       -->
       <p v-if="frozen" class="hint frozen" aria-hidden="true">{{ frozen }}</p>
 
@@ -261,15 +260,14 @@ function onChoice(id: string, e: Event) {
         <div v-for="f in fields" :key="f.id" class="field">
           <div class="field-head">
             <label :for="`${uid}-${f.id}`">{{ f.label }}</label>
-            <!-- Le doublage en toutes lettres : aucune information n'est portée
-                 par la seule position d'un curseur ou la seule teinte d'une
-                 pastille. -->
+            <!-- The value spelled out as well: no information is carried by
+                 a slider's position alone or a patch's hue alone. -->
             <span class="num shown">{{ f.shown }}</span>
           </div>
 
           <!--
-            `input` pendant le glissement, `change` au relâchement : le premier
-            alimente la boucle de rendu, le second déclenche l'écriture disque.
+            `input` while dragging, `change` on release: the first feeds the
+            render loop, the second triggers the disk write.
           -->
           <input
             v-if="f.kind === 'number'"
@@ -285,8 +283,8 @@ function onChoice(id: string, e: Event) {
           />
 
           <!--
-            La seule couleur écrite par ce formulaire, et l'exception admise :
-            elle représente ce que le clavier **émet**, pas un rôle d'interface.
+            The only color this form writes, and the allowed exception: it
+            stands for what the keyboard **emits**, not an interface role.
           -->
           <input
             v-else-if="f.kind === 'color'"
@@ -308,17 +306,17 @@ function onChoice(id: string, e: Event) {
           />
 
           <!--
-            `:value` suffit, et ce n'est pas évident. Deux effets peuvent
-            déclarer un `choice` de même identifiant avec des options
-            différentes : le `v-for` réutilise alors ce `<select>`, et si la
-            valeur courante est identique, on pourrait croire que rien n'est
-            réécrit — les `<option>` seraient remplacés et le navigateur
-            retomberait sur le premier, affichant une sélection que rien dans
-            l'état ne dit. Vue l'évite deux fois : les enfants sont rendus avant
-            les propriétés, et `value` est **toujours** repassée, même inchangée,
-            puis comparée au `el.value` vivant et non à l'ancienne propriété.
-            Une clé de secours a été essayée puis retirée : elle ne défendait
-            rien, et deux listes d'options distinctes pouvaient la partager.
+            `:value` is enough, and that is not obvious. Two effects can declare
+            a `choice` with the same identifier and different options: the
+            `v-for` then reuses this `<select>`, and if the current value is the
+            same, one could believe nothing is rewritten: the `<option>`s would
+            be replaced and the browser would fall back on the first one,
+            showing a selection nothing in the state says. Vue avoids it twice:
+            children are rendered before properties, and `value` is **always**
+            passed again, even unchanged, then compared with the live
+            `el.value` and not with the old property. A fallback key was tried
+            and then removed: it defended nothing, and two distinct option lists
+            could share it.
           -->
           <select
             v-else
@@ -332,8 +330,8 @@ function onChoice(id: string, e: Event) {
         </div>
 
         <!--
-          Dans le `fieldset` : rétablir est un réglage comme un autre, et il suit
-          donc la même règle que les curseurs quand l'effet ne tourne pas.
+          Inside the `fieldset`: restoring is a setting like any other, so it
+          follows the same rule as the sliders when the effect is not running.
         -->
         <button v-if="touched" class="revert" type="button" @click="emit('reset')">
           {{ t('effects.params.reset') }}
@@ -366,8 +364,8 @@ function onChoice(id: string, e: Event) {
   font-size: 12px;
 }
 
-/* Un état, pas une alerte : le filet dit « en attente », le texte dit quoi. La
-   couleur ne porte rien seule. */
+/* A state, not an alert: the rule says "waiting", the text says what for. Color
+   carries nothing alone. */
 .frozen {
   padding: var(--gap-2) var(--gap-3);
   background: var(--raised);
@@ -377,9 +375,9 @@ function onChoice(id: string, e: Event) {
 }
 
 /*
- * `min-width: 0` : un `fieldset` a une largeur minimale implicite, que la remise
- * à plat ne touche pas. Sans elle, le plus long libellé impose sa largeur et la
- * colonne déborde au lieu de se comprimer — à 400 px comme à 240 px.
+ * `min-width: 0`: a `fieldset` has an implicit minimum width, which the reset
+ * does not touch. Without it, the longest label imposes its width and the
+ * column overflows instead of shrinking, at 400 px as at 240 px.
  */
 .fields {
   display: flex;
@@ -392,10 +390,9 @@ function onChoice(id: string, e: Event) {
 }
 
 /*
- * Pas de `min-width: 0` sur les enfants d'une colonne flexible : la largeur y
- * est l'axe secondaire, où `min-width: auto` vaut déjà zéro. Seuls le `fieldset`
- * — qui porte sa propre largeur minimale — et le libellé, élément flexible d'une
- * ligne, en ont besoin.
+ * No `min-width: 0` on the children of a flex column: width is the cross axis
+ * there, where `min-width: auto` is already zero. Only the `fieldset`, which
+ * carries its own minimum width, and the label, a flex item of a row, need it.
  */
 .field {
   display: flex;
@@ -404,10 +401,9 @@ function onChoice(id: string, e: Event) {
 }
 
 /*
- * Libellé et valeur sur la même ligne, le contrôle en dessous : c'est ce qui
- * tient dans une colonne étroite sans rien tronquer. Deux colonnes côte à côte
- * imposeraient une largeur au libellé, qui est écrit par l'effet et peut être
- * long.
+ * Label and value on the same line, the control below: that is what fits in a
+ * narrow column without truncating anything. Two columns side by side would
+ * impose a width on the label, which is written by the effect and can be long.
  */
 .field-head {
   display: flex;
@@ -425,10 +421,10 @@ label {
 }
 
 /*
- * Même traitement que le libellé, et pour la même raison : sur un `choice`, la
- * valeur affichée est l'option **telle que l'effet la déclare**. Une option d'un
- * seul tenant un peu longue pousserait sinon la ligne hors de la colonne, et
- * `.detail` gagnerait une barre de défilement horizontale.
+ * Same treatment as the label, and for the same reason: on a `choice`, the value
+ * shown is the option **as the effect declares it**. A somewhat long unbroken
+ * option would otherwise push the row out of the column, and `.detail` would get
+ * a horizontal scroll bar.
  */
 .shown {
   min-width: 0;
@@ -438,16 +434,15 @@ label {
   overflow-wrap: anywhere;
 }
 
-/* Les contrôles suivent l'accent, comme le reste de l'application : c'est le
-   navigateur qui dessine curseur, case et pastille, `accent-color` suffit. */
+/* The controls follow the accent, like the rest of the application: the browser
+   draws the slider, checkbox and color patch, `accent-color` is enough. */
 .fields input,
 .fields select {
   accent-color: var(--accent);
 }
 
-/* `width: 100%` et non la largeur intrinsèque d'un `input`, qui vaut environ
-   150 px : c'est ce qui laisse le curseur suivre la colonne quand elle se
-   resserre. */
+/* `width: 100%` and not an `input`'s intrinsic width, which is about 150 px:
+   that is what lets the slider follow the column when it narrows. */
 .slider {
   width: 100%;
   margin: 0;
@@ -495,9 +490,9 @@ label {
 }
 
 /*
- * L'état inerte se lit : les contrôles s'effacent, le curseur dit non, et la
- * phrase au-dessus explique. `:disabled` porté par le `fieldset` descend sur
- * tous les contrôles — il n'y a donc qu'une règle, pas une par sorte.
+ * The inert state can be read: the controls fade, the pointer says no, and the
+ * sentence above explains. `:disabled` carried by the `fieldset` goes down to
+ * every control, so there is only one rule, not one per kind.
  */
 .fields:disabled {
   opacity: 0.5;

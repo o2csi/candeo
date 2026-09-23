@@ -1,27 +1,27 @@
 /**
- * Contrôle de cohérence gabarit ↔ image, pour le simulateur.
+ * Layout ↔ frame consistency check, for the simulator.
  *
- * ⚠️ Ce fichier ne contient **aucune géométrie**. Elle vit au seul endroit où
- * elle est testée — `crates/candeo-device/src/layout.rs` — et arrive par la
- * commande `get_default_layout()` quand rien n'est branché. Une transcription
- * ici serait une seconde source de vérité, et celle-là ne diverge pas
- * bruyamment : elle diverge en silence.
+ * ⚠️ This file holds **no geometry**. It lives in the one place where it is
+ * tested — `crates/candeo-device/src/layout.rs` — and arrives through the
+ * `get_default_layout()` command when nothing is plugged in. A transcription
+ * here would be a second source of truth, and that one does not diverge
+ * loudly: it diverges silently.
  *
- * La géométrie n'est d'ailleurs pas un relevé : le périphérique n'expose que sa
- * grille 6 × 22 et ne déclare aucune dimension. Voir `docs/api/commands.md`,
- * « La géométrie n'est pas une lecture du périphérique ».
+ * The geometry is not a survey, either: the device only exposes its 6 × 22 grid
+ * and declares no dimension. See `docs/api/commands.md`, "The geometry is not
+ * read from the device".
  */
 
 import type { KeyInfo, Rgb } from '../api/types'
 
 /**
- * Ce que le simulateur demande d'un gabarit.
+ * What the simulator asks of a layout.
  *
- * Identique au `LayoutInfo` de `api/types`, au détail près de `keys`, ici en
- * **lecture seule** : `readonly()` de Vue renvoie un `readonly KeyInfo[]`, qui
- * n'est pas assignable à `KeyInfo[]`. Un `LayoutInfo` reste accepté tel quel,
- * l'inverse ne l'est pas — et c'est le bon sens de la relation, le simulateur
- * ne modifie jamais le gabarit qu'on lui donne.
+ * Identical to the `LayoutInfo` of `api/types`, except for `keys`, here
+ * **read-only**: Vue's `readonly()` returns a `readonly KeyInfo[]`, which is not
+ * assignable to `KeyInfo[]`. A `LayoutInfo` is still accepted as it is, the
+ * reverse is not — and that is the right direction for the relation, the
+ * simulator never modifies the layout it is given.
  */
 export interface LayoutView {
   name: string
@@ -30,18 +30,18 @@ export interface LayoutView {
   frameLen: number
   keys: readonly KeyInfo[]
   /**
-   * Ce que sont ces lumières : le dessin est le même, ce qu'on en dit ne l'est
-   * pas — « 103 touches éclairées » sur un cerclage et un logo serait faux.
-   * Absent, on lit des touches, comme avant qu'un appareil sache le dire.
+   * What these lights are: the drawing is the same, what is said about it is
+   * not — "103 lit keys" over a ring and a logo would be false. Absent, they
+   * are read as keys, as before a device could say.
    */
   lights?: 'keys' | 'zones'
 }
 
 /**
- * Encombrement du dessin, en unités de pas — 22,5 × 6,5 sur ce clavier.
+ * Footprint of the drawing, in pitch units — 22.5 × 6.5 on this keyboard.
  *
- * Calculé et non écrit en dur : c'est ce qui permet au `viewBox` de suivre
- * n'importe quel gabarit, quel que soit le modèle que le Rust renvoie.
+ * Computed and not hard-coded: it is what lets the `viewBox` follow any layout,
+ * whatever the model Rust returns.
  */
 export function extent(keys: readonly KeyInfo[]): { w: number; h: number } {
   let w = 0
@@ -50,23 +50,23 @@ export function extent(keys: readonly KeyInfo[]): { w: number; h: number } {
     if (k.x + k.w > w) w = k.x + k.w
     if (k.y + k.h > h) h = k.y + k.h
   }
-  // Un gabarit vide donnerait un `viewBox` de surface nulle, que le navigateur
-  // refuse de dessiner : on rend une boîte unitaire plutôt qu'un trou noir.
+  // An empty layout would give a `viewBox` of zero area, which the browser
+  // refuses to draw: a unit box is returned rather than a black hole.
   return { w: w || 1, h: h || 1 }
 }
 
 /**
- * Contrôle de cohérence gabarit ↔ image.
+ * Layout ↔ frame consistency check.
  *
- * La géométrie elle-même est vérifiée côté Rust, où elle est écrite. Restent
- * les invariants que seul l'assemblage peut trahir, et ce sont exactement ceux
- * que ce matériel piège : lire une couleur au rang de la touche plutôt qu'à son
- * `index`, recevoir 106 couleurs au lieu de 132, voir deux touches partager un
- * index.
+ * The geometry itself is checked on the Rust side, where it is written. What
+ * remains are the invariants only the assembly can betray, and they are exactly
+ * those this hardware sets traps for: reading a color at the key's rank rather
+ * than at its `index`, receiving 106 colors instead of 132, seeing two keys
+ * share an index.
  *
- * Rendu sous forme de liste plutôt que par une exception : on veut **tous** les
- * défauts d'un coup, et un simulateur qui refuse de s'afficher n'aide personne.
- * Appelé par `KeyboardSimulator` en développement uniquement.
+ * Returned as a list rather than through an exception: we want **all** the
+ * flaws at once, and a simulator that refuses to display helps nobody. Called
+ * by `KeyboardSimulator` in development only.
  */
 export function layoutProblems(layout: LayoutView, frame: readonly Rgb[]): string[] {
   const problems: string[] = []
@@ -94,10 +94,10 @@ export function layoutProblems(layout: LayoutView, frame: readonly Rgb[]): strin
     }
   }
 
-  // Deux capuchons ne peuvent pas occuper le même espace — y compris les deux
-  // bras de l'Entrée en L, qui sont jointifs et non superposés. Doublon assumé
-  // du test Rust `key_rectangles_do_not_overlap` : celui-ci vaut pour le
-  // gabarit qui arrive réellement, quel qu'il soit.
+  // Two keycaps cannot occupy the same space — including the two arms of the
+  // L-shaped Enter, which are adjoining and not overlapping. Deliberate
+  // duplicate of the Rust test `key_rectangles_do_not_overlap`: this one holds
+  // for the layout that actually arrives, whatever it is.
   const keys = layout.keys
   for (let i = 0; i < keys.length; i++) {
     const a = keys[i]

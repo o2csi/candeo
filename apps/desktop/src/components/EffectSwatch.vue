@@ -1,30 +1,29 @@
 <script setup lang="ts">
 /**
- * Le repère de couleurs d'un effet, dans la liste.
+ * An effect's color swatch, in the list.
  *
- * Quelques bandes côte à côte, prises telles quelles dans `EffectEntry.swatch` :
- * le front ne calcule rien. Ces couleurs sont **échantillonnées en exécutant
- * l'effet**, côté Rust, à l'installation — c'est ce qui les empêche de mentir,
- * et c'est aussi pourquoi elles arrivent avec la liste plutôt que par un appel
- * par vignette.
+ * A few bands side by side, taken as is from `EffectEntry.swatch`: the front end
+ * computes nothing. These colors are **sampled by running the effect**, on the
+ * Rust side, at install time: that is what keeps them from lying, and it is also
+ * why they arrive with the list rather than through one call per thumbnail.
  *
- * `aria-hidden` : le repère aide à retrouver un effet d'un coup d'œil, il
- * n'apporte rien à qui ne voit pas l'écran — le nom et la description, eux, sont
- * lus. Un lecteur d'écran n'aurait que « quatre couleurs » à annoncer.
+ * `aria-hidden`: the swatch helps find an effect at a glance, it brings nothing
+ * to someone who cannot see the screen; the name and description are read out.
+ * A screen reader would only have "four colors" to announce.
  */
 import { computed } from 'vue'
 
 import { t } from '../i18n'
 
 const props = defineProps<{
-  /** Couleurs `#rrggbb`. Peut être vide : voir `EffectEntry.swatch`. */
+  /** `#rrggbb` colors. Can be empty: see `EffectEntry.swatch`. */
   colors: string[]
 }>()
 
 /**
- * Un repère absent n'est pas une erreur : un effet qui lève pendant
- * l'échantillonnage s'installe quand même. On réserve alors la même place, en
- * neutre, plutôt que de décaler les lignes voisines.
+ * A missing swatch is not an error: an effect that throws during sampling is
+ * still installed. The same room is then kept, in a neutral tone, rather than
+ * shifting the neighboring rows.
  */
 const known = computed(() => props.colors.length > 0)
 </script>
@@ -42,15 +41,15 @@ const known = computed(() => props.colors.length > 0)
 
 <style scoped>
 /*
- * Ces couleurs ne sont pas de l'interface : ce sont des octets sortis du moteur,
- * ceux-là mêmes qui partiraient vers les LED. Elles ne suivent donc aucun thème,
- * et elles arrivent en style calculé — il n'y a rien à en écrire ici.
+ * These colors are not interface: they are bytes out of the engine, the very
+ * ones that would go to the LEDs. So they follow no theme, and they arrive as a
+ * computed style: there is nothing to write about them here.
  */
 .swatch {
   display: flex;
 
-  /* `flex: none` : la ligne peut être comprimée, le repère ne se réduit pas à
-     un trait — c'est ce qui sert à reconnaître l'effet. */
+  /* `flex: none`: the row can be squeezed, the swatch does not shrink to a line;
+     it is what serves to recognize the effect. */
   flex: none;
   align-self: center;
   width: 34px;
@@ -64,8 +63,8 @@ const known = computed(() => props.colors.length > 0)
   flex: 1;
 }
 
-/* Sans repère : une pastille sourde, pas un trou. Elle dit « rien à montrer »
-   sans prétendre montrer une couleur que l'effet n'a jamais produite. */
+/* Without a swatch: a muted patch, not a hole. It says "nothing to show"
+   without claiming to show a color the effect never produced. */
 .swatch.unknown {
   background: repeating-linear-gradient(45deg, var(--raised-2) 0 4px, transparent 4px 8px);
 }

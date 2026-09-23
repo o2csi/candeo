@@ -1,37 +1,36 @@
 /**
- * Brouillons — ce qui empêche de perdre un effet en cours d'écriture.
+ * Drafts — what prevents losing an effect while it is being written.
  *
- * ## Le problème
+ * ## The problem
  *
- * Tant qu'un effet n'est pas validé, il n'existe nulle part : `install_effect`
- * est le seul chemin vers le disque, et il demande du code qui compile. Or on
- * quitte l'éditeur bien avant d'en être là — un clic sur « Retour », une
- * fenêtre fermée, un rechargement à chaud en développement.
+ * As long as an effect is not validated, it exists nowhere: `install_effect` is
+ * the only path to disk, and it asks for code that compiles. Yet one leaves the
+ * editor well before getting there — a click on "Back", a closed window, a hot
+ * reload in development.
  *
- * ## Ce qui a été retenu
+ * ## What was chosen
  *
- * Enregistrement continu dans le stockage local de la vue web, sous une clé par
- * effet, restauré à l'ouverture et effacé seulement après une installation
- * réussie.
+ * Continuous saving in the web view's local storage, under one key per effect,
+ * restored on opening and erased only after a successful install.
  *
- * **Pourquoi pas une boîte de dialogue « voulez-vous enregistrer ? »** : elle
- * pose une question à laquelle on peut répondre de travers, et une seule fois.
- * Un brouillon restauré, lui, ne perd rien, ne demande rien, et se jette d'un
- * bouton quand on n'en veut plus.
+ * **Why not a "do you want to save?" dialog**: it asks a question that can be
+ * answered wrongly, and only once. A restored draft, for its part, loses
+ * nothing, asks nothing, and is thrown away with a button when it is no longer
+ * wanted.
  *
- * **Pourquoi pas un fichier sur disque** : il faudrait une commande Rust
- * d'écriture de brouillon. Le stockage de la vue web survit à la fermeture de
- * l'application comme à la navigation, ce qui couvre exactement les cas visés ;
- * la copie durable, elle, reste le `source.ts` écrit à l'installation.
+ * **Why not a file on disk**: it would need a Rust command to write a draft. The
+ * web view's storage survives closing the application as well as navigation,
+ * which covers exactly the cases targeted; the durable copy, for its part,
+ * remains the `source.ts` written at install.
  *
- * Le stockage peut être refusé — vue web durcie, profil en lecture seule. On
- * n'échoue pas pour autant : perdre un brouillon est ennuyeux, empêcher
- * d'écrire un effet le serait davantage.
+ * Storage can be refused — hardened web view, read-only profile. That is no
+ * reason to fail: losing a draft is annoying, preventing an effect from being
+ * written would be more so.
  */
 
 const PREFIX = 'candeo:brouillon:'
 
-/** L'effet en cours d'écriture n'a pas encore d'identifiant : `null`. */
+/** The effect being written has no identifier yet: `null`. */
 function key(id: string | null): string {
   return PREFIX + (id ?? '')
 }
@@ -48,8 +47,8 @@ export function writeDraft(id: string | null, source: string): void {
   try {
     localStorage.setItem(key(id), source)
   } catch {
-    // Sans stockage, l'éditeur fonctionne — il ne rattrape simplement plus les
-    // fausses manœuvres.
+    // Without storage, the editor works — it simply no longer catches
+    // mistakes.
   }
 }
 
@@ -57,7 +56,7 @@ export function clearDraft(id: string | null): void {
   try {
     localStorage.removeItem(key(id))
   } catch {
-    // Voir `writeDraft`.
+    // See `writeDraft`.
   }
 }
 

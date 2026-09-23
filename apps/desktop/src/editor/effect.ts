@@ -24,7 +24,7 @@
 import type * as TS from 'typescript'
 
 /** File name given to the compiler: it only shows in its messages. */
-const FILE = 'effet.ts'
+const FILE = 'effect.ts'
 
 let loading: Promise<typeof TS> | null = null
 

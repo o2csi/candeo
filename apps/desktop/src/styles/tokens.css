@@ -1,15 +1,15 @@
 /*
- * Jetons de style.
+ * Style tokens.
  *
- * L'application est **sombre par défaut**, et ce n'est pas une question de
- * mode : elle sert à juger des couleurs sur un clavier éclairé, souvent dans
- * une pièce peu lumineuse. Une interface claire à côté délaverait le jugement.
- * Le thème clair reste fourni pour qui préfère suivre son système.
+ * The application is **dark by default**, and it is not a matter of fashion:
+ * it is used to judge colours on a lit keyboard, often in a dimly lit room. A
+ * light interface beside it would wash out that judgement. The light theme is
+ * still provided for whoever prefers to follow their system.
  *
- * Les neutres portent une légère dominante violette — celle d'une pièce sombre
- * — plutôt qu'un gris pur, qui sonne comme un défaut non choisi. L'accent est
- * ambré : *candela*, l'incandescence. Aucune couleur d'accent n'emprunte au
- * spectre RVB, réservé à ce que le clavier affiche réellement.
+ * The neutrals carry a slight violet cast — that of a dark room — rather than
+ * a pure grey, which comes across as a default nobody chose. The accent is
+ * amber: *candela*, incandescence. No accent colour borrows from the RGB
+ * spectrum, which is reserved for what the keyboard actually displays.
  */
 
 :root {
@@ -52,8 +52,8 @@
 }
 
 /*
- * Thème clair. Les rôles sont redéfinis, jamais inversés mécaniquement :
- * l'ambre est assombri, sans quoi il deviendrait illisible sur fond pâle.
+ * Light theme. The roles are redefined, never mechanically inverted: the
+ * amber is darkened, or it would become unreadable on a pale background.
  */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {

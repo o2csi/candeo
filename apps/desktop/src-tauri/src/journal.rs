@@ -509,7 +509,7 @@ pub fn reload_level_setting(app: &AppHandle) {
 /// Brings the level back to the default, without restarting.
 ///
 /// Called by the configuration reset: the setting has just been erased from the
-/// file, and a screen still showing "détaillé" (verbose) would be lying. No effect
+/// file, and a screen still showing "Detailed" would be lying. No effect
 /// when [`VARIABLE`] decided: priority is not suspended for a reset.
 pub(crate) fn reset_level_to_default() {
     apply_files_kept(DEFAULT_FILES_KEPT);

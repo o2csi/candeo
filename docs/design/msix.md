@@ -1,7 +1,9 @@
 # The MSIX package, for the Microsoft Store
 
-Status: **proposed** (#126). What the package holds, what changes for the
-application inside one, and how to build and test it.
+Status: **implemented** (#126): the package is published on the Microsoft Store,
+built by hand for now; the release workflow takes over in #162. What the
+package holds, what changes for the application inside one, and how to build
+and test it.
 
 ## Why
 

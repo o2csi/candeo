@@ -13,11 +13,11 @@ import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
 /**
- * Ce qu'on a déjà lu, par appareil : fermer n'arrange rien, l'appareil continue
- * d'échouer et le dirait à chaque relecture de la liste.
+ * What has already been read, per device: closing fixes nothing, the device
+ * keeps failing and would say so at every reading of the list.
  *
- * Masqué **tant que le message ne change pas** : un appareil qui se met à
- * échouer autrement a quelque chose de neuf à dire.
+ * Hidden **while the message does not change**: a device that starts failing
+ * differently has something new to say.
  */
 const hushed = reactive<Record<string, string>>({})
 
@@ -46,9 +46,9 @@ onMounted(refresh)
     </header>
 
     <!--
-      Un gabarit connu mais débranché reste affiché, marqué absent. Le masquer
-      donnerait une liste vide, qui ressemble à une panne de l'application
-      alors qu'il suffit de brancher le clavier.
+      A known layout that is unplugged stays shown, marked absent. Hiding it
+      would give an empty list, which looks like a failure of the application
+      when plugging the keyboard in is all it takes.
     -->
     <ul class="list">
       <li
@@ -64,10 +64,10 @@ onMounted(refresh)
               `${d.vid.toString(16).padStart(4, '0')}:${d.pid.toString(16).padStart(4, '0')}`
             }}</span>
             <!--
-              La version lue, en face de celle du relevé : c'est la première
-              question devant un clavier qui n'obéit pas. Fermé, on dit qu'elle
-              n'a pas été lue plutôt que de laisser un vide qui se lirait comme
-              « aucune ».
+              The version read, next to the one of the survey: it is the first
+              question in front of a keyboard that does not obey. Closed, it
+              says the version was not read rather than leave a blank that
+              would read as "none".
             -->
             <span class="mono ids detail">
               {{
@@ -98,9 +98,9 @@ onMounted(refresh)
           </div>
 
           <!--
-            Deux pastilles, et elles ne disent pas la même chose : la première
-            ce que voit le système, la seconde ce qui a été décidé. Les fondre
-            en une seule rendrait « piloté mais débranché » indicible.
+            Two tags, and they do not say the same thing: the first what the
+            system sees, the second what was decided. Merging them into one
+            would make "controlled but unplugged" impossible to say.
           -->
           <span class="tag" :class="d.present ? 'ok' : 'absent'">
             {{ d.present ? t('devices.plugged') : t('devices.unplugged') }}
@@ -108,14 +108,14 @@ onMounted(refresh)
           <span class="tag" :class="d.state">{{ t(`devices.state.${d.state}`) }}</span>
 
           <!--
-            Un appareil jamais vu est listé, pas piloté : c'est un bouton à
-            cliquer une fois, pas une case à recocher à chaque lancement.
+            A device never seen before is listed, not controlled: it is a button
+            to click once, not a box to tick again at every launch.
 
-            Il reste proposé sur un appareil piloté, branché mais **fermé** : la
-            décision peut viser un autre exemplaire du même modèle que celui qui
-            est branché — sa série le dit à l'ouverture — et sans ce bouton le
-            clavier branché ne pourrait plus être adopté qu'en passant par
-            « Ignorer ».
+            It stays offered on a controlled device that is plugged in but
+            **closed**: the decision may target a unit of the same model other
+            than the one plugged in (its serial says so on open), and without
+            this button the plugged-in keyboard could only be adopted again by
+            going through "Ignore".
           -->
           <button
             v-if="d.state !== 'adopted' || (d.present && !d.open)"
@@ -131,15 +131,15 @@ onMounted(refresh)
         </div>
 
         <!--
-          L'erreur appartient à l'appareil qui l'a produite : affichée sur sa
-          ligne, elle ne laisse pas croire que les autres sont touchés.
+          The error belongs to the device that produced it: shown on its row, it
+          does not suggest the others are affected.
         -->
         <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
         <!--
-          Un avertissement, pas une erreur : rien n'est bloqué, l'appareil reste
-          ouvert. Visible sur la ligne plutôt que dans le seul journal —
-          une version différente de celle du relevé est la première piste devant
-          un clavier qui n'obéit pas, et personne n'irait la chercher ailleurs.
+          A warning, not an error: nothing is blocked, the device stays open.
+          Visible on the row rather than only in the log: a version different
+          from the survey's is the first lead in front of a keyboard that does
+          not obey, and nobody would go looking for it elsewhere.
         -->
         <p v-for="w in d.warnings" :key="w" class="warn" role="status">{{ w }}</p>
       </li>
@@ -196,14 +196,14 @@ onMounted(refresh)
   border-style: dashed;
 }
 
-/* Ignoré : présent dans la liste, mais visiblement mis de côté. */
+/* Ignored: present in the list, but visibly set aside. */
 .row.ignored {
   opacity: 0.6;
 }
 
 /*
- * Ouvert *en ce moment* — pas « adopté ». C'est le signe qui manquait : un effet
- * qui tourne sans qu'aucun octet n'atteigne le clavier ne se voyait nulle part.
+ * Open *right now*, not "adopted". It is the sign that was missing: an effect
+ * running without a single byte reaching the keyboard showed nowhere.
  */
 .row.open {
   border-color: var(--accent);
@@ -299,7 +299,7 @@ onMounted(refresh)
   font-size: 12px;
 }
 
-/* Un avertissement, pas une erreur : rien n'est cassé, mais rien ne l'éteindra. */
+/* A warning, not an error: nothing is broken, but nothing will clear it. */
 .warn {
   margin: 0;
   padding: var(--gap-2) var(--gap-3);

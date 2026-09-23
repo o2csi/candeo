@@ -1,8 +1,8 @@
 /**
- * Effets matériels, et effet posé par cette session.
+ * Hardware effects, and the effect set by this session.
  *
- * État au niveau du module, comme `useDevice` : passer sur l'écran
- * Périphériques et revenir ne doit pas effacer ce qu'on vient d'appliquer.
+ * Module-level state, like `useDevice`: moving to the Devices screen and coming
+ * back must not erase what was just applied.
  */
 
 import { readonly, ref } from 'vue'
@@ -148,56 +148,56 @@ export function hardwareEffectsFor(
 }
 
 /**
- * Ce que cette session a posé, **appareil par appareil**, clé « vid:pid ».
+ * What this session has set, **device by device**, key "vid:pid".
  *
- * Un seul champ global marquerait le même effet actif sur tous les appareils,
- * dans une liste qui décrit ce que fait **un** appareil : ce n'est pas une
- * simplification, c'est une information fausse dès le second clavier.
+ * A single global field would mark the same effect active on every device, in a
+ * list that describes what **one** device does: it is not a simplification, it
+ * is false information from the second keyboard on.
  */
-const posed = ref<Record<string, { id: string; colours: number[] }>>({})
+const applied = ref<Record<string, { id: string; colours: number[] }>>({})
 const error = ref<string | null>(null)
 
 const key = (d: DeviceRef) => `${d.vid}:${d.pid}`
 
-/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
+/** Errors raised by Rust are already readable: they are shown as they are. */
 export function useEffects() {
   /**
-   * Pose un effet matériel **sur un appareil**.
+   * Sets a hardware effect **on a device**.
    *
-   * Ce qu'on retient dit ce que **cette session** a posé, pas ce que le clavier
-   * affiche : le protocole relevé sait écrire un effet, pas le relire. Rien
-   * n'est donc marqué au lancement — une supposition serait pire que le vide,
-   * puisqu'elle se tromperait silencieusement après un redémarrage.
+   * What is remembered says what **this session** has set, not what the
+   * keyboard shows: the recorded protocol can write an effect, not read it back.
+   * Nothing is therefore marked at launch — a guess would be worse than
+   * nothing, since it would be silently wrong after a restart.
    */
   async function apply(device: DeviceRef, e: HardwareEffect, colours: number[] = []) {
     error.value = null
     try {
       await api.setEffect(device, e.id, colours)
-      // Remplacement plutôt que mutation : `readonly()` interdit d'écrire dans
-      // l'objet exposé, et la réactivité ne dépend plus de la clé déjà présente.
-      posed.value = { ...posed.value, [key(device)]: { id: e.id, colours } }
+      // Replacement rather than mutation: `readonly()` forbids writing into the
+      // exposed object, and reactivity no longer depends on the key being present.
+      applied.value = { ...applied.value, [key(device)]: { id: e.id, colours } }
     } catch (err) {
       error.value = message(err)
     }
   }
 
-  /** L'effet matériel que cette session a posé sur cet appareil, s'il y en a un. */
+  /** The hardware effect this session has set on this device, if there is one. */
   function appliedOn(device: DeviceRef | null): string | null {
-    return device ? (posed.value[key(device)]?.id ?? null) : null
+    return device ? (applied.value[key(device)]?.id ?? null) : null
   }
 
 
   /**
-   * Oublie ce que cette session avait posé, sur tous les appareils.
+   * Forgets what this session had set, on every device.
    *
-   * Appelé après la remise à zéro de la configuration, qui éteint le
-   * rétroéclairage et referme les appareils : ce qu'on retenait ici décrivait un
-   * mode que plus aucun clavier n'affiche. Le garder ferait marquer « actif » un
-   * effet éteint — et cette table ne se corrige pas d'elle-même, puisque le
-   * protocole relevé sait écrire un effet, pas le relire.
+   * Called after the configuration reset, which turns the backlight off and
+   * closes the devices: what was remembered here described a mode no keyboard
+   * shows any more. Keeping it would mark an effect that is off as "active" —
+   * and this table does not correct itself, since the recorded protocol can
+   * write an effect, not read it back.
    */
-  function forgetPosed() {
-    posed.value = {}
+  function forgetApplied() {
+    applied.value = {}
   }
 
   /** Closes the message: what failed is read, and the screen goes back to work. */
@@ -210,6 +210,6 @@ export function useEffects() {
     error: readonly(error),
     dismissError,
     apply,
-    forgetPosed,
+    forgetApplied,
   }
 }

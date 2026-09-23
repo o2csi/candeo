@@ -16,7 +16,7 @@
 //! ⚠️ A costly lesson, set down here: the effect identifier probe first filtered
 //! out all-zero replies to discard noise, **hiding exactly the interesting
 //! case** (the "normal" mode reads `00 00`); and it set `Static` and
-//! `Respiration` without a color, hence in **black** — indistinguishable by eye
+//! `Breathing` without a color, hence in **black** — indistinguishable by eye
 //! from a nonexistent effect. Verify by reading back (`0x0f`/`0x82`), never by
 //! eye alone.
 
@@ -488,7 +488,7 @@ fn probe_usb_descriptor() {
 ///
 /// ⚠️ **Application closed.** A render loop writing to the same interface would
 /// interleave its commands with ours: the echo filters them out, but the
-/// verdicts would become "non vérifiée" (unverified).
+/// verdicts would become "unverified".
 #[test]
 #[ignore]
 fn probe_inspection_on_open() {

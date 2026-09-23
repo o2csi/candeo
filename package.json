@@ -1,8 +1,8 @@
 {
   "name": "candeo",
   "private": true,
-  "version": "0.7.0",
-  "description": "Controle de l'eclairage clavier, par acces HID direct",
+  "version": "0.8.0",
+  "description": "Lighting control, through direct HID access",
   "packageManager": "pnpm@12.4.1",
   "engines": {
     "node": ">=22.12"

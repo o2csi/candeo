@@ -37,28 +37,28 @@
 
 import { computed, watch } from 'vue'
 
-import { erreur } from '../api/journal'
+import { error } from '../api/journal'
 import { t } from '../i18n'
 import type { Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
 
 const props = defineProps<{
   layout: LayoutView
-  /** `layout.frameLen` couleurs — **pas** `layout.keys.length`. */
+  /** `layout.frameLen` colors, **not** `layout.keys.length`. */
   frame: readonly Rgb[]
 }>()
 
 /**
- * Jeu entre deux capuchons, par côté, en unités de pas.
+ * Clearance between two keycaps, per side, in pitch units.
  *
- * Appliqué uniformément, sans exception : les deux bras de l'Entrée en L sont
- * donc séparés par la même couture que les autres touches. C'est le prix d'un
- * rendu sans cas particulier, et ce n'est pas un mauvais prix — l'Entrée ISO
- * porte réellement **deux** LED (index 57 et 79), et le dégradé vertical qu'on
- * y voit sur l'appareil n'apparaîtrait pas si on la peignait d'un bloc.
+ * Applied uniformly, without exception: the two arms of the L-shaped Enter are
+ * therefore separated by the same seam as the other keys. That is the price of
+ * rendering with no special case, and it is not a bad price: the ISO Enter
+ * really carries **two** LEDs (indices 57 and 79), and the vertical gradient
+ * seen on it on the device would not show if it were painted as one block.
  */
 const GAP = 0.04
-/** Arrondi d'un capuchon, en unités de pas. */
+/** A keycap's corner radius, in pitch units. */
 const RADIUS = 0.1
 
 const BLACK: Rgb = [0, 0, 0]
@@ -70,12 +70,12 @@ function byte(v: number): number {
 }
 
 /**
- * Couleur émise, écrite en clair.
+ * Emitted color, written literally.
  *
- * Seule entorse admise aux jetons de style : ce n'est pas de l'interface, c'est
- * ce que le clavier éclaire. Aucun thème ne s'y applique — un clavier éteint est
- * noir sous un thème clair aussi. Le repère de couleurs d'`EffectSwatch` relève
- * de la même exception, mais lui n'écrit rien : il reçoit ses couleurs du Rust.
+ * The only exception allowed to the style tokens: this is not interface, it is
+ * what the keyboard lights. No theme applies to it: a keyboard that is off is
+ * black under a light theme too. `EffectSwatch`'s color swatch falls under the
+ * same exception, but it writes nothing: it receives its colors from Rust.
  */
 function css(c: Rgb): string {
   return `#${((1 << 24) | (byte(c[0]) << 16) | (byte(c[1]) << 8) | byte(c[2])).toString(16).slice(1)}`
@@ -91,11 +91,11 @@ interface Cap {
 }
 
 /**
- * La couleur d'une touche se lit à `frame[key.index]`.
+ * A key's color is read at `frame[key.index]`.
  *
- * **Pas** au rang de la touche dans `keys` : l'image couvre les `frameLen`
- * cases de la matrice — 132 —, dont seules 106 portent une LED. Confondre les
- * deux est le piège de ce matériel (`docs/api/commands.md`, « Gabarit »).
+ * **Not** at the key's position in `keys`: the frame covers the matrix's
+ * `frameLen` cells (132), of which only 106 carry an LED. Mixing the two up is
+ * this hardware's trap (`docs/api/commands.md`, "Layout").
  */
 const caps = computed<Cap[]>(() =>
   props.layout.keys.map((k) => ({
@@ -109,16 +109,15 @@ const caps = computed<Cap[]>(() =>
 )
 
 /**
- * Contrôle de cohérence, en développement seulement.
+ * Consistency check, in development only.
  *
- * Une erreur de géométrie ne casse aucun test — elle ne se voit qu'à l'œil.
- * Mais tout ce qui touche à l'indexation, lui, se vérifie : c'est ce que fait
- * `layoutProblems`. Déclenché au changement de gabarit et au changement de
- * **taille** d'image, pas à chaque trame : l'invariant porte sur la forme de
- * l'image, pas sur son contenu.
+ * A geometry error breaks no test: it only shows to the eye. But everything to
+ * do with indexing can be checked: that is what `layoutProblems` does. Triggered
+ * when the layout changes and when the frame **size** changes, not on every
+ * frame: the invariant is about the frame's shape, not its content.
  *
- * `import.meta.env.DEV` est remplacé à la compilation : rien de tout ceci ne
- * subsiste dans l'application livrée.
+ * `import.meta.env.DEV` is replaced at compile time: none of this remains in the
+ * shipped application.
  */
 if (import.meta.env.DEV) {
   watch(
@@ -126,11 +125,11 @@ if (import.meta.env.DEV) {
     () => {
       const problems = layoutProblems(props.layout, props.frame)
       if (problems.length) {
-        // Une seule ligne, incohérences comprises : le journal est un fichier
-        // qu'on relit, et une panne éclatée sur N lignes se perd entre deux
-        // images. Le compte reste en tête — c'est ce qu'on cherche d'abord.
-        erreur(
-          'simulateur',
+        // A single line, inconsistencies included: the log is a file that gets
+        // read back, and a failure split over N lines gets lost between two
+        // frames. The count stays first: it is what one looks for first.
+        error(
+          'simulator',
           `layout and frame disagree (${problems.length}): ${problems.join(' · ')}`,
         )
       }
@@ -169,8 +168,8 @@ if (import.meta.env.DEV) {
 
 <style scoped>
 /*
- * Le châssis, lui, est de l'interface : il ne rayonne pas, il suit donc les
- * jetons et le thème. Seuls les capuchons portent une couleur en clair.
+ * The chassis, however, is interface: it does not glow, so it follows the
+ * tokens and the theme. Only the keycaps carry a literal color.
  */
 .board {
   display: flex;
@@ -185,9 +184,9 @@ if (import.meta.env.DEV) {
 }
 
 /*
- * `height: auto` suffit à tenir les proportions : un SVG à `viewBox` a un
- * rapport intrinsèque. `max-height` cède la main quand c'est la hauteur qui
- * manque — `preserveAspectRatio` centre alors le dessin au lieu de l'étirer.
+ * `height: auto` is enough to keep the proportions: an SVG with a `viewBox` has
+ * an intrinsic ratio. `max-height` takes over when height is what is short:
+ * `preserveAspectRatio` then centers the drawing instead of stretching it.
  */
 .draw {
   width: 100%;
