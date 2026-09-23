@@ -925,6 +925,111 @@ export function onStateChanged(handler: () => void): Promise<UnlistenFn> {
   })
 }
 
+// ---------------------------------------------------------------- signals
+
+/**
+ * The signals API as Settings shows it (#108). Mirror of `SignalsApi`, in
+ * `src-tauri/src/signals/mod.rs`.
+ */
+export interface SignalsApi {
+  enabled: boolean
+  port: number
+  /** Made the first time the API is turned on; empty before. */
+  token: string
+  /** The interfaces listened on besides loopback, by name. */
+  interfaces: string[]
+  /** The addresses listened on now, such as `127.0.0.1:7317`. */
+  listening: string[]
+  /** Something else holds the port on loopback: nothing answers there. */
+  portInUse: boolean
+}
+
+export function getSignalsApi(): Promise<SignalsApi> {
+  return invoke('get_signals_api')
+}
+
+/**
+ * Turns the API on or off, and says where it listens besides loopback. The
+ * interfaces are named, not addressed: an address changes with DHCP, another
+ * Wi-Fi or a dock, and Rust follows the addresses of the names ticked.
+ *
+ * The token is made the first time the API is turned on. A port below 1024 is
+ * refused.
+ */
+export function setSignalsApi(
+  enabled: boolean,
+  port: number,
+  interfaces: string[],
+): Promise<SignalsApi> {
+  return invoke('set_signals_api', { enabled, port, interfaces })
+}
+
+/** A new token: every sender holding the old one is refused from now on. */
+export function renewSignalsToken(): Promise<SignalsApi> {
+  return invoke('renew_signals_token')
+}
+
+/**
+ * An interface that is up, loopback aside, which the API can listen on. IPv4
+ * addresses come first: that is the one someone copies into another machine.
+ */
+export interface NetworkInterface {
+  name: string
+  addresses: string[]
+}
+
+export function listNetworkInterfaces(): Promise<NetworkInterface[]> {
+  return invoke('list_network_interfaces')
+}
+
+/** A signal's value, flat, as its sender sent it. */
+export type SignalValue = string | number | boolean
+
+/** A signal held now. Mirror of `SignalView`, in `src-tauri/src/signals/store.rs`. */
+export interface HeldSignal {
+  name: string
+  value: SignalValue
+  /** When it was last received, in epoch milliseconds. */
+  received: number
+  /** When it expires, in epoch milliseconds; `null` until erased. */
+  expires: number | null
+}
+
+/** The signals held now, by name. */
+export function listSignals(): Promise<HeldSignal[]> {
+  return invoke('list_signals')
+}
+
+/**
+ * Sets a value as a sender would, for the default lifetime: a rule can be tried
+ * before any sender exists. An empty value erases the signal, as it does over
+ * HTTP.
+ */
+export function sendSignal(name: string, value: string): Promise<void> {
+  return invoke('send_signal', { name, value })
+}
+
+/** Erases a signal whatever its lifetime: the way out of one sent "until erased". */
+export function eraseSignal(name: string): Promise<void> {
+  return invoke('erase_signal', { name })
+}
+
+/**
+ * Emitted by Rust when the signals held change, expiry included.
+ *
+ * Written here and as `CHANGED` in `src-tauri/src/signals/mod.rs`; nothing links
+ * the two at compile time, so renaming one side only leaves a list that stops
+ * following, without an error.
+ */
+const SIGNALS_CHANGED = 'candeo://signals-changed'
+
+/** Tells when the signals held change, so a list follows without polling. */
+export function onSignalsChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen(SIGNALS_CHANGED, () => {
+    handler()
+  })
+}
+
 // ---------------------------------------------------------------- log
 
 /** Mirror of `LogLevel`, in `src-tauri/src/journal.rs`. */
