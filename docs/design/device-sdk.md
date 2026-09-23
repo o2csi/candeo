@@ -95,7 +95,7 @@ that no effect can target together.
 ### "All kinds" is written out
 
 ```ts
-kinds: 'all',          // un choix, pas un oubli
+kinds: 'all',          // a choice, not an oversight
 kinds: ['keyboard'],
 kinds: ['mouse', 'mousepad'],
 ```
