@@ -73,7 +73,7 @@ pub(crate) fn init<R: Runtime>() -> TauriPlugin<R> {
 /// visible effect reads as a refusal to start.
 ///
 /// Two callers now, and deliberately the same path: the second launch, and
-/// "Ouvrir la fenêtre" (Open window) in the system tray ([`crate::tray`]). Both
+/// "Open window" in the system tray ([`crate::tray`]). Both
 /// ask for exactly the same thing — a hidden window to show, or a destroyed
 /// window to reopen from its declaration — and writing two versions would make
 /// them diverge at the first fix.

@@ -32,7 +32,7 @@
 //! uniform — and so invisible in the swatch.
 //!
 //! A band, and not a key: an effect may leave most of the keyboard dark —
-//! "Balayage" (Sweep) is exactly that —, and a single key would land on black
+//! "Sweep" is exactly that —, and a single key would land on black
 //! by chance. The average of a quarter of the LEDs does say something true: a
 //! mostly dark effect gives a dark swatch, and that is precisely what sets it
 //! apart from an effect that fills everything.
@@ -61,7 +61,7 @@ pub const SAMPLES: usize = 4;
 /// Render instants, in seconds.
 ///
 /// Irregularly spaced: see the module header. They cover a little over two
-/// seconds, which gives a slow effect — "Respiration" (Breathing) breathes in
+/// seconds, which gives a slow effect — "Breathing" breathes in
 /// five seconds — time to show something other than its first frame.
 const INSTANTS: [f64; SAMPLES] = [0.0, 0.37, 1.13, 2.61];
 
@@ -119,7 +119,7 @@ pub fn sample(js: &str, layout: &'static Layout) -> Swatch {
 /// itself.
 ///
 /// Not an empty object: nothing forces an effect to fall back on a value when a
-/// parameter is missing, and `params.couleur.r` on `undefined` gives black. The
+/// parameter is missing, and `params.color.r` on `undefined` gives black. The
 /// swatch would then show an effect nobody will ever see — the gallery launches
 /// the effect with its defaults.
 ///
@@ -280,7 +280,7 @@ mod tests {
         );
     }
 
-    /// Black is not a failure. An "Éteint" (Off) effect has a swatch, and it is
+    /// Black is not a failure. An "Off" effect has a swatch, and it is
     /// black — which sets it apart from an effect whose swatch could not be
     /// computed, which has none.
     #[test]
