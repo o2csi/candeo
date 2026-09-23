@@ -17,12 +17,12 @@ export default defineConfig(() => ({
   },
 
   build: {
-    // Monaco embarque le compilateur TypeScript : son ouvrier pese pres de
-    // 7 Mo, et le compilateur charge a la validation 3,5 Mo de plus. Le seuil
-    // par defaut (500 ko) avertirait donc a chaque construction d'un poids
-    // choisi : l'application est empaquetee, rien n'est telecharge a l'usage,
-    // et ces morceaux ne sont lus qu'a l'ouverture de l'editeur.
-    // Voir `docs/design/studio.md` §2.
+    // Monaco carries the TypeScript compiler: its worker weighs close to 7 MB,
+    // and the compiler loaded for checking adds 3.5 MB more. The default
+    // threshold (500 kB) would therefore warn at every build about a weight
+    // that was chosen: the application is packaged, nothing is downloaded in
+    // use, and these chunks are only read when the editor opens.
+    // See `docs/design/studio.md` §2.
     chunkSizeWarningLimit: 8000,
   },
 

@@ -4,7 +4,7 @@ import { computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import * as api from './api/candeo'
-import { alerte, message } from './api/journal'
+import { warn, message } from './api/journal'
 import { controlledSummary } from './composables/deviceStatus'
 import { useDevice } from './composables/useDevice'
 import { useSettings } from './composables/useSettings'
@@ -35,7 +35,7 @@ watch(
   (summary) => {
     getCurrentWindow()
       .setTitle(t('app.title', { summary }))
-      .catch((e: unknown) => alerte('App', `window title not updated: ${message(e, 'en')}`, e))
+      .catch((e: unknown) => warn('App', `window title not updated: ${message(e, 'en')}`, e))
   },
   { immediate: true },
 )
@@ -50,12 +50,12 @@ onMounted(() => {
   // what it is for is telling someone who would not have gone looking (#139).
   // It says nothing when the setting is off, and never interrupts.
   startUpdateCheck().catch((e: unknown) =>
-    alerte('App', `version not checked: ${message(e, 'en')}`, e),
+    warn('App', `version not checked: ${message(e, 'en')}`, e),
   )
   // Effects dropped in the folder are compiled now, not when the gallery opens:
   // the tray only offers what is compiled, and it may be all someone uses.
   refreshLibrary().catch((e: unknown) =>
-    alerte('App', `library not compiled: ${message(e, 'en')}`, e),
+    warn('App', `library not compiled: ${message(e, 'en')}`, e),
   )
 
   // The state can change **without the window**: the notification area icon
@@ -77,7 +77,7 @@ onMounted(() => {
       // until it is reopened. Nothing to show on screen — the user can do
       // nothing about it —, but a log that explains it avoids hunting for a
       // write failure where there is only a missing listener.
-      alerte('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
+      warn('App', `no resynchronisation after changes made outside the window: ${message(e, 'en')}`, e)
     })
 })
 </script>

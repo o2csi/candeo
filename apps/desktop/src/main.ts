@@ -12,7 +12,7 @@ import './styles/tokens.css'
 import './styles/base.css'
 
 import { getLanguage } from './api/candeo'
-import { erreur, message } from './api/journal'
+import { error, message } from './api/journal'
 import App from './App.vue'
 import { useTheme } from './composables/useTheme'
 import { i18n, showIn } from './i18n'
@@ -37,7 +37,7 @@ const app = createApp(App)
  * precisely what nobody knew how to present.
  */
 app.config.errorHandler = (e, _instance, info) => {
-  erreur('vue', `${info}: ${message(e, 'en')}`, e)
+  error('vue', `${info}: ${message(e, 'en')}`, e)
 }
 
 // The language and the theme first, so that the window does not show English or
@@ -46,6 +46,6 @@ app.config.errorHandler = (e, _instance, info) => {
 void Promise.all([
   getLanguage()
     .then((status) => showIn(status.language))
-    .catch((e: unknown) => erreur('i18n', `interface language not read: ${message(e, 'en')}`, e)),
+    .catch((e: unknown) => error('i18n', `interface language not read: ${message(e, 'en')}`, e)),
   useTheme().load(),
 ]).finally(() => app.use(i18n).use(router).mount('#app'))

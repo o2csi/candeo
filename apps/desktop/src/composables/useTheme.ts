@@ -1,7 +1,7 @@
 import { ref } from 'vue'
 
 import { getSettings, setTheme, type ThemeSetting } from '../api/candeo'
-import { alerte, message } from '../api/journal'
+import { warn, message } from '../api/journal'
 
 /**
  * The theme shown, at module level: the switch in the top bar and the
@@ -26,7 +26,7 @@ export function useTheme() {
     try {
       show((await getSettings()).preferences.theme ?? 'system')
     } catch (e) {
-      alerte('theme', `theme not read: ${message(e, 'en')}`, e)
+      warn('theme', `theme not read: ${message(e, 'en')}`, e)
     }
   }
 
@@ -39,7 +39,7 @@ export function useTheme() {
     try {
       await setTheme(setting)
     } catch (e) {
-      alerte('theme', `theme not saved: ${message(e, 'en')}`, e)
+      warn('theme', `theme not saved: ${message(e, 'en')}`, e)
     }
   }
 

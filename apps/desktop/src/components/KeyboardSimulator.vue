@@ -37,7 +37,7 @@
 
 import { computed, watch } from 'vue'
 
-import { erreur } from '../api/journal'
+import { error } from '../api/journal'
 import { t } from '../i18n'
 import type { Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
@@ -128,7 +128,7 @@ if (import.meta.env.DEV) {
         // A single line, inconsistencies included: the log is a file that gets
         // read back, and a failure split over N lines gets lost between two
         // frames. The count stays first: it is what one looks for first.
-        erreur(
+        error(
           'simulator',
           `layout and frame disagree (${problems.length}): ${problems.join(' · ')}`,
         )

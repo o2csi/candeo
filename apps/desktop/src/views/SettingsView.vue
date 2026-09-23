@@ -30,7 +30,7 @@ import {
   type LaunchAtLogin,
   type LogLevel,
 } from '../api/candeo'
-import { erreur, message } from '../api/journal'
+import { error, message } from '../api/journal'
 import FailureNote from '../components/FailureNote.vue'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
@@ -41,7 +41,7 @@ import { showIn, t } from '../i18n'
 
 const { busy, refresh } = useDevice()
 const { dropAll } = useSettings()
-const { forgetPosed } = useEffects()
+const { forgetApplied } = useEffects()
 const { load: loadTheme } = useTheme()
 
 // ---------------------------------------------------------------- language
@@ -250,7 +250,7 @@ async function copyDiagnostic(): Promise<void> {
       copied.value = t('settings.log.copied')
     } catch (e) {
       copied.value = t('settings.log.copyRefused')
-      erreur('diagnostic', `clipboard unavailable: ${message(e, 'en')}`, e)
+      error('diagnostic', `clipboard unavailable: ${message(e, 'en')}`, e)
     }
   } catch (e) {
     journalProblem.value = message(e)
@@ -278,7 +278,7 @@ async function reset(): Promise<void> {
     // write back the settings just erased, and the gallery would mark as applied
     // a hardware effect Rust just switched off.
     dropAll()
-    forgetPosed()
+    forgetApplied()
     asking.value = false
   } catch (e) {
     problem.value = message(e)

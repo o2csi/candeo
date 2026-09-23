@@ -81,7 +81,7 @@ jobs:
       # webkit2gtk: without these packages, it fails at link time, not at
       # analysis. Same list as the `linux` job, minus `rpm` — nothing is
       # packaged here.
-      - name: Dépendances système
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -134,7 +134,7 @@ jobs:
       # every `hidapi` backend resolves through pkg-config, whichever it is;
       # `pkg-config` itself; and `rpm`, to read the produced package back —
       # none of the three is preinstalled on the image.
-      - name: Dépendances système
+      - name: System dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -174,11 +174,11 @@ jobs:
       # The proof: the rule is in both packages, at the expected location. The
       # packages produced are read — without that, `bundle.linux.*.files` would
       # remain a declaration that nothing holds up against the result.
-      - name: La règle udev est livrée par les paquets
+      - name: The packages ship the udev rule
         run: |
-          regle='usr/lib/udev/rules.d/60-candeo.rules'
-          dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$regle"
-          rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$regle"
+          rule='usr/lib/udev/rules.d/60-candeo.rules'
+          dpkg-deb -c "$(ls target/debug/bundle/deb/*.deb | head -1)" | grep -F "$rule"
+          rpm -qpl "$(ls target/debug/bundle/rpm/*.rpm | head -1)" | grep -F "/$rule"
 
   # Security advisories for the Rust dependencies. Kept apart from the `rust`
   # job so that a new advisory does not hide a code regression.

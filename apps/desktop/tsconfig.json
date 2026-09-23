@@ -26,17 +26,17 @@
       "@candeo/effects-api": ["../../packages/effects-api/src/index.ts"]
     }
   },
-  /* `example.ts` de `@candeo/effects-api` est désigné comme l'effet de
-     référence — le premier fichier qu'on montre à qui veut en écrire un — et
-     rien ne le compilait : le paquet n'a ni `tsconfig.json` ni script, et
-     l'application n'importe que `index.ts`, donc lui seul entrait dans le
-     programme.
+  /* `example.ts` in `@candeo/effects-api` is named the reference effect — the
+     first file shown to whoever wants to write one — and nothing compiled it:
+     the package has neither a `tsconfig.json` nor a script, and the
+     application imports only `index.ts`, so only that file entered the
+     program.
 
-     Il est rattaché ici plutôt que dans un projet à part, et c'est le but :
-     `vue-tsc --noEmit` tourne déjà sur cette configuration, en local comme dans
-     le job `web`. Élargir ce qu'il lit ne coûte pas une étape d'intégration
-     continue de plus — les minutes sont comptées — et vérifie l'exemple contre
-     la version de l'API qui est dans l'arbre, pas contre une copie. */
+     It is attached here rather than in a project of its own, and that is the
+     point: `vue-tsc --noEmit` already runs on this configuration, locally as in
+     the `web` job. Widening what it reads costs no extra continuous integration
+     step — the minutes are counted — and checks the example against the
+     version of the API in the tree, not against a copy. */
   "include": [
     "src/**/*.ts",
     "src/**/*.d.ts",

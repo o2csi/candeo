@@ -47,12 +47,12 @@ function record(level: WebviewLevel, source: string, message: string, detail?: u
 }
 
 /** The user's lighting is broken. */
-export function erreur(source: string, message: string, detail?: unknown): void {
+export function error(source: string, message: string, detail?: unknown): void {
   record('error', source, message, detail)
 }
 
 /** Degraded but working. */
-export function alerte(source: string, message: string, detail?: unknown): void {
+export function warn(source: string, message: string, detail?: unknown): void {
   record('warn', source, message, detail)
 }
 
