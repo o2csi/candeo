@@ -6,7 +6,7 @@
     <title>Candeo — automations</title>
     <meta
       name="description"
-      content="Rules that interrupt the effect on a device for a while, then give it back: the time on the hour, the keyboard off at night. Written as a sentence, or in cron."
+      content="Rules that interrupt the effect on a device for a while, then give it back: the time on the hour, the keyboard off at night, a signal from another program. Written as a sentence, or in cron."
     />
     <link rel="icon" href="assets/icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -113,6 +113,26 @@
           The time comes from the system's own count of the last input — Candeo reads no keys for
           this, and someone using only the mouse is not away. Windows answers it;
           elsewhere the choice is shown unavailable, and a rule waiting for it does nothing.
+        </p>
+      </section>
+
+      <section>
+        <h2>When: another program says so</h2>
+        <p>
+          A rule can wait for a <strong>signal</strong>: a value another program sends —
+          <strong>when</strong> <code>build</code> <strong>is</strong> <code>failed</code>, show a red
+          gradient on the ring, <strong>while it holds</strong>. A build script, a home-automation
+          system, a watcher of your own: anything that can make an HTTP request, with the token
+          shown in Settings.
+        </p>
+        <p>
+          <strong>While it holds</strong> suits a state: the rule lasts from the moment the value
+          arrives until it changes, expires or is erased. <strong>For 5 seconds</strong> suits an
+          event: a flash at each receipt, so a doorbell rung again flashes again. The sender never
+          names a device or an effect — it says what happened, and the rule decides what that
+          lights. The API is off until you turn it on; how to send is in
+          <a href="https://github.com/o2csi/candeo/blob/main/docs/api/signals.md">the signals
+          documentation</a>.
         </p>
       </section>
 
