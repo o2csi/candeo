@@ -2,59 +2,60 @@
 import { ref } from 'vue'
 
 /**
- * L'état des deux colonnes repliables, au niveau du module.
+ * The state of the two collapsible columns, at module level.
  *
- * Passer à l'éditeur détruit cette vue : depuis `setup()`, la colonne qu'on
- * vient de replier se rouvrirait au retour, et la bande morte qu'on voulait
- * supprimer reviendrait à chaque aller-retour. Même motif que `useDevice` —
- * l'état d'écran survit à la navigation, il ne se sérialise pas pour autant.
+ * Going to the editor destroys this view: from `setup()`, the column just
+ * collapsed would reopen on return, and the dead strip that was meant to go
+ * would come back on every round trip. Same pattern as `useDevice`: screen
+ * state survives navigation, it is not serialized for all that.
  *
- * Rangé dans un objet, et repris nommément dans `<script setup>` : seules les
- * liaisons de ce bloc-là sont exposées au patron.
+ * Kept in an object, and taken up by name in `<script setup>`: only that
+ * block's bindings are exposed to the template.
  */
 const shut = { devices: ref(false), effects: ref(false) }
 </script>
 
 <script setup lang="ts">
 /**
- * Studio — trois colonnes : appareils, effets, réglages.
+ * Studio: three columns, devices, effects, settings.
  *
- * La hiérarchie est celle dans laquelle on pense : on choisit un appareil, puis
- * son effet, puis ses réglages. **L'affectation n'est plus une case à cocher en
- * bas de panneau, c'est la structure de l'écran.**
+ * The hierarchy is the one people think in: choose a device, then its effect,
+ * then its settings. **Assignment is no longer a checkbox at the bottom of a
+ * panel, it is the structure of the screen.**
  *
- * ## Deux colonnes se replient, la troisième non
+ * ## Two columns collapse, the third does not
  *
- * Avec un seul appareil piloté, une colonne entière serait une bande morte
- * permanente, et c'est l'aperçu qui a besoin de la largeur. La troisième ne se
- * replie pas : c'est le contenu, il ne resterait rien. Le détail du repliement
- * est dans la feuille de style, là où le piège se trouve.
+ * With a single controlled device, a whole column would be a permanent dead
+ * strip, and it is the preview that needs the width. The third does not
+ * collapse: it is the content, nothing would be left. The collapsing details
+ * are in the style sheet, where the trap is.
  *
- * ## Un seul effet « actif »
+ * ## A single "active" effect
  *
- * Celui de l'appareil **sélectionné**, et lui seul. Marquer actifs les effets de
- * tous les appareils dans une liste qui décrit ce que fait *un* appareil n'est
- * pas une simplification, c'est une information fausse.
+ * The **selected** device's, and only that one. Marking every device's effects
+ * active in a list that describes what *one* device does is not a
+ * simplification, it is false information.
  *
- * ## Sélectionner lance l'aperçu, « Appliquer » envoie au clavier
+ * ## Selecting starts the preview, Apply sends to the keyboard
  *
- * On réglait à l'aveugle puis on découvrait le résultat sur le clavier ; c'est
- * l'inverse désormais (issue #63). **Deux boucles, et elles ne se touchent
- * pas** : celle de l'appareil écrit sur les LED, celle de l'aperçu n'écrit nulle
- * part. Parcourir la galerie ne peut donc pas éteindre l'éclairage en cours — ce
- * qui serait arrivé avec une seule boucle par appareil, et ne se serait vu
- * qu'une fois livré.
+ * Settings used to be adjusted blind and the result discovered on the keyboard;
+ * it is the other way round now (issue #63). **Two loops, and they do not touch
+ * each other**: the device's writes to the LEDs, the preview's writes nowhere.
+ * Browsing the gallery therefore cannot turn off the lighting in use, which
+ * would have happened with a single loop per device, and would only have shown
+ * once shipped.
  *
- * L'écran dit **lequel des deux** il montre, à chaque instant : `engine_status`
- * les range dans deux champs distincts, et il n'y a rien à filtrer ici.
+ * The screen says **which of the two** it shows, at every moment:
+ * `engine_status` keeps them in two separate fields, and there is nothing to
+ * filter here.
  *
- * Le simulateur vient dans le panneau de droite : liste à gauche / rendu à
- * droite ici, code à gauche / rendu à droite dans l'éditeur. Même grammaire, et
- * **un seul dessin** — `KeyboardSimulator` est le même composant des deux côtés,
- * il n'y a pas deux tracés à tenir d'accord.
+ * The simulator sits in the right-hand panel: list on the left / render on the
+ * right here, code on the left / render on the right in the editor. Same
+ * grammar, and **a single drawing**: `KeyboardSimulator` is the same component
+ * on both sides, there are not two drawings to keep in agreement.
  *
- * Il est alimenté par un canal d'images du moteur, celles-là mêmes qui partent
- * vers le clavier quand c'est l'appareil qu'on regarde (`docs/design/studio.md`
+ * It is fed by a frame channel from the engine, the very frames that go to the
+ * keyboard when the device is what is being watched (`docs/design/studio.md`
  * §3).
  */
 
@@ -105,16 +106,16 @@ import { t } from '../i18n'
 import { localized } from '../i18n/text'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
 
-/** Période d'interrogation du moteur, en millisecondes. */
+/** Engine polling period, in milliseconds. */
 const STATUS_PERIOD = 1000
 
 /**
- * Plage de la luminosité.
+ * Brightness range.
  *
- * Un octet, parce que c'est ce que la trame porte (`0x0f`/`0x04`) — pas un choix
- * d'interface. À ne pas confondre avec `BRIGHTNESS_DEFAULT`, qui vaut la même
- * chose aujourd'hui pour une tout autre raison : le maximum est une contrainte du
- * protocole, le défaut est une décision.
+ * A byte, because that is what the report carries (`0x0f`/`0x04`), not an
+ * interface choice. Not to be confused with `BRIGHTNESS_DEFAULT`, which has the
+ * same value today for an entirely different reason: the maximum is a protocol
+ * constraint, the default is a decision.
  */
 const BRIGHTNESS_MAX = 255
 
@@ -123,8 +124,8 @@ const shutEffects = shut.effects
 
 const router = useRouter()
 const { devices, current, select, busy, refresh } = useDevice()
-// `apply` ne lève pas : il range son échec dans `applyError`, qu'il faut donc
-// afficher — sans quoi un mode matériel refusé par l'appareil ne dirait rien.
+// `apply` does not throw: it stores its failure in `applyError`, which must
+// therefore be shown, or a hardware mode refused by the device would say nothing.
 const {
   appliedOn,
   apply,
@@ -150,41 +151,41 @@ const {
   dismissError: dismissParamsError,
 } = useSettings()
 
-/** Les erreurs remontées par Rust sont déjà lisibles : on les affiche telles quelles. */
-// ---------------------------------------------------------------- appareils
+/** Errors coming up from Rust are already readable: they are shown as they are. */
+// ---------------------------------------------------------------- devices
 
 /**
- * La colonne liste les appareils **pilotés**, et rien d'autre.
+ * The column lists the **controlled** devices, and nothing else.
  *
- * L'adoption reste dans la vue Périphériques : choisir ce qu'on configure et
- * choisir ce que Candeo a le droit de piloter sont deux gestes différents, et
- * les fondre ferait d'un clic de sélection une prise de contrôle.
+ * Adoption stays in the Devices view: choosing what to configure and choosing
+ * what Candeo is allowed to control are two different gestures, and merging
+ * them would turn a selection click into taking control.
  */
-const piloted = computed(() => devices.value.filter((d) => d.state === 'adopted'))
+const controlled = computed(() => devices.value.filter((d) => d.state === 'adopted'))
 
 /**
- * L'appareil que la colonne montre comme choisi.
+ * The device the column shows as chosen.
  *
- * Le choix courant de l'application s'il est piloté, sinon le premier de la
- * liste : `current` peut désigner un gabarit connu mais non adopté, qui n'a
- * aucune ligne ici.
+ * The application's current choice if it is controlled, otherwise the first in
+ * the list: `current` can point to a known but unadopted layout, which has no
+ * row here.
  */
 const selectedDevice = computed(() => {
-  const list = piloted.value
+  const list = controlled.value
   const c = current.value
   return list.find((d) => c !== null && d.vid === c.vid && d.pid === c.pid) ?? list[0] ?? null
 })
 
-/** Identité stable d'un appareil, pour comparer sans dépendre de l'objet. */
+/** A device's stable identity, to compare without depending on the object. */
 const key = (d: DeviceRef | null) => (d ? `${d.vid}:${d.pid}` : null)
 
 const deviceKey = computed(() => key(selectedDevice.value))
 
 /**
- * Ce que la colonne désigne devient le choix de toute l'application.
+ * What the column points to becomes the whole application's choice.
  *
- * C'est ce qui fait qu'« ouvrir dans l'éditeur » travaille sur l'appareil qu'on
- * regardait : l'éditeur n'a pas de colonne, il reprend `current`.
+ * That is what makes "open in the editor" work on the device being looked at:
+ * the editor has no column, it takes up `current`.
  */
 watch(
   deviceKey,
@@ -200,23 +201,23 @@ function choose(d: { vid: number; pid: number }) {
 }
 
 /**
- * L'avertissement attend la fin de la recherche lancée au démarrage. Sans ce
- * `busy`, il s'afficherait le temps de l'énumération puis disparaîtrait :
- * annoncer une absence qu'on n'a pas encore vérifiée.
+ * The warning waits for the search started at launch to end. Without this
+ * `busy`, it would show for the length of the enumeration and then vanish:
+ * announcing an absence not yet checked.
  */
-const noDevice = computed(() => piloted.value.length === 0 && !busy.value)
+const noDevice = computed(() => controlled.value.length === 0 && !busy.value)
 
-// ---------------------------------------------------------------- bibliothèque
+// ---------------------------------------------------------------- library
 
 type Nature = 'builtin' | 'user' | 'hardware'
 
 /**
- * Un effet, quelle que soit sa nature.
+ * An effect, whatever its nature.
  *
- * Les trois listes n'ont ni la même origine ni la même forme — `list_effects`
- * pour les deux premières, un catalogue écrit pour le matériel — mais la colonne
- * les affiche de la même façon. On les ramène donc à une seule forme ici plutôt
- * que de tenir trois gabarits de gabarit dans le patron.
+ * The three lists have neither the same origin nor the same shape
+ * (`list_effects` for the first two, a written catalogue for the hardware) but
+ * the column shows them the same way. So they are brought to a single shape
+ * here rather than keeping three sub-templates in the template.
  */
 interface Choice {
   id: string
@@ -224,16 +225,16 @@ interface Choice {
   nature: Nature
   description: string
   /**
-   * Repère de couleurs **prélevé en exécutant l'effet**, côté Rust (issue #29).
+   * Color swatch **sampled by running the effect**, on the Rust side (issue #29).
    *
-   * Vide pour le matériel, et c'est la seule réponse honnête : ces effets sont
-   * exécutés par le micrologiciel, l'application ne voit jamais leurs images.
-   * `EffectSwatch` montre alors une pastille sourde — inventer quatre couleurs
-   * plausibles serait décrire un effet qu'on n'a pas regardé.
+   * Empty for hardware, and that is the only honest answer: those effects are
+   * run by the firmware, the application never sees their frames.
+   * `EffectSwatch` then shows a muted patch: making up four plausible colors
+   * would be describing an effect nobody looked at.
    */
   swatch: string[]
   params: Record<string, ParamSpec>
-  /** Renseigné pour la seule nature qui ne passe pas par le moteur. */
+  /** Set for the only nature that does not go through the engine. */
   hardware: HardwareEffect | null
   /**
    * Whether the effect can run. Only a file can be anything but `ready`: one not
@@ -253,9 +254,9 @@ interface Choice {
 const library = ref<EffectEntry[]>([])
 /** False until the library was read once: before that, every effect looks missing. */
 const libraryRead = ref(false)
-/** Déjà lisible : les messages du Rust s'affichent tels quels. */
+/** Already readable: Rust's messages are shown as they are. */
 const listError = ref<string | null>(null)
-/** Ce qui a empêché d'appliquer ou d'arrêter. Déjà lisible aussi. */
+/** What prevented applying or stopping. Already readable too. */
 const problem = ref<string | null>(null)
 
 function fromEntry(e: EffectEntry): Choice {
@@ -431,18 +432,17 @@ watch(deviceKey, () => {
   if (loaded.value) void followDevice()
 })
 
-// ---------------------------------------------------------------- moteur
+// ---------------------------------------------------------------- engine
 
 /**
- * L'état du moteur : ce qui tourne sur les appareils, et ce qu'on regarde.
+ * The engine's state: what runs on the devices, and what is being watched.
  *
- * Tout est relu d'un coup : c'est un seul aller-retour par seconde, et la
- * colonne des appareils a besoin de chaque ligne pour dire ce que chacun fait
- * tourner.
+ * Everything is read back at once: it is a single round trip per second, and
+ * the devices column needs every row to say what each one runs.
  *
- * **Les deux champs ne se mélangent jamais.** `devices` décrit le matériel ;
- * `preview` ce que le simulateur montre quand l'effet sélectionné n'est pas
- * celui qui tourne. Tout ce qui parle d'« actif » dans cet écran lit le premier.
+ * **The two fields never mix.** `devices` describes the hardware; `preview`
+ * what the simulator shows when the selected effect is not the one running.
+ * Everything that speaks of "active" on this screen reads the first.
  */
 const report = ref<EngineReport>({ devices: [], preview: null })
 
@@ -452,12 +452,11 @@ function statusOf(d: { vid: number; pid: number } | null) {
 }
 
 /**
- * L'effet qu'un appareil fait tourner — **sur ses LED**.
+ * The effect a device runs, **on its LEDs**.
  *
- * La boucle hôte l'emporte sur le mode matériel : tant qu'elle pousse des
- * images, c'est elle qu'on voit sur les LED, quel que soit le mode posé avant.
- * L'aperçu n'entre pas dans ce calcul, et ne le peut pas : il n'est pas dans
- * `devices`.
+ * The host loop wins over the hardware mode: as long as it pushes frames, it is
+ * what shows on the LEDs, whatever mode was set before. The preview does not
+ * enter this computation, and cannot: it is not in `devices`.
  */
 function runningOn(d: { vid: number; pid: number } | null): string | null {
   const s = statusOf(d)
@@ -474,11 +473,11 @@ function effectName(id: string | null): string | null {
 }
 
 /**
- * Ce que fait un appareil, en une ligne, pour la colonne de gauche.
+ * What a device does, in one line, for the left-hand column.
  *
- * Un appareil au repos qui **se souvient** de son dernier effet le dit : c'est
- * là que se voit le fait que la configuration est enregistrée, à l'endroit même
- * où elle décrit quelque chose.
+ * An idle device that **remembers** its last effect says so: that is where it
+ * shows that the configuration is saved, at the very place where it describes
+ * something.
  */
 function deviceLine(d: { vid: number; pid: number }): string {
   const interruption = statusOf(d)?.interruption
@@ -488,19 +487,21 @@ function deviceLine(d: { vid: number; pid: number }): string {
     const line = interruptionLine(interruption, rule, applied, Date.now())
     return t(line.key, line.params)
   }
-  const tourne = effectName(runningOn(d))
-  if (tourne !== null) return tourne
-  const retenu = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
-  return retenu !== null ? t('effects.deviceStopped', { name: retenu }) : t('effects.deviceIdle')
+  const running = effectName(runningOn(d))
+  if (running !== null) return running
+  const remembered = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
+  return remembered !== null
+    ? t('effects.deviceStopped', { name: remembered })
+    : t('effects.deviceIdle')
 }
 
-/** Le seul effet marqué **appliqué** : celui de l'appareil sélectionné. */
+/** The only effect marked **applied**: the selected device's. */
 const activeId = computed(() => runningOn(selectedDevice.value))
 
 const status = computed(() => statusOf(selectedDevice.value))
 const runningHere = computed(() => status.value?.running === true)
 
-/** L'aperçu en cours, quand il montre bien l'effet sélectionné. */
+/** The preview in progress, when it does show the selected effect. */
 const preview = computed(() => {
   const p = report.value.preview
   if (!p || !p.running) return null
@@ -508,13 +509,13 @@ const preview = computed(() => {
 })
 
 /**
- * L'échec d'un aperçu, **quand il concerne l'effet qu'on regarde**.
+ * A preview's failure, **when it concerns the effect being watched**.
  *
- * Le filtre sur l'identifiant n'est pas une précaution de style : l'état du
- * moteur est relu chaque seconde, et l'aperçu d'un effet cassé survit à la
- * sélection suivante le temps que le nouveau démarre. Sans lui, on attribuerait
- * à un effet la panne d'un autre — la façon la plus rapide de faire chercher au
- * mauvais endroit.
+ * The filter on the identifier is not a stylistic precaution: the engine state
+ * is read back every second, and a broken effect's preview outlives the next
+ * selection for the time the new one takes to start. Without it, one effect
+ * would be blamed for another's failure: the fastest way to send someone
+ * looking in the wrong place.
  */
 const previewError = computed<string | null>(() => {
   const p = report.value.preview
@@ -530,14 +531,14 @@ async function refreshStatus(): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------- aperçu
+// ---------------------------------------------------------------- preview
 
 /**
- * Gabarit de repli, demandé au Rust : il faut bien dessiner quelque chose avant
- * qu'un appareil soit ouvert.
+ * Fallback layout, asked of Rust: something has to be drawn before a device is
+ * open.
  */
 const fallback = ref<LayoutInfo | null>(null)
-/** Gabarit de l'appareil sélectionné, quand il est réellement ouvert. */
+/** The selected device's layout, when it is really open. */
 const opened = ref<LayoutInfo | null>(null)
 /**
  * The whole layout, not the simulator's view of it: this screen also reads what
@@ -547,33 +548,32 @@ const opened = ref<LayoutInfo | null>(null)
 const board = computed<LayoutInfo | null>(() => opened.value ?? fallback.value)
 
 /**
- * Le dessin suit l'appareil sélectionné.
+ * The drawing follows the selected device.
  *
- * Un seul gabarit est connu aujourd'hui, mais il vient de l'appareil et non
- * d'une constante : `get_layout` pour celui qui est ouvert, le gabarit par
- * défaut sinon. Le jour où un second modèle arrive, cette vue n'a rien à
- * apprendre.
+ * A single layout is known today, but it comes from the device and not from a
+ * constant: `get_layout` for the one that is open, the default layout
+ * otherwise. The day a second model arrives, this view has nothing to learn.
  */
 watch(
   [deviceKey, () => selectedDevice.value?.open === true],
-  async ([, ouvert]) => {
+  async ([, isOpen]) => {
     const d = selectedDevice.value
-    if (!d || !ouvert) {
+    if (!d || !isOpen) {
       opened.value = null
       return
     }
-    // Un gabarit qu'on n'obtient pas n'est pas une panne : le repli dessine.
+    // A layout that cannot be obtained is not a failure: the fallback draws.
     opened.value = await getLayout({ vid: d.vid, pid: d.pid }).catch(() => null)
   },
   { immediate: true },
 )
 
 /**
- * L'effet sélectionné est-il déjà celui qui tourne **sur l'appareil** ?
+ * Is the selected effect already the one running **on the device**?
  *
- * C'est la question qui décide de tout ce qui suit : dans ce cas le simulateur
- * montre les vraies images du clavier, et il n'y a aucune raison d'entretenir un
- * second contexte QuickJS pour afficher la même chose.
+ * It is the question that decides everything that follows: in that case the
+ * simulator shows the keyboard's real frames, and there is no reason to keep a
+ * second QuickJS context alive to display the same thing.
  */
 const applied = computed(
   () => selectedEffect.value !== null && activeId.value === selectedEffect.value.id,
@@ -594,7 +594,7 @@ const deviceTrouble = computed(() => {
   return said === hushed.value ? null : said
 })
 
-/** Vrai quand le simulateur doit afficher le flux de l'appareil. */
+/** True when the simulator must show the device's stream. */
 const showsDevice = computed(() => runningHere.value && applied.value)
 
 const { frame, restartPreview } = useSimulatorFeed({
@@ -627,12 +627,12 @@ const { frame, restartPreview } = useSimulatorFeed({
 })
 
 /**
- * Ce que le simulateur montre, dit en toutes lettres plutôt que deviné.
+ * What the simulator shows, spelled out rather than guessed.
  *
- * **C'est ici que se joue le refus du mensonge.** Un aperçu qui ressemble à une
- * application coûte une session de diagnostic — c'est la quatrième fois que ce
- * motif se présente dans ce projet. La phrase dit donc les deux choses à la
- * fois : ce qu'on regarde, et ce que le clavier fait pendant ce temps.
+ * **This is where the refusal to lie plays out.** A preview that looks like an
+ * applied effect costs a debugging session: it is the fourth time this pattern
+ * has come up in this project. So the sentence says both things at once: what
+ * is being watched, and what the keyboard is doing meanwhile.
  */
 const previewNote = computed(() => {
   const c = selectedEffect.value
@@ -643,14 +643,15 @@ const previewNote = computed(() => {
     return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
   }
 
-  const tourne = effectName(activeId.value)
-  const ailleurs = runningHere.value && tourne !== null
+  const running = effectName(activeId.value)
+  const elsewhere = runningHere.value && running !== null
   if (preview.value) {
-    // Sans appareil piloté, ne pas promettre « Appliquer » : le bouton est
-    // désactivé, et l'annoncer enverrait chercher pourquoi il ne répond pas.
+    // Without a controlled device, do not promise Apply: the button is
+    // disabled, and announcing it would send people looking for why it does not
+    // respond.
     if (!selectedDevice.value) return t('effects.preview.noDevice')
-    return ailleurs
-      ? t('effects.preview.elsewhere', { name: tourne })
+    return elsewhere
+      ? t('effects.preview.elsewhere', { name: running })
       : t('effects.preview.apply')
   }
   if (previewError.value !== null) return t('effects.preview.stopped')
@@ -662,18 +663,18 @@ const previewNote = computed(() => {
 const working = ref(false)
 
 /**
- * « Appliquer » **promeut l'aperçu en effet d'appareil** : c'est le geste qui
- * envoie au clavier, et le seul.
+ * Apply **promotes the preview to a device effect**: it is the gesture that
+ * sends to the keyboard, and the only one.
  *
- * Deux chemins, parce que les deux natures ne passent pas par le même endroit :
- * un effet matériel est un mode posé sur le micrologiciel, un effet hôte est une
- * boucle qu'on démarre. Poser un mode matériel arrête d'abord la boucle : sans
- * cela elle continuerait d'écrire par-dessus, et le mode resterait invisible.
+ * Two paths, because the two natures do not go through the same place: a
+ * hardware effect is a mode set on the firmware, a host effect is a loop that
+ * gets started. Setting a hardware mode stops the loop first: otherwise it
+ * would keep writing over it, and the mode would stay invisible.
  *
- * Rien n'arrête l'aperçu ici : `showsDevice` devient vrai dès la relecture de
- * l'état, la surveillance plus haut le range d'elle-même, et le simulateur passe
- * sur les images réelles. Le faire à la main en ferait deux chemins à tenir
- * d'accord.
+ * Nothing stops the preview here: `showsDevice` turns true as soon as the state
+ * is read back, the watcher above puts it away by itself, and the simulator
+ * switches to the real frames. Doing it by hand would make two paths to keep
+ * in agreement.
  */
 async function applyEffect(): Promise<void> {
   const c = selectedEffect.value
@@ -688,13 +689,13 @@ async function applyEffect(): Promise<void> {
       if (statusOf(d)?.running === true) await stopEffect(device)
       await apply(device, c.hardware, colourBytes(paramValues.value))
     } else {
-      // Les réglages retenus pour **cette paire**, et non les valeurs déclarées :
-      // un effet réglé puis quitté doit repartir comme on l'avait laissé, sans
-      // quoi il faudrait rebouger chaque curseur après chaque « Appliquer ».
+      // The settings remembered for **this pair**, and not the declared values:
+      // an effect adjusted then left must start again as it was left, or every
+      // slider would have to be moved again after every Apply.
       //
-      // Rien à abonner ici : le canal vit dans l'état de la boucle, et c'est la
-      // surveillance plus haut qui l'ouvre dès que le moteur dit « en cours ».
-      // Un abonnement de plus, posé ici, en ferait deux pour un seul flux.
+      // Nothing to subscribe here: the channel lives in the loop's state, and it
+      // is the watcher above that opens it as soon as the engine says "running".
+      // One more subscription, set up here, would make two for a single stream.
       await startEffect(device, c.id, paramValues.value)
     }
   } catch (e) {
@@ -702,19 +703,19 @@ async function applyEffect(): Promise<void> {
   } finally {
     working.value = false
     await refreshStatus()
-    // Le Rust vient de retenir — ou non — l'effet appliqué : relire est la seule
-    // façon honnête de le savoir. Le deviner ici ferait de la fenêtre une
-    // seconde source de vérité, qui divergerait au premier échec d'écriture.
+    // Rust has just remembered the applied effect, or not: reading back is the
+    // only honest way to know. Guessing it here would make the window a second
+    // source of truth, which would diverge at the first write failure.
     await reloadSettings()
   }
 }
 
 /**
- * Arrête la boucle de l'**appareil**. La dernière image reste affichée comme
- * elle reste sur le clavier : arrêter un effet n'éteint pas les LED.
+ * Stops the **device**'s loop. The last frame stays displayed as it stays on the
+ * keyboard: stopping an effect does not turn the LEDs off.
  *
- * L'aperçu n'est pas concerné — et c'est bien le sujet : arrêter ce qui tourne
- * sur le clavier ne doit pas fermer ce qu'on est en train de regarder.
+ * The preview is not affected, and that is precisely the point: stopping what
+ * runs on the keyboard must not close what is being watched.
  */
 async function halt(): Promise<void> {
   const d = selectedDevice.value
@@ -729,9 +730,9 @@ async function halt(): Promise<void> {
   } finally {
     working.value = false
     await refreshStatus()
-    // L'arrêt a **oublié** l'effet appliqué dans le fichier : sans cette
-    // relecture, la colonne annoncerait encore « retenu : … » pour un appareil
-    // dont plus rien n'est retenu.
+    // The stop **forgot** the applied effect in the file: without this read
+    // back, the column would still announce "remembered: …" for a device that
+    // no longer remembers anything.
     await reloadSettings()
   }
 }
@@ -756,7 +757,7 @@ async function resume(): Promise<void> {
   }
 }
 
-// ------------------------------------------------------------- suppression
+// ------------------------------------------------------------- removal
 
 /**
  * Only the user's effects are deleted from here. A built-in is not
@@ -880,20 +881,20 @@ async function refreshEffects(): Promise<void> {
 }
 
 /**
- * L'effet dont la suppression attend confirmation, **par son identifiant**.
+ * The effect whose removal awaits confirmation, **by its identifier**.
  *
- * Un identifiant et non un booléen : la question ne fige pas l'écran, on peut
- * cliquer ailleurs pendant qu'elle est posée, et un drapeau se retrouverait à
- * confirmer la suppression d'un autre effet que celui qu'on avait désigné.
+ * An identifier and not a boolean: the question does not freeze the screen,
+ * one can click elsewhere while it is asked, and a flag would end up confirming
+ * the removal of an effect other than the one that was pointed to.
  */
 const pendingRemoval = ref<string | null>(null)
 
 /**
- * Changer d'effet retire la question.
+ * Changing effect withdraws the question.
  *
- * Une confirmation qui survivrait à la sélection se rouvrirait d'elle-même au
- * retour, sans qu'on l'ait redemandée — et ce n'est pas une boîte qu'on veut
- * voir apparaître par surprise.
+ * A confirmation that outlived the selection would reopen by itself on return,
+ * without being asked for again, and that is not a box anyone wants to see pop
+ * up by surprise.
  */
 watch(
   () => selectedEffect.value?.id,
@@ -904,14 +905,13 @@ watch(
 )
 
 /**
- * Supprime l'effet désigné **par la confirmation**, jamais celui que la
- * sélection montre au moment du clic.
+ * Removes the effect pointed to **by the confirmation**, never the one the
+ * selection shows at the time of the click.
  *
- * Le Rust fait le reste dans l'ordre qu'il faut : il refuse ce qui n'est pas
- * supprimable, arrête les boucles qui font tourner cet effet sur quelque appareil
- * que ce soit, efface le dossier, puis oublie les réglages retenus pour lui. Rien
- * de tout cela n'est réparti ici — c'est la seule façon que l'invariant tienne
- * quel que soit l'appelant.
+ * Rust does the rest in the right order: it refuses what cannot be removed,
+ * stops the loops running this effect on any device, deletes the folder, then
+ * forgets the settings remembered for it. None of this is spread out here: it
+ * is the only way for the invariant to hold whoever the caller is.
  */
 async function removeEffect(): Promise<void> {
   const id = pendingRemoval.value
@@ -922,74 +922,74 @@ async function removeEffect(): Promise<void> {
   try {
     await deleteEffect(id)
 
-    // Le pendant en mémoire de ce que le Rust vient de faire sur disque : sans
-    // cet oubli, un effet réenregistré sous le même nom dans la même session
-    // hériterait des réglages de son homonyme disparu.
+    // The in-memory counterpart of what Rust has just done on disk: without
+    // this forgetting, an effect saved again under the same name in the same
+    // session would inherit the settings of its vanished namesake.
     dropEffect(id)
 
     pendingRemoval.value = null
-    // La sélection retombe sur le premier de la liste : l'effet qu'elle désignait
-    // n'existe plus.
+    // The selection falls back on the first in the list: the effect it pointed
+    // to no longer exists.
     if (chosenEffect.value === id) chosenEffect.value = null
     await readLibrary()
   } catch (e) {
     problem.value = message(e)
   } finally {
     working.value = false
-    // La boucle a pu s'arrêter : l'état du moteur ne le dira qu'une fois relu.
+    // The loop may have stopped: the engine state will only say so once read back.
     await refreshStatus()
   }
 }
 
-// ---------------------------------------------------------------- réglages
+// ---------------------------------------------------------------- settings
 
-/** Les paramètres déclarés par l'effet regardé. */
+/** The parameters declared by the effect being watched. */
 const specs = computed<Record<string, ParamSpec>>(() => selectedEffect.value?.params ?? {})
 
 /**
- * Les valeurs sur lesquelles cet effet tourne — ou tournerait — sur cet
- * appareil : son manifeste, recouvert par ce qu'on a retenu pour cette paire.
+ * The values this effect runs on, or would run on, on this device: its
+ * manifest, overridden by what was remembered for this pair.
  */
 const paramValues = computed(() =>
   valuesFor(selectedDevice.value, selectedEffect.value?.id ?? '', specs.value),
 )
 
 /**
- * Pourquoi les contrôles sont inertes, ou `null` s'ils sont vivants.
+ * Why the controls are inert, or `null` if they are live.
  *
- * **Ils sont vivants presque toujours, désormais.** Ils l'étaient au seul effet
- * appliqué, ce qui obligeait à régler à l'aveugle puis à découvrir le résultat
- * sur le clavier ; la boucle d'aperçu supprime ce marché (issue #63) — on ajuste
- * en voyant, et sans rien envoyer nulle part.
+ * **They are live almost always, now.** They used to be live only for the
+ * applied effect, which forced adjusting blind and then discovering the result
+ * on the keyboard; the preview loop does away with that bargain (issue #63):
+ * one adjusts while seeing, and without sending anything anywhere.
  *
- * Reste le cas où il n'y a aucune boucle à ajuster : un effet matériel, dont le
- * micrologiciel n'expose rien, et le court instant où l'aperçu n'a pas encore
- * démarré.
+ * What remains is the case where there is no loop to adjust: a hardware effect,
+ * whose firmware exposes nothing, and the brief moment when the preview has not
+ * started yet.
  */
 const frozen = computed<string | null>(() => {
   if (preview.value || showsDevice.value) return null
-  // **Pas pendant que l'aperçu démarre.** Les contrôles restent vivants : ce
-  // qu'on règle est retenu, et l'aperçu démarrera avec ces valeurs-là — c'est
-  // `paramValues` qu'on lui passe. Les figer le temps d'un aller-retour ferait
-  // clignoter le formulaire à chaque changement de sélection, pour rien.
+  // **Not while the preview is starting.** The controls stay live: what is
+  // adjusted is remembered, and the preview will start with those values: it
+  // is `paramValues` that is passed to it. Freezing them for a round trip would
+  // make the form flicker at every selection change, for nothing.
   //
-  // Un effet matériel n'a rien à ajuster non plus, mais il ne déclare aucun
-  // paramètre : c'est `noParams` qui parle pour lui, et le redire ici ferait lire
-  // deux fois la même phrase.
+  // A hardware effect has nothing to adjust either, but it declares no
+  // parameter: `noParams` speaks for it, and saying it again here would have
+  // the same sentence read twice.
   return previewError.value === null ? null : t('effects.frozen')
 })
 
-/** Un effet sans paramètre le dit — et il ne le dit pas de la même façon selon sa nature. */
+/** An effect without parameters says so, and says it differently depending on its nature. */
 const noParams = computed(() =>
   selectedEffect.value?.hardware ? t('effects.noParamsHardware') : t('effects.noParams'),
 )
 
 /**
- * Ce que la configuration retient, dit à l'endroit où on la fabrique.
+ * What the configuration remembers, said where it is made.
  *
- * C'est le défaut réel que l'issue #64 relève : les réglages sont conservés
- * depuis l'issue #28, et **rien à l'écran ne le laissait deviner**. On règle, on
- * ferme, et on n'a aucune raison de croire que ça a tenu.
+ * It is the real defect issue #64 points out: settings have been kept since
+ * issue #28, and **nothing on screen let anyone guess it**. One adjusts, closes,
+ * and has no reason to believe it held.
  */
 const savedNote = computed<string | null>(() => {
   const c = selectedEffect.value
@@ -1002,18 +1002,18 @@ const savedNote = computed<string | null>(() => {
 })
 
 /**
- * Un réglage part vers **la boucle qu'on regarde**, et sur disque.
+ * A setting goes to **the loop being watched**, and to disk.
  *
- * ⚠️ **Vers le clavier uniquement si c'est cet effet-là qui y tourne.** Une
- * première version poussait systématiquement vers les deux boucles, en pensant
- * qu'on réglait l'effet appliqué tout en en prévisualisant un autre. C'est faux :
- * `selectedEffect` est celui qu'on **regarde**, pas celui qui est appliqué.
- * Régler la couleur d'un effet prévisualisé changeait donc l'éclairage en cours,
- * et pouvait arrêter l'effet appliqué — les valeurs d'un effet arrivaient dans
- * la boucle d'un autre.
+ * ⚠️ **To the keyboard only if that very effect is the one running on it.** A
+ * first version always pushed to both loops, on the idea that the applied
+ * effect was being adjusted while another was previewed. That is wrong:
+ * `selectedEffect` is the one being **watched**, not the one that is applied.
+ * Adjusting the color of a previewed effect therefore changed the lighting in
+ * use, and could stop the applied effect: one effect's values arrived in
+ * another's loop.
  *
- * Le disque, lui, retient toujours : le réglage appartient à la paire
- * appareil/effet et vaudra au prochain lancement de cet effet.
+ * The disk always remembers: the setting belongs to the device/effect pair and
+ * will hold at the next launch of this effect.
  */
 function onParamChange(id: string, value: ParamValue): void {
   const d = selectedDevice.value
@@ -1030,7 +1030,7 @@ function onParamChange(id: string, value: ParamValue): void {
   if (preview.value) adjustPreview(complete)
 }
 
-/** Le geste est fini — curseur relâché, case cochée : on écrit maintenant. */
+/** The gesture is over (slider released, box checked): write now. */
 function onParamCommit(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
@@ -1052,33 +1052,33 @@ function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  const declarees = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, c.id === activeId.value)
-  if (preview.value) adjustPreview(declarees)
+  const declared = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, c.id === activeId.value)
+  if (preview.value) adjustPreview(declared)
 }
 
-// ---------------------------------------------------------------- luminosité
+// ---------------------------------------------------------------- brightness
 
 /**
- * Le niveau de l'appareil sélectionné, de 0 à 255.
+ * The selected device's level, from 0 to 255.
  *
- * Dans la colonne des périphériques, et non dans les réglages d'un effet : c'est
- * une propriété de l'appareil — une commande distincte du protocole (`0x0f`/
- * `0x04`), qui n'a rien à voir avec l'effet en cours. La commande existait depuis
- * le premier jour et n'était affichée nulle part : ce n'était pas un bogue
- * d'affichage, c'était une interface qui n'avait jamais été écrite (issue #64).
+ * In the devices column, and not in an effect's settings: it is a property of
+ * the device, a separate protocol command (`0x0f`/`0x04`) that has nothing to
+ * do with the running effect. The command existed from day one and was shown
+ * nowhere: it was not a display bug, it was an interface that had never been
+ * written (issue #64).
  */
 const brightness = computed(() => brightnessOf(selectedDevice.value))
 
-/** En pourcentage, parce que 0-255 ne veut rien dire pour qui règle sa lumière. */
+/** As a percentage, because 0-255 means nothing to someone adjusting their light. */
 const brightnessPercent = computed(() =>
   Math.round((brightness.value / BRIGHTNESS_MAX) * 100),
 )
 
 /**
- * `commit` sépare le glissement de sa fin : pendant, on écrit sur le clavier ;
- * à la fin seulement, sur le disque. Même partage que pour les réglages d'effet,
- * et pour la même raison — `settings.json` s'écrit par fichier temporaire puis
- * renommage, c'est un geste disque complet.
+ * `commit` separates the drag from its end: during it, the keyboard is written;
+ * only at the end, the disk. Same split as for effect settings, and for the
+ * same reason: `settings.json` is written through a temporary file then a
+ * rename, it is a complete disk operation.
  */
 function onBrightness(event: Event, commit: boolean): void {
   const d = selectedDevice.value
@@ -1087,10 +1087,10 @@ function onBrightness(event: Event, commit: boolean): void {
   setBrightness({ vid: d.vid, pid: d.pid }, level, commit)
 }
 
-// ---------------------------------------------------------------- cycle de vie
+// ---------------------------------------------------------------- lifecycle
 
 let statusTimer = 0
-/** Faux dès la destruction : l'ouverture enchaîne des allers-retours au Rust. */
+/** False once destroyed: opening chains round trips to Rust. */
 let alive = true
 
 onMounted(async () => {
@@ -1098,15 +1098,15 @@ onMounted(async () => {
     fallback.value = l
   })
 
-  // Avant tout le reste : « Appliquer » et l'aperçu partent des valeurs
-  // retenues, et les lire après coup laisserait une fenêtre où l'effet
-  // démarrerait sur ses défauts.
+  // Before anything else: Apply and the preview start from the remembered
+  // values, and reading them afterwards would leave a window where the effect
+  // would start on its defaults.
   await loadSettings()
 
   await refresh()
 
-  // Une seule alerte : la bibliothèque est lue d'un coup, elle échoue d'un coup.
-  // Les effets matériels, eux, sont écrits ici : la colonne n'est jamais vide.
+  // A single alert: the library is read in one go, it fails in one go. The
+  // hardware effects are written here: the column is never empty.
   try {
     await readLibrary()
     libraryRead.value = true
@@ -1119,28 +1119,28 @@ onMounted(async () => {
   loaded.value = true
   void followDevice()
 
-  // On a pu quitter l'écran entre-temps : poser l'interrogation périodique
-  // maintenant la laisserait tourner pour personne.
+  // The screen may have been left in the meantime: setting up the periodic
+  // polling now would leave it running for nobody.
   if (alive) statusTimer = window.setInterval(() => void refreshStatus(), STATUS_PERIOD)
 })
 
 onBeforeUnmount(() => {
   alive = false
   window.clearInterval(statusTimer)
-  // Le dernier mouvement d'un curseur ne doit pas dépendre du fait qu'on soit
-  // resté devant le temps du repos d'écriture.
+  // A slider's last movement must not depend on someone having stayed on the
+  // screen for the write's idle delay.
   flushParams()
 })
 </script>
 
 <template>
   <section class="studio" :class="{ 'shut-1': shutDevices, 'shut-2': shutEffects }">
-    <!-- ------------------------------------------------------- appareils -->
+    <!-- --------------------------------------------------------- devices -->
     <section class="col devices" :class="{ shut: shutDevices }" :aria-label="t('effects.columns.devices')">
       <!--
-        Un intitulé, pas un titre de niveau : le seul `h1` de l'écran est le nom
-        de l'effet qu'on configure, et il vient après dans le document. Chaque
-        colonne est déjà nommée pour les lecteurs d'écran par son `aria-label`.
+        A caption, not a heading: the screen's only `h1` is the name of the
+        effect being configured, and it comes later in the document. Each column
+        is already named for screen readers by its `aria-label`.
       -->
       <div class="col-head">
         <p class="col-title">{{ t('effects.columns.devices') }}</p>
@@ -1163,7 +1163,7 @@ onBeforeUnmount(() => {
           markup that would also re-select the device on every drag.
         -->
         <div
-          v-for="d in piloted"
+          v-for="d in controlled"
           :key="`${d.vid}:${d.pid}`"
           class="card"
           :class="{ selected: deviceKey === key(d) }"
@@ -1177,11 +1177,11 @@ onBeforeUnmount(() => {
             @click="choose(d)"
           >
             <!--
-              Un pictogramme de type, pas un logo de fabricant : ce sont des
-              marques protégées, elles ne distinguent pas un clavier d'une souris,
-              et le nom du produit porte déjà l'information. Le seul gabarit connu
-              est un clavier ; le jour où le Rust déclarera un type, il viendra de
-              là plutôt que d'être deviné sur le nom.
+              A type pictogram, not a manufacturer's logo: those are protected
+              trademarks, they do not tell a keyboard from a mouse, and the
+              product name already carries the information. The only known
+              layout is a keyboard; the day Rust declares a type, it will come
+              from there rather than be guessed from the name.
             -->
             <!--
               The state rides on the pictogram rather than in the text: it stays
@@ -1206,9 +1206,9 @@ onBeforeUnmount(() => {
             </span>
 
             <span class="entry-text">
-              <!-- Le nom du **produit**, pas une catégorie : c'est ce qui
-                   distingue deux claviers de la même marque. Il passe à la ligne
-                   plutôt que d'être tronqué. -->
+              <!-- The **product** name, not a category: it is what tells two
+                   keyboards of the same brand apart. It wraps rather than being
+                   truncated. -->
               <span class="dev-name">{{ d.name }}</span>
               <!-- The column is narrow and cuts the line: the whole of it on hover. -->
               <span class="dev-fx" :title="deviceLine(d)">{{ deviceLine(d) }}</span>
@@ -1223,13 +1223,15 @@ onBeforeUnmount(() => {
             Collapsed column: the card rules below restore the button alone, so
             the slider is hidden without having to be named.
           -->
-          <div v-if="deviceKey === key(d)" class="lum">
-            <label class="lum-head" :for="`lum-${key(d)}`">
-              <span class="lum-label">{{ t('effects.brightness') }}</span>
-              <span class="lum-value">{{ t('effects.percent', { n: brightnessPercent }) }}</span>
+          <div v-if="deviceKey === key(d)" class="brightness">
+            <label class="brightness-head" :for="`brightness-${key(d)}`">
+              <span class="brightness-label">{{ t('effects.brightness') }}</span>
+              <span class="brightness-value">{{
+                t('effects.percent', { n: brightnessPercent })
+              }}</span>
             </label>
             <input
-              :id="`lum-${key(d)}`"
+              :id="`brightness-${key(d)}`"
               type="range"
               min="0"
               :max="BRIGHTNESS_MAX"
@@ -1242,14 +1244,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <p v-if="!piloted.length" class="none">
+        <p v-if="!controlled.length" class="none">
           {{ t('effects.noDevice') }}
           <RouterLink to="/devices" class="link">{{ t('effects.chooseDevice') }}</RouterLink>
         </p>
       </div>
     </section>
 
-    <!-- ---------------------------------------------------------- effets -->
+    <!-- --------------------------------------------------------- effects -->
     <section class="col effects" :class="{ shut: shutEffects }" :aria-label="t('effects.columns.effects')">
       <div class="col-head">
         <p class="col-title">{{ t('effects.columns.effects') }}</p>
@@ -1307,10 +1309,10 @@ onBeforeUnmount(() => {
             :aria-labelledby="`fx-section-head-${g.nature}`"
           >
             <!--
-              « appliqué », et non « actif ». Le mot d'avant valait pour les deux
-              états à la fois, or ils n'ont rien à voir : l'un dit ce que le
-              clavier fait, l'autre ce qu'on regarde. La sélection, elle, se lit
-              déjà sur `aria-pressed` et sur la bordure.
+              "applied", and not "active". The earlier word stood for both
+              states at once, yet they have nothing in common: one says what
+              the keyboard does, the other what is being watched. The selection
+              already reads from `aria-pressed` and from the border.
             -->
             <button
               v-for="c in g.items"
@@ -1373,7 +1375,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <!-- --------------------------------------------------------- réglages -->
+    <!-- --------------------------------------------------------- settings -->
     <section class="col detail" :aria-label="t('effects.columns.settings')">
       <FailureNote v-if="listError" class="failure" @close="listError = null">
         {{ listError }}
@@ -1393,19 +1395,19 @@ onBeforeUnmount(() => {
         {{ deviceTrouble }}
       </FailureNote>
       <!--
-        L'erreur de l'aperçu est distincte de celle de l'effet appliqué, et le
-        dit : un effet qu'on regarde peut lever pendant qu'un autre éclaire le
-        clavier sans faute. Les confondre enverrait chercher au mauvais endroit.
+        The preview's error is distinct from the applied effect's, and says so:
+        an effect being watched can throw while another lights the keyboard
+        flawlessly. Confusing them would send people looking in the wrong place.
       -->
       <FailureNote v-if="previewError" class="notice warn" :closable="false">
         {{ t('effects.previewError', { error: previewError }) }}
       </FailureNote>
 
       <!--
-        La bibliothèque se parcourt sans appareil : on doit pouvoir voir ce que
-        l'application propose avant d'autoriser quoi que ce soit. L'aperçu, lui,
-        tourne quand même — sur le gabarit par défaut, sans rien écrire nulle
-        part. Mais l'écran dit ce qui manque et où aller.
+        The library can be browsed without a device: one must be able to see
+        what the application offers before allowing anything. The preview runs
+        anyway, on the default layout, without writing anything anywhere. But
+        the screen says what is missing and where to go.
       -->
       <p v-for="key in missingEffects" :key="key" class="notice warn" role="status">
         {{ t('effects.missing', { name: nameOfKey(key) }) }}
@@ -1455,17 +1457,16 @@ onBeforeUnmount(() => {
         <div class="preview">
           <p class="cost">{{ previewNote }}</p>
           <!--
-            Le gabarit vient du Rust : il est nul le temps d'un aller-retour. On
-            ne dessine pas un clavier vide en attendant.
+            The layout comes from Rust: it is null for the length of a round
+            trip. No empty keyboard is drawn in the meantime.
           -->
           <KeyboardSimulator v-if="board" class="sim" :layout="board" :frame="frame" />
           <p v-if="board && !opened" class="cost">{{ t('effects.preview.defaultLayout') }}</p>
         </div>
 
         <!--
-          Les réglages, engendrés depuis le manifeste. Le formulaire ne connaît
-          aucun effet en particulier : il connaît les quatre sortes de
-          `ParamSpec`, et rien d'autre.
+          The settings, generated from the manifest. The form knows no effect in
+          particular: it knows the four kinds of `ParamSpec`, and nothing else.
         -->
         <EffectParamsForm
           :specs="specs"
@@ -1477,7 +1478,7 @@ onBeforeUnmount(() => {
           @reset="onParamReset"
         />
 
-        <!-- Ce qui est retenu, dit là où on le fabrique. Voir `savedNote`. -->
+        <!-- What is remembered, said where it is made. See `savedNote`. -->
         <p v-if="savedNote" class="cost">{{ savedNote }}</p>
 
         <footer class="actions">
@@ -1490,8 +1491,8 @@ onBeforeUnmount(() => {
           </button>
 
           <!--
-            Arrête la boucle de **l'appareil**, pas celle de l'effet sélectionné :
-            c'est elle qui écrit, quel que soit l'effet qu'on regarde.
+            Stops the **device**'s loop, not the selected effect's: it is the one
+            that writes, whatever effect is being watched.
           -->
           <button v-if="runningHere" class="ghost" :disabled="working" @click="halt">
             {{ t('effects.stop') }}
@@ -1502,8 +1503,8 @@ onBeforeUnmount(() => {
             {{ t('effects.resume') }}
           </button>
 
-          <!-- Un effet matériel n'a pas de code : le dire vaut mieux que de
-               laisser cliquer dans le vide. -->
+          <!-- A hardware effect has no code: saying so is better than letting
+               people click into the void. -->
           <button
             class="ghost"
             :disabled="selectedEffect.hardware !== null"
@@ -1533,9 +1534,9 @@ onBeforeUnmount(() => {
           <!--
             Offered for the user's effects only.
 
-            Il reste en place et actif pendant que la question est posée : le
-            masquer ou le désactiver retirerait le focus du clavier au moment
-            précis où il doit atteindre la réponse, qui suit dans le document.
+            It stays in place and enabled while the question is asked: hiding or
+            disabling it would take keyboard focus away at the very moment it
+            must reach the answer, which follows in the document.
           -->
           <button
             v-if="removable"
@@ -1554,14 +1555,14 @@ onBeforeUnmount(() => {
         </footer>
 
         <!--
-          La question est posée dans la colonne, pas dans une boîte modale : elle
-          reste à côté de ce qu'elle décrit, et n'empêche pas de regarder ailleurs
-          pendant qu'on y réfléchit.
+          The question is asked in the column, not in a modal box: it stays next
+          to what it describes, and does not prevent looking elsewhere while
+          thinking it over.
 
-          **Après** le bouton qui la déclenche, et c'est ce qui fait tout le
-          parcours au clavier : la réponse est la tabulation suivante. Le titre
-          porte `role="alert"` — l'encart apparaît sans que rien ne bouge à
-          l'écran, il faut bien l'annoncer.
+          **After** the button that triggers it, and that is what makes the
+          whole keyboard path: the answer is the next tab stop. The title
+          carries `role="alert"`: the box appears without anything moving on
+          screen, so it has to be announced.
         -->
         <div
           v-if="pendingRemoval"
@@ -1573,9 +1574,9 @@ onBeforeUnmount(() => {
             {{ t('effects.deleteTitle', { name: selectedEffect.name }) }}
           </p>
           <!--
-            Ce qui part, dit en toutes lettres. La source est le seul élément
-            irremplaçable de la liste : les réglages se refont, la boucle se
-            relance, le code écrit à la main ne se réinstalle pas.
+            What goes, spelled out. The source is the only irreplaceable item on
+            the list: settings can be redone, the loop restarted, hand-written
+            code cannot be reinstalled.
           -->
           <p class="cost">{{ t('effects.deleteDetail') }}</p>
           <div class="confirm-actions">
@@ -1615,10 +1616,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /*
- * Les deux largeurs repliables sont des **variables**, pas des règles
- * concurrentes : `.shut-1` et `.shut-2` écrivent chacune la sienne, et le point
- * de rupture redéfinit `grid-template-columns` une bonne fois. Aucune des trois
- * n'a à l'emporter sur les autres — il n'y a rien à départager.
+ * The two collapsible widths are **variables**, not competing rules: `.shut-1`
+ * and `.shut-2` each write their own, and the breakpoint redefines
+ * `grid-template-columns` once and for all. None of the three has to win over
+ * the others: there is nothing to settle.
  */
 .studio {
   --col-devices: 212px;
@@ -1684,8 +1685,8 @@ onBeforeUnmount(() => {
   border-color: var(--line);
 }
 
-/* Conteneur de défilement : rien ne peut déborder latéralement d'une colonne
-   repliée, quelle que soit l'erreur commise plus bas. */
+/* Scroll container: nothing can overflow sideways out of a collapsed column,
+   whatever mistake is made further down. */
 .col-body {
   flex: 1;
   min-height: 0;
@@ -1718,8 +1719,8 @@ onBeforeUnmount(() => {
   border-radius: var(--r-md);
 }
 
-/* Doublé de la marque « actif » pour les effets, et de la position dans la
-   liste pour les appareils : la bordure ambrée ne porte rien seule. */
+/* Backed by the "active" mark for effects, and by the position in the list for
+   devices: the amber border carries nothing alone. */
 .effects .entry[aria-pressed="true"],
 .card.selected {
   background: var(--raised-2);
@@ -1754,9 +1755,9 @@ onBeforeUnmount(() => {
   display: block;
   font-weight: 500;
 
-  /* Un nom de produit est long : il passe à la ligne plutôt que d'être
-     tronqué — c'est lui qui distingue deux claviers de la même marque.
-     `anywhere` couvre le cas d'une référence d'un seul tenant. */
+  /* A product name is long: it wraps rather than being truncated, since it is
+     what tells two keyboards of the same brand apart. `anywhere` covers the
+     case of an unbroken model number. */
   overflow-wrap: anywhere;
 }
 
@@ -1774,14 +1775,14 @@ onBeforeUnmount(() => {
  * of that device. The left offset adds up the button's border, padding, glyph
  * width and gap.
  */
-.lum {
+.brightness {
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 0 var(--gap-2) 6px calc(1px + var(--gap-2) + 18px + var(--gap-2));
 }
 
-.lum-head {
+.brightness-head {
   display: flex;
   flex-wrap: wrap;
   gap: 0 var(--gap-2);
@@ -1790,23 +1791,24 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
-.lum-label {
+.brightness-label {
   flex: 1;
 }
 
-/* Le chiffre en clair : un curseur sans valeur ne se repose pas au même endroit
-   d'une session à l'autre, et c'est justement ce qu'on retient ici. */
-.lum-value {
+/* The figure spelled out: a slider without a value is not set back to the same
+   place from one session to the next, and that is precisely what is remembered
+   here. */
+.brightness-value {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
 
-.lum input {
+.brightness input {
   width: 100%;
   accent-color: var(--accent);
 }
 
-.lum input:disabled {
+.brightness input:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -1869,9 +1871,9 @@ onBeforeUnmount(() => {
   color: var(--text-faint);
 }
 
-/* Le repère est décoratif — il porte déjà `aria-hidden`. Le rendre transparent
-   au pointeur laisse l'infobulle du bouton passer : une fois la colonne
-   repliée, c'est le seul endroit où le nom de l'effet se lit encore. */
+/* The swatch is decorative: it already carries `aria-hidden`. Making it
+   transparent to the pointer lets the button's tooltip through: once the column
+   is collapsed, it is the only place where the effect's name can still be read. */
 .mark {
   pointer-events: none;
 }
@@ -1900,26 +1902,26 @@ onBeforeUnmount(() => {
 }
 
 /*
- * ---------------------------------------------------------------- repliement
+ * ---------------------------------------------------------------- collapsing
  *
- * Deux fois la même règle, au même endroit : **on masque tous les enfants, puis
- * on rétablit explicitement le seul qui reste**.
+ * The same rule twice, in the same place: **hide every child, then explicitly
+ * restore the only one that stays**.
  *
- * Ce n'est pas un détail de style. Énumérer ce qu'on cache — « cacher le nom,
- * cacher l'effet » — a déjà produit ici une collision de spécificité : une règle
- * ajoutée ailleurs pour le nom l'emportait sur le masquage, et le texte revenait
- * déborder dans 40 px. Écrite ainsi, la règle survit à l'ajout d'un enfant ou
- * d'une classe :
+ * This is not a stylistic detail. Listing what is hidden ("hide the name, hide
+ * the effect") already produced a specificity collision here: a rule added
+ * elsewhere for the name won over the hiding, and the text came back to
+ * overflow into 40 px. Written this way, the rule survives the addition of a
+ * child or a class:
  *
- * 1. le sélecteur universel couvre ce qui n'existe pas encore — un enfant ajouté
- *    demain est masqué sans que personne ait à y penser ;
- * 2. le rétablissement est plus spécifique que le masquage, et il est ici, à
- *    deux lignes de lui, pas dans un autre bloc ;
- * 3. toute règle qui pourrait les concurrencer est gardée par `:not(.shut)` :
- *    elle ne **s'applique pas** en état replié, au lieu de gagner ou perdre un
- *    arbitrage de spécificité ;
- * 4. `.col-body` est un conteneur de défilement : même une règle fautive ne
- *    pourrait pas faire déborder la colonne sur sa voisine.
+ * 1. the universal selector covers what does not exist yet: a child added
+ *    tomorrow is hidden without anyone having to think about it;
+ * 2. the restoring is more specific than the hiding, and it is here, two lines
+ *    away from it, not in another block;
+ * 3. any rule that could compete with them is guarded by `:not(.shut)`: it
+ *    **does not apply** in the collapsed state, instead of winning or losing a
+ *    specificity contest;
+ * 4. `.col-body` is a scroll container: even a faulty rule could not make the
+ *    column overflow onto its neighbor.
  */
 @media (width > 820px) {
   .col.shut .col-head {
@@ -1970,8 +1972,8 @@ onBeforeUnmount(() => {
     display: block;
   }
 
-  /* Second niveau : dans une entrée, un seul enfant survit — l'icône d'appareil
-     ou le repère de couleurs. */
+  /* Second level: inside an entry, a single child survives: the device icon or
+     the color swatch. */
   .col.shut .entry > * {
     display: none;
   }
@@ -1983,8 +1985,8 @@ onBeforeUnmount(() => {
   .col.shut .entry > .mark {
     display: flex;
 
-    /* 34 px ne tiennent pas dans les 32 px utiles d'une colonne repliée : le
-       repère se resserre plutôt que de faire défiler la colonne en largeur. */
+    /* 34 px do not fit in the 32 usable px of a collapsed column: the swatch
+       narrows rather than making the column scroll sideways. */
     width: 26px;
   }
 
@@ -1995,7 +1997,7 @@ onBeforeUnmount(() => {
     padding-inline: 0;
   }
 
-  /* Même forme pour le bouton d'ajout : tout masqué, le signe rétabli. */
+  /* Same form for the add button: everything hidden, the sign restored. */
   .col.shut .new > * {
     display: none;
   }
@@ -2037,12 +2039,12 @@ onBeforeUnmount(() => {
   }
 
   /*
-   * Gardé par `:not(.shut)`, et c'est la clause qui compte.
+   * Guarded by `:not(.shut)`, and that is the clause that matters.
    *
-   * Le nom d'un appareil passe à la ligne, donc son entrée s'aligne en haut.
-   * Sans cette garde, la règle **s'appliquerait** en état replié et il faudrait
-   * qu'elle perde un arbitrage de spécificité contre le masquage — exactement le
-   * piège dans lequel cette interface est déjà tombée.
+   * A device's name wraps, so its entry aligns to the top. Without this guard,
+   * the rule **would apply** in the collapsed state and would have to lose a
+   * specificity contest against the hiding: exactly the trap this interface
+   * already fell into.
    */
   .devices:not(.shut) .entry {
     align-items: flex-start;
@@ -2054,7 +2056,7 @@ onBeforeUnmount(() => {
 }
 
 /*
- * ------------------------------------------------------------------ réglages
+ * ------------------------------------------------------------------ settings
  */
 .detail {
   overflow-y: auto;
@@ -2109,7 +2111,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
-/* Le coût réel, les notes d'état et les aides : même voix, la plus discrète. */
+/* The real cost, the state notes and the hints: same voice, the quietest. */
 .cost {
   max-width: 68ch;
   color: var(--text-faint);
@@ -2122,10 +2124,10 @@ onBeforeUnmount(() => {
   gap: var(--gap-2);
 }
 
-/* Le dessin ne prend pas plus que sa part : la colonne porte aussi les réglages
-   et les actions, et un clavier qui pousse le reste hors de l'écran ferait
-   défiler pour trouver un bouton. Borné en **largeur** et non en hauteur — le
-   SVG garde ses proportions, une hauteur maximale le ferait rogner. */
+/* The drawing takes no more than its share: the column also holds the settings
+   and the actions, and a keyboard pushing the rest off screen would mean
+   scrolling to find a button. Bounded in **width** and not in height: the SVG
+   keeps its proportions, a maximum height would crop it. */
 .sim {
   max-width: 760px;
 }
@@ -2173,9 +2175,9 @@ onBeforeUnmount(() => {
 }
 
 /*
- * Un geste sans retour. La couleur ne le dit pas seule — le libellé annonce la
- * suppression, et la confirmation énumère ce qui part : un daltonien lit la même
- * chose que les autres.
+ * A gesture with no way back. Color does not say it alone: the label announces
+ * the removal, and the confirmation lists what goes: a color-blind person reads
+ * the same thing as everyone else.
  */
 .danger {
   color: var(--bad);
@@ -2205,7 +2207,7 @@ onBeforeUnmount(() => {
 .confirm-title {
   font-weight: 600;
 
-  /* Un nom d'effet est libre : il passe à la ligne plutôt que de déborder. */
+  /* An effect's name is free-form: it wraps rather than overflowing. */
   overflow-wrap: anywhere;
 }
 
@@ -2228,8 +2230,8 @@ onBeforeUnmount(() => {
   color: var(--text-muted);
 }
 
-/* Un écart entre ce qu'on a demandé et ce qui se passe. La couleur ne porte pas
-   seule : le texte le dit aussi. */
+/* A gap between what was asked and what is happening. Color does not carry it
+   alone: the text says it too. */
 .notice.warn {
   background: color-mix(in srgb, var(--warn) 12%, var(--raised));
   border-color: var(--warn);
@@ -2257,10 +2259,10 @@ onBeforeUnmount(() => {
 }
 
 /*
- * Fenêtre étroite : les trois colonnes s'empilent. Le repliement n'y a plus de
- * sens — une colonne pleine largeur réduite à une bande d'icônes ne gagnerait
- * rien — donc ses règles sont **entièrement** dans le point de rupture large, et
- * le bouton disparaît plutôt que de basculer un état sans effet.
+ * Narrow window: the three columns stack. Collapsing no longer makes sense
+ * there (a full-width column reduced to a strip of icons would gain nothing),
+ * so its rules are **entirely** in the wide breakpoint, and the button
+ * disappears rather than toggling a state with no effect.
  */
 @media (width <= 820px) {
   .studio {
@@ -2282,7 +2284,7 @@ onBeforeUnmount(() => {
     display: none;
   }
 
-  /* Les deux listes cèdent la place au contenu, sans disparaître. */
+  /* The two lists give way to the content, without disappearing. */
   .devices .col-body,
   .effects .col-body {
     max-height: 24vh;
