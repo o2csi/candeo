@@ -42,7 +42,7 @@ tauri-plugin-notification = "2"
 
 # Effects engine. `loader` resolves `@candeo/effects-api` to an internal
 # module, with no bundler and no `node_modules`.
-rquickjs = { version = "0.13", features = ["loader"] }
+rquickjs = { version = "0.14", features = ["loader"] }
 
 # Log — see `src/journal.rs`. `tracing` rather than `tauri-plugin-log`, which is
 # first-party and would settle most of it in a few lines: there is one render
