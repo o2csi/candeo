@@ -182,6 +182,18 @@ export interface EffectContext<P = undefined> {
    * is what animations run on; `clock` is what a clock face needs.
    */
   readonly clock: Clock
+  /**
+   * Every signal other programs have sent and that has not expired, by name —
+   * `{ build: 'failed', volume: 0.4 }`. Empty unless the effect declares
+   * `inputs: ['signals']`.
+   *
+   * An author's tool, for an effect drawing many values at once. An effect
+   * reading `signals.build` works only for whoever sends exactly `build`: to let
+   * a signal drive one setting of any effect, the person binds that setting to
+   * it in the gallery instead, and the effect reads it in `params` without
+   * knowing (`docs/design/inputs-and-automations.md` §2.3.1).
+   */
+  readonly signals: Readonly<Record<string, string | number | boolean>>
 }
 
 /** A key going down. See {@link EffectContext.presses}. */
@@ -210,7 +222,7 @@ export interface Clock {
 }
 
 /** What an effect reads besides time and its parameters. */
-export type Input = 'keys' | 'clock'
+export type Input = 'keys' | 'clock' | 'signals'
 
 /** An effect renders a frame at each call. */
 export type Effect = (ctx: EffectContext) => void
@@ -311,7 +323,8 @@ export interface EffectModule<P = undefined> {
    * effect runs, and the gallery says so (`docs/design/key-input.md`).
    * `['clock']` gives it {@link EffectContext.clock}: nothing is captured for
    * it, so it is read whenever the effect asks
-   * (`docs/design/inputs-and-automations.md` §2.1).
+   * (`docs/design/inputs-and-automations.md` §2.1). `['signals']` gives it
+   * {@link EffectContext.signals}.
    */
   readonly inputs?: readonly Input[]
   readonly params?: P

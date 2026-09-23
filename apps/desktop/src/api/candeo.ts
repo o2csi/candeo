@@ -519,7 +519,12 @@ export interface EffectParamsRecord {
   pid: number
   effect: string
   values: EffectParams
+  /** Parameters reading a signal instead of their value: `{ colour: 'signal:status' }`. */
+  bindings?: Bindings
 }
+
+/** Parameters bound to a live value, by parameter: `{ colour: 'signal:status' }`. */
+export type Bindings = Record<string, string>
 
 /**
  * Mirror of `Settings`, in `src-tauri/src/storage.rs`.
@@ -602,6 +607,7 @@ export interface SignalTrigger {
 export interface RuleShow {
   effect: string
   params: EffectParams
+  bindings?: Bindings
 }
 
 export interface RuleDuration {

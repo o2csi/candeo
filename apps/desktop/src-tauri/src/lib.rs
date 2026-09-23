@@ -1290,7 +1290,9 @@ pub fn run() {
             // rule interrupts the device.
             app.manage(automations::Automations::default());
             // Before the automations start: a tick reads what is held.
-            app.manage(signals::Signals::default());
+            // The store the engine's loops read bound values from: one for both.
+            let store = app.state::<AppState>().engine.signals();
+            app.manage(signals::Signals::sharing(store));
 
             // After `manage`, since starting goes through the command path, which
             // reads the state from the manager; before the tray, so its first menu
@@ -1377,12 +1379,14 @@ pub fn run() {
             runtime::start_effect,
             runtime::stop_effect,
             runtime::set_effect_params,
+            runtime::set_effect_bindings,
             runtime::set_output_to_keyboard,
             runtime::subscribe_frames,
             runtime::unsubscribe_frames,
             runtime::start_preview,
             runtime::stop_preview,
             runtime::set_preview_params,
+            runtime::set_preview_bindings,
             runtime::subscribe_preview_frames,
             runtime::unsubscribe_preview_frames,
             runtime::engine_status,
@@ -1420,6 +1424,7 @@ pub fn run() {
             storage::set_check_for_updates,
             storage::reset_settings,
             storage::remember_effect_params,
+            storage::remember_effect_bindings,
             journal::get_journal,
             journal::set_log_level,
             journal::set_log_files_kept,

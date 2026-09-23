@@ -128,6 +128,15 @@ pub fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':'))
 }
 
+/// The signal a binding reads, from its source as a parameter stores it:
+/// `signal:status`. A source names its kind so that another per-frame value — the
+/// sound level of §2.2 — binds the same way; only signals exist so far.
+pub fn bound_signal(source: &str) -> Option<&str> {
+    source
+        .strip_prefix("signal:")
+        .filter(|name| valid_name(name))
+}
+
 /// The `ttl` a request asks for, in seconds, from its query string.
 pub fn parse_ttl(raw: Option<&str>) -> Result<Option<u32>, Refusal> {
     match raw {
@@ -228,6 +237,46 @@ impl Store {
         &self.held
     }
 
+    /// What one frame of an effect reads of the signals, as the render entry point
+    /// takes it: the raw values bound to its parameters, by parameter, and — when
+    /// it declares the `signals` input — every value held, by name. An empty
+    /// string stands for none, and costs the effect no parsing.
+    ///
+    /// Raw on purpose: converting `"#ff0000"` into a colour needs the parameter's
+    /// spec, which only the bootstrap holds (§2.3.1).
+    pub fn frame_inputs(
+        &self,
+        bindings: &BTreeMap<String, String>,
+        bag: bool,
+        now: i64,
+    ) -> (String, String) {
+        let bound: serde_json::Map<String, Value> = bindings
+            .iter()
+            .filter_map(|(param, source)| {
+                let held = self.held.get(bound_signal(source)?)?;
+                held.alive(now)
+                    .then(|| (param.clone(), scalar_json(&held.value)))
+            })
+            .collect();
+        let all: serde_json::Map<String, Value> = if bag {
+            self.held
+                .iter()
+                .filter(|(_, held)| held.alive(now))
+                .map(|(name, held)| (name.clone(), scalar_json(&held.value)))
+                .collect()
+        } else {
+            serde_json::Map::new()
+        };
+        let text = |map: serde_json::Map<String, Value>| {
+            if map.is_empty() {
+                String::new()
+            } else {
+                Value::Object(map).to_string()
+            }
+        };
+        (text(bound), text(all))
+    }
+
     /// What is held, for Settings and `GET /signals`, by name.
     pub fn views(&self, now: i64) -> Vec<SignalView> {
         self.held
@@ -241,6 +290,10 @@ impl Store {
             })
             .collect()
     }
+}
+
+fn scalar_json(value: &Scalar) -> Value {
+    serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
 #[cfg(test)]
@@ -374,6 +427,49 @@ mod tests {
         assert!(!valid_name("two words"));
         assert!(!valid_name("line\nbreak"));
         assert!(!valid_name("naïve"));
+    }
+
+    #[test]
+    fn a_frame_reads_the_values_bound_to_its_parameters() {
+        let mut store = Store::default();
+        store
+            .apply(&json!({ "status": "#ff0000", "volume": 0.4 }), None, NOW)
+            .unwrap();
+        let bindings: BTreeMap<String, String> = [
+            ("colour".to_string(), "signal:status".to_string()),
+            ("speed".to_string(), "signal:volume".to_string()),
+            ("width".to_string(), "signal:never-sent".to_string()),
+            ("height".to_string(), "sound:level".to_string()),
+        ]
+        .into();
+
+        let (bound, all) = store.frame_inputs(&bindings, false, NOW);
+        assert_eq!(bound, r##"{"colour":"#ff0000","speed":0.4}"##);
+        assert_eq!(all, "", "the bag only for an effect declaring it");
+
+        let (_, all) = store.frame_inputs(&BTreeMap::new(), true, NOW);
+        assert_eq!(all, r##"{"status":"#ff0000","volume":0.4}"##);
+    }
+
+    #[test]
+    fn an_expired_value_reaches_no_frame() {
+        let mut store = Store::default();
+        store
+            .apply(&json!({ "status": "busy" }), None, NOW)
+            .unwrap();
+        let bindings = [("colour".to_string(), "signal:status".to_string())].into();
+        assert_eq!(
+            store.frame_inputs(&bindings, true, NOW + 60_000),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn a_binding_names_its_source() {
+        assert_eq!(bound_signal("signal:status"), Some("status"));
+        assert_eq!(bound_signal("status"), None, "the kind is not optional");
+        assert_eq!(bound_signal("signal:two words"), None);
+        assert_eq!(bound_signal("sound:level"), None, "not a source yet");
     }
 
     #[test]

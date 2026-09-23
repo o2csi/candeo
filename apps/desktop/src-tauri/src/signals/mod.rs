@@ -19,7 +19,7 @@ pub mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,11 @@ use crate::CmdResult;
 use http::{Listener, Request, Response};
 use interfaces::NetworkInterface;
 use store::{Held, Refusal, SignalView, Store};
+
+/// What is held, shared with the effects engine: a render loop reads the values
+/// bound to its parameters on every frame, and has no application handle to ask
+/// for them (`docs/design/inputs-and-automations.md` §2.3.1).
+pub type SharedStore = Arc<Mutex<Store>>;
 
 /// The port, unless something else holds it; editable in Settings.
 pub const DEFAULT_PORT: u16 = 7317;
@@ -90,13 +95,23 @@ pub struct SignalsApi {
 
 #[derive(Default)]
 pub struct Signals {
-    store: Mutex<Store>,
+    store: SharedStore,
     /// The settings the listeners were last set from: a request reads its token
     /// here rather than from the disk.
     config: Mutex<SignalsConfig>,
     listeners: Mutex<Vec<Listener>>,
     /// Addresses that could not be listened on, and why.
     refused: Mutex<BTreeMap<SocketAddr, String>>,
+}
+
+impl Signals {
+    /// Signals holding `store`, the one the effects engine reads.
+    pub fn sharing(store: SharedStore) -> Self {
+        Self {
+            store,
+            ..Self::default()
+        }
+    }
 }
 
 /// Starts following the settings and the interfaces: a thread of its own, for as

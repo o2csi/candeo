@@ -89,6 +89,10 @@ pub struct Show {
     pub effect: String,
     #[serde(default)]
     pub params: serde_json::Map<String, serde_json::Value>,
+    /// Its parameters bound to a signal, as the gallery binds them for a device
+    /// (§2.3.1): a rule carries its own, as it carries its own settings.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub bindings: crate::runtime::Bindings,
 }
 
 /// How long an occurrence lasts.
@@ -138,6 +142,15 @@ impl Rule {
         if self.lasts.seconds == 0 {
             return Some("an occurrence lasts 1 second or more".into());
         }
+        if let Some(param) = self
+            .show
+            .bindings
+            .iter()
+            .find(|(_, source)| crate::signals::store::bound_signal(source).is_none())
+            .map(|(param, _)| param)
+        {
+            return Some(format!("\"{param}\" is bound to no signal"));
+        }
         if self.show.effect.is_empty() {
             return Some("the rule shows no effect".into());
         }
@@ -176,6 +189,7 @@ pub struct Interruption {
     pub rule: String,
     pub effect: String,
     pub params: serde_json::Map<String, serde_json::Value>,
+    pub bindings: crate::runtime::Bindings,
     /// When this occurrence started, in epoch milliseconds.
     pub since: i64,
     /// When it ends, in epoch milliseconds.
@@ -264,6 +278,7 @@ fn interruption(rule: &Rule, since: i64, until: i64, open: bool) -> Interruption
         rule: rule.id.clone(),
         effect: rule.show.effect.clone(),
         params: rule.show.params.clone(),
+        bindings: rule.show.bindings.clone(),
         since,
         until,
         open,
@@ -332,6 +347,7 @@ mod tests {
             show: Show {
                 effect: format!("shipped:{id}"),
                 params: serde_json::Map::new(),
+                bindings: crate::runtime::Bindings::new(),
             },
             lasts: Lasts { seconds },
         }

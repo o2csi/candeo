@@ -323,6 +323,7 @@
     "signalNameInvalid": "« {name} » ne peut pas nommer un signal : utilisez des lettres, des chiffres, ou _ - . :",
     "signalValueTooLong": "La valeur de « {name} » est trop longue : {max} caractères au plus.",
     "signalsFull": "{max} signaux sont déjà reçus : effacez-en un, ou attendez qu'un expire.",
+    "bindingInvalid": "Le paramètre « {param} » ne peut pas lire « {source} » : choisissez un signal par son nom.",
     "effectExists": "Un effet nommé « {name} » existe déjà.",
     "builtinNotSaved": "« {name} » est un effet intégré : dupliquez-le pour le modifier.",
     "builtinNotRenamed": "« {name} » est un effet intégré : dupliquez-le pour le renommer.",

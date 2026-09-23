@@ -124,6 +124,11 @@ pub struct Manifest {
     /// an effect reads is what someone chooses it by.
     #[serde(default)]
     pub reads_clock: bool,
+    /// The effect declares `inputs: ['signals']`: it is given every value held
+    /// (#108). Bound parameters need no declaration, and are not what this
+    /// says.
+    #[serde(default)]
+    pub reads_signals: bool,
 }
 
 /// Kind of effect: shipped with the application, or the user's.
@@ -362,6 +367,13 @@ pub struct EffectParamsRecord {
     /// create a second source of truth, which would diverge at the first
     /// parameter type added.
     pub values: serde_json::Map<String, serde_json::Value>,
+    /// Parameters that read a signal instead of their value, by parameter:
+    /// `{"colour": "signal:status"}`. The value above stays, and is what the
+    /// effect shows while the signal is absent (§2.3.1). Beside the values
+    /// rather than in a record of its own: a binding follows the effect on the
+    /// device, and goes when it goes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bindings: crate::runtime::Bindings,
 }
 
 /// What applies to the whole application, and to no device in particular.
@@ -734,7 +746,18 @@ impl Settings {
             .map(|r| &r.values)
     }
 
-    /// Keeps parameters. An **empty** map erases the entry.
+    /// The parameters of an effect bound to a signal on a device; none when
+    /// nothing is bound.
+    pub fn effect_bindings(&self, vid: u16, pid: u16, effect: &str) -> crate::runtime::Bindings {
+        self.effect_params
+            .iter()
+            .find(|r| r.vid == vid && r.pid == pid && r.effect == effect)
+            .map(|r| r.bindings.clone())
+            .unwrap_or_default()
+    }
+
+    /// Keeps parameters. An **empty** map erases them, and the entry with them
+    /// when nothing is bound either.
     ///
     /// That is what makes "restore the declared values" a forget and not a copy:
     /// the effect then starts again from its manifest, including when a later
@@ -746,24 +769,50 @@ impl Settings {
         effect: &str,
         values: serde_json::Map<String, serde_json::Value>,
     ) {
+        let record = self.effect_record(vid, pid, effect);
+        record.values = values;
+        self.drop_empty_effect_records();
+    }
+
+    /// Keeps which parameters read a signal. Empty unbinds them all, and erases
+    /// the entry when no value is kept either.
+    pub fn set_effect_bindings(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        effect: &str,
+        bindings: crate::runtime::Bindings,
+    ) {
+        let record = self.effect_record(vid, pid, effect);
+        record.bindings = bindings;
+        self.drop_empty_effect_records();
+    }
+
+    fn effect_record(&mut self, vid: u16, pid: u16, effect: &str) -> &mut EffectParamsRecord {
         let position = self
             .effect_params
             .iter()
             .position(|r| r.vid == vid && r.pid == pid && r.effect == effect);
-
-        match (position, values.is_empty()) {
-            (Some(i), true) => {
-                self.effect_params.remove(i);
+        let i = match position {
+            Some(i) => i,
+            None => {
+                self.effect_params.push(EffectParamsRecord {
+                    vid,
+                    pid,
+                    effect: effect.to_owned(),
+                    values: serde_json::Map::new(),
+                    bindings: crate::runtime::Bindings::new(),
+                });
+                self.effect_params.len() - 1
             }
-            (Some(i), false) => self.effect_params[i].values = values,
-            (None, true) => {}
-            (None, false) => self.effect_params.push(EffectParamsRecord {
-                vid,
-                pid,
-                effect: effect.to_owned(),
-                values,
-            }),
-        }
+        };
+        &mut self.effect_params[i]
+    }
+
+    /// Same economy as the rest of the file: an entry holding nothing goes.
+    fn drop_empty_effect_records(&mut self) {
+        self.effect_params
+            .retain(|r| !r.values.is_empty() || !r.bindings.is_empty());
     }
 
     /// Forgets an effect **everywhere**: its parameters, and where it is applied.
@@ -1082,7 +1131,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// - 1: an effect's settings in the order it declares them (#177); before,
 ///   sorted by key.
-const CACHE_FORMAT: u32 = 1;
+/// - 2: whether it reads signals (#108).
+const CACHE_FORMAT: u32 = 2;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1109,6 +1159,8 @@ struct CacheRecord {
     /// Defaulted, so a cache written before the clock input reads back.
     #[serde(default)]
     reads_clock: bool,
+    #[serde(default)]
+    reads_signals: bool,
     #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
@@ -1979,6 +2031,7 @@ fn library_entry(
                 api_version: r.api_version,
                 reads_keys: r.reads_keys,
                 reads_clock: r.reads_clock,
+                reads_signals: r.reads_signals,
             },
         ),
     };
@@ -2004,6 +2057,7 @@ fn library_entry(
             api_version: declared.api_version,
             reads_keys: declared.reads_keys,
             reads_clock: declared.reads_clock,
+            reads_signals: declared.reads_signals,
         },
     }
 }
@@ -2028,6 +2082,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             api_version: declared.api_version,
             reads_keys: declared.reads_keys,
             reads_clock: declared.reads_clock,
+            reads_signals: declared.reads_signals,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -2043,6 +2098,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
             reads_clock: false,
+            reads_signals: false,
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -2077,6 +2133,7 @@ struct Declared {
     api_version: u32,
     reads_keys: bool,
     reads_clock: bool,
+    reads_signals: bool,
 }
 
 impl Declared {
@@ -2088,6 +2145,7 @@ impl Declared {
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
             reads_clock: false,
+            reads_signals: false,
         }
     }
 }
@@ -2130,6 +2188,7 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
         api_version,
         reads_keys: declares("keys"),
         reads_clock: declares("clock"),
+        reads_signals: declares("signals"),
     })
 }
 
@@ -2503,6 +2562,27 @@ pub fn remember_effect_params(
     }
 
     settings.set_effect_params(device.vid, device.pid, &effect, params);
+    store.write_settings(&settings)
+}
+
+/// Keeps which parameters of an effect read a signal on a device (§2.3.1), as
+/// [`remember_effect_params`] keeps their values: the running loop is set apart,
+/// through [`crate::runtime::set_effect_bindings`].
+#[tauri::command]
+pub fn remember_effect_bindings(
+    app: AppHandle,
+    device: DeviceRef,
+    effect: String,
+    bindings: crate::runtime::Bindings,
+) -> CmdResult<()> {
+    EffectKey::settings_of(&effect)?;
+    let bindings = crate::runtime::checked_bindings(bindings)?;
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    if settings.effect_bindings(device.vid, device.pid, &effect) == bindings {
+        return Ok(());
+    }
+    settings.set_effect_bindings(device.vid, device.pid, &effect, bindings);
     store.write_settings(&settings)
 }
 
@@ -3822,6 +3902,7 @@ mod tests {
                 pid: 0x0292,
                 effect: "respiration".into(),
                 values: to_map(&[("period", serde_json::json!(12.5))]),
+                bindings: [("period".to_string(), "signal:tempo".to_string())].into(),
             }],
             shipped_effects: BTreeMap::from([
                 ("Breathing".to_owned(), Some("abc".to_owned())),
@@ -4518,6 +4599,7 @@ mod tests {
             api_version: EFFECTS_API_VERSION,
             reads_keys: false,
             reads_clock: false,
+            reads_signals: false,
         }
     }
 
@@ -4651,7 +4733,10 @@ mod tests {
             "id": "night", "name": "Night", "enabled": true,
             "devices": [{ "vid": 5426, "pid": 658 }],
             "when": { "kind": "cron", "expr": "0 22 * * *" },
-            "show": { "effect": "hardware:off", "params": {} },
+            "show": {
+                "effect": "hardware:off", "params": {},
+                "bindings": { "colour": "signal:status" }
+            },
             "for": { "seconds": 32400 }
         }))
         .expect("a rule");
@@ -4694,6 +4779,7 @@ mod tests {
                 pid: 0x0290,
                 effect: "onde".into(),
                 values: serde_json::Map::new(),
+                bindings: [("speed".to_string(), "signal:volume".to_string())].into(),
             },
         );
     }

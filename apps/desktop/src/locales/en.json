@@ -323,6 +323,7 @@
     "signalNameInvalid": "“{name}” cannot name a signal: use letters, digits, or _ - . :",
     "signalValueTooLong": "The value of “{name}” is too long: {max} characters at most.",
     "signalsFull": "{max} signals are already held: erase one, or wait for one to expire.",
+    "bindingInvalid": "The setting “{param}” cannot read “{source}”: choose a signal by its name.",
     "effectExists": "An effect named “{name}” already exists.",
     "builtinNotSaved": "“{name}” is a built-in effect: duplicate it to change it.",
     "builtinNotRenamed": "“{name}” is a built-in effect: duplicate it to rename it.",

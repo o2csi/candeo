@@ -1051,7 +1051,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 s.status.reaching_keyboard,
                 s.status.error.map_or(String::new(), |e| format!(
                     " · effect error: {}",
-                    crate::runtime::loggable(&e, s.status.reads_keys)
+                    crate::runtime::loggable(&e, s.status.reads_private)
                 )),
                 s.status
                     .device_error
@@ -1076,7 +1076,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 p.layout_of,
                 p.error.map_or(String::new(), |e| format!(
                     " · effect error: {}",
-                    crate::runtime::loggable(&e, p.reads_keys)
+                    crate::runtime::loggable(&e, p.reads_private)
                 )),
             ),
         },
