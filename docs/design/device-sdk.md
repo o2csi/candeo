@@ -773,19 +773,19 @@ Described, not written: the implementation is the body of [#34].
 
 ## 11. Open questions
 
-- **The language of identifiers.** This document proposes `kinds`, `requires`,
-  `geometry`, `wheel` — English, to stay consistent with `name`, `params`, `render`,
-  `rows`, `cols` and the rest of the public surface. The prose stays in French. To
-  be confirmed, because it is as costly to change later as the rest of the
-  vocabulary.
+- ~~**The language of identifiers**~~ — settled: English everywhere, prose
+  included (AGENTS.md). `kinds`, `requires`, `geometry` and `wheel` stay as
+  proposed.
 - **Do zones and the grid really coexist?** A keyboard with
   underglow would have both, and a flat frame would concatenate both. Nothing
-  here stands in the way, and nothing has tried it either.
+  here stands in the way, and nothing has tried it either. The m18 R1 has both,
+  but as two USB devices, each with a layout declaring `Lights::Keys` or
+  `Lights::Zones` (#193): one device holding both is still untried.
 - **Intercepting undeclared reads** (§4) is a lead, not a
   decision. Its real cost in QuickJS has not been measured.
-- **Can a protocol family be described as data?** §7 leaves it in code.
-  The exact boundary between "family parameter" and "new family" will only
-  be settled with the second protocol, and not before.
+- ~~**Can a protocol family be described as data?**~~ — the second protocol
+  answered no (§7, *What the second family taught*): a family is a trait, one
+  file per protocol, and a device of a known family stays data.
 - **Two units of the same model remain indistinguishable** when the USB
   descriptor carries no serial number ([#35]). The SDK changes nothing there, but a
   catalog of layouts makes the case more frequent.
