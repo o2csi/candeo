@@ -17,14 +17,21 @@
 //! `idle` applies once the session has had no input — no key, no mouse — for some
 //! minutes, and lasts as long as that holds (#179). How long it has been comes in
 //! with the context: the system's own count, never key capture.
+//!
+//! # When: a signal says so
+//!
+//! `signal` applies while a value another program sent equals the one the rule
+//! names — held while it does, or flashed for the rule's duration at each send
+//! (#108). What is held comes in with the context, like idleness.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
 use chrono::{DateTime, TimeZone};
 use croner::Cron;
 use serde::{Deserialize, Serialize};
 
+use crate::signals::store::{valid_name, Held};
 use crate::DeviceRef;
 
 /// A rule, as `settings.json` holds it (§3.2).
@@ -48,8 +55,7 @@ pub struct Rule {
     pub lasts: Lasts,
 }
 
-/// When a rule applies. `signal` comes with its own pull request, as a further
-/// variant of this tag.
+/// When a rule applies.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Trigger {
@@ -59,6 +65,20 @@ pub enum Trigger {
     /// Under way once nobody has used the computer for `minutes`, until someone
     /// does. The rule's duration does not apply, except to Try.
     Idle { minutes: u32 },
+    /// Under way while the signal `name` equals `equals`, compared as text: from
+    /// when that value was set, for as long as it holds — or, with `hold` off,
+    /// for the rule's duration from each time it is received. There is no
+    /// "becomes": the sender already chooses when to send.
+    Signal {
+        name: String,
+        equals: String,
+        #[serde(default = "holds")]
+        hold: bool,
+    },
+}
+
+fn holds() -> bool {
+    true
 }
 
 /// What a rule shows: an effect id, as `activeEffects` names them, and its own
@@ -91,6 +111,7 @@ impl Rule {
             Trigger::Cron { expr } => Cron::from_str(expr)
                 .map_err(|e| format!("\"{expr}\" is not a cron expression: {e}")),
             Trigger::Idle { .. } => Err("an idle rule has no cron expression".into()),
+            Trigger::Signal { .. } => Err("a signal rule has no cron expression".into()),
         }
     }
 
@@ -109,6 +130,10 @@ impl Rule {
                 return Some("idle means 1 minute or more without input".into())
             }
             Trigger::Idle { .. } => {}
+            Trigger::Signal { name, .. } if !valid_name(name) => {
+                return Some(format!("\"{name}\" is not a signal name"))
+            }
+            Trigger::Signal { .. } => {}
         }
         if self.lasts.seconds == 0 {
             return Some("an occurrence lasts 1 second or more".into());
@@ -160,9 +185,9 @@ pub struct Interruption {
     pub open: bool,
 }
 
-/// How far ahead an idle occurrence is known to last: until the scheduler looks
-/// again, a second later.
-const IDLE_LOOK_MS: i64 = 1000;
+/// How far ahead an open occurrence — idle, a signal held — is known to last:
+/// until the scheduler looks again, a second later.
+const LOOK_MS: i64 = 1000;
 
 /// Everything, besides the device, the answer depends on.
 pub struct Context<'a, Tz: TimeZone> {
@@ -177,6 +202,9 @@ pub struct Context<'a, Tz: TimeZone> {
     /// How long since the last input in the session, in milliseconds; `None`
     /// where the system does not say, and an idle rule then never applies.
     pub idle: Option<i64>,
+    /// The signals held now. Expired ones may still be there; they apply no
+    /// more.
+    pub signals: &'a BTreeMap<String, Held>,
 }
 
 /// Every occurrence under way on `device` now, first the one that should run.
@@ -207,7 +235,24 @@ pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Int
             }
             Trigger::Idle { minutes } => {
                 let since = idle_since(minutes, context.idle?, now)?;
-                Some(interruption(rule, since, now + IDLE_LOOK_MS, true))
+                Some(interruption(rule, since, now + LOOK_MS, true))
+            }
+            Trigger::Signal {
+                ref name,
+                ref equals,
+                hold,
+            } => {
+                let held = context.signals.get(name)?;
+                let alive = held.expires.is_none_or(|at| now < at);
+                if !alive || held.value.as_text() != *equals {
+                    return None;
+                }
+                if hold {
+                    Some(interruption(rule, held.since, now + LOOK_MS, true))
+                } else {
+                    let until = held.received + rule.lasts_ms();
+                    (now < until).then(|| interruption(rule, held.received, until, false))
+                }
             }
         });
 
@@ -252,6 +297,7 @@ fn idle_since(minutes: u32, idle_ms: i64, now: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::signals::store::Scalar;
     use chrono::FixedOffset;
 
     const KEYBOARD: DeviceRef = DeviceRef {
@@ -302,6 +348,7 @@ mod tests {
         paused: bool,
         tried: HashMap<String, i64>,
         idle: Option<i64>,
+        signals: BTreeMap<String, Held>,
     }
 
     impl Given {
@@ -310,6 +357,7 @@ mod tests {
                 paused: false,
                 tried: HashMap::new(),
                 idle: Some(0),
+                signals: BTreeMap::new(),
             }
         }
 
@@ -326,6 +374,7 @@ mod tests {
                     paused: self.paused,
                     tried: &self.tried,
                     idle: self.idle,
+                    signals: &self.signals,
                 },
                 device,
             )
@@ -492,11 +541,122 @@ mod tests {
                 paused: false,
                 tried: &given.tried,
                 idle: given.idle,
+                signals: &given.signals,
             },
             KEYBOARD,
         );
         let order: Vec<&str> = under_way.iter().map(|i| i.rule.as_str()).collect();
         assert_eq!(order, ["Clock", "Rain"]);
+    }
+
+    fn signal_rule(id: &str, name: &str, equals: &str, hold: bool) -> Rule {
+        Rule {
+            when: Trigger::Signal {
+                name: name.into(),
+                equals: equals.into(),
+                hold,
+            },
+            ..rule(id, "0 * * * *", 5)
+        }
+    }
+
+    fn given_signal(name: &str, value: Scalar, since: i64, received: i64) -> Given {
+        let mut given = Given::nothing();
+        given.signals.insert(
+            name.into(),
+            Held {
+                value,
+                since,
+                received,
+                expires: Some(received + 60_000),
+            },
+        );
+        given
+    }
+
+    /// A rule as the tab writes it for a signal: held unless it says otherwise.
+    #[test]
+    fn a_signal_rule_reads_from_json_and_holds_by_default() {
+        let raw = serde_json::json!({
+            "id": "Build",
+            "enabled": true,
+            "devices": [{ "vid": 0x1532, "pid": 0x0292 }],
+            "when": { "kind": "signal", "name": "build", "equals": "failed" },
+            "show": { "effect": "shipped:Fixed gradient" }
+        });
+        let rule = parse(&[raw]).remove(0).unwrap();
+        assert_eq!(rule.when, signal_rule("x", "build", "failed", true).when);
+    }
+
+    /// Held: from when the value was set, for as long as it is — a watcher
+    /// re-sending it keeps the same start, so the scheduler reads one run.
+    #[test]
+    fn a_signal_rule_holds_while_the_value_does() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let now = at(17, 10, 0, 40);
+        let given = given_signal("build", Scalar::Text("failed".into()), set, set + 30_000);
+        let rules = [signal_rule("Build", "build", "failed", true)];
+
+        let under_way = given.first(now, &rules, KEYBOARD).unwrap();
+        assert_eq!(under_way.since, set);
+        assert!(under_way.open);
+        assert_eq!(under_way.until, now.timestamp_millis() + LOOK_MS);
+    }
+
+    #[test]
+    fn another_value_or_no_value_applies_nothing() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let now = at(17, 10, 0, 1);
+        let rules = [signal_rule("Build", "build", "failed", true)];
+
+        let ok = given_signal("build", Scalar::Text("ok".into()), set, set);
+        assert_eq!(ok.first(now, &rules, KEYBOARD), None);
+        assert_eq!(Given::nothing().first(now, &rules, KEYBOARD), None);
+    }
+
+    #[test]
+    fn an_expired_value_applies_no_more() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let given = given_signal("build", Scalar::Text("failed".into()), set, set);
+        let rules = [signal_rule("Build", "build", "failed", true)];
+        assert_eq!(given.first(at(17, 10, 1, 0), &rules, KEYBOARD), None);
+    }
+
+    /// Flashed: for the rule's duration from each receipt, so a doorbell rung
+    /// again starts again.
+    #[test]
+    fn a_signal_flash_starts_at_each_receipt() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let rang = at(17, 10, 0, 20).timestamp_millis();
+        let given = given_signal("doorbell", Scalar::Text("ring".into()), set, rang);
+        let rules = [signal_rule("Door", "doorbell", "ring", false)];
+
+        let flash = given.first(at(17, 10, 0, 23), &rules, KEYBOARD).unwrap();
+        assert_eq!((flash.since, flash.until), (rang, rang + 5_000));
+        assert!(!flash.open);
+        assert_eq!(
+            given.first(at(17, 10, 0, 26), &rules, KEYBOARD),
+            None,
+            "5 s later, over"
+        );
+    }
+
+    #[test]
+    fn a_number_sent_matches_the_text_a_rule_holds() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let given = given_signal("level", Scalar::Number(1.0), set, set);
+        let rules = [signal_rule("Level", "level", "1", true)];
+        assert!(given.first(at(17, 10, 0, 1), &rules, KEYBOARD).is_some());
+    }
+
+    #[test]
+    fn a_signal_rule_names_a_valid_signal() {
+        assert_eq!(
+            signal_rule("Bad", "two words", "x", true)
+                .problem()
+                .as_deref(),
+            Some("\"two words\" is not a signal name")
+        );
     }
 
     /// Switched off or paused, a rule does nothing; tried by hand, it runs once

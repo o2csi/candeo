@@ -31,7 +31,7 @@
 
 pub mod resolver;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -40,6 +40,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::runtime::{DeviceEngineStatus, EngineStatus};
+use crate::signals::store::Held;
 use crate::{AppState, CmdResult, DeviceRef, Failure};
 use resolver::{Context, Interruption, Rule};
 
@@ -186,8 +187,10 @@ fn tick(app: &AppHandle) {
         }
     };
     let now = chrono::Local::now();
-    // Read once, for every device: idleness is the session's, not a keyboard's.
+    // Read once, for every device: idleness is the session's, not a keyboard's,
+    // and so are the signals.
     let idle = crate::idle::idle_ms();
+    let signals = crate::signals::held(app);
     let (Some(automations), Some(state)) =
         (app.try_state::<Automations>(), app.try_state::<AppState>())
     else {
@@ -212,6 +215,7 @@ fn tick(app: &AppHandle) {
                     paused,
                     tried: &tables.tried,
                     idle,
+                    signals: &signals,
                 },
                 device,
             )
@@ -492,6 +496,7 @@ fn under_way_now(
     tables: &Tables,
     device: DeviceRef,
     read: CmdResult<(Vec<Rule>, bool)>,
+    signals: &BTreeMap<String, Held>,
 ) -> Vec<Interruption> {
     match read {
         Ok((rules, paused)) => resolver::active(
@@ -501,6 +506,7 @@ fn under_way_now(
                 paused,
                 tried: &tables.tried,
                 idle: crate::idle::idle_ms(),
+                signals,
             },
             device,
         ),
@@ -543,8 +549,9 @@ pub(crate) fn dismiss(app: &AppHandle, device: DeviceRef) {
     };
     // Read before taking the lock, which is never held across a disk access.
     let read = read_rules(app);
+    let signals = crate::signals::held(app);
     let mut tables = automations.tables.lock().unwrap();
-    let under_way = under_way_now(&tables, device, read);
+    let under_way = under_way_now(&tables, device, read, &signals);
     if dismiss_runs(&mut tables, device, under_way) {
         if let Some(running) = tables.running.remove(&device) {
             tracing::info!(
@@ -610,8 +617,9 @@ pub(crate) fn annotate(app: &AppHandle, devices: &mut Vec<DeviceEngineStatus>) {
 pub fn resume_device(app: AppHandle, device: DeviceRef) {
     if let Some(automations) = app.try_state::<Automations>() {
         let read = read_rules(&app);
+        let signals = crate::signals::held(&app);
         let mut tables = automations.tables.lock().unwrap();
-        let under_way = under_way_now(&tables, device, read);
+        let under_way = under_way_now(&tables, device, read, &signals);
         dismiss_runs(&mut tables, device, under_way);
     }
     give_back(&app, device);
