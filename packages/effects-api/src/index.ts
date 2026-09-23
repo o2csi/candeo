@@ -1,32 +1,32 @@
 /**
- * API d'écriture d'effets.
+ * The API for writing effects.
  *
- * Un effet est une fonction pure du temps et de la position vers une couleur.
- * C'est ce qui rend YAML inadapté : on décrirait une configuration, pas un
- * comportement. Ici l'effet *est* du code.
+ * An effect is a pure function from time and position to a color. That is
+ * what makes YAML unsuitable: it would describe a configuration, not a
+ * behavior. Here the effect *is* code.
  *
- * ## Le contrat
+ * ## The contract
  *
- * Un module d'effet **exporte par défaut** un {@link EffectModule}. Le moteur
- * ne cherche rien d'autre :
+ * An effect module **default-exports** an {@link EffectModule}. The engine
+ * looks for nothing else:
  *
  * ```ts
  * import { hsv } from '@candeo/effects-api'
  *
  * export default {
- *   description: 'Mon effet',
+ *   description: 'My effect',
  *   render({ layout, time, frame }) { … },
  * } satisfies EffectModule
  * ```
  *
- * ## Ce fichier a un jumeau
+ * ## This file has a twin
  *
- * ⚠️ Il décrit ce que l'**éditeur** montre en autocomplétion ; ce que le moteur
- * fournit réellement est écrit dans
- * `apps/desktop/src-tauri/src/runtime/api.js`. S'ils divergent, l'éditeur
- * promet une fonction qui n'existe pas, et l'erreur ne se voit qu'à la première
- * image. Le test Rust `api_js_exports_match_the_typescript_surface` échoue si
- * un nom disparaît du jumeau — toute modification doit toucher les deux.
+ * ⚠️ It describes what the **editor** shows in autocompletion; what the engine
+ * actually provides is written in
+ * `apps/desktop/src-tauri/src/runtime/api.js`. If they diverge, the editor
+ * promises a function that does not exist, and the error only shows at the
+ * first frame. The Rust test `api_js_exports_match_the_typescript_surface`
+ * fails if a name disappears from the twin — any change must touch both.
  */
 
 export interface Rgb {
@@ -47,11 +47,11 @@ export interface Rgb {
  *   simulator draws.
  *
  * An effect that talks about distance must therefore choose what it measures:
- * among the shipped effects, "Onde radiale" measures the keycaps, "Onde
- * diagonale" counts matrix steps.
+ * among the shipped effects, "Radial wave" measures the keycaps, "Diagonal
+ * wave" counts matrix steps.
  */
 export interface Key {
-  /** Index de LED dans l'image. */
+  /** LED index in the frame. */
   readonly index: number
   readonly row: number
   readonly col: number
@@ -72,46 +72,46 @@ export interface Key {
    */
   readonly scancode?: number
   /**
-   * Bord gauche du capuchon, en **unités de pas de clavier** : 1 u = la largeur
-   * d'une touche alphabétique. L'origine est en haut à gauche, `y` croît vers le
-   * bas, et la touche occupe `[x, x + w[ × [y, y + h[`.
+   * Left edge of the keycap, in **keyboard pitch units**: 1 u = the width of a
+   * letter key. The origin is at the top left, `y` grows downwards, and the key
+   * covers `[x, x + w[ × [y, y + h[`.
    *
-   * ## Pourquoi `u`, et pas une fraction du clavier
+   * ## Why `u`, and not a fraction of the keyboard
    *
-   * Le pas est une grandeur **absolue** — 19,05 mm sur tout clavier pleine
-   * taille. `1 u` désigne donc la même distance sur un pleine taille, un TKL ou
-   * un pavé de macros, et une échelle réglée en `u` garde son sens d'un appareil
-   * à l'autre : « un anneau toutes les six touches » reste un anneau toutes les
-   * six touches. Normaliser sur l'encombrement ferait l'inverse — le même `0,5`
-   * vaudrait onze touches ici et trois ailleurs, et l'effet changerait d'aspect
-   * sans qu'une ligne change.
+   * The pitch is an **absolute** quantity — 19.05 mm on any full-size keyboard.
+   * `1 u` therefore means the same distance on a full-size keyboard, a TKL or a
+   * macro pad, and a scale set in `u` keeps its meaning from one device to
+   * another: "a ring every six keys" stays a ring every six keys. Normalizing
+   * on the footprint would do the opposite — the same `0.5` would be worth
+   * eleven keys here and three elsewhere, and the effect would change its look
+   * without a line changing.
    *
-   * Ce qu'un appareil plus petit change, c'est le **nombre** d'anneaux visibles,
-   * pas leur taille. Ce qu'un effet ne doit pas supposer, en revanche, c'est où
-   * est le centre : il se lit dans {@link bounds}, jamais dans `rows`/`cols`.
+   * What a smaller device changes is the **number** of visible rings, not their
+   * size. What an effect must not assume, on the other hand, is where the
+   * center is: it is read from {@link bounds}, never from `rows`/`cols`.
    *
-   * C'est aussi l'unité que porte le Rust (`crates/candeo-device/src/layout.rs`)
-   * : rien ne se convertit en chemin, donc rien ne peut s'y tromper.
+   * It is also the unit the Rust code carries
+   * (`crates/candeo-device/src/layout.rs`): nothing is converted along the way,
+   * so nothing can get it wrong there.
    *
-   * ## ⚠️ Facultatif, et c'est le fond du sujet
+   * ## ⚠️ Optional, and that is the heart of the matter
    *
-   * La géométrie n'est pas une lecture du périphérique — il n'expose que sa
-   * grille logique — mais une transcription faite à la main. Tous les gabarits
-   * n'en ont pas : c'est la capacité `geometry` de `docs/design/device-sdk.md`
-   * §3.2.
+   * The geometry is not read from the device — it only exposes its logical
+   * grid — but transcribed by hand. Not every layout has it: it is the
+   * `geometry` capability of `docs/design/device-sdk.md` §3.2.
    *
-   * Un effet qui en dépend doit donc le **dire en échouant**, jamais soustraire
-   * `undefined` : la distance vaudrait `NaN`, la couleur serait bornée à zéro,
-   * et le clavier resterait noir sans un mot. {@link center} et {@link bounds}
-   * sont là pour ça — elles lèvent en nommant la touche qui n'a pas de
-   * rectangle.
+   * An effect that depends on it must therefore **say so by failing**, never
+   * subtract `undefined`: the distance would be `NaN`, the color would be
+   * clamped to zero, and the keyboard would stay black without a word.
+   * {@link center} and {@link bounds} are there for that — they throw, naming
+   * the key that has no rectangle.
    */
   readonly x?: number
-  /** Bord supérieur, en unités de pas. Voir {@link x}. */
+  /** Top edge, in pitch units. See {@link x}. */
   readonly y?: number
-  /** Largeur, en unités de pas. Voir {@link x}. */
+  /** Width, in pitch units. See {@link x}. */
   readonly w?: number
-  /** Hauteur, en unités de pas. Voir {@link x}. */
+  /** Height, in pitch units. See {@link x}. */
   readonly h?: number
 }
 
@@ -119,50 +119,50 @@ export interface Layout {
   readonly name: string
   readonly rows: number
   readonly cols: number
-  /** Uniquement les positions portant une LED. */
+  /** Only the positions that carry an LED. */
   readonly keys: readonly Key[]
 }
 
 export interface Frame {
-  /** Écrit une couleur à une position. */
+  /** Writes a color at a position. */
   set(key: Key, color: Rgb): void
-  /** Écrit la même couleur partout. */
+  /** Writes the same color everywhere. */
   fill(color: Rgb): void
 }
 
 export interface EffectContext<P = undefined> {
   readonly layout: Layout
   /**
-   * Secondes écoulées depuis le démarrage de l'effet.
+   * Seconds elapsed since the effect started.
    *
-   * **C'est l'horloge, et la seule.** Elle est prise sur le temps réel, pas
-   * comptée en images : une image sautée ne ralentit donc pas l'animation, elle
-   * l'échantillonne moins souvent. Animer sur `time` garde la même vitesse
-   * quelle que soit la charge de la machine.
+   * **It is the clock, and the only one.** It is taken from real time, not
+   * counted in frames: a skipped frame therefore does not slow the animation
+   * down, it samples it less often. Animating on `time` keeps the same speed
+   * whatever the load on the machine.
    */
   readonly time: number
   /**
-   * Numéro d'image, incrémenté à chaque rendu.
+   * Frame number, incremented at each render.
    *
-   * ⚠️ **Ce n'est pas une horloge.** La boucle vise 30 images par seconde mais
-   * ne les garantit pas : une machine chargée en fait moins, et les images
-   * manquées ne sont **pas** rattrapées. `frameIndex * 0.016` n'est donc pas
-   * une durée, et un effet animé dessus **ralentit** au lieu de sauter — sans
-   * rien signaler.
+   * ⚠️ **It is not a clock.** The loop aims at 30 frames per second but does
+   * not guarantee them: a loaded machine renders fewer, and missed frames are
+   * **not** made up. `frameIndex * 0.016` is therefore not a duration, and an
+   * effect animated on it **slows down** instead of skipping — without
+   * reporting anything.
    *
-   * Il sert à ce qui se compte en images et non en secondes : alterner une
-   * image sur deux, semer un générateur pseudo-aléatoire, espacer un
-   * rafraîchissement coûteux. Pour tout mouvement, c'est {@link time}.
+   * It is for what counts in frames and not in seconds: alternating every other
+   * frame, seeding a pseudo-random generator, spacing out a costly refresh. For
+   * any motion, it is {@link time}.
    */
   readonly frameIndex: number
   readonly frame: Frame
   /**
-   * Paramètres déclarés par l'effet, tels que réglés dans l'interface.
+   * Parameters declared by the effect, as set in the interface.
    *
-   * `Rgb` fait partie de l'union parce qu'un {@link ParamSpec} de type `color`
-   * a pour valeur une couleur, pas un nombre : l'omettre obligerait tout effet
-   * paramétré par une couleur à passer par un transtypage, pour contourner une
-   * déclaration fausse.
+   * `Rgb` is part of the union because a {@link ParamSpec} of kind `color` has
+   * a color as its value, not a number: leaving it out would force every effect
+   * parameterized by a color through a cast, to work around a wrong
+   * declaration.
    */
   readonly params: ParamsOf<P>
   /**
@@ -212,24 +212,24 @@ export interface Clock {
 /** What an effect reads besides time and its parameters. */
 export type Input = 'keys' | 'clock'
 
-/** Un effet rend une image à chaque appel. */
+/** An effect renders a frame at each call. */
 export type Effect = (ctx: EffectContext) => void
 
 /**
- * Ce que vaut un paramètre réglé dans l'interface.
+ * The value of a parameter set in the interface.
  *
- * Exactement l'ensemble des `default` que {@link ParamSpec} peut porter. Nommé
- * plutôt qu'écrit deux fois : l'éditeur s'en sert pour typer ce qu'il envoie à
- * `start_effect`, et les deux unions ne doivent pas pouvoir diverger.
+ * Exactly the set of `default`s a {@link ParamSpec} can carry. Named rather
+ * than written twice: the editor uses it to type what it sends to
+ * `start_effect`, and the two unions must not be able to diverge.
  */
 export type ParamValue = number | string | boolean | Rgb
 
 /**
- * La valeur que porte un paramètre, déduite de sa déclaration.
+ * The value a parameter carries, inferred from its declaration.
  *
- * C'est ce qui évite d'écrire `params.couleur as Rgb` dans un effet — un
- * transtypage serait de toute façon impossible dans un effet intégré, qui est
- * du JavaScript exécuté tel quel par le moteur.
+ * It is what avoids writing `params.color as Rgb` in an effect — a cast would
+ * be impossible anyway in a built-in effect, which is JavaScript run as it is
+ * by the engine.
  */
 type ValueOfSpec<S> = S extends { kind: 'number' }
   ? number
@@ -242,10 +242,10 @@ type ValueOfSpec<S> = S extends { kind: 'number' }
         : ParamValue
 
 /**
- * Les paramètres tels que `render` les reçoit.
+ * The parameters as `render` receives them.
  *
- * Sans déclaration — un effet qui n'en a pas — on retombe sur la forme large,
- * ce qui laisse l'effet fonctionner sans rien déclarer.
+ * Without a declaration — an effect that has none — it falls back to the wide
+ * form, which lets the effect work without declaring anything.
  */
 export type ParamsOf<P> = P extends Record<string, ParamSpec>
   ? { readonly [K in keyof P]: ValueOfSpec<P[K]> }
@@ -275,7 +275,7 @@ export type Text = string | { readonly [language: string]: string }
  */
 export type ChoiceOption = string | { readonly value: string; readonly label: Text }
 
-/** Déclaration d'un paramètre réglable, pour que l'interface le présente. */
+/** Declaration of an adjustable parameter, for the interface to present it. */
 export type ParamSpec =
   | { kind: 'number'; label: Text; min: number; max: number; step?: number; default: number }
   | { kind: 'color'; label: Text; default: Rgb }
@@ -315,29 +315,28 @@ export interface EffectModule<P = undefined> {
    */
   readonly inputs?: readonly Input[]
   readonly params?: P
-  /** `ctx.params` est typé d'après `params` ci-dessus. */
+  /** `ctx.params` is typed from `params` above. */
   readonly render: (ctx: EffectContext<P>) => void
 }
 
 /**
- * Déclare un effet.
+ * Declares an effect.
  *
- * Ne fait **rien** à l'exécution — elle rend son argument tel quel. Son seul
- * rôle est de donner un type contextuel à l'objet littéral, ce qui type les
- * paramètres de `render` :
+ * Does **nothing** at run time — it returns its argument as it is. Its only
+ * role is to give the object literal a contextual type, which types the
+ * parameters of `render`:
  *
  * ```ts
  * export default defineEffect({
- *   description: 'Mon effet',
- *   render({ layout, time, frame }) { … },   // typés, sans annotation
+ *   description: 'My effect',
+ *   render({ layout, time, frame }) { … },   // typed, without annotations
  * })
  * ```
  *
- * Sans cette enveloppe — ou sans `satisfies EffectModule` — un objet littéral
- * n'a aucun type contextuel : `layout`, `time`, `frame` et `params` sont alors
- * implicitement `any`, et `strict` les refuse. Quatre erreurs, sur la façon la
- * plus naturelle d'écrire un effet ; c'est précisément ce que cette fonction
- * évite.
+ * Without this wrapper — or without `satisfies EffectModule` — an object
+ * literal has no contextual type: `layout`, `time`, `frame` and `params` are
+ * then implicitly `any`, and `strict` rejects them. Four errors, on the most
+ * natural way to write an effect; that is precisely what this function avoids.
  */
 export function defineEffect<
   const P extends Readonly<Record<string, ParamSpec>> | undefined = undefined,
@@ -345,7 +344,7 @@ export function defineEffect<
   return effect
 }
 
-// ---------------------------------------------------------------- utilitaires
+// ------------------------------------------------------------------ utilities
 
 export const rgb = (r: number, g: number, b: number): Rgb => ({
   r: clampByte(r),
@@ -359,7 +358,7 @@ function clampByte(v: number): number {
   return Math.max(0, Math.min(255, Math.round(v)))
 }
 
-/** Teinte 0-360, saturation et valeur 0-1. */
+/** Hue 0-360, saturation and value 0-1. */
 export function hsv(h: number, s: number, v: number): Rgb {
   const c = v * s
   const hp = (((h % 360) + 360) % 360) / 60
@@ -381,13 +380,13 @@ export function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return rgb(lerp(a.r, b.r, t), lerp(a.g, b.g, t), lerp(a.b, b.b, t))
 }
 
-// ------------------------------------------------------------------ géométrie
+// ------------------------------------------------------------------- geometry
 //
-// Deux fonctions, et elles ont le même rôle : lire un rectangle **ou échouer en
-// le disant**. C'est tout ce qui sépare un effet spatial portable d'un effet qui
-// rend du noir sur les gabarits qu'on n'a pas sous la main. Voir {@link Key.x}.
+// Two functions with the same role: read a rectangle **or fail saying so**.
+// That is all that separates a portable spatial effect from an effect that
+// renders black on the layouts we do not have at hand. See {@link Key.x}.
 
-/** Un rectangle en unités de pas de clavier. */
+/** A rectangle in keyboard pitch units. */
 export interface Rect {
   readonly x: number
   readonly y: number
@@ -396,36 +395,36 @@ export interface Rect {
 }
 
 /**
- * Le centre du capuchon d'une touche, en unités de pas.
+ * The center of a key's keycap, in pitch units.
  *
- * Le centre et non le coin : c'est là qu'est la LED, et c'est ce qui place la
- * barre d'espace au milieu de ses 6,25 u plutôt qu'à son bord gauche.
+ * The center and not the corner: that is where the LED is, and it is what puts
+ * the space bar in the middle of its 6.25 u rather than at its left edge.
  *
- * @throws si la touche n'a pas de rectangle — voir {@link Key.x}.
+ * @throws if the key has no rectangle — see {@link Key.x}.
  */
 export function center(key: Key): { x: number; y: number } {
   const { x, y, w, h } = key
   if (x === undefined || y === undefined || w === undefined || h === undefined) {
-    throw new TypeError(sansRectangle(key))
+    throw new TypeError(noRectangle(key))
   }
   return { x: x + w / 2, y: y + h / 2 }
 }
 
 /**
- * L'encombrement physique du dessin, en unités de pas.
+ * The physical footprint of the drawing, in pitch units.
  *
- * C'est ce qui remplace `rows`/`cols` dès qu'on parle de distance : le milieu du
- * clavier est en `x + w / 2`, et il y reste sur un gabarit sans pavé numérique
- * comme sur un pleine taille. `(cols - 1) / 2` désigne le milieu de la
- * **matrice**, qui n'est le milieu de rien de visible.
+ * It is what replaces `rows`/`cols` as soon as distance is involved: the middle
+ * of the keyboard is at `x + w / 2`, and it stays there on a layout without a
+ * numeric keypad as on a full-size one. `(cols - 1) / 2` designates the middle
+ * of the **matrix**, which is the middle of nothing visible.
  *
- * Même définition que le `viewBox` du simulateur : le centre d'une onde est
- * donc le centre de ce qu'on regarde.
+ * Same definition as the simulator's `viewBox`: the center of a wave is
+ * therefore the center of what one looks at.
  *
- * Un gabarit sans aucune touche rend un rectangle nul — il n'y a rien à
- * encadrer, et rien non plus à éclairer.
+ * A layout without any key returns an empty rectangle — there is nothing to
+ * frame, and nothing to light either.
  *
- * @throws dès qu'une touche n'a pas de rectangle — voir {@link Key.x}.
+ * @throws as soon as a key has no rectangle — see {@link Key.x}.
  */
 export function bounds(layout: Layout): Rect {
   if (layout.keys.length === 0) return { x: 0, y: 0, w: 0, h: 0 }
@@ -438,7 +437,7 @@ export function bounds(layout: Layout): Rect {
   for (const key of layout.keys) {
     const { x, y, w, h } = key
     if (x === undefined || y === undefined || w === undefined || h === undefined) {
-      throw new TypeError(sansRectangle(key))
+      throw new TypeError(noRectangle(key))
     }
     if (x < x0) x0 = x
     if (y < y0) y0 = y
@@ -450,12 +449,12 @@ export function bounds(layout: Layout): Rect {
 }
 
 /**
- * La phrase que lisent {@link center} et {@link bounds} en échouant.
+ * The sentence {@link center} and {@link bounds} throw when they fail.
  *
- * Elle nomme la touche fautive : un gabarit contribué peut être dessiné à
- * moitié, et « il manque un rectangle » sans dire lequel ne se corrige pas.
+ * It names the faulty key: a contributed layout can be half drawn, and "a
+ * rectangle is missing" without saying which one cannot be fixed.
  */
-function sansRectangle(key: Key): string {
+function noRectangle(key: Key): string {
   const which = key.label === undefined ? `position ${key.index}` : `“${key.label}”`
   return (
     `${which} has no rectangle: this layout has no surveyed geometry, ` +
@@ -463,9 +462,9 @@ function sansRectangle(key: Key): string {
   )
 }
 
-// L'exemple de référence vit dans `example.ts` : ce fichier décrit l'API, il
-// n'exporte pas d'effet. Un export par défaut ici ferait de la bibliothèque
-// elle-même un effet, ce qu'elle n'est pas.
+// The reference example lives in `example.ts`: this file describes the API, it
+// exports no effect. A default export here would make the library itself an
+// effect, which it is not.
 //
 // The effects shipped with the application live in `packages/effects/`: plain
 // `.ts` files against this same API, copied into the effects folder at startup.
