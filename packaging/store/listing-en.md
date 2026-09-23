@@ -5,7 +5,7 @@ and `listing-fr.md` to Partner Center when both describe the version released
 (#162, `docs/releasing.md`); keep the five sections in this order. **What's new**
 is rewritten at every release; the rest changes only when the application does.
 
-Version described: **0.9.0**. Its *What's new* covers everything since 0.8.0.
+Version described: **0.10.0**. Its *What's new* covers everything since 0.9.0.
 
 ## Short description (shown in search results)
 
@@ -40,12 +40,11 @@ Open source, under the GPL-3.0.
 - No account, nothing collected, no network request
 - English and French, light and dark themes
 
-## What's new in this version (0.9.0)
+## What's new in this version (0.10.0)
 
-• Signals: other programs — a build script, Home Assistant — can now tell Candeo what happened, through a local HTTP API, and your rules decide what it lights. Off until you turn it on in Settings.
-• A rule can wait for a signal: while it holds, for a state, or a flash of a few seconds at each receipt, for an event.
-• Settings lists the signals received and how long each one lasts, and sends a test one to try a rule.
-• The reset confirmation now says that automation rules are deleted too.
+• A setting can follow a signal: in the gallery, switch a colour, a speed or any other setting to Signal, and it takes the value another program sends — a colour computed by a script, a level from Home Assistant. While nothing arrives, it keeps its own value.
+• A rule's settings can follow a signal the same way.
+• Effects you write can read every signal received, by declaring it.
 
 ## Search terms (7 at most, 30 characters each)
 

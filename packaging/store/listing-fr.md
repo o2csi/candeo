@@ -4,7 +4,7 @@ The French listing for the Microsoft Store submission (#126), the translation of
 `listing-en.md`. It uses the words the French interface uses: *piloter*,
 *appareil*, *effets*, *paramètres*.
 
-Version described: **0.9.0**. Its *What's new* covers everything since 0.8.0.
+Version described: **0.10.0**. Its *What's new* covers everything since 0.9.0.
 
 ## Description courte (affichée dans les résultats de recherche)
 
@@ -39,12 +39,11 @@ Open source, sous licence GPL-3.0.
 - Aucun compte, rien de collecté, aucune requête réseau
 - Français et anglais, thème clair et sombre
 
-## Nouveautés de cette version (0.9.0)
+## Nouveautés de cette version (0.10.0)
 
-• Les signaux : d'autres programmes — un script de compilation, Home Assistant — peuvent désormais dire à Candeo ce qui se passe, par une API HTTP locale, et vos règles décident de ce que ça allume. Désactivé tant que vous ne l'activez pas dans les Réglages.
-• Une règle peut attendre un signal : tant que c'est le cas, pour un état, ou un flash de quelques secondes à chaque réception, pour un événement.
-• Les Réglages listent les signaux reçus et leur durée restante, et en envoient un de test pour essayer une règle.
-• La confirmation de réinitialisation indique désormais que les règles d'automatisation sont aussi supprimées.
+• Un paramètre peut suivre un signal : dans la galerie, passez une couleur, une vitesse ou tout autre paramètre sur Signal, et il prend la valeur qu'envoie un autre programme — une couleur calculée par un script, un niveau venu de Home Assistant. Tant que rien n'arrive, il garde sa propre valeur.
+• Les paramètres d'une règle peuvent suivre un signal de la même façon.
+• Les effets que vous écrivez peuvent lire tous les signaux reçus, en le déclarant.
 
 ## Termes de recherche (7 au maximum, 30 caractères chacun)
 
