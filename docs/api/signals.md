@@ -149,7 +149,7 @@ senders using those exact names; binding a setting, above, works with any effect
 
 ## What the token protects
 
-Whoever holds the token can set values, and nothing else: not choose a device, an
-effect or a colour, not read the settings. A rule decides what a value lights, and
-rules are only written in Candeo. Keep the token out of shared scripts all the
+Whoever holds the token can set values, and nothing else: not choose a device or
+an effect, not read the settings. What a value changes — a rule, or a setting
+bound to it — is only decided in Candeo. Keep the token out of shared scripts all the
 same — an environment variable, a secret store — and make a new one if it leaks.
