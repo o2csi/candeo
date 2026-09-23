@@ -13,12 +13,12 @@ Your keyboard's lighting, exactly the way you want it, without the maker's softw
 
 ## Description
 
-Make your keyboard light up exactly the way you want. Candeo drives every key directly — fifteen ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
+Make your keyboard light up exactly the way you want. Candeo drives every key directly — sixteen ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
 
 Works with the Razer DeathStalker V2 Pro (wired) and the Alienware m18 R1, its keyboard and its lighting zones. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
 
 HIGHLIGHTS
-• Fifteen effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys… Tune each one while you watch it.
+• Sixteen effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, a status row for what your other tools report… Tune each one while you watch it.
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
@@ -31,7 +31,7 @@ Open source, under the GPL-3.0.
 
 ## Features (a short list, shown on the Store page)
 
-- Fifteen ready-made effects, tuned while you watch them
+- Sixteen ready-made effects, tuned while you watch them
 - Every key its own colour, plus your device's firmware effects
 - Automations: the time on the hour, dark at night or when you step away
 - Write your own effects in TypeScript, with a live preview
@@ -44,6 +44,7 @@ Open source, under the GPL-3.0.
 
 • A setting can follow a signal: in the gallery, switch a colour, a speed or any other setting to Signal, and it takes the value another program sends — a colour computed by a script, a level from Home Assistant. While nothing arrives, it keeps its own value.
 • A rule's settings can follow a signal the same way.
+• Status row, a new effect: one key of the top row per signal received, green, amber or red by what it says.
 • Effects you write can read every signal received, by declaring it.
 
 ## Search terms (7 at most, 30 characters each)
