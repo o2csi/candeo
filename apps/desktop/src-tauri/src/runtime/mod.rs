@@ -3659,6 +3659,51 @@ mod signal_tests {
         );
     }
 
+    /// The shipped dashboard: one key of the top row per signal, in the order of
+    /// their names, coloured by what each says.
+    #[test]
+    fn status_row_lights_one_key_per_signal_in_name_order() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Status row"), layout).expect("load");
+        // The top row as effects see it: the matrix's first line, keys only.
+        let keyed: std::collections::HashSet<u16> = layout.keys.iter().map(|k| k.index).collect();
+        let row: Vec<u16> = layout.matrix[..usize::from(layout.cols)]
+            .iter()
+            .copied()
+            .filter(|index| keyed.contains(index))
+            .collect();
+        let at = |frame: &[u8], index: u16| {
+            let i = usize::from(index) * 3;
+            [frame[i], frame[i + 1], frame[i + 2]]
+        };
+
+        let frame = render_with(
+            &ctx,
+            0.25,
+            0,
+            &FrameInputs {
+                params: "{}",
+                presses: "",
+                clock_ms: 0.0,
+                bound: "",
+                signals: r#"{"tests":"running","build":"failed","deploy":"ok","cpu":1}"#,
+            },
+            layout.led_count(),
+        )
+        .expect("render");
+
+        // build, cpu, deploy, tests: alphabetical, whatever order they came in.
+        assert_eq!(at(&frame, row[0]), [235, 24, 24], "build failed: red");
+        assert_eq!(at(&frame, row[1]), [235, 24, 24], "cpu at its worst: red");
+        assert_eq!(at(&frame, row[2]), [32, 200, 64], "deploy ok: green");
+        let tests = at(&frame, row[3]);
+        assert!(
+            tests[0] > 200 && tests[2] == 0,
+            "tests running: amber, {tests:?}"
+        );
+        assert_eq!(at(&frame, row[4]), [0, 0, 0], "no fifth signal");
+    }
+
     #[test]
     fn an_effect_declaring_nothing_is_handed_no_signal() {
         let drawn = frame_of(DECLARES_NOTHING, "", r#"{"count":7}"#);
