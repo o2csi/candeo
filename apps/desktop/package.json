@@ -1,7 +1,7 @@
 {
   "name": "@candeo/desktop",
   "private": true,
-  "version": "0.7.0",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,7 +22,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/cli": "^2.11.5",
     "@vitejs/plugin-vue": "^6.0.9",
     "typescript": "~6.0.3",
     "vite": "^8.3.0",
