@@ -13,20 +13,23 @@ apps/desktop/src-tauri/gen
 # The page, built by site/build.mjs and uploaded by the Pages workflow
 site/_site
 
-# Editeurs / OS
+# Editors / OS
 .DS_Store
 Thumbs.db
 *.swp
 .idea
-# La liste d'extensions recommandees est suivie, le reste du dossier est local.
-# Seule regle que portait apps/desktop/.gitignore et que la racine n'avait pas :
-# le reste de ce fichier ne faisait que redoubler celui-ci, ou viser yarn et
-# lerna dans un depot pnpm.
+# The recommended extensions list is tracked, the rest of the folder is local.
+# The only rule apps/desktop/.gitignore carried that the root did not: the rest
+# of that file only repeated this one, or targeted yarn and lerna in a pnpm
+# repository.
 .vscode/*
 !.vscode/extensions.json
 
-# Journaux
+# Logs
 *.log
 
-# Captures volumineuses : conservees hors depot
+# Large captures: kept outside the repository
 docs/captures/*.pcap
+
+# Worktrees created by coding agents
+.claude/worktrees/
