@@ -61,6 +61,7 @@ const shut = { devices: ref(false), effects: ref(false) }
 
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue } from '@candeo/effects-api'
 
 import {
@@ -73,12 +74,15 @@ import {
   engineStatus,
   getDefaultLayout,
   getLayout,
+  listSignals,
+  onSignalsChanged,
   resumeDevice,
   startEffect,
   stopEffect,
   type EffectEntry,
   type EffectState,
   type EngineReport,
+  type HeldSignal,
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
@@ -136,9 +140,12 @@ const {
   load: loadSettings,
   reload: reloadSettings,
   valuesFor,
+  bindingsFor,
   keptFor,
   adjust,
   adjustPreview,
+  bind,
+  bindPreview,
   settle,
   forget,
   dropEffect,
@@ -621,6 +628,7 @@ const { frame, restartPreview } = useSimulatorFeed({
     return bytes.length >= 3 ? [[bytes[0], bytes[1], bytes[2]] as Rgb] : []
   },
   params: () => paramValues.value,
+  bindings: () => paramBindings.value,
   onError: (e) => {
     problem.value = message(e)
   },
@@ -696,7 +704,10 @@ async function applyEffect(): Promise<void> {
       // Nothing to subscribe here: the channel lives in the loop's state, and it
       // is the watcher above that opens it as soon as the engine says "running".
       // One more subscription, set up here, would make two for a single stream.
-      await startEffect(device, c.id, paramValues.value)
+      //
+      // Its bindings too: Rust starts an effect with those it is given, and
+      // without them the parameters bound here would stop reading their signal.
+      await startEffect(device, c.id, paramValues.value, paramBindings.value)
     }
   } catch (e) {
     problem.value = message(e)
@@ -955,6 +966,24 @@ const paramValues = computed(() =>
 )
 
 /**
+ * Its parameters reading a signal on this device. None for a firmware effect:
+ * it has no loop of ours to read one, and its colours reach the firmware only
+ * when it is applied.
+ */
+const paramBindings = computed(() => {
+  const c = selectedEffect.value
+  return c && !c.hardware ? bindingsFor(selectedDevice.value, c.id, specs.value) : {}
+})
+
+/** The signals held now: suggested to a setting that reads one, and what it reads. */
+const held = ref<HeldSignal[]>([])
+
+async function readSignals(): Promise<void> {
+  // Only suggestions and a line beside a field: a failure keeps the last list.
+  held.value = await listSignals().catch(() => held.value)
+}
+
+/**
  * Why the controls are inert, or `null` if they are live.
  *
  * **They are live almost always, now.** They used to be live only for the
@@ -1048,12 +1077,35 @@ function onParamCommit(): void {
   }
 }
 
+/**
+ * A setting reads a signal, or its value again: the same destinations as a
+ * value, by the same rule — the keyboard only when this effect runs there.
+ */
+function onParamBind(id: string, source: string | null): void {
+  const d = selectedDevice.value
+  const c = selectedEffect.value
+  if (!d || !c || c.hardware) return
+  const bindings = bind(
+    { vid: d.vid, pid: d.pid },
+    c.id,
+    specs.value,
+    id,
+    source,
+    c.id === activeId.value,
+  )
+  if (preview.value) bindPreview(bindings)
+}
+
+/** Back to what the effect declares: its values, and no setting reading a signal. */
 function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
   const declared = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, c.id === activeId.value)
-  if (preview.value) adjustPreview(declared)
+  if (preview.value) {
+    adjustPreview(declared)
+    bindPreview({})
+  }
 }
 
 // ---------------------------------------------------------------- brightness
@@ -1092,11 +1144,22 @@ function onBrightness(event: Event, commit: boolean): void {
 let statusTimer = 0
 /** False once destroyed: opening chains round trips to Rust. */
 let alive = true
+let unlistenSignals: UnlistenFn | null = null
 
 onMounted(async () => {
   void getDefaultLayout().then((l) => {
     fallback.value = l
   })
+
+  // Pushed rather than polled, expiry included: a bound setting says what its
+  // signal holds without a second timer beside the engine's.
+  void readSignals()
+  void onSignalsChanged(() => void readSignals())
+    .then((stop) => {
+      if (alive) unlistenSignals = stop
+      else stop()
+    })
+    .catch(() => null)
 
   // Before anything else: Apply and the preview start from the remembered
   // values, and reading them afterwards would leave a window where the effect
@@ -1127,6 +1190,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   alive = false
   window.clearInterval(statusTimer)
+  unlistenSignals?.()
   // A slider's last movement must not depend on someone having stayed on the
   // screen for the write's idle delay.
   flushParams()
@@ -1471,10 +1535,14 @@ onBeforeUnmount(() => {
         <EffectParamsForm
           :specs="specs"
           :values="paramValues"
+          :bindings="paramBindings"
+          :bindable="selectedEffect.hardware === null"
+          :signals="held"
           :frozen="frozen"
           :empty="noParams"
           @change="onParamChange"
           @commit="onParamCommit"
+          @bind="onParamBind"
           @reset="onParamReset"
         />
 

@@ -34,6 +34,7 @@ import {
   setAutomationsPaused,
   setRules,
   tryRule,
+  type Bindings,
   type EffectEntry,
   type EffectParams,
   type HeldSignal,
@@ -47,6 +48,7 @@ import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
+import { declaredBindings, withBinding } from '../composables/bindings'
 import { hardwareEffectsFor, named, type HardwareEffect } from '../composables/useEffects'
 import {
   EVERY_DAY,
@@ -61,6 +63,7 @@ import {
   readSimple,
   ruleValues,
   whileItHolds,
+  withoutSettings,
   writeSimple,
   type Days,
   type Frequency,
@@ -352,9 +355,19 @@ function onParamsCommit(index: number, rule: Rule): void {
   if (params) update(index, (r) => ({ ...r, show: { ...r.show, params } }))
 }
 
+/** The rule's settings reading a signal, among those its effect still declares. */
+function bindings(rule: Rule): Bindings {
+  return declaredBindings(manifest(rule)?.params ?? {}, rule.show.bindings ?? {})
+}
+
+/** Saved at once, like the end of a gesture: a binding changes on a click or a name written. */
+function onBind(index: number, id: string, source: string | null): void {
+  update(index, (r) => ({ ...r, show: withBinding(r.show, id, source) }))
+}
+
 function onParamsReset(index: number, rule: Rule): void {
   delete drafts[rule.id]
-  update(index, (r) => ({ ...r, show: { ...r.show, params: {} } }))
+  update(index, (r) => ({ ...r, show: withoutSettings(r.show) }))
 }
 
 // ---------------------------------------------------------------- dragging
@@ -569,13 +582,19 @@ function onDrop(to: number): void {
             />
             <details v-if="hasSettings(raw)" class="settings">
               <summary>{{ t('automations.settingsOf', { effect: effectLabel(raw) }) }}</summary>
+              <!-- Only a library effect has settings here, and every one can
+                   read a signal: a firmware effect has none to show. -->
               <EffectParamsForm
                 :specs="manifest(raw)?.params ?? {}"
                 :values="values(raw)"
+                :bindings="bindings(raw)"
+                bindable
+                :signals="held"
                 :frozen="null"
                 :empty="t('automations.noSettings')"
                 @change="(id, value) => onParam(raw, id, value)"
                 @commit="onParamsCommit(index, raw)"
+                @bind="(id, source) => onBind(index, id, source)"
                 @reset="onParamsReset(index, raw)"
               />
             </details>

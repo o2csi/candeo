@@ -99,7 +99,7 @@ const STATUS_PERIOD = 1000
 const route = useRoute()
 const router = useRouter()
 const { devices, layout, current, refresh } = useDevice()
-const { load: loadSettings, reload: reloadSettings, valuesFor } = useSettings()
+const { load: loadSettings, reload: reloadSettings, valuesFor, bindingsFor } = useSettings()
 
 /** `/editor` without an identifier = new effect; with one = installed effect. */
 const id = computed<string | null>(() => {
@@ -333,6 +333,7 @@ const { frame, restartPreview } = useSimulatorFeed({
   // A new effect has no file to preview until its first save.
   previewed: () => (ready.value ? id.value : null),
   params: () => valuesFor(current.value, id.value ?? '', savedSpecs.value),
+  bindings: () => bindingsFor(current.value, id.value ?? '', savedSpecs.value),
   onError: (e) => {
     problem.value = message(e)
   },
@@ -453,10 +454,16 @@ const applyToDevice = () =>
     const device = current.value
     if (!device) return
     const effectId = (unsaved.value ? null : id.value) ?? (await install())
-    // The gallery's rule, through the same helper: manifest defaults overridden
-    // by what is remembered for this device. Two rules would light one effect
-    // differently depending on the screen it was applied from.
-    await startEffect(device, effectId, valuesFor(device, effectId, savedSpecs.value))
+    // The gallery's rule, through the same helpers: manifest defaults overridden
+    // by what is remembered for this device, and the settings bound to a signal.
+    // Two rules would light one effect differently depending on the screen it
+    // was applied from.
+    await startEffect(
+      device,
+      effectId,
+      valuesFor(device, effectId, savedSpecs.value),
+      bindingsFor(device, effectId, savedSpecs.value),
+    )
     appliedSource.value = { device: `${device.vid}:${device.pid}`, text: saved.value }
     // Rust has just remembered the applied effect. The gallery reads this shared
     // state back rather than guessing it.

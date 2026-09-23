@@ -153,7 +153,15 @@
       "title": "Settings",
       "on": "on",
       "off": "off",
-      "reset": "Restore the effect's values"
+      "reset": "Restore the effect's values",
+      "source": "{name}: value or signal",
+      "fromValue": "Value",
+      "fromSignal": "Signal",
+      "signalName": "signal name",
+      "signalOf": "Signal read by {name}",
+      "signalHeld": "Held now: “{value}”",
+      "signalUnfit": "Held now: “{value}”. This setting cannot take it, and keeps its value.",
+      "signalAbsent": "No signal held under this name: this setting keeps its value."
     },
     "swatchKnown": "Colors sampled by running the effect",
     "swatchUnknown": "No swatch",

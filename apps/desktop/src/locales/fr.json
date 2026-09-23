@@ -153,7 +153,15 @@
       "title": "Réglages",
       "on": "activé",
       "off": "désactivé",
-      "reset": "Rétablir les valeurs de l'effet"
+      "reset": "Rétablir les valeurs de l'effet",
+      "source": "{name} : valeur ou signal",
+      "fromValue": "Valeur",
+      "fromSignal": "Signal",
+      "signalName": "nom du signal",
+      "signalOf": "Signal lu par {name}",
+      "signalHeld": "Reçu en ce moment : « {value} »",
+      "signalUnfit": "Reçu en ce moment : « {value} ». Ce réglage ne peut pas le prendre, et garde sa valeur.",
+      "signalAbsent": "Aucun signal reçu sous ce nom : ce réglage garde sa valeur."
     },
     "swatchKnown": "Couleurs prélevées en exécutant l'effet",
     "swatchUnknown": "Repère indisponible",

@@ -667,6 +667,23 @@ export function rememberEffectParams(
   return invoke('remember_effect_params', { device, effect, params })
 }
 
+/**
+ * Remembers which parameters of an effect read a signal on a device, as
+ * {@link rememberEffectParams} remembers their values: on disk only, the running
+ * loop is {@link setEffectBindings}. The tray, resuming and automations start the
+ * effect with them.
+ *
+ * An **empty** table unbinds every parameter. A source that names no signal is
+ * refused (`bindingInvalid`).
+ */
+export function rememberEffectBindings(
+  device: DeviceRef,
+  effect: string,
+  bindings: Bindings,
+): Promise<void> {
+  return invoke('remember_effect_bindings', { device, effect, bindings })
+}
+
 // ---------------------------------------------------------------- engine
 
 export interface EngineStatus {
@@ -785,13 +802,17 @@ export interface EngineReport {
  * Targeting an unplugged device is not an error: the loop runs, the simulator
  * animates, and `reachingKeyboard` stays false until the device opens. It is
  * what makes it possible to write an effect **without owning the keyboard**.
+ *
+ * `bindings` are not read from the file: an effect started without them reads
+ * no signal, whatever is remembered for it.
  */
 export function startEffect(
   device: DeviceRef,
   id: string,
   params: EffectParams = {},
+  bindings: Bindings = {},
 ): Promise<void> {
-  return invoke('start_effect', { device, id, params })
+  return invoke('start_effect', { device, id, params, bindings })
 }
 
 export function stopEffect(device: DeviceRef): Promise<void> {
@@ -820,8 +841,9 @@ export function startPreview(
   device: DeviceRef | null,
   id: string,
   params: EffectParams = {},
+  bindings: Bindings = {},
 ): Promise<void> {
-  return invoke('start_preview', { device, id, params })
+  return invoke('start_preview', { device, id, params, bindings })
 }
 
 /** Stops the preview. No device effect is touched. */
@@ -832,6 +854,11 @@ export function stopPreview(): Promise<void> {
 /** Adjusts the preview's parameters live, without restarting its loop. */
 export function setPreviewParams(params: EffectParams): Promise<void> {
   return invoke('set_preview_params', { params })
+}
+
+/** Binds the preview's parameters to signals live, as {@link setEffectBindings} does for a device. */
+export function setPreviewBindings(bindings: Bindings): Promise<void> {
+  return invoke('set_preview_bindings', { bindings })
 }
 
 /**
@@ -856,6 +883,16 @@ export function subscribePreviewFrames(
 /** Adjusts the parameters live, without restarting the loop. */
 export function setEffectParams(device: DeviceRef, params: EffectParams): Promise<void> {
   return invoke('set_effect_params', { device, params })
+}
+
+/**
+ * Binds parameters of the effect running on a device to signals, live: the loop
+ * reads them from its next frame, without restarting. The whole table, as
+ * {@link setEffectParams} sends every value. Remembering them is
+ * {@link rememberEffectBindings}.
+ */
+export function setEffectBindings(device: DeviceRef, bindings: Bindings): Promise<void> {
+  return invoke('set_effect_bindings', { device, bindings })
 }
 
 /**

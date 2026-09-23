@@ -10,6 +10,9 @@ const api = vi.hoisted(() => ({
   rememberEffectParams: vi.fn(),
   setEffectParams: vi.fn(),
   setPreviewParams: vi.fn(),
+  rememberEffectBindings: vi.fn(),
+  setEffectBindings: vi.fn(),
+  setPreviewBindings: vi.fn(),
   setBrightness: vi.fn(),
   rememberBrightness: vi.fn(),
 }))
@@ -64,6 +67,9 @@ beforeEach(() => {
   api.rememberEffectParams.mockResolvedValue(undefined)
   api.setEffectParams.mockResolvedValue(undefined)
   api.setPreviewParams.mockResolvedValue(undefined)
+  api.rememberEffectBindings.mockResolvedValue(undefined)
+  api.setEffectBindings.mockResolvedValue(undefined)
+  api.setPreviewBindings.mockResolvedValue(undefined)
   api.setBrightness.mockResolvedValue(undefined)
   api.rememberBrightness.mockResolvedValue(undefined)
 })
@@ -316,6 +322,131 @@ describe('reload', () => {
   })
 })
 
+describe('bindings', () => {
+  it('reads the bindings kept for the pair, declared parameters only', async () => {
+    const s = await fresh({
+      effectParams: [
+        {
+          ...keyboard,
+          effect: 'Wave',
+          values: {},
+          bindings: { color: 'signal:status', removed: 'signal:status' },
+        },
+      ],
+    })
+
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual({ color: 'signal:status' })
+    expect(s.keptFor(keyboard, 'Wave')).toBe(true)
+    expect(s.bindingsFor(other, 'Wave', specs)).toEqual({})
+    expect(s.bindingsFor(null, 'Wave', specs)).toEqual({})
+    expect([...s.referencedEffects.value]).toEqual(['Wave'])
+  })
+
+  it('binds one parameter at a time, and writes every binding at once', async () => {
+    const s = await fresh({
+      effectParams: [{ ...keyboard, effect: 'Wave', values: {}, bindings: { color: 'signal:status' } }],
+    })
+
+    const bindings = s.bind(keyboard, 'Wave', specs, 'speed', 'signal:volume', false)
+
+    const both = { color: 'signal:status', speed: 'signal:volume' }
+    expect(bindings).toEqual(both)
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual(both)
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(keyboard, 'Wave', both)
+    // Values are not rewritten for a binding: the parameter keeps its own.
+    await vi.runAllTimersAsync()
+    expect(api.rememberEffectParams).not.toHaveBeenCalled()
+  })
+
+  it('gives a parameter its value back, and writes the empty table', async () => {
+    const s = await fresh({
+      effectParams: [{ ...keyboard, effect: 'Wave', values: {}, bindings: { color: 'signal:status' } }],
+    })
+
+    expect(s.bind(keyboard, 'Wave', specs, 'color', null, false)).toEqual({})
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(keyboard, 'Wave', {})
+    expect(s.keptFor(keyboard, 'Wave')).toBe(false)
+  })
+
+  it('sends the bindings live only to the loop running the effect', async () => {
+    const s = await fresh()
+
+    s.bind(keyboard, 'Wave', specs, 'color', 'signal:status', false)
+    expect(api.setEffectBindings).not.toHaveBeenCalled()
+
+    s.bind(keyboard, 'Wave', specs, 'speed', 'signal:volume', true)
+    expect(api.setEffectBindings).toHaveBeenCalledWith(keyboard, {
+      color: 'signal:status',
+      speed: 'signal:volume',
+    })
+    expect(api.setPreviewBindings).not.toHaveBeenCalled()
+  })
+
+  it('keeps nothing for a parameter the effect does not declare', async () => {
+    const s = await fresh()
+
+    expect(s.bind(keyboard, 'Wave', specs, 'removed', 'signal:status', true)).toEqual({})
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(keyboard, 'Wave', {})
+  })
+
+  it('gives the preview its bindings, and never writes them', async () => {
+    const s = await fresh()
+
+    s.bindPreview({ color: 'signal:status' })
+
+    expect(api.setPreviewBindings).toHaveBeenCalledWith({ color: 'signal:status' })
+    expect(api.rememberEffectBindings).not.toHaveBeenCalled()
+  })
+
+  it('says why a binding was refused', async () => {
+    const s = await fresh()
+    api.rememberEffectBindings.mockRejectedValueOnce('binding refused')
+
+    s.bind(keyboard, 'Wave', specs, 'color', 'signal:status', false)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(s.error.value).toBe('binding refused')
+  })
+
+  it('keeps a binding whose write is on its way when the file is read again', async () => {
+    const s = await fresh()
+    const flight = deferred<void>()
+    api.rememberEffectBindings.mockReturnValueOnce(flight.promise)
+
+    s.bind(keyboard, 'Wave', specs, 'color', 'signal:status', false)
+    await s.reload()
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual({ color: 'signal:status' })
+
+    flight.resolve()
+    await vi.advanceTimersByTimeAsync(0)
+    api.getSettings.mockResolvedValue(
+      settings({
+        effectParams: [{ ...keyboard, effect: 'Wave', values: {}, bindings: { speed: 'signal:volume' } }],
+      }),
+    )
+    await s.reload()
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual({ speed: 'signal:volume' })
+  })
+
+  it('forgets bindings with the effect, and with everything', async () => {
+    const withBindings: Partial<Settings> = {
+      effectParams: [
+        { ...keyboard, effect: 'Wave', values: {}, bindings: { color: 'signal:status' } },
+        { ...keyboard, effect: 'Rain', values: {}, bindings: { speed: 'signal:volume' } },
+      ],
+    }
+    const s = await fresh(withBindings)
+
+    s.dropEffect('Wave')
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual({})
+    expect(s.bindingsFor(keyboard, 'Rain', specs)).toEqual({ speed: 'signal:volume' })
+
+    s.dropAll()
+    expect(s.bindingsFor(keyboard, 'Rain', specs)).toEqual({})
+    expect(api.rememberEffectBindings).not.toHaveBeenCalled()
+  })
+})
+
 describe('forget', () => {
   it('writes an empty table at once and hands back the declared values', async () => {
     const s = await fresh({
@@ -338,6 +469,22 @@ describe('forget', () => {
     s.forget(keyboard, 'Wave', specs, true)
 
     expect(api.setEffectParams).toHaveBeenCalledWith(keyboard, defaults)
+    expect(api.setEffectBindings).toHaveBeenCalledWith(keyboard, {})
+  })
+
+  it('unbinds every parameter too, on disk and in the loop', async () => {
+    const s = await fresh({
+      effectParams: [
+        { ...keyboard, effect: 'Wave', values: { speed: 1.5 }, bindings: { color: 'signal:status' } },
+      ],
+    })
+
+    s.forget(keyboard, 'Wave', specs, false)
+
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual({})
+    expect(s.keptFor(keyboard, 'Wave')).toBe(false)
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(keyboard, 'Wave', {})
+    expect(api.setEffectBindings).not.toHaveBeenCalled()
   })
 })
 

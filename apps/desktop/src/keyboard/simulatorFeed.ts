@@ -11,7 +11,7 @@
 
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
-import { startPreview, stopPreview, type EffectParams } from '../api/candeo'
+import { startPreview, stopPreview, type Bindings, type EffectParams } from '../api/candeo'
 import type { DeviceRef, Rgb } from '../api/types'
 import { useEngineFrames } from './engineFrames'
 import { illustrate } from './illustration'
@@ -65,6 +65,12 @@ export interface SimulatorFeedOptions {
    * running preview live instead of rebuilding a QuickJS context.
    */
   params: () => EffectParams
+  /**
+   * The parameters reading a signal, read when the preview starts like
+   * `params`. Without them the preview would draw the values the keyboard does
+   * not show.
+   */
+  bindings?: () => Bindings
   onError: (e: unknown) => void
 }
 
@@ -113,7 +119,12 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
       }
       timer = window.setTimeout(() => {
         const d = options.device()
-        startPreview(d ? { vid: d.vid, pid: d.pid } : null, id, options.params())
+        startPreview(
+          d ? { vid: d.vid, pid: d.pid } : null,
+          id,
+          options.params(),
+          options.bindings?.() ?? {},
+        )
           // Resubscribing after every start is mandatory. The channel lives in
           // the loop state and `start_preview` builds a new one: without this,
           // the simulator would freeze on the previous preview's last frame and

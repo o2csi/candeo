@@ -31,11 +31,24 @@
  * (`min-width: min-content`) that no reset removes. Without `min-width: 0`, the
  * longest label imposes its width on the group, and the right-hand column
  * overflows instead of shrinking.
+ *
+ * ## A value or a signal
+ *
+ * A parameter can read a signal instead of its value
+ * (`docs/design/inputs-and-automations.md` §2.3.1), and it is written here, in
+ * the parameter's own row: this form is the gallery's and a rule's, so both get
+ * it by it existing once. The row's switch is the pattern the cron field settled
+ * (§3.2): one of the two holds the parameter, the other is shown disabled. The
+ * value stays visible because it is still used: the effect shows it while the
+ * signal is absent or does not fit.
  */
 
-import { computed, useId } from 'vue'
+import { computed, nextTick, reactive, useId, watch } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
-import type { EffectParams } from '../api/candeo'
+import type { Bindings, EffectParams, HeldSignal } from '../api/candeo'
+import { bindingState, boundSignal, signalSource, type BindingState } from '../composables/bindings'
+import { validSignalName } from '../composables/rules'
+import { signalText } from '../composables/signals'
 import { sameValue } from '../composables/useSettings'
 import { t } from '../i18n'
 import { localized } from '../i18n/text'
@@ -45,6 +58,15 @@ const props = defineProps<{
   specs: Record<string, ParamSpec>
   /** Their current values, already complete: see `useSettings`. */
   values: EffectParams
+  /** The parameters reading a signal, `{ colour: 'signal:status' }`: see `useSettings`. */
+  bindings: Bindings
+  /**
+   * Whether a parameter can read a signal. Not for an effect the firmware runs:
+   * no loop of the application reads anything for it.
+   */
+  bindable: boolean
+  /** The signals held now: their names are suggested, and a bound row says what its signal holds. */
+  signals: readonly HeldSignal[]
   /**
    * Why the controls are inert, or `null` if they are live.
    *
@@ -69,6 +91,12 @@ const emit = defineEmits<{
    * window would take away.
    */
   commit: []
+  /**
+   * A parameter reads a signal, `signal:<name>`, or its value again (`null`).
+   * Once a name is written, never while it is typed: each one goes to disk.
+   */
+  bind: [id: string, source: string | null]
+  /** Back to what the effect declares: its values, and no parameter reading a signal. */
   reset: []
 }>()
 
@@ -106,6 +134,56 @@ function decimals(step: number): number {
   return dot === -1 ? 0 : written.length - dot - 1
 }
 
+// ---------------------------------------------------------------- signals
+
+/**
+ * Rows switched to Signal whose name is not written yet. Nothing is bound: the
+ * value, shown disabled, still holds, as it does for a signal not received.
+ */
+const pending = reactive(new Set<string>())
+
+/**
+ * A row's name that is not what it reads: typed and not written yet, refused,
+ * or kept from the signal the row stopped reading, so that switching back to
+ * Signal reads it again.
+ */
+const drafts = reactive<Record<string, string>>({})
+
+/** Rows whose name cannot be one, to say so beside the field. */
+const refused = reactive(new Set<string>())
+
+function clearDrafts(): void {
+  pending.clear()
+  refused.clear()
+  for (const id of Object.keys(drafts)) delete drafts[id]
+}
+
+// Another effect, or the same one installed again: what was typed for its rows
+// is not about these. The gallery keeps one form for every effect.
+watch(() => props.specs, clearDrafts)
+
+/** The signal a row reads, or `null` while it holds its value. */
+function readBy(id: string): string | null {
+  const source = props.bindable ? props.bindings[id] : undefined
+  return source === undefined ? null : boundSignal(source)
+}
+
+/** The row is on Signal: reading one, or waiting for its name. */
+function signalChosen(id: string): boolean {
+  return readBy(id) !== null || pending.has(id)
+}
+
+function reads(state: BindingState): string {
+  switch (state.kind) {
+    case 'absent':
+      return t('effects.params.signalAbsent')
+    case 'fits':
+      return t('effects.params.signalHeld', { value: state.value })
+    case 'unfit':
+      return t('effects.params.signalUnfit', { value: state.value })
+  }
+}
+
 // ---------------------------------------------------------------- fields
 
 /**
@@ -120,6 +198,14 @@ interface Common {
   label: string
   /** The current value, spelled out. */
   shown: string
+  /** What holds the parameter: its value, or a signal. The other is shown disabled. */
+  source: 'value' | 'signal'
+  /** The name in the signal field. */
+  name: string
+  /** What the signal read holds now, spelled out; `null` while none is read. */
+  reads: string | null
+  /** The name typed cannot be one. */
+  refused: boolean
 }
 
 type Field =
@@ -130,7 +216,15 @@ type Field =
 
 const fields = computed<Field[]>(() =>
   Object.entries(props.specs).map(([id, spec]): Field => {
-    const head = { id, label: localized(spec.label) }
+    const signal = readBy(id)
+    const head = {
+      id,
+      label: localized(spec.label),
+      source: signalChosen(id) ? ('signal' as const) : ('value' as const),
+      name: drafts[id] ?? signal ?? '',
+      reads: signal === null ? null : reads(bindingState(spec, signal, props.signals)),
+      refused: refused.has(id),
+    }
     const v = props.values[id] ?? spec.default
 
     switch (spec.kind) {
@@ -176,11 +270,14 @@ const fields = computed<Field[]>(() =>
  */
 const announced = computed(() => (fields.value.length ? (props.frozen ?? '') : ''))
 
-/** True as soon as a setting departs from the manifest: that is what can be restored. */
+/**
+ * True as soon as a setting departs from the manifest, a value or a signal read:
+ * that is what can be restored.
+ */
 const touched = computed(() =>
   Object.entries(props.specs).some(([id, spec]) => {
     const v = props.values[id]
-    return v !== undefined && !sameValue(v, spec.default)
+    return (v !== undefined && !sameValue(v, spec.default)) || readBy(id) !== null
   }),
 )
 
@@ -220,6 +317,66 @@ function onBoolean(id: string, e: Event) {
 function onChoice(id: string, e: Event) {
   emit('change', id, (e.target as HTMLSelectElement).value)
   emit('commit')
+}
+
+// ---------------------------------------------------------------- binding
+
+/** Back to the value. The name stays in the field for a switch back to Signal. */
+function toValue(id: string): void {
+  pending.delete(id)
+  refused.delete(id)
+  const signal = readBy(id)
+  if (signal === null) return
+  drafts[id] ??= signal
+  emit('bind', id, null)
+}
+
+/**
+ * To a signal: the name the row had, when it has one, is read again at once;
+ * otherwise the field waits for one, and the value holds meanwhile.
+ */
+function toSignal(id: string): void {
+  if (signalChosen(id)) return
+  const name = (drafts[id] ?? '').trim()
+  if (validSignalName(name)) {
+    delete drafts[id]
+    emit('bind', id, signalSource(name))
+    return
+  }
+  pending.add(id)
+  void nextTick(() => document.getElementById(`${uid}-${id}-signal`)?.focus())
+}
+
+function onName(id: string, e: Event) {
+  drafts[id] = input(e).value
+}
+
+/**
+ * The name is written: Enter, or leaving the field. A name never received is
+ * bound all the same, since a setting is often bound before its sender runs;
+ * one that cannot be a name stays in the field, said refused. Emptied, the field
+ * reads nothing and the row stays on Signal, waiting for a name.
+ */
+function onNameEnd(id: string) {
+  const name = (drafts[id] ?? readBy(id) ?? '').trim()
+  if (name !== '' && !validSignalName(name)) {
+    refused.add(id)
+    return
+  }
+  refused.delete(id)
+  delete drafts[id]
+  if (name === '') {
+    pending.add(id)
+    if (readBy(id) !== null) emit('bind', id, null)
+    return
+  }
+  pending.delete(id)
+  if (name !== readBy(id)) emit('bind', id, signalSource(name))
+}
+
+function onReset() {
+  clearDrafts()
+  emit('reset')
 }
 </script>
 
@@ -263,6 +420,34 @@ function onChoice(id: string, e: Event) {
             <!-- The value spelled out as well: no information is carried by
                  a slider's position alone or a patch's hue alone. -->
             <span class="num shown">{{ f.shown }}</span>
+            <!--
+              Two buttons rather than two radios: a radio keeps its own checked
+              state, and a binding the parent does not take (no device to keep
+              it for) would leave it checked while the row says otherwise.
+            -->
+            <span
+              v-if="bindable"
+              class="source"
+              role="group"
+              :aria-label="t('effects.params.source', { name: f.label })"
+            >
+              <button
+                type="button"
+                class="seg"
+                :aria-pressed="f.source === 'value'"
+                @click="toValue(f.id)"
+              >
+                {{ t('effects.params.fromValue') }}
+              </button>
+              <button
+                type="button"
+                class="seg"
+                :aria-pressed="f.source === 'signal'"
+                @click="toSignal(f.id)"
+              >
+                {{ t('effects.params.fromSignal') }}
+              </button>
+            </span>
           </div>
 
           <!--
@@ -278,6 +463,7 @@ function onChoice(id: string, e: Event) {
             :max="f.max"
             :step="f.step"
             :value="f.value"
+            :disabled="f.source === 'signal'"
             @input="onNumber(f.id, $event)"
             @change="onNumberEnd(f.id, $event)"
           />
@@ -292,6 +478,7 @@ function onChoice(id: string, e: Event) {
             class="color"
             type="color"
             :value="f.hex"
+            :disabled="f.source === 'signal'"
             @input="onColor(f.id, $event)"
             @change="onColorEnd(f.id, $event)"
           />
@@ -302,6 +489,7 @@ function onChoice(id: string, e: Event) {
             class="check"
             type="checkbox"
             :checked="f.on"
+            :disabled="f.source === 'signal'"
             @change="onBoolean(f.id, $event)"
           />
 
@@ -323,17 +511,46 @@ function onChoice(id: string, e: Event) {
             :id="`${uid}-${f.id}`"
             class="choice"
             :value="f.value"
+            :disabled="f.source === 'signal'"
             @change="onChoice(f.id, $event)"
           >
             <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
+
+          <div v-if="f.source === 'signal'" class="bind">
+            <input
+              :id="`${uid}-${f.id}-signal`"
+              class="signal mono"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              :list="`${uid}-held`"
+              :placeholder="t('effects.params.signalName')"
+              :aria-label="t('effects.params.signalOf', { name: f.label })"
+              :aria-invalid="f.refused"
+              :value="f.name"
+              @input="onName(f.id, $event)"
+              @change="onNameEnd(f.id)"
+            />
+            <p v-if="f.refused" class="reads bad" role="alert">
+              {{ t('errors.signalNameInvalid', { name: f.name.trim() }) }}
+            </p>
+            <!-- Not a live region: a signal can change several times a second,
+                 and each change would be read out. -->
+            <p v-else-if="f.reads" class="reads">{{ f.reads }}</p>
+          </div>
         </div>
+
+        <!-- One list for every row: the signals held now, each with its value. -->
+        <datalist v-if="bindable" :id="`${uid}-held`">
+          <option v-for="s in signals" :key="s.name" :value="s.name" :label="signalText(s.value)" />
+        </datalist>
 
         <!--
           Inside the `fieldset`: restoring is a setting like any other, so it
           follows the same rule as the sliders when the effect is not running.
         -->
-        <button v-if="touched" class="revert" type="button" @click="emit('reset')">
+        <button v-if="touched" class="revert" type="button" @click="onReset">
           {{ t('effects.params.reset') }}
         </button>
       </fieldset>
@@ -413,8 +630,10 @@ function onChoice(id: string, e: Event) {
   justify-content: space-between;
 }
 
+/* The label takes the room left: the value and the switch keep to the right. */
 label {
   min-width: 0;
+  margin-right: auto;
   color: var(--text-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
@@ -475,6 +694,81 @@ label {
   font-size: 13px;
 }
 
+/*
+ * Value | Signal, as one small control. No `overflow: hidden` to round the
+ * pair: it would clip the focus ring, which is drawn outside each button.
+ */
+.source {
+  display: inline-flex;
+  align-self: center;
+}
+
+.seg {
+  padding: 1px var(--gap-2);
+  border: 1px solid var(--line-strong);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.seg:first-child {
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+}
+
+.seg:last-child {
+  border-left: 0;
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+
+.seg:hover:not(:disabled, [aria-pressed='true']) {
+  color: var(--text);
+  background: var(--raised-2);
+}
+
+.seg[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.bind {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-1);
+}
+
+.signal {
+  width: 100%;
+  padding: 4px var(--gap-2);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.signal[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+
+/* A signal's value is what a sender wrote, up to 256 characters: it wraps. */
+.reads {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.reads.bad {
+  color: var(--bad);
+}
+
+/*
+ * A value a signal holds back: faded as the inert form is, but alone. Not under
+ * an inert `fieldset`, which already fades everything: the two would multiply.
+ */
+.fields:not(:disabled) :is(.slider, .color, .check, .choice):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .revert {
   align-self: flex-start;
   padding: 4px var(--gap-2);
@@ -500,6 +794,7 @@ label {
 
 .fields:disabled input,
 .fields:disabled select,
+.fields:disabled .seg,
 .fields:disabled .revert {
   cursor: not-allowed;
 }
