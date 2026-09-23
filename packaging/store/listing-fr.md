@@ -27,6 +27,16 @@ POINTS FORTS
 
 Open source, sous licence GPL-3.0.
 
+## Fonctionnalités (liste courte, affichée sur la page du Store)
+
+- Quinze effets prêts à l'emploi, réglables en les regardant
+- Chaque touche sa couleur, et les effets du micrologiciel de votre appareil
+- Automatisations : l'heure à chaque heure pile, éteint la nuit ou pendant votre absence
+- Écrivez vos propres effets en TypeScript, avec aperçu en direct
+- Continue de tourner fenêtre fermée, depuis la zone de notification
+- Aucun compte, rien de collecté, aucune requête réseau
+- Français et anglais, thème clair et sombre
+
 ## Nouveautés de cette version (0.8.0)
 
 • Un deuxième appareil : l'Alienware m18 R1. Candeo pilote son clavier touche par touche, et l'anneau et le logo qui l'entourent en trois zones.

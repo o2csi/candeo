@@ -2,7 +2,7 @@
 
 For the Microsoft Store submission (#126). The release workflow sends this text
 and `listing-fr.md` to Partner Center when both describe the version released
-(#162, `docs/releasing.md`); keep the four sections in this order. **What's new**
+(#162, `docs/releasing.md`); keep the five sections in this order. **What's new**
 is rewritten at every release; the rest changes only when the application does.
 
 Version described: **0.8.0**. Its *What's new* covers everything since 0.7.0.
@@ -27,6 +27,16 @@ HIGHLIGHTS
 • Starts with Windows if you want it to. Light and dark themes. English and French.
 
 Open source, under the GPL-3.0.
+
+## Features (a short list, shown on the Store page)
+
+- Fifteen ready-made effects, tuned while you watch them
+- Every key its own colour, plus your device's firmware effects
+- Automations: the time on the hour, dark at night or when you step away
+- Write your own effects in TypeScript, with a live preview
+- Keeps running with the window closed, from the notification area
+- No account, nothing collected, no network request
+- English and French, light and dark themes
 
 ## What's new in this version (0.8.0)
 

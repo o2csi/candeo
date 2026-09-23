@@ -18,6 +18,11 @@ First paragraph.
 
 Second paragraph.
 
+## Features (shown on the Store page)
+
+- One feature.
+- Another feature.
+
 ## What's new in this version (1.2.0)
 
 • One thing.
@@ -28,13 +33,14 @@ Second paragraph.
 hid, rgb, keyboard lighting
 `
 
-test('a listing gives its locale, its version and four texts', () => {
+test('a listing gives its locale, its version and five texts', () => {
   const listing = parseListing(LISTING)
   assert.equal(listing.locale, 'en-us')
   assert.equal(listing.version, '1.2.0')
   assert.deepEqual(listing.fields, {
     shortDescription: 'Lighting control.',
     description: 'First paragraph.\n\nSecond paragraph.',
+    features: ['One feature.', 'Another feature.'],
     releaseNotes: '• One thing.\n• Another.',
     keywords: ['hid', 'rgb', 'keyboard lighting'],
   })
@@ -49,7 +55,7 @@ test('a what’s new heading that names another version is refused', () => {
 
 test('a section missing is refused rather than read out of place', () => {
   const withoutTerms = LISTING.slice(0, LISTING.indexOf('## Search terms'))
-  assert.throws(() => parseListing(withoutTerms), /4 sections expected/)
+  assert.throws(() => parseListing(withoutTerms), /5 sections expected/)
 })
 
 test('the Store limits are checked before submitting', () => {
@@ -61,12 +67,18 @@ test('the Store limits are checked before submitting', () => {
     () => parseListing(LISTING.replace('• Another.', 'x'.repeat(1500))),
     /the Store takes 1500/,
   )
+  assert.throws(
+    () => parseListing(LISTING.replace('- Another feature.', `- ${'x'.repeat(201)}`)),
+    /over 200 characters/,
+  )
 })
 
 test('the texts land in the fields the submission has, whatever their case', () => {
   const submission = {
     Listings: {
-      'en-us': { BaseListing: { Description: 'old', ReleaseNotes: 'old', Keywords: [], Title: 'Candeo' } },
+      'en-us': {
+        BaseListing: { Description: 'old', Features: ['old'], ReleaseNotes: 'old', Keywords: [], Title: 'Candeo' },
+      },
       'de-de': { BaseListing: { Description: 'alt' } },
     },
     ApplicationPackages: [{ FileName: 'Candeo_1.2.0_x64.msix' }],
@@ -76,6 +88,7 @@ test('the texts land in the fields the submission has, whatever their case', () 
   assert.equal(base.Description, 'First paragraph.\n\nSecond paragraph.')
   assert.equal(base.ReleaseNotes, '• One thing.\n• Another.')
   assert.deepEqual(base.Keywords, ['hid', 'rgb', 'keyboard lighting'])
+  assert.deepEqual(base.Features, ['One feature.', 'Another feature.'])
   assert.equal(base.Title, 'Candeo', 'a field no listing file carries is kept')
   assert.equal(updated.Listings['de-de'].BaseListing.Description, 'alt', 'another language is kept')
   assert.deepEqual(updated.ApplicationPackages, submission.ApplicationPackages, 'the package is kept')
