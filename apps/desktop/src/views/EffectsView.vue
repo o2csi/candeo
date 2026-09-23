@@ -256,6 +256,11 @@ interface Choice {
   readsKeys: boolean
   /** It is given the wall-clock time: said on screen, like every input read. */
   readsClock: boolean
+  /**
+   * It is given every signal held, `inputs: ['signals']`. A parameter bound to
+   * a signal is not this, and not said here: the person chose it.
+   */
+  readsSignals: boolean
 }
 
 const library = ref<EffectEntry[]>([])
@@ -280,6 +285,7 @@ function fromEntry(e: EffectEntry): Choice {
     modified: e.modified,
     readsKeys: e.readsKeys ?? false,
     readsClock: e.readsClock ?? false,
+    readsSignals: e.readsSignals ?? false,
   }
 }
 
@@ -299,6 +305,7 @@ function fromHardware(e: HardwareEffect): Choice {
     modified: false,
     readsKeys: false,
     readsClock: false,
+    readsSignals: false,
   }
 }
 
@@ -1507,6 +1514,9 @@ onBeforeUnmount(() => {
           <span v-if="selectedEffect.readsKeys" class="badge keys">{{ t('effects.readsKeys') }}</span>
           <span v-if="selectedEffect.readsClock" class="badge keys">{{
             t('effects.readsClock')
+          }}</span>
+          <span v-if="selectedEffect.readsSignals" class="badge keys">{{
+            t('effects.readsSignals')
           }}</span>
         </header>
 

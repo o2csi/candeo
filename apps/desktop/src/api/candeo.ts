@@ -187,6 +187,11 @@ export interface EffectManifest {
   readsKeys?: boolean
   /** Declares `inputs: ['clock']`: it is given the wall-clock time. */
   readsClock?: boolean
+  /**
+   * Declares `inputs: ['signals']`: it is given every signal held. A parameter
+   * bound to a signal needs no declaration, and is not what this says.
+   */
+  readsSignals?: boolean
 }
 
 /**

@@ -45,6 +45,7 @@
     "modified": "{nature} · modified",
     "readsKeys": "reacts to key presses",
     "readsClock": "reads the clock",
+    "readsSignals": "reads signals",
     "interruptedFor": "{rule} — for {seconds} s, then {applied}",
     "interruptedForAlone": "{rule} — for {seconds} s",
     "interruptedUntil": "{rule} — until {time}, then {applied}",
