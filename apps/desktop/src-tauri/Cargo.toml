@@ -75,6 +75,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # changes. One trigger that says "the hour", "weekdays at 9" and "at 22:00", rather
 # than a schedule of our own grown one option at a time.
 croner = "4"
+# The signals API (#108): a blocking HTTP server in a thread of its own, since
+# nothing else in the application runs on an async runtime; the interfaces it
+# may listen on; and the token's randomness. See `src/signals/`.
+tiny_http = "0.12"
+if-addrs = "0.15"
+getrandom = "0.3"
 
 # Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`), key
 # presses through Raw Input (`src/runtime/presses.rs`) and the display language
