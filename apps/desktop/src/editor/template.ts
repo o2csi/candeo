@@ -1,14 +1,14 @@
 /**
- * Le point de départ d'un nouvel effet.
+ * The starting point of a new effect.
  *
- * Ce n'est pas un modèle écrit pour l'occasion : c'est **l'effet de référence**
- * de `@candeo/effects-api`, lu tel quel. Un modèle recopié ici se serait mis à
- * diverger du jour où l'API aurait changé, et personne ne l'aurait vu — un
- * exemple n'a pas de test qui le contredise.
+ * It is not a template written for the occasion: it is **the reference effect**
+ * of `@candeo/effects-api`, read as it is. A template copied here would have
+ * started to diverge the day the API changed, and nobody would have seen it —
+ * an example has no test to contradict it.
  *
- * Seule retouche, et elle est mécanique : l'exemple vit **dans** le paquet, il
- * importe donc `./index`. Un effet de l'utilisateur, lui, est résolu par le
- * chargeur de modules de rquickjs, qui ne connaît que le nom du paquet.
+ * Only one touch-up, and it is mechanical: the example lives **inside** the
+ * package, so it imports `./index`. A user's effect, on the other hand, is
+ * resolved by rquickjs's module loader, which only knows the package name.
  */
 
 import example from '@candeo/effects-api/src/example.ts?raw'
@@ -20,10 +20,10 @@ const PUBLIC = "'@candeo/effects-api'"
 
 export const NEW_EFFECT = example.replace(LOCAL, PUBLIC)
 
-// Une substitution qui ne trouve rien passerait inaperçue : le modèle
-// importerait `./index`, que le moteur ne sait pas résoudre, et l'erreur
-// n'arriverait qu'au démarrage de l'effet. `import.meta.env.DEV` est remplacé à
-// la compilation — rien de ceci ne subsiste dans l'application livrée.
+// A substitution that finds nothing would go unnoticed: the template would
+// import `./index`, which the engine cannot resolve, and the error would only
+// come when the effect starts. `import.meta.env.DEV` is replaced at build
+// time — none of this remains in the shipped application.
 if (import.meta.env.DEV && !example.includes(LOCAL)) {
   erreur(
     'template',
