@@ -1,0 +1,92 @@
+name: winget
+
+# Sends a published release to the Windows Package Manager (#180). release.yml
+# calls it once a release is public; running it by hand sends a version
+# published before, such as the first one after the package is accepted.
+#
+# The manifests are rendered by packaging/winget/winget.mjs from the release's
+# own SHA256SUMS, as when they are written by hand (docs/releasing.md), and
+# wingetcreate only opens the pull request. `wingetcreate update` would download
+# the installers and hash them again, which is what the script refuses to do.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag, such as v0.1.0"
+        required: true
+        type: string
+    secrets:
+      WINGET_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, such as v0.1.0"
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: candeo-winget-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    # wingetcreate is a Windows program.
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with: { node-version: 24 }
+      - name: Render the manifests and open the pull request
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag must look like v1.2.3, got $TAG"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+
+          if [ -z "$WINGET_TOKEN" ]; then
+            echo "::notice::No WINGET_TOKEN secret: $VERSION is not sent to winget (docs/releasing.md)."
+            exit 0
+          fi
+          # A package winget does not list yet enters through a new-package pull
+          # request, reviewed by a moderator and opened by hand (#138). Sending
+          # versions before it is accepted would only open competing ones.
+          if ! gh api repos/microsoft/winget-pkgs/contents/manifests/o/O2CSI/Candeo --silent 2>/dev/null; then
+            echo "::notice::O2CSI.Candeo is not in winget-pkgs yet: $VERSION waits for the first submission to be accepted. Run this workflow for $TAG once it is."
+            exit 0
+          fi
+          # Run again for a version already there or already proposed, it stops.
+          if gh api "repos/microsoft/winget-pkgs/contents/manifests/o/O2CSI/Candeo/$VERSION" --silent 2>/dev/null; then
+            echo "::notice::winget already has O2CSI.Candeo $VERSION."
+            exit 0
+          fi
+          OPEN="$(gh pr list -R microsoft/winget-pkgs --state open --search "O2CSI.Candeo $VERSION in:title" --json url --jq '.[0].url // empty')"
+          if [ -n "$OPEN" ]; then
+            echo "::notice::O2CSI.Candeo $VERSION is already proposed: $OPEN"
+            exit 0
+          fi
+
+          node packaging/winget/winget.mjs "$VERSION"
+
+          # Pinned and checked: this program receives a token that can push.
+          curl -fsSL -o wingetcreate.exe \
+            https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe
+          echo "24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea  wingetcreate.exe" | sha256sum -c -
+
+          ./wingetcreate.exe submit --no-open \
+            --prtitle "New version: O2CSI.Candeo version $VERSION" \
+            --token "$WINGET_TOKEN" \
+            "target/winget/manifests/o/O2CSI/Candeo/$VERSION"

@@ -1,8 +1,9 @@
 # Store listing — English (en-US)
 
-For the Microsoft Store submission (#126). Text is pasted into Partner Center by
-hand until #162 automates it. **What's new** is rewritten at every release; the
-rest changes only when the application does.
+For the Microsoft Store submission (#126). The release workflow sends this text
+and `listing-fr.md` to Partner Center when both describe the version released
+(#162, `docs/releasing.md`); keep the four sections in this order. **What's new**
+is rewritten at every release; the rest changes only when the application does.
 
 Version described: **0.8.0**. Its *What's new* covers everything since 0.7.0.
 
