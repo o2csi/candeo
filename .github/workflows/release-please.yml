@@ -43,3 +43,6 @@ jobs:
       tag: ${{ needs.release-please.outputs.tag_name }}
       # The commit this push merged, which release-please just tagged.
       ref: ${{ github.sha }}
+    # For the Store and winget submissions that follow publishing: a called
+    # workflow sees no secret it is not handed.
+    secrets: inherit
