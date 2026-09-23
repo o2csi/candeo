@@ -13,11 +13,11 @@ import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
 /**
- * Ce qu'on a déjà lu, par appareil : fermer n'arrange rien, l'appareil continue
- * d'échouer et le dirait à chaque relecture de la liste.
+ * What has already been read, per device: closing fixes nothing, the device
+ * keeps failing and would say so at every reading of the list.
  *
- * Masqué **tant que le message ne change pas** : un appareil qui se met à
- * échouer autrement a quelque chose de neuf à dire.
+ * Hidden **while the message does not change**: a device that starts failing
+ * differently has something new to say.
  */
 const hushed = reactive<Record<string, string>>({})
 

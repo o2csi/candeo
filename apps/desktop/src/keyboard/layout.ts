@@ -30,9 +30,9 @@ export interface LayoutView {
   frameLen: number
   keys: readonly KeyInfo[]
   /**
-   * Ce que sont ces lumières : le dessin est le même, ce qu'on en dit ne l'est
-   * pas — « 103 touches éclairées » sur un cerclage et un logo serait faux.
-   * Absent, on lit des touches, comme avant qu'un appareil sache le dire.
+   * What these lights are: the drawing is the same, what is said about it is
+   * not — "103 lit keys" over a ring and a logo would be false. Absent, they
+   * are read as keys, as before a device could say.
    */
   lights?: 'keys' | 'zones'
 }
