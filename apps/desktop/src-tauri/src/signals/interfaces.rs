@@ -2,7 +2,7 @@
 //! (§2.3).
 //!
 //! An interface is kept **by name**, never by address: an address changes with
-//! DHCP, another Wi-Fi or a dock, and a choice kept as `192.168.1.23` would stop
+//! DHCP, another Wi-Fi or a dock, and a choice kept as `192.0.2.23` would stop
 //! answering the day it does. [`addresses`] turns the names into the addresses
 //! they have now, and is pure, so that is a unit test.
 
@@ -103,8 +103,8 @@ mod tests {
         group(vec![
             ("Wi-Fi".into(), ip("fe80::1")),
             ("Wi-Fi".into(), ip("2001:db8::23")),
-            ("Wi-Fi".into(), ip("192.168.1.23")),
-            ("Ethernet".into(), ip("10.0.0.5")),
+            ("Wi-Fi".into(), ip("192.0.2.23")),
+            ("Ethernet".into(), ip("198.51.100.5")),
         ])
     }
 
@@ -115,11 +115,11 @@ mod tests {
             vec![
                 NetworkInterface {
                     name: "Wi-Fi".into(),
-                    addresses: vec![ip("192.168.1.23"), ip("2001:db8::23")],
+                    addresses: vec![ip("192.0.2.23"), ip("2001:db8::23")],
                 },
                 NetworkInterface {
                     name: "Ethernet".into(),
-                    addresses: vec![ip("10.0.0.5")],
+                    addresses: vec![ip("198.51.100.5")],
                 },
             ]
         );
@@ -138,10 +138,10 @@ mod tests {
     #[test]
     fn a_ticked_interface_adds_its_current_addresses() {
         let wanted = addresses(7317, &["Wi-Fi".into()], &up());
-        assert!(wanted.contains(&"192.168.1.23:7317".parse().unwrap()));
+        assert!(wanted.contains(&"192.0.2.23:7317".parse().unwrap()));
         assert!(wanted.contains(&"[2001:db8::23]:7317".parse().unwrap()));
         assert!(
-            !wanted.contains(&"10.0.0.5:7317".parse().unwrap()),
+            !wanted.contains(&"198.51.100.5:7317".parse().unwrap()),
             "Ethernet was not ticked"
         );
     }

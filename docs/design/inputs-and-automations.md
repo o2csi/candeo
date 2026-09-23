@@ -202,7 +202,7 @@ place.
   check would add.
 - **Where it listens is chosen by interface, not by address.** Settings lists
   the interfaces that are up, each with its name and its current address —
-  *Wi-Fi — 192.168.1.23*, *Ethernet*, *vEthernet (WSL)* — and loopback, always
+  *Wi-Fi — 192.0.2.23*, *Ethernet*, *vEthernet (WSL)* — and loopback, always
   ticked. Ticking another one says, once, that other machines on that network
   can send signals, with the token. The choice is kept **by name**: an address
   changes with DHCP, another Wi-Fi or a dock, and the listeners follow the
@@ -426,8 +426,8 @@ A rule is one sentence someone can read back:
   **A `signal` rule takes either.** Without `for`, its occurrence is open and
   lasts while the value holds, since the value was first set. With `for`, it
   starts at **each receipt** of the value and lasts that long: a doorbell rung
-  twice flashes twice, and a watcher re-sending the same state in a loop is not
-  a flash. **There is no "becomes"**: the sender already chooses when to send,
+  again flashes again, and rung during the flash lengthens it — one run, as
+  back-to-back occurrences always are (§3.6). **There is no "becomes"**: the sender already chooses when to send,
   and the rule chooses how long it shows. The only comparison is equality;
   thresholds on numbers belong to bindings (§2.3.1).
 - **Action**: any effect of the library or a hardware effect, including *Off*,
