@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.12.0](https://github.com/o2csi/candeo/compare/v0.11.0...v0.12.0) (2026-09-24)
+
+
+### Features
+
+* give Clock the smooth, sharp and still displays ([38d740f](https://github.com/o2csi/candeo/commit/38d740f2a6dfe62b25326284ac39494953e7b3d7))
+* scroll any text across the keyboard, typed or from a signal ([a749d8e](https://github.com/o2csi/candeo/commit/a749d8ea8eadb6a08529cac3af9303f531cd8d16))
+* scroll text smoothly, or hold it still a page at a time ([ecfef62](https://github.com/o2csi/candeo/commit/ecfef6222558e2c10631d3c566aa60a713c83a6e))
+
+
+### Documentation
+
+* add Clock's display to the Store's What's new ([5aab6a2](https://github.com/o2csi/candeo/commit/5aab6a2228457a869abe027097f7789a1ba3a4c3))
+* put Scrolling text first in the Store's What's new ([2a53d20](https://github.com/o2csi/candeo/commit/2a53d20d3c0cbfcc789d60b287bf3dc074b3b52b))
+
+
+### CI/CD
+
+* frame the Store's What's new with its version and notes ([f663de7](https://github.com/o2csi/candeo/commit/f663de7abb85cc9714ebc3e9e14f41fd95110a66))
+
 ## [0.11.0](https://github.com/o2csi/candeo/compare/v0.10.0...v0.11.0) (2026-09-24)
 
 
