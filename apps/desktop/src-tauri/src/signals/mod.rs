@@ -19,7 +19,7 @@ pub mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,11 @@ use crate::CmdResult;
 use http::{Listener, Request, Response};
 use interfaces::NetworkInterface;
 use store::{Held, Refusal, SignalView, Store};
+
+/// What is held, shared with the effects engine: a render loop reads the values
+/// bound to its parameters on every frame, and has no application handle to ask
+/// for them (`docs/design/inputs-and-automations.md` §2.3.1).
+pub type SharedStore = Arc<Mutex<Store>>;
 
 /// The port, unless something else holds it; editable in Settings.
 pub const DEFAULT_PORT: u16 = 7317;
@@ -90,13 +95,23 @@ pub struct SignalsApi {
 
 #[derive(Default)]
 pub struct Signals {
-    store: Mutex<Store>,
+    store: SharedStore,
     /// The settings the listeners were last set from: a request reads its token
     /// here rather than from the disk.
     config: Mutex<SignalsConfig>,
     listeners: Mutex<Vec<Listener>>,
     /// Addresses that could not be listened on, and why.
     refused: Mutex<BTreeMap<SocketAddr, String>>,
+}
+
+impl Signals {
+    /// Signals holding `store`, the one the effects engine reads.
+    pub fn sharing(store: SharedStore) -> Self {
+        Self {
+            store,
+            ..Self::default()
+        }
+    }
 }
 
 /// Starts following the settings and the interfaces: a thread of its own, for as
@@ -149,7 +164,7 @@ pub(crate) fn reconcile(app: &AppHandle) {
         listeners.retain(|listener| {
             let keep = wanted.contains(&listener.addr);
             if !keep {
-                tracing::info!(addr = %listener.addr, "signals API stops listening");
+                tracing::info!(on = %logged(&listener.addr), "signals API stops listening");
             }
             keep
         });
@@ -160,7 +175,7 @@ pub(crate) fn reconcile(app: &AppHandle) {
             let serving = app.clone();
             match Listener::start(addr, move |request| serve(&serving, request)) {
                 Ok(listener) => {
-                    tracing::info!(addr = %addr, "signals API listening");
+                    tracing::info!(on = %logged(&addr), "signals API listening");
                     listeners.push(listener);
                 }
                 Err(e) => {
@@ -175,10 +190,21 @@ pub(crate) fn reconcile(app: &AppHandle) {
         // Said once, not every ten seconds while it lasts. Loopback in IPv6 is
         // refused on a system without IPv6, which is nobody's problem.
         if previous.get(addr) != Some(reason) && !addr.is_ipv6() {
-            tracing::warn!(addr = %addr, "signals API not listening: {reason}");
+            tracing::warn!(on = %logged(addr), "signals API not listening: {reason}");
         }
     }
     *previous = refused;
+}
+
+/// Where a listener listens, as the log says it. An interface's address
+/// identifies the machine and its network, and no address reaches the log
+/// (AGENTS.md, Privacy); loopback's says nothing about anyone.
+fn logged(addr: &SocketAddr) -> String {
+    if addr.ip().is_loopback() {
+        addr.to_string()
+    } else {
+        format!("a network interface, port {}", addr.port())
+    }
 }
 
 /// Answers one request, on the listener's thread.
@@ -389,6 +415,15 @@ mod tests {
         assert!(!config.enabled);
         assert_eq!(config.port, DEFAULT_PORT);
         assert!(config.is_default());
+    }
+
+    #[test]
+    fn the_log_names_no_address_but_loopback() {
+        let lan: SocketAddr = "192.0.2.23:7317".parse().unwrap();
+        let v6: SocketAddr = "[2001:db8::23]:7317".parse().unwrap();
+        assert_eq!(logged(&lan), "a network interface, port 7317");
+        assert!(!logged(&v6).contains("2001"));
+        assert_eq!(logged(&"127.0.0.1:7317".parse().unwrap()), "127.0.0.1:7317");
     }
 
     #[test]

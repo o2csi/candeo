@@ -10,6 +10,7 @@ import type {
   EffectParams,
   HeldSignal,
   Rule,
+  RuleShow,
   SignalTrigger,
 } from '../api/candeo'
 import { startingParams } from '../api/candeo'
@@ -316,4 +317,12 @@ export function ruleValues(
     if (manifest.params && id in manifest.params) values[id] = value
   }
   return values
+}
+
+/**
+ * The rule's effect as it declares itself: its values, and no parameter reading
+ * a signal, since an effect declares none.
+ */
+export function withoutSettings(show: RuleShow): RuleShow {
+  return { effect: show.effect, params: {} }
 }

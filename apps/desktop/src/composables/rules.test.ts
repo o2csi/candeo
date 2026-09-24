@@ -17,6 +17,7 @@ import {
   signalTrigger,
   validSignalName,
   whileItHolds,
+  withoutSettings,
   writeSimple,
 } from './rules'
 import type { HeldSignal, Rule } from '../api/candeo'
@@ -241,5 +242,17 @@ describe('ruleValues', () => {
 
   it('has nothing to show for a firmware effect', () => {
     expect(ruleValues(undefined, {})).toEqual({})
+  })
+})
+
+describe('withoutSettings', () => {
+  it('gives the effect back its declared values, and unbinds every parameter', () => {
+    const show = {
+      effect: 'shipped:Fixed gradient',
+      params: { speed: 1.5 },
+      bindings: { colour: 'signal:status' },
+    }
+
+    expect(withoutSettings(show)).toEqual({ effect: 'shipped:Fixed gradient', params: {} })
   })
 })

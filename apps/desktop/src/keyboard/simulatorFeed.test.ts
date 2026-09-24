@@ -29,6 +29,7 @@ function feed() {
       showsDevice: () => showsDevice.value,
       previewed: () => previewed.value,
       params: () => ({ speed: 1 }),
+      bindings: () => ({ colour: 'signal:status' }),
       onError,
     }),
   )
@@ -62,7 +63,10 @@ describe('useSimulatorFeed', () => {
     expect(api.startPreview).not.toHaveBeenCalled()
 
     await vi.advanceTimersByTimeAsync(80)
-    expect(api.startPreview.mock.calls).toEqual([[keyboard, 'Bubbles', { speed: 1 }]])
+    // With its settings and the parameters reading a signal, as the keyboard would run it.
+    expect(api.startPreview.mock.calls).toEqual([
+      [keyboard, 'Bubbles', { speed: 1 }, { colour: 'signal:status' }],
+    ])
     // Every start builds a new channel: the simulator subscribes again after it.
     expect(api.subscribePreviewFrames).toHaveBeenCalledTimes(1)
   })
@@ -75,7 +79,12 @@ describe('useSimulatorFeed', () => {
     await nextTick()
     await vi.advanceTimersByTimeAsync(180)
 
-    expect(api.startPreview).toHaveBeenCalledWith(null, 'Rain', { speed: 1 })
+    expect(api.startPreview).toHaveBeenCalledWith(
+      null,
+      'Rain',
+      { speed: 1 },
+      { colour: 'signal:status' },
+    )
   })
 
   it('shows the device frames, and stops the preview at once, when the effect runs there', async () => {

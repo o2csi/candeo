@@ -864,6 +864,14 @@ on one side, a single one when the slider stops on the other — nor the same de
 A dedicated command rather than a `set_settings` from the window: reading,
 modifying and writing happen on the Rust side, in one go.
 
+### `remember_effect_bindings(device, effect, bindings)`
+
+Remembers which settings of an effect read a signal on one device, beside their
+values: `{ colour: 'signal:status' }`. An empty object unbinds them all; the
+entry goes when it holds neither values nor bindings. `bindingInvalid { param,
+source }` when a source does not name a signal as `signal:<name>` does. The
+running loop is set apart, by `set_effect_bindings`.
+
 ### `remember_brightness(device, level)`
 
 Remembers the brightness of **this** device, without touching the keyboard — the disk
@@ -1153,7 +1161,7 @@ the DOM and the Tauri API. Design in
 parameters, its own error state and its own output. Nothing is shared between two
 devices, and that is what keeps a failing device from affecting any other.
 
-### `start_effect(device, id, params)`
+### `start_effect(device, id, params, bindings?)`
 
 Loads the JavaScript compiled from the effect file's current bytes, refused while the file is `stale` or `broken` — and
 starts the loop **of this device**. The engine makes
@@ -1192,6 +1200,23 @@ resolved to an internal module provided by the host: no bundler, no
 Each frame starts from black. An effect that writes only part of the keyboard
 therefore does not silently inherit the previous frame — a frame is complete by
 definition.
+
+### Signals in settings: `bindings`
+
+`start_effect` and `start_preview` take an optional `bindings`, and
+`set_effect_bindings(device, bindings)` / `set_preview_bindings(bindings)`
+change them live, the loop reading them at every frame like its parameters:
+
+```ts
+bindings: { [param: string]: `signal:${string}` }
+```
+
+A bound parameter takes, at every frame, the value its signal holds, converted
+against its spec by the bootstrap; while the signal is absent, expired or does
+not convert, it keeps its configured value
+([`inputs-and-automations.md`](../design/inputs-and-automations.md) §2.3.1). The
+tray, resuming and automations start an effect with the bindings remembered for
+it, as they do with its parameters; a rule carries its own in `show.bindings`.
 
 ### `stop_effect(device)` · `set_effect_params(device, params)`
 
@@ -1239,7 +1264,7 @@ the keyboard.
 ### The preview: `start_preview` · `stop_preview` · `set_preview_params`
 
 ```ts
-start_preview(device: { vid, pid } | null, id: string, params: object)
+start_preview(device: { vid, pid } | null, id: string, params: object, bindings?: object)
 ```
 
 The exact counterpart of `start_effect`, **minus everything that commits**: no hardware
@@ -1378,7 +1403,8 @@ Rule = {
     | { kind: 'cron', expr: string }    // 5 fields, or 6 with seconds first, local time
     | { kind: 'idle', minutes: number } // nobody has used the computer for that long
     | { kind: 'signal', name: string, equals: string, hold: boolean }, // absent hold: true
-  show: { effect: string, params: Record<string, ParamValue> },
+  show: { effect: string, params: Record<string, ParamValue>,
+          bindings?: Record<string, string> },  // a setting reading a signal
   for: { seconds: number }              // absent: 10; an idle or held signal rule's
                                         // applies to Try only
 }

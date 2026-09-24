@@ -5,7 +5,8 @@
  * which token, and what is held now.
  *
  * Off, the block is its switch alone. On, it holds everything a sender needs, the
- * signals held with the time each has left, and a test signal, so that a rule can
+ * signals held with the time each has left and what reads each, the names
+ * something reads that nothing sends now, and a test signal, so that a rule can
  * be tried before any sender exists.
  *
  * Its root is a `.block` of the Settings page, which gives it its place and its
@@ -16,13 +17,16 @@ import type { UnlistenFn } from '@tauri-apps/api/event'
 
 import {
   eraseSignal,
+  getSettings,
   getSignalsApi,
+  listEffects,
   listNetworkInterfaces,
   listSignals,
   onSignalsChanged,
   renewSignalsToken,
   sendSignal,
   setSignalsApi,
+  type EffectEntry,
   type HeldSignal,
   type NetworkInterface,
   type SignalsApi,
@@ -39,10 +43,20 @@ import {
   timeLeft,
   validPort,
 } from '../composables/signals'
+import {
+  expectedSignals,
+  readerText,
+  signalReaders,
+  switchedOff,
+  type ReadingSettings,
+  type SignalReader,
+} from '../composables/signalReaders'
+import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 import FailureNote from './FailureNote.vue'
 
 const uid = useId()
+const { devices } = useDevice()
 
 /** The token hidden: a fixed length, so the mask says nothing of the token. */
 const MASK = '•'.repeat(16)
@@ -70,12 +84,26 @@ const ticked = ref(false)
 /** The window's clock, for the countdowns. */
 const now = ref(Date.now())
 
+/**
+ * The bindings and rules, read when the block opens: they change on other
+ * screens, and this one is mounted again each time Settings is shown.
+ */
+const reading = ref<ReadingSettings>({ effectParams: [], rules: [] })
+/** The library, to name effects and their settings. */
+const library = ref<EffectEntry[]>([])
+
 const testName = ref('')
 const testValue = ref('')
 
 const rows = computed(() => (api.value ? interfaceRows(up.value, api.value.interfaces) : []))
 const shown = computed(() => alive(held.value, now.value))
+const readers = computed(() => signalReaders(reading.value, devices.value, library.value))
+const expected = computed(() => expectedSignals(readers.value, shown.value))
 const networkWarning = computed(() => ticked.value && (api.value?.interfaces.length ?? 0) > 0)
+
+function readersOf(name: string): SignalReader[] {
+  return readers.value.get(name) ?? []
+}
 
 function left(signal: HeldSignal): string {
   const time = timeLeft(signal.expires, now.value)
@@ -108,6 +136,25 @@ async function readHeld(): Promise<void> {
   }
 }
 
+/**
+ * What reads signals, and the names to say it with. Without the library, effects
+ * and settings go by their keys: the lines stay true, only less readable.
+ */
+async function readReaders(): Promise<void> {
+  const [settings, effects] = await Promise.all([
+    getSettings().catch((e: unknown) => {
+      problem.value = message(e)
+      return null
+    }),
+    listEffects().catch((e: unknown) => {
+      warn('signals', `library not listed, effects named by their keys: ${message(e, 'en')}`)
+      return null
+    }),
+  ])
+  if (settings) reading.value = { effectParams: settings.effectParams, rules: settings.rules }
+  if (effects) library.value = effects
+}
+
 // ---------------------------------------------------------------- the API
 
 /** Asks Rust for these settings; it answers with where it listens now. Whether it took them. */
@@ -131,7 +178,7 @@ async function toggle(event: Event): Promise<void> {
     box.checked = !on
     return
   }
-  if (on) await Promise.all([readInterfaces(), readHeld()])
+  if (on) await Promise.all([readInterfaces(), readHeld(), readReaders()])
 }
 
 async function choosePort(event: Event): Promise<void> {
@@ -223,7 +270,7 @@ const retry = window.setInterval(() => {
 
 onMounted(async () => {
   await readApi()
-  if (api.value?.enabled) await Promise.all([readInterfaces(), readHeld()])
+  if (api.value?.enabled) await Promise.all([readInterfaces(), readHeld(), readReaders()])
   unlisten = await onSignalsChanged(() => void readHeld()).catch(() => null)
   // Left before the listener was in place: nobody else will remove it.
   if (gone) unlisten?.()
@@ -346,19 +393,51 @@ onBeforeUnmount(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="signal in shown" :key="signal.name">
-            <td class="mono selectable">{{ signal.name }}</td>
-            <td class="mono selectable">{{ signalText(signal.value) }}</td>
-            <td class="left">{{ left(signal) }}</td>
-            <td>
-              <button type="button" class="ghost small" @click="erase(signal.name)">
-                {{ t('settings.signals.erase') }}
-              </button>
-            </td>
-          </tr>
+          <template v-for="signal in shown" :key="signal.name">
+            <tr>
+              <td class="mono selectable">{{ signal.name }}</td>
+              <td class="mono selectable">{{ signalText(signal.value) }}</td>
+              <td class="left">{{ left(signal) }}</td>
+              <td>
+                <button type="button" class="ghost small" @click="erase(signal.name)">
+                  {{ t('settings.signals.erase') }}
+                </button>
+              </td>
+            </tr>
+            <!-- A signal nothing reads has nothing under it: send it, see it, then bind it. -->
+            <tr v-if="readersOf(signal.name).length" class="under">
+              <td colspan="4">
+                <ul class="readers">
+                  <li v-for="(reader, i) in readersOf(signal.name)" :key="i">
+                    {{ readerText(reader) }}
+                    <span v-if="switchedOff(reader)" class="off">
+                      {{ t('settings.signals.ruleOff') }}
+                    </span>
+                  </li>
+                </ul>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
       <p v-else class="note">{{ t('settings.signals.none') }}</p>
+
+      <template v-if="expected.length">
+        <h3>{{ t('settings.signals.expected') }}</h3>
+        <ul class="expected">
+          <li v-for="signal in expected" :key="signal.name">
+            <span class="mono selectable">{{ signal.name }}</span>
+            <ul class="readers">
+              <li v-for="(reader, i) in signal.readers" :key="i">
+                {{ readerText(reader) }}
+                <span v-if="switchedOff(reader)" class="off">
+                  {{ t('settings.signals.ruleOff') }}
+                </span>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </template>
 
       <h3>{{ t('settings.signals.test') }}</h3>
       <FailureNote v-if="sendProblem" class="err" @close="sendProblem = null">
@@ -375,8 +454,10 @@ onBeforeUnmount(() => {
           autocomplete="off"
           :list="`${uid}-names`"
         />
+        <!-- The names something waits for too: a test signal is how a binding is tried. -->
         <datalist :id="`${uid}-names`">
           <option v-for="signal in shown" :key="signal.name" :value="signal.name" />
+          <option v-for="signal in expected" :key="signal.name" :value="signal.name" />
         </datalist>
         <label :for="`${uid}-value`">{{ t('settings.signals.value') }}</label>
         <input
@@ -518,6 +599,52 @@ h3 {
 /* Digits of one width, so a countdown does not jitter. */
 .left {
   font-variant-numeric: tabular-nums;
+}
+
+/* What reads a signal sits under its row, closer to it than to the next signal. */
+.held .under td {
+  padding-top: 0;
+  padding-bottom: var(--gap-2);
+}
+
+.readers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0 0 0 var(--gap-3);
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.readers li {
+  overflow-wrap: anywhere;
+}
+
+.expected {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.expected .readers {
+  margin-top: 2px;
+}
+
+/* A rule switched off reads nothing until someone switches it on. */
+.off {
+  margin-left: var(--gap-1);
+  padding: 0 var(--gap-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .actions {

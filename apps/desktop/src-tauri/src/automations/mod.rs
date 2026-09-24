@@ -368,6 +368,7 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
             device,
             &interruption.effect,
             Some(&interruption.params),
+            interruption.bindings.clone(),
         ),
     };
 
@@ -452,6 +453,7 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
                     device,
                     effect,
                     settings.effect_params(device.vid, device.pid, effect),
+                    settings.effect_bindings(device.vid, device.pid, effect),
                 ),
                 // Stopped meanwhile from elsewhere: nothing to go back to.
                 None => {
@@ -713,6 +715,7 @@ mod tests {
             rule: rule.into(),
             effect: "shipped:Clock".into(),
             params: serde_json::Map::new(),
+            bindings: crate::runtime::Bindings::new(),
             since,
             until,
             open: false,

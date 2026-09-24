@@ -120,9 +120,82 @@ device, show an effect —
 **Send a test signal**, in Settings, tries a rule before any sender exists; the
 list above it shows what arrived, and when each value expires.
 
+## Driving a setting with it
+
+A rule decides *which* effect runs. A signal can also drive **one setting of the
+effect already running**: in the gallery, a setting's **Signal** switch makes it
+read a signal instead of its value — *Fixed gradient*, its colour from `status`;
+*Ripples*, its speed from `volume`. A rule's settings bind the same way.
+
+What the sender sends is converted to the setting's kind:
+
+| Setting | Accepted |
+|---|---|
+| colour | `#rrggbb` or `#rgb`, the `#` optional |
+| number | a number or its text, kept within the setting's range |
+| on/off | `true`, `false`, `1`, `0` |
+| choice | one of the choices, by its value |
+
+Anything else — and a signal absent or expired — leaves the setting's own value,
+which is what the effect shows meanwhile. So a sender computing a colour sends
+`{"status": "#ff0000"}` and the colour follows; a word like `failed` is for a
+rule.
+
+## Reading signals in an effect you write
+
+An effect declaring `inputs: ['signals']` receives every value held, by name, in
+`ctx.signals` — for an effect drawing many at once. It then works only with
+senders using those exact names; binding a setting, above, works with any effect.
+
+*Status row*, shipped with Candeo, is one: a key of the top row per signal, by
+name. Another, to copy into your effects folder as `Meters.ts` — each number
+received drawn as a bar, one row per signal:
+
+```ts
+import { defineEffect, mix, BLACK } from '@candeo/effects-api'
+
+const LOW = { r: 32, g: 200, b: 64 }
+const HIGH = { r: 235, g: 24, b: 24 }
+
+export default defineEffect({
+  description: 'Each number received as a bar, one row per signal',
+  inputs: ['signals'],
+  params: {
+    unlit: { kind: 'number', label: 'Unlit part (%)', min: 0, max: 100, default: 8 },
+  },
+  render({ layout, signals, frame, params }) {
+    // Numbers only, by name: `cpu`, `ram`, `volume`… each on its own row, top down.
+    const levels = Object.keys(signals)
+      .sort()
+      .flatMap((name) => {
+        const value = signals[name]
+        return typeof value === 'number' ? [value <= 1 ? value : value / 100] : []
+      })
+    const rows = [...new Set(layout.keys.map((key) => key.row))].sort((a, b) => a - b)
+
+    levels.forEach((level, i) => {
+      const row = rows[i]
+      if (row === undefined) return
+      const keys = layout.keys.filter((key) => key.row === row).sort((a, b) => a.col - b.col)
+      keys.forEach((key, k) => {
+        const at = (k + 1) / keys.length
+        const colour = mix(LOW, HIGH, at)
+        frame.set(key, at <= level ? colour : mix(BLACK, colour, params.unlit / 100))
+      })
+    })
+  },
+})
+```
+
+Fed by a watcher sending, every few seconds:
+
+```bash
+curl -H "Authorization: Bearer $CANDEO_TOKEN" -H "Content-Type: application/json"   -d '{"cpu":0.42,"ram":61}' http://127.0.0.1:7317/signals
+```
+
 ## What the token protects
 
-Whoever holds the token can set values, and nothing else: not choose a device, an
-effect or a colour, not read the settings. A rule decides what a value lights, and
-rules are only written in Candeo. Keep the token out of shared scripts all the
+Whoever holds the token can set values, and nothing else: not choose a device or
+an effect, not read the settings. What a value changes — a rule, or a setting
+bound to it — is only decided in Candeo. Keep the token out of shared scripts all the
 same — an environment variable, a secret store — and make a new one if it leaks.

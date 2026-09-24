@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — signals</title>
+    <meta
+      name="description"
+      content="Other programs tell Candeo what happened — a build that failed, the doorbell, a call — through a local HTTP API, and you decide what it lights: a rule, a setting that follows it, or an effect that reads them all."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Signals</h1>
+      <p class="lead">
+        Other programs tell Candeo what happened — a build that failed, the doorbell, a call
+        starting — and you decide what it lights. The sender never names a device, an effect or a
+        colour: it states a fact, and what that fact changes is decided in Candeo.
+      </p>
+
+      <section>
+        <h2>A signal is a name and a value</h2>
+        <p>
+          <code>build</code> is <code>failed</code>, <code>volume</code> is <code>0.4</code>,
+          <code>muted</code> is <code>true</code>. Names are yours to choose — letters, digits and
+          <code>_ - . :</code> — and values are flat: text, a number, true or false.
+        </p>
+        <p>
+          A value lasts <strong>60 seconds</strong> unless the sender says otherwise, so a script
+          that stops does not leave a keyboard lit for the rest of the day. A state sent once — a
+          build that stays broken — is sent with no lifetime, and lasts until it changes or is
+          erased. Values are kept in memory only: never written to disk, never written to the log.
+        </p>
+      </section>
+
+      <section>
+        <h2>Turning it on</h2>
+        <p>
+          In <strong>Settings › Signals</strong>, turn on <em>Receive signals from other
+          software</em>. Candeo then listens on this computer, at
+          <code>http://127.0.0.1:7317/signals</code>, and shows the token every request carries —
+          <strong>Copy</strong> it into your script; <strong>New token</strong> refuses every sender
+          still holding the old one.
+        </p>
+        <p>
+          For another machine — Home Assistant, most often — tick the network interface it reaches
+          this computer through: <em>Wi-Fi</em>, <em>Ethernet</em>. Windows asks once whether to
+          let Candeo through its firewall; allow it on private networks only. The port is 7317,
+          and can be changed there.
+        </p>
+      </section>
+
+      <section>
+        <h2>Sending one</h2>
+        <p>PowerShell, at the end of a build script:</p>
+        <pre>$headers = @{ Authorization = "Bearer $env:CANDEO_TOKEN" }
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
+  -Headers $headers -ContentType "application/json" -Body '{"build":"failed"}'</pre>
+        <p><code>curl</code>, which Windows 10 and later ship, and every Linux:</p>
+        <pre>curl -H "Authorization: Bearer $CANDEO_TOKEN" -H "Content-Type: application/json" \
+  -d '{"build":"ok","tests":"running"}' http://127.0.0.1:7317/signals</pre>
+        <p>
+          The answer says what was taken and when it expires — <code>?ttl=</code> sets the lifetime
+          in seconds, <code>0</code> for none, and an empty string erases a name. A request is taken
+          whole or not at all, and a refused one says why. Settings lists the signals held, with
+          their time left, and <strong>Send a test signal</strong> tries a rule before any sender
+          exists.
+        </p>
+      </section>
+
+      <section>
+        <h2>Which to use</h2>
+        <p>
+          A signal can <strong>change which effect runs</strong> — a rule, in the Automations tab —
+          or <strong>set a value of the effect already running</strong> — a setting following it,
+          in the gallery. The first takes the device over for a while and gives it back; the second
+          never changes the effect, only one of its settings.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>You want</th>
+                <th>Use</th>
+                <th>Where</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>the keyboard red while the build is broken, then your effect back</td>
+                <td>a rule, while it holds</td>
+                <td>Automations</td>
+              </tr>
+              <tr>
+                <td>a flash when the doorbell rings</td>
+                <td>a rule, for a few seconds</td>
+                <td>Automations</td>
+              </tr>
+              <tr>
+                <td>your gradient's colour, or an effect's speed, set by a script</td>
+                <td>a setting following the signal</td>
+                <td>the gallery</td>
+              </tr>
+              <tr>
+                <td>several signals on the keyboard at once</td>
+                <td>Status row, or an effect reading them</td>
+                <td>the gallery</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A word someone chose — <code>failed</code>, <code>ring</code> — is for a rule, which
+          decides what it means. A value the sender computed — a colour, a level — is for a setting.
+        </p>
+      </section>
+
+      <section>
+        <h2>Three ways to use it</h2>
+
+        <h3>A rule waits for it</h3>
+        <blockquote class="sentence">
+          When build is failed · on Alienware m18 R1 · show Fixed gradient · while it holds
+        </blockquote>
+        <p>
+          <strong>While it holds</strong> suits a state: the rule lasts from the moment the value
+          arrives until it changes, expires or is erased. <strong>For 5 seconds</strong> suits an
+          event: a flash at each receipt, so a doorbell rung again flashes again. Rules keep their
+          priority and their <em>Try</em> — see <a href="automations.html">automations</a>.
+        </p>
+
+        <h3>A setting follows it</h3>
+        <p>
+          In the gallery, any setting of any effect — a colour, a speed, a choice — has a
+          <strong>Value | Signal</strong> switch. On <em>Signal</em>, it takes the value sent under
+          the name you type, at every frame, and keeps its own while nothing arrives. The effect
+          needs no code for it: every effect that ships with Candeo, and every one you write,
+          follows a signal this way. A rule's settings bind the same way.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Takes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Colour</td>
+                <td><code>#rrggbb</code> or <code>#rgb</code>, the <code>#</code> optional</td>
+              </tr>
+              <tr>
+                <td>Number</td>
+                <td>a number or its text, kept within the setting's range</td>
+              </tr>
+              <tr>
+                <td>On / off</td>
+                <td><code>true</code>, <code>false</code>, <code>1</code>, <code>0</code></td>
+              </tr>
+              <tr>
+                <td>Choice</td>
+                <td>one of its choices</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Anything else leaves the setting as it was. So a script computing a colour sends
+          <code>{"status": "#ff0000"}</code> and the colour follows; a word like <code>failed</code>
+          is for a rule. The effects the device's firmware runs are the exception: their colour is
+          written into the device once, not drawn frame by frame, and they have no switch.
+        </p>
+
+        <h3>An effect reads them all</h3>
+        <p>
+          <strong>Status row</strong>, shipped with Candeo, gives each signal a key of the top row,
+          in the order of their names, green, amber or red by what it says — <code>ok</code>,
+          <code>running</code>, <code>failed</code> — and a number as a level. An effect you write
+          does the same by declaring <code>inputs: ['signals']</code>; the
+          <a href="{{repository}}/blob/main/docs/api/signals.md#reading-signals-in-an-effect-you-write"
+            >signals documentation</a
+          >
+          has one to copy, drawing each number received as a bar.
+        </p>
+      </section>
+
+      <section>
+        <h2>Naming: facts, not devices</h2>
+        <p>
+          The sender only knows the names you chose. The link between a name and a device is made in
+          Candeo, when you bind a setting on that device or write a rule for it.
+        </p>
+        <ul>
+          <li>
+            Name <strong>the fact</strong> — <code>build</code>, <code>meeting</code>,
+            <code>doorbell</code> — and decide in Candeo which device shows what. Change keyboards,
+            and the script does not move.
+          </li>
+          <li>
+            <strong>The same name on two devices</strong> changes both with one request: every
+            keyboard shows the build.
+          </li>
+          <li>
+            <strong>A name each</strong> — <code>desk.colour</code>, <code>laptop.colour</code> — for
+            a script that drives each keyboard's colour on its own.
+          </li>
+        </ul>
+        <p>
+          <strong>Settings › Signals</strong> shows, under each name, what it drives — a setting on
+          a device, a rule — and lists the names something waits for that have not arrived.
+        </p>
+      </section>
+
+      <section>
+        <h2>Home Assistant</h2>
+        <p>
+          Once the interface is ticked, a <code>rest_command</code> in
+          <code>configuration.yaml</code>, with the address of the computer running Candeo:
+        </p>
+        <pre>rest_command:
+  candeo_signal:
+    url: "http://192.0.2.23:7317/signals"
+    method: post
+    headers:
+      Authorization: !secret candeo_bearer
+    content_type: "application/json"
+    payload: '{"{{ name }}": "{{ value }}"}'</pre>
+        <p>
+          with <code>candeo_bearer: "Bearer &lt;token&gt;"</code> in <code>secrets.yaml</code>, and
+          an automation calling it:
+        </p>
+        <pre>action:
+  - action: rest_command.candeo_signal
+    data:
+      name: doorbell
+      value: ring</pre>
+      </section>
+
+      <section>
+        <h2>What the token protects</h2>
+        <p>
+          Signals are off until you turn them on. Every request carries the token, this computer's
+          own included, and a request coming from a web page is refused: a page can reach any port
+          of this computer, and the token is what it does not have. Whoever holds it can set
+          values, and nothing else — not choose a device or an effect, not read your settings. Keep
+          it out of shared scripts all the same, and make a new one if it leaks. The rest is in the
+          <a href="privacy.html">privacy policy</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Further</h2>
+        <p>
+          The request in full — every answer and every bound — is in
+          <a href="{{repository}}/blob/main/docs/api/signals.md">docs/api/signals.md</a>, and the
+          reasons behind these choices in
+          <a href="{{repository}}/blob/main/docs/design/inputs-and-automations.md"
+            >docs/design/inputs-and-automations.md</a
+          >.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>

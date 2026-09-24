@@ -89,6 +89,10 @@ pub mod swatch;
 
 use presses::Presses;
 
+/// Parameters bound to a live value, by parameter: `{"colour": "signal:status"}`
+/// (`docs/design/inputs-and-automations.md` §2.3.1).
+pub type Bindings = std::collections::BTreeMap<String, String>;
+
 /// The module the host provides, and that the editor describes through its
 /// `.d.ts`.
 const API_JS: &str = include_str!("api.js");
@@ -265,9 +269,12 @@ struct Shared {
     /// Name of the running effect, so that the interface knows what to
     /// highlight after the window restarts.
     effect_id: Mutex<Option<String>>,
-    /// The effect reads key presses: its error text stays out of the log and
-    /// the diagnostic. See [`loggable`].
-    reads_keys: AtomicBool,
+    /// The effect reads key presses or signals: its error text stays out of the
+    /// log and the diagnostic. See [`loggable`].
+    reads_private: AtomicBool,
+    /// Parameters bound to a signal, by parameter: `{"colour": "signal:status"}`.
+    /// Re-read on every frame, like `params`.
+    bindings: Mutex<Bindings>,
 }
 
 impl Default for Shared {
@@ -282,7 +289,8 @@ impl Default for Shared {
             reaching: AtomicBool::new(false),
             device_failures: AtomicU32::new(0),
             effect_id: Mutex::new(None),
-            reads_keys: AtomicBool::new(false),
+            reads_private: AtomicBool::new(false),
+            bindings: Mutex::new(Bindings::new()),
         }
     }
 }
@@ -293,9 +301,9 @@ impl Default for Shared {
 /// presses into it; nothing about key presses reaches the log or the diagnostic
 /// (`docs/design/key-input.md` §3, #44). Its text is left out there; the window,
 /// which is local, still shows it.
-pub(crate) fn loggable(error: &str, reads_keys: bool) -> &str {
-    if reads_keys {
-        "(text not logged: the effect reads key presses)"
+pub(crate) fn loggable(error: &str, private: bool) -> &str {
+    if private {
+        "(text not logged: the effect reads key presses or signals)"
     } else {
         error
     }
@@ -316,7 +324,7 @@ pub struct EngineStatus {
     pub to_keyboard: bool,
     /// For the diagnostic: see [`loggable`].
     #[serde(skip)]
-    pub reads_keys: bool,
+    pub reads_private: bool,
     /// The rule interrupting this device, if one does (#106). Set from the
     /// automations when the status is reported, never by the engine, which
     /// knows nothing of rules.
@@ -370,7 +378,7 @@ pub struct PreviewStatus {
     pub error: Option<String>,
     /// For the diagnostic: see [`loggable`].
     #[serde(skip)]
-    pub reads_keys: bool,
+    pub reads_private: bool,
 }
 
 /// Everything the engine knows, **arranged so that nothing gets confused**.
@@ -504,6 +512,9 @@ pub struct Engine {
     preview_layout: Mutex<Option<DeviceRef>>,
     /// Key presses, read only while a loop runs an effect declaring them.
     presses: Arc<Presses>,
+    /// The signals held, shared with [`crate::signals`]: a loop reads the values
+    /// bound to its parameters on every frame.
+    signals: crate::signals::SharedStore,
 }
 
 /// The loop of **one** device.
@@ -544,7 +555,7 @@ impl DeviceLoop {
                 device_error: s.device_error.lock().unwrap().clone(),
                 reaching_keyboard: s.reaching.load(Ordering::Relaxed),
                 to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
-                reads_keys: s.reads_keys.load(Ordering::Relaxed),
+                reads_private: s.reads_private.load(Ordering::Relaxed),
                 // The engine knows nothing of rules: see [`engine_status`].
                 interruption: None,
             },
@@ -591,9 +602,10 @@ impl DeviceLoop {
         effect_id: String,
         js: String,
         params: String,
+        bindings: Bindings,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
-        presses: Arc<Presses>,
+        inputs: Inputs,
     ) -> Result<(), String> {
         // Held from start to finish: this lock is what forbids two loops from
         // overlapping on this device. It is taken only here and in
@@ -609,6 +621,7 @@ impl DeviceLoop {
 
         let shared = Arc::new(Shared::default());
         *shared.params.lock().unwrap() = params;
+        *shared.bindings.lock().unwrap() = bindings;
         *shared.effect_id.lock().unwrap() = Some(effect_id.clone());
         // The simulator listens to a target, not to an effect: whoever subscribed
         // keeps the frames when another effect starts there. An automation
@@ -637,7 +650,7 @@ impl DeviceLoop {
                     js,
                     layout,
                     out,
-                    presses,
+                    inputs,
                     ready_tx,
                 )
             })
@@ -760,7 +773,7 @@ impl Engine {
             running: !s.stop.load(Ordering::Relaxed),
             effect_id: s.effect_id.lock().unwrap().clone(),
             error: s.error.lock().unwrap().clone(),
-            reads_keys: s.reads_keys.load(Ordering::Relaxed),
+            reads_private: s.reads_private.load(Ordering::Relaxed),
         };
         Some(status)
     }
@@ -818,6 +831,7 @@ impl Engine {
         effect_id: String,
         js: String,
         params: String,
+        bindings: Bindings,
         layout: &'static Layout,
     ) -> Result<(), String> {
         // Written **before** the start: if the start fails, the loop is empty
@@ -829,9 +843,10 @@ impl Engine {
             effect_id,
             js,
             params,
+            bindings,
             layout,
             Box::new(NoOutput),
-            Arc::clone(&self.presses),
+            self.inputs(),
         )
     }
 
@@ -848,6 +863,12 @@ impl Engine {
     pub fn set_preview_params(&self, params: String) {
         if let Some(s) = self.preview.current() {
             *s.params.lock().unwrap() = params;
+        }
+    }
+
+    pub fn set_preview_bindings(&self, bindings: Bindings) {
+        if let Some(s) = self.preview.current() {
+            *s.bindings.lock().unwrap() = bindings;
         }
     }
 
@@ -920,6 +941,24 @@ impl Engine {
         }
     }
 
+    pub fn set_bindings(&self, device: DeviceRef, bindings: Bindings) {
+        if let Some(s) = self.shared(device) {
+            *s.bindings.lock().unwrap() = bindings;
+        }
+    }
+
+    /// The signal store the loops read, for [`crate::signals`] to hold.
+    pub fn signals(&self) -> crate::signals::SharedStore {
+        Arc::clone(&self.signals)
+    }
+
+    fn inputs(&self) -> Inputs {
+        Inputs {
+            presses: Arc::clone(&self.presses),
+            signals: Arc::clone(&self.signals),
+        }
+    }
+
     pub fn set_to_keyboard(&self, device: DeviceRef, on: bool) {
         if let Some(s) = self.shared(device) {
             s.to_keyboard.store(on, Ordering::Relaxed);
@@ -936,12 +975,14 @@ impl Engine {
     ///
     /// The other devices are not touched — not their loop, not their frame
     /// rate, not their error state.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &self,
         device: DeviceRef,
         effect_id: String,
         js: String,
         params: String,
+        bindings: Bindings,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
     ) -> Result<(), String> {
@@ -950,9 +991,10 @@ impl Engine {
             effect_id,
             js,
             params,
+            bindings,
             layout,
             out,
-            Arc::clone(&self.presses),
+            self.inputs(),
         )
     }
 }
@@ -972,9 +1014,10 @@ fn render_loop(
     js: String,
     layout: &'static Layout,
     out: Box<dyn DeviceOut>,
-    presses: Arc<Presses>,
+    inputs: Inputs,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
+    let Inputs { presses, signals } = inputs;
     // **The span, and it is the reason `tracing` was chosen.** There is one
     // loop per device: "write refused" is useless without knowing which one.
     // Opened here, it carries the device and the effect until the thread ends,
@@ -1031,7 +1074,13 @@ fn render_loop(
     let reads_keys = ctx
         .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_keys"))
         .unwrap_or(false);
-    shared.reads_keys.store(reads_keys, Ordering::Relaxed);
+    // The bag of signals, for an effect declaring it (§2.3.1). Bound values
+    // need no declaration: they reach any effect through its parameters.
+    let reads_signals = ctx
+        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_signals"))
+        .unwrap_or(false);
+    let reads_private = reads_keys || reads_signals;
+    shared.reads_private.store(reads_private, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
     let keyboard = match target {
         Target::Device(d) => Some((d.vid, d.pid)),
@@ -1045,6 +1094,18 @@ fn render_loop(
 
     while !shared.stop.load(Ordering::Relaxed) {
         let params = shared.params.lock().unwrap().clone();
+        let bindings = shared.bindings.lock().unwrap().clone();
+        let clock_ms = wall_clock_ms();
+        // The store is touched only when something reads it: most effects bind
+        // nothing and declare nothing.
+        let (bound, held) = if bindings.is_empty() && !reads_signals {
+            (String::new(), String::new())
+        } else {
+            signals
+                .lock()
+                .unwrap()
+                .frame_inputs(&bindings, reads_signals, clock_ms as i64)
+        };
         let now = Instant::now();
         let time = now.duration_since(started).as_secs_f64();
         let pressed = match &keys {
@@ -1059,13 +1120,17 @@ fn render_loop(
         // for all on the `Runtime`.
         budget.grant(FRAME_BUDGET);
 
-        match render_with_inputs(
+        match render_with(
             &ctx,
             time,
             frame_index,
-            &params,
-            &pressed,
-            wall_clock_ms(),
+            &FrameInputs {
+                params: &params,
+                presses: &pressed,
+                clock_ms,
+                bound: &bound,
+                signals: &held,
+            },
             frame_len,
         ) {
             Ok(bytes) => {
@@ -1096,14 +1161,14 @@ fn render_loop(
                 let before = shared.error.lock().unwrap().replace(e.clone());
                 if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
                 {
-                    tracing::warn!("effect started failing: {}", loggable(&e, reads_keys));
+                    tracing::warn!("effect started failing: {}", loggable(&e, reads_private));
                 }
                 if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                     tracing::error!(
                         failures = MAX_CONSECUTIVE_ERRORS,
                         "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
                          backlight turned off: {}",
-                        loggable(&e, reads_keys)
+                        loggable(&e, reads_private)
                     );
                     shared.stop.store(true, Ordering::Relaxed);
                     // A frozen last frame reads as an effect still running; off
@@ -1338,6 +1403,48 @@ fn render_with_inputs(
     clock_ms: f64,
     frame_len: usize,
 ) -> Result<Vec<u8>, String> {
+    render_with(
+        ctx,
+        time,
+        frame_index,
+        &FrameInputs {
+            params,
+            presses,
+            clock_ms,
+            bound: "",
+            signals: "",
+        },
+        frame_len,
+    )
+}
+
+/// What one frame hands the effect besides the time, each as the bootstrap
+/// reads it: JSON, or an empty string for none.
+struct FrameInputs<'a> {
+    params: &'a str,
+    presses: &'a str,
+    clock_ms: f64,
+    /// Raw values bound to parameters, by parameter: converted by the bootstrap
+    /// against each parameter's spec.
+    bound: &'a str,
+    /// Every signal held, for an effect declaring the `signals` input.
+    signals: &'a str,
+}
+
+/// What a loop reads besides its parameters: key presses and signals, shared
+/// with the rest of the application.
+struct Inputs {
+    presses: Arc<Presses>,
+    signals: crate::signals::SharedStore,
+}
+
+fn render_with(
+    ctx: &Context,
+    time: f64,
+    frame_index: u32,
+    inputs: &FrameInputs,
+    frame_len: usize,
+) -> Result<Vec<u8>, String> {
     ctx.with(|ctx| {
         let render: Function = ctx
             .globals()
@@ -1345,7 +1452,15 @@ fn render_with_inputs(
             .map_err(|_| "the render function is gone from the context".to_string())?;
 
         let out: Vec<u8> = render
-            .call((time, frame_index, params, presses, clock_ms))
+            .call((
+                time,
+                frame_index,
+                inputs.params,
+                inputs.presses,
+                inputs.clock_ms,
+                inputs.bound,
+                inputs.signals,
+            ))
             .catch(&ctx)
             .map_err(|e| format!("{e}"))?;
 
@@ -1581,8 +1696,10 @@ pub fn start_effect(
     device: DeviceRef,
     id: String,
     params: serde_json::Value,
+    bindings: Option<Bindings>,
 ) -> CmdResult<()> {
-    run_effect(&app, device, &id, &params)?;
+    let bindings = checked_bindings(bindings.unwrap_or_default())?;
+    run_effect(&app, device, &id, &params, bindings)?;
     // A gesture always wins over a rule: an effect applied during an
     // interruption ends it, and becomes the one the device goes back to.
     crate::automations::dismiss(&app, device);
@@ -1604,6 +1721,7 @@ pub(crate) fn run_effect(
     device: DeviceRef,
     id: &str,
     params: &serde_json::Value,
+    bindings: Bindings,
 ) -> CmdResult<()> {
     let layout = crate::find_layout(device)?;
     let js = crate::storage::store(app)?.effect_js(&crate::storage::EffectKey::parse(id)?)?;
@@ -1615,7 +1733,7 @@ pub(crate) fn run_effect(
     let out = Box::new(state.handle(device));
     state
         .engine
-        .start(device, id.to_owned(), js, params, layout, out)
+        .start(device, id.to_owned(), js, params, bindings, layout, out)
         .map_err(|error| not_started(id, error))
 }
 
@@ -1626,6 +1744,7 @@ pub(crate) fn run_with(
     device: DeviceRef,
     effect: &str,
     stored: Option<&serde_json::Map<String, serde_json::Value>>,
+    bindings: Bindings,
 ) -> CmdResult<()> {
     let entry = crate::storage::store(app)?
         .list_effects()?
@@ -1633,7 +1752,13 @@ pub(crate) fn run_with(
         .find(|e| e.id == effect)
         .ok_or_else(|| Failure::new("effectNotFound").with("name", effect))?;
     let params = crate::storage::starting_params(&entry.manifest, stored);
-    run_effect(app, device, effect, &serde_json::Value::Object(params))
+    run_effect(
+        app,
+        device,
+        effect,
+        &serde_json::Value::Object(params),
+        bindings,
+    )
 }
 
 /// Starts `effect` on `device` with the settings saved for it on that device.
@@ -1647,6 +1772,7 @@ pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> C
         device,
         effect,
         settings.effect_params(device.vid, device.pid, effect),
+        settings.effect_bindings(device.vid, device.pid, effect),
     )?;
     remember_active_effect(app, device, Some(effect));
     Ok(())
@@ -1787,7 +1913,9 @@ pub fn start_preview(
     device: Option<DeviceRef>,
     id: String,
     params: serde_json::Value,
+    bindings: Option<Bindings>,
 ) -> CmdResult<()> {
+    let bindings = checked_bindings(bindings.unwrap_or_default())?;
     let layout = match device {
         Some(d) => crate::find_layout(d)?,
         None => crate::default_layout(),
@@ -1797,7 +1925,14 @@ pub fn start_preview(
 
     state
         .engine
-        .start_preview(DeviceRef::of(layout), id.clone(), js, params, layout)
+        .start_preview(
+            DeviceRef::of(layout),
+            id.clone(),
+            js,
+            params,
+            bindings,
+            layout,
+        )
         .map_err(|error| not_started(&id, error))
 }
 
@@ -1811,6 +1946,16 @@ pub fn stop_preview(state: State<'_, AppState>) {
 #[tauri::command]
 pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
     state.engine.set_preview_params(serialised(&params)?);
+    Ok(())
+}
+
+/// Binds the preview's parameters to signals, live, as
+/// [`set_effect_bindings`] does for a device.
+#[tauri::command]
+pub fn set_preview_bindings(state: State<'_, AppState>, bindings: Bindings) -> CmdResult<()> {
+    state
+        .engine
+        .set_preview_bindings(checked_bindings(bindings)?);
     Ok(())
 }
 
@@ -1839,6 +1984,36 @@ pub fn set_effect_params(
 ) -> CmdResult<()> {
     state.engine.set_params(device, serialised(&params)?);
     Ok(())
+}
+
+/// Binds parameters of the effect running on a device to signals, live: the
+/// loop reads the bound values from the next frame, without restarting.
+/// Remembering them is [`crate::storage::remember_effect_bindings`].
+#[tauri::command]
+pub fn set_effect_bindings(
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    bindings: Bindings,
+) -> CmdResult<()> {
+    state
+        .engine
+        .set_bindings(device, checked_bindings(bindings)?);
+    Ok(())
+}
+
+/// Bindings as the interface or a rule sends them, checked: each source must
+/// name a signal the way `signal:<name>` does. A parameter the effect does not
+/// declare is let through — the bootstrap ignores it, as it ignores a stored
+/// value for a parameter an effect no longer has.
+pub(crate) fn checked_bindings(bindings: Bindings) -> CmdResult<Bindings> {
+    for (param, source) in &bindings {
+        if crate::signals::store::bound_signal(source).is_none() {
+            return Err(Failure::new("bindingInvalid")
+                .with("param", param)
+                .with("source", source));
+        }
+    }
+    Ok(bindings)
 }
 
 /// Turns a device's keyboard output on or off, without touching the simulator.
@@ -2088,6 +2263,7 @@ mod tests {
                 effect_id.into(),
                 EFFECT.into(),
                 "{}".into(),
+                Bindings::new(),
                 layout(),
                 Box::new(out),
             )
@@ -2324,6 +2500,7 @@ mod tests {
                 effect_id.into(),
                 EFFECT.into(),
                 "{}".into(),
+                Bindings::new(),
                 layout(),
             )
             .expect("preview start");
@@ -2692,6 +2869,7 @@ mod tests {
                 "keys".into(),
                 READS_KEYS.into(),
                 "{}".into(),
+                Bindings::new(),
                 layout(),
             )
             .expect("preview start");
@@ -2732,6 +2910,7 @@ mod tests {
                 "onde-radiale".into(),
                 js.to_string(),
                 "{}".into(),
+                Bindings::new(),
                 l,
                 Box::new(Arc::clone(&handle)),
             )
@@ -2960,6 +3139,7 @@ mod tests {
             "borne".into(),
             js.into(),
             "{}".into(),
+            Bindings::new(),
             layout(),
             Box::new(out),
         )
@@ -3083,7 +3263,7 @@ mod tests {
         });
         let error = status(&engine, FIRST).error.unwrap();
         assert!(error.contains("boum"), "message rewritten: {error}");
-        assert!(!status(&engine, FIRST).reads_keys);
+        assert!(!status(&engine, FIRST).reads_private);
 
         engine.stop(FIRST);
     }
@@ -3100,13 +3280,13 @@ mod tests {
             status(&engine, FIRST).error.is_some()
         });
         let s = status(&engine, FIRST);
-        assert!(s.reads_keys);
+        assert!(s.reads_private);
         let error = s.error.unwrap();
         assert!(
             error.contains("A pressed"),
             "the window lost the text: {error}"
         );
-        assert!(!loggable(&error, s.reads_keys).contains("A pressed"));
+        assert!(!loggable(&error, s.reads_private).contains("A pressed"));
         assert_eq!(loggable("boum", false), "boum");
 
         engine.stop(FIRST);
@@ -3360,5 +3540,173 @@ mod tests {
             gap < 60,
             "Space and B are physically close, their colors should be too: {space:?} vs {key_b:?}"
         );
+    }
+}
+
+/// Signals reaching an effect: bound to a parameter, converted by the bootstrap
+/// against its spec, or handed whole to an effect declaring them (§2.3.1).
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+
+    /// Paints its parameters on the first two keys and one signal on the third,
+    /// to read them back out of a frame.
+    const PAINTS_ITS_PARAMETERS: &str = "export default {
+        params: {
+            colour: { kind: 'color', label: 'Colour', default: { r: 1, g: 2, b: 3 } },
+            level: { kind: 'number', label: 'Level', min: 0, max: 100, default: 50 },
+            on: { kind: 'boolean', label: 'On', default: false },
+            mode: { kind: 'choice', label: 'Mode', options: ['a', { value: 'b', label: 'B' }], default: 'a' },
+        },
+        inputs: ['signals'],
+        render({ layout, params, signals, frame }) {
+            frame.set(layout.keys[0], params.colour)
+            frame.set(layout.keys[1], {
+                r: params.level,
+                g: params.on ? 255 : 0,
+                b: params.mode === 'b' ? 255 : 0,
+            })
+            frame.set(layout.keys[2], {
+                r: typeof signals.count === 'number' ? signals.count : 0,
+                g: Object.isFrozen(signals) ? 1 : 0,
+                b: 0,
+            })
+        },
+    }";
+
+    /// The same, declaring nothing.
+    const DECLARES_NOTHING: &str = "export default {
+        render({ layout, signals, frame }) {
+            frame.set(layout.keys[2], { r: Object.keys(signals).length, g: 0, b: 0 })
+        },
+    }";
+
+    const CONFIGURED: &str = r#"{"colour":{"r":1,"g":2,"b":3},"level":50,"on":false,"mode":"a"}"#;
+
+    fn frame_of(js: &str, bound: &str, signals: &str) -> Vec<u8> {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(js, layout).expect("load");
+        render_with(
+            &ctx,
+            0.0,
+            0,
+            &FrameInputs {
+                params: CONFIGURED,
+                presses: "",
+                clock_ms: 0.0,
+                bound,
+                signals,
+            },
+            layout.led_count(),
+        )
+        .expect("render")
+    }
+
+    fn frame(bound: &str, signals: &str) -> Vec<u8> {
+        frame_of(PAINTS_ITS_PARAMETERS, bound, signals)
+    }
+
+    fn key(frame: &[u8], i: usize) -> [u8; 3] {
+        let at = usize::from(crate::default_layout().keys[i].index) * 3;
+        [frame[at], frame[at + 1], frame[at + 2]]
+    }
+
+    #[test]
+    fn without_a_binding_the_effect_draws_its_configured_values() {
+        let drawn = frame("", "");
+        assert_eq!(key(&drawn, 0), [1, 2, 3]);
+        assert_eq!(key(&drawn, 1), [50, 0, 0]);
+    }
+
+    #[test]
+    fn a_bound_colour_replaces_the_configured_one() {
+        assert_eq!(
+            key(&frame(r##"{"colour":"#ff8000"}"##, ""), 0),
+            [255, 128, 0]
+        );
+        assert_eq!(
+            key(&frame(r#"{"colour":"0f0"}"#, ""), 0),
+            [0, 255, 0],
+            "#rgb, # optional"
+        );
+    }
+
+    #[test]
+    fn a_bound_number_is_clamped_and_text_reads_as_sent() {
+        let drawn = frame(r#"{"level":"250","on":"true","mode":"b"}"#, "");
+        assert_eq!(key(&drawn, 1), [100, 255, 255]);
+        let drawn = frame(r#"{"level":-4,"on":1}"#, "");
+        assert_eq!(key(&drawn, 1), [0, 255, 0]);
+    }
+
+    #[test]
+    fn a_bound_value_that_does_not_fit_leaves_the_configured_one() {
+        let drawn = frame(
+            r#"{"colour":"red","level":"loud","on":"maybe","mode":"c","unknown":1}"#,
+            "",
+        );
+        assert_eq!(key(&drawn, 0), [1, 2, 3]);
+        assert_eq!(key(&drawn, 1), [50, 0, 0]);
+    }
+
+    #[test]
+    fn an_effect_declaring_signals_is_handed_them_frozen() {
+        assert_eq!(key(&frame("", r#"{"count":7}"#), 2), [7, 1, 0]);
+        assert_eq!(
+            key(&frame("", ""), 2),
+            [0, 1, 0],
+            "an empty bag, frozen too"
+        );
+    }
+
+    /// The shipped dashboard: one key of the top row per signal, in the order of
+    /// their names, coloured by what each says.
+    #[test]
+    fn status_row_lights_one_key_per_signal_in_name_order() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Status row"), layout).expect("load");
+        // The top row as effects see it: the matrix's first line, keys only.
+        let keyed: std::collections::HashSet<u16> = layout.keys.iter().map(|k| k.index).collect();
+        let row: Vec<u16> = layout.matrix[..usize::from(layout.cols)]
+            .iter()
+            .copied()
+            .filter(|index| keyed.contains(index))
+            .collect();
+        let at = |frame: &[u8], index: u16| {
+            let i = usize::from(index) * 3;
+            [frame[i], frame[i + 1], frame[i + 2]]
+        };
+
+        let frame = render_with(
+            &ctx,
+            0.25,
+            0,
+            &FrameInputs {
+                params: "{}",
+                presses: "",
+                clock_ms: 0.0,
+                bound: "",
+                signals: r#"{"tests":"running","build":"failed","deploy":"ok","cpu":1}"#,
+            },
+            layout.led_count(),
+        )
+        .expect("render");
+
+        // build, cpu, deploy, tests: alphabetical, whatever order they came in.
+        assert_eq!(at(&frame, row[0]), [235, 24, 24], "build failed: red");
+        assert_eq!(at(&frame, row[1]), [235, 24, 24], "cpu at its worst: red");
+        assert_eq!(at(&frame, row[2]), [32, 200, 64], "deploy ok: green");
+        let tests = at(&frame, row[3]);
+        assert!(
+            tests[0] > 200 && tests[2] == 0,
+            "tests running: amber, {tests:?}"
+        );
+        assert_eq!(at(&frame, row[4]), [0, 0, 0], "no fifth signal");
+    }
+
+    #[test]
+    fn an_effect_declaring_nothing_is_handed_no_signal() {
+        let drawn = frame_of(DECLARES_NOTHING, "", r#"{"count":7}"#);
+        assert_eq!(key(&drawn, 2), [0, 0, 0]);
     }
 }

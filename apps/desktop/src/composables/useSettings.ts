@@ -44,6 +44,15 @@
  * later version of the effect changes its default. Same economy as the adoption
  * decisions, which only write what departs from the default.
  *
+ * ## Bindings: the same pair, another table
+ *
+ * A parameter can read a signal instead of its value
+ * (`docs/design/inputs-and-automations.md` §2.3.1). Its value stays, and is what
+ * the effect shows while the signal is absent. Bindings go to the same three
+ * places, but a binding changes on a click, not a drag: it is sent and written
+ * at once, with neither pace nor debounce (`set_effect_bindings`,
+ * `set_preview_bindings`, `remember_effect_bindings`).
+ *
  * Module-level state, like `useDevice` and `useEffects`: moving to the editor
  * destroys the view, and settings in flight must not go with it.
  */
@@ -52,9 +61,10 @@ import { computed, readonly, ref } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
-import type { EffectParams } from '../api/candeo'
+import type { Bindings, EffectParams } from '../api/candeo'
 import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
+import { declaredBindings, rebound } from './bindings'
 
 /**
  * Maximum pace of live sends, in milliseconds.
@@ -101,6 +111,13 @@ const DISK_PERIOD = 250
 
 /** What differs from the manifest, per device and per effect. Key `vid:pid/effect`. */
 const remembered = ref<Record<string, EffectParams>>({})
+
+/**
+ * Which parameters read a signal, per device and per effect, same key. An empty
+ * table is kept once someone unbinds, rather than removed: a read landing
+ * before the write must find it (see {@link read}).
+ */
+const bound = ref<Record<string, Bindings>>({})
 
 /**
  * The effect **applied** on each device, as the file remembers it.
@@ -327,15 +344,22 @@ const written = new Map<string, number>()
  */
 const inflight = new Map<string, number>()
 
+/**
+ * Binding writes sent to Rust and not yet confirmed, per pair: the same
+ * protection as {@link inflight}, for the other table. They leave at once, so
+ * there is no pending table to go with it.
+ */
+const bindingsInflight = new Map<string, number>()
+
 /** Records that a write is leaving, and the means to know when it has come back. */
-function takeOff(k: string): void {
-  inflight.set(k, (inflight.get(k) ?? 0) + 1)
+function takeOff(k: string, table = inflight): void {
+  table.set(k, (table.get(k) ?? 0) + 1)
 }
 
-function landed(k: string): void {
-  const remaining = (inflight.get(k) ?? 1) - 1
-  if (remaining > 0) inflight.set(k, remaining)
-  else inflight.delete(k)
+function landed(k: string, table = inflight): void {
+  const remaining = (table.get(k) ?? 1) - 1
+  if (remaining > 0) table.set(k, remaining)
+  else table.delete(k)
 }
 
 /**
@@ -368,6 +392,24 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
       })
   }
   writes.set(k, { timer: window.setTimeout(run, DISK_DELAY), run })
+}
+
+/**
+ * Writes which parameters of an effect read a signal on a device, at once: a
+ * binding changes on a click or a name typed, never thirty times a second.
+ * Counted in flight until Rust answers, for {@link read}.
+ */
+function rememberBindings(device: DeviceRef, effect: string, bindings: Bindings): void {
+  const k = key(device, effect)
+  takeOff(k, bindingsInflight)
+  api
+    .rememberEffectBindings(device, effect, bindings)
+    .catch((e: unknown) => {
+      error.value = message(e)
+    })
+    .finally(() => {
+      landed(k, bindingsInflight)
+    })
 }
 
 /**
@@ -462,6 +504,11 @@ function read(): Promise<void> {
       const onDisk: Record<string, EffectParams> = Object.fromEntries(
         s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
       )
+      const boundOnDisk: Record<string, Bindings> = Object.fromEntries(
+        s.effectParams
+          .filter((r) => r.bindings !== undefined)
+          .map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.bindings as Bindings]),
+      )
 
       // The two other tables are taken as they are: the window does not write
       // them — Rust remembers the applied effect at startup, and the
@@ -492,8 +539,15 @@ function read(): Promise<void> {
         const ours = remembered.value[k]
         if (ours !== undefined) onDisk[k] = ours
       }
+      // Same for a binding whose write has not come back: the file would unbind
+      // what was just bound, or the other way round.
+      for (const k of bindingsInflight.keys()) {
+        const ours = bound.value[k]
+        if (ours !== undefined) boundOnDisk[k] = ours
+      }
 
       remembered.value = onDisk
+      bound.value = boundOnDisk
       loaded = true
     })
     .catch((e: unknown) => {
@@ -561,7 +615,20 @@ export function useSettings() {
   }
 
   /**
-   * True if something is **remembered** for this pair.
+   * The parameters of this effect that read a signal on this device. Without a
+   * device, none: nothing is kept for no device.
+   */
+  function bindingsFor(
+    device: DeviceRef | null,
+    effect: string,
+    specs: Record<string, ParamSpec>,
+  ): Bindings {
+    const kept = device ? bound.value[key(device, effect)] : undefined
+    return declaredBindings(specs, kept ?? {})
+  }
+
+  /**
+   * True if something is **remembered** for this pair: a value, or a binding.
    *
    * Used to say so on screen. It was the real flaw of the persistence shipped
    * by issue #28: the settings held, and nothing hinted at it — you adjust, you
@@ -569,7 +636,11 @@ export function useSettings() {
    */
   function keptFor(device: DeviceRef | null, effect: string): boolean {
     if (!device) return false
-    return Object.keys(remembered.value[key(device, effect)] ?? {}).length > 0
+    const k = key(device, effect)
+    return (
+      Object.keys(remembered.value[k] ?? {}).length > 0 ||
+      Object.keys(bound.value[k] ?? {}).length > 0
+    )
   }
 
   /**
@@ -634,6 +705,44 @@ export function useSettings() {
     hot(PREVIEW, api.setPreviewParams, values)
   }
 
+  /**
+   * Binds **one** parameter to a signal, or gives it its value back when
+   * `source` is `null`: memory, the device's loop, disk.
+   *
+   * To the device only when this effect runs there, for the reason
+   * {@link adjust} gives: another effect's loop would read a binding that is not
+   * its own. Always remembered for the pair.
+   *
+   * Returns every binding of the effect, for the caller to give the preview
+   * ({@link bindPreview}), as {@link adjust} returns the values.
+   */
+  function bind(
+    device: DeviceRef,
+    effect: string,
+    specs: Record<string, ParamSpec>,
+    id: string,
+    source: string | null,
+    applied: boolean,
+  ): Bindings {
+    error.value = null
+    const next = declaredBindings(specs, rebound(bindingsFor(device, effect, specs), id, source))
+    bound.value = { ...bound.value, [key(device, effect)]: next }
+    if (applied) {
+      void api.setEffectBindings(device, next).catch((e: unknown) => {
+        error.value = message(e)
+      })
+    }
+    rememberBindings(device, effect, next)
+    return next
+  }
+
+  /** Gives the **preview** loop its bindings, live. Nothing goes to disk: see {@link adjustPreview}. */
+  function bindPreview(bindings: Bindings): void {
+    void api.setPreviewBindings(bindings).catch((e: unknown) => {
+      error.value = message(e)
+    })
+  }
+
   /** The brightness remembered for this device, or the default. */
   function brightnessOf(device: DeviceRef | null): number {
     if (!device) return api.BRIGHTNESS_DEFAULT
@@ -695,12 +804,16 @@ export function useSettings() {
    * Restores what the effect declares, and **forgets** — the entry disappears
    * from `settings.json` instead of keeping a copy of the defaults there.
    *
+   * The effect declares values and no binding, so every parameter reading a
+   * signal goes back to its value too: restoring half of the settings would
+   * leave a bound colour looking like the default one while it follows a signal.
+   *
    * Writes without waiting: it is a click, not a drag, there is nothing to
    * group.
    *
    * Returns the declared values, for the same reason {@link adjust} returns
    * its own: the preview must come back with them, and only the caller knows
-   * what it is looking at.
+   * what it is looking at. Its bindings are none: {@link bindPreview} with `{}`.
    */
   function forget(
     device: DeviceRef,
@@ -710,13 +823,21 @@ export function useSettings() {
   ): EffectParams {
     error.value = null
     const declared = merge(specs, {})
-    remembered.value = { ...remembered.value, [key(device, effect)]: {} }
+    const k = key(device, effect)
+    remembered.value = { ...remembered.value, [k]: {} }
+    bound.value = { ...bound.value, [k]: {} }
     // Same condition as {@link adjust}, and for the same reason: restoring the
     // values of an effect being previewed has no reason to touch the keyboard,
     // which may be running something else.
-    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), declared)
+    if (applied) {
+      hot(deviceKey(device), (p) => api.setEffectParams(device, p), declared)
+      void api.setEffectBindings(device, {}).catch((e: unknown) => {
+        error.value = message(e)
+      })
+    }
     persist(device, effect, {})
     settleOne(device, effect, true)
+    rememberBindings(device, effect, {})
     return declared
   }
 
@@ -741,6 +862,7 @@ export function useSettings() {
     remembered.value = Object.fromEntries(
       Object.entries(remembered.value).filter(([k]) => others(k)),
     )
+    bound.value = Object.fromEntries(Object.entries(bound.value).filter(([k]) => others(k)))
     // The counterpart of what `Settings::forget_effect` has just done on disk:
     // the identifier no longer designates anything, and leaving it here would
     // make the devices column announce a "remembered" effect that the library
@@ -760,6 +882,7 @@ export function useSettings() {
   function dropAll(): void {
     cancelWrites(() => false)
     remembered.value = {}
+    bound.value = {}
     // The two other tables described a file that has just been reset: keeping
     // them would make the screen say that an effect is still applied and a
     // brightness still remembered, while Rust has turned everything off and
@@ -777,6 +900,9 @@ export function useSettings() {
   const referencedEffects = computed(() => {
     const names = new Set(Object.values(applied.value))
     for (const key of Object.keys(remembered.value)) names.add(key.slice(key.indexOf('/') + 1))
+    for (const [key, bindings] of Object.entries(bound.value)) {
+      if (Object.keys(bindings).length > 0) names.add(key.slice(key.indexOf('/') + 1))
+    }
     return names
   })
 
@@ -790,9 +916,12 @@ export function useSettings() {
     reload,
     referencedEffects,
     valuesFor,
+    bindingsFor,
     keptFor,
     adjust,
     adjustPreview,
+    bind,
+    bindPreview,
     settle,
     forget,
     dropEffect,

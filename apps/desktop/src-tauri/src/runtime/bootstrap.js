@@ -47,6 +47,14 @@ globalThis.__candeo_reads_keys = Array.isArray(effect.inputs) && effect.inputs.i
 // and no `Date` is built for it (`docs/design/inputs-and-automations.md` §2.1).
 const READS_CLOCK = Array.isArray(effect.inputs) && effect.inputs.includes('clock')
 
+// Read by the render loop too: only an effect that declares signals is handed
+// every value held (§2.3.1). Values bound to its parameters need no declaration.
+const READS_SIGNALS = Array.isArray(effect.inputs) && effect.inputs.includes('signals')
+globalThis.__candeo_reads_signals = READS_SIGNALS
+
+// The declared parameters, against which a bound value is converted.
+const SPECS = effect.params ?? {}
+
 // Frozen and shared: an effect that declares no keys receives this one list on
 // every frame, with nothing to allocate or to modify.
 const NO_PRESSES = Object.freeze([])
@@ -62,6 +70,9 @@ const NO_CLOCK = Object.freeze({
   seconds: 0,
   ms: 0,
 })
+
+// Likewise for signals, for an effect that does not declare them.
+const NO_SIGNALS = Object.freeze({})
 
 // Buffer reused from one frame to the next: allocating it 30 times per second
 // would make the garbage collector work for nothing. The rate went down, not
@@ -130,7 +141,71 @@ function clock(clockMs) {
   }
 }
 
-globalThis.__candeo_render = (time, frameIndex, paramsJson, pressesJson, clockMs) => {
+// `signalsJson` is every value held, by name, or empty when the effect does not
+// declare signals.
+function signals(signalsJson) {
+  if (!READS_SIGNALS || !signalsJson) return NO_SIGNALS
+  return Object.freeze(JSON.parse(signalsJson))
+}
+
+// A bound value, raw as a sender sent it, converted against the parameter's
+// spec: `undefined` when it does not fit, and the configured value then stays.
+// Here and not in Rust, which keeps parameter values untyped on purpose — the
+// specs are only here (§2.3.1).
+function converted(spec, raw) {
+  switch (spec?.kind) {
+    case 'number': {
+      const n = typeof raw === 'string' ? (raw.trim() === '' ? NaN : Number(raw)) : raw
+      if (typeof n !== 'number' || !Number.isFinite(n)) return undefined
+      return Math.min(spec.max, Math.max(spec.min, n))
+    }
+    case 'color':
+      return typeof raw === 'string' ? hexColor(raw) : undefined
+    case 'boolean':
+      if (raw === true || raw === 'true' || raw === 1 || raw === '1') return true
+      if (raw === false || raw === 'false' || raw === 0 || raw === '0') return false
+      return undefined
+    case 'choice': {
+      const value = String(raw)
+      const known = spec.options.some((o) => (typeof o === 'string' ? o : o.value) === value)
+      return known ? value : undefined
+    }
+    default:
+      return undefined
+  }
+}
+
+// `#rrggbb` or `#rgb`, the `#` optional: what a sender computing a colour writes.
+function hexColor(text) {
+  const hex = text.trim().replace(/^#/, '')
+  const full = /^[0-9a-f]{3}$/i.test(hex) ? hex.replace(/./g, (c) => c + c) : hex
+  if (!/^[0-9a-f]{6}$/i.test(full)) return undefined
+  const n = parseInt(full, 16)
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
+}
+
+// The configured parameters, with each bound value that converts in its place.
+// Absent, expired or nonsense, a bound value leaves the configured one: nothing
+// goes dark, and the preview and the swatch draw at rest.
+function params(paramsJson, boundJson) {
+  const configured = JSON.parse(paramsJson)
+  if (!boundJson) return configured
+  for (const [name, raw] of Object.entries(JSON.parse(boundJson))) {
+    const value = converted(SPECS[name], raw)
+    if (value !== undefined) configured[name] = value
+  }
+  return configured
+}
+
+globalThis.__candeo_render = (
+  time,
+  frameIndex,
+  paramsJson,
+  pressesJson,
+  clockMs,
+  boundJson,
+  signalsJson,
+) => {
   // Every frame starts again from black: a frame is complete by definition, and
   // an effect that writes only part of the keyboard must not silently inherit
   // what was there before.
@@ -141,9 +216,10 @@ globalThis.__candeo_render = (time, frameIndex, paramsJson, pressesJson, clockMs
     time,
     frameIndex,
     frame,
-    params: JSON.parse(paramsJson),
+    params: params(paramsJson, boundJson),
     presses: presses(pressesJson),
     clock: clock(clockMs),
+    signals: signals(signalsJson),
   })
 
   return buf

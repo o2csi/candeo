@@ -62,7 +62,8 @@ that your automation rules can react to. It is **off** until you turn it on.
   unless the sender says otherwise. They are never written to disk, never
   written to the log, and never sent anywhere.
 - What a sender can do is set such values, and nothing else: it cannot choose a
-  device, an effect or a colour, nor read your settings.
+  device or an effect, nor read your settings. What a value changes is decided
+  by you — a rule that waits for it, or a setting you bound to it.
 
 ## What you send, if you choose to
 
