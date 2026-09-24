@@ -162,7 +162,7 @@
       "signalOf": "Signal lu par {name}",
       "signalHeld": "Reçu en ce moment : « {value} »",
       "signalUnfit": "Reçu en ce moment : « {value} ». Ce réglage ne peut pas le prendre, et garde sa valeur.",
-      "signalAbsent": "Aucun signal reçu sous ce nom : ce réglage garde sa valeur."
+      "signalAbsent": "En attente de « {name} » : ce réglage garde sa valeur jusqu'à ce qu'il arrive."
     },
     "swatchKnown": "Couleurs prélevées en exécutant l'effet",
     "swatchUnknown": "Repère indisponible",

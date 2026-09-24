@@ -43,7 +43,7 @@
  * signal is absent or does not fit.
  */
 
-import { computed, nextTick, reactive, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, useId, watch } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { Bindings, EffectParams, HeldSignal } from '../api/candeo'
 import { bindingState, boundSignal, signalSource, type BindingState } from '../composables/bindings'
@@ -173,10 +173,10 @@ function signalChosen(id: string): boolean {
   return readBy(id) !== null || pending.has(id)
 }
 
-function reads(state: BindingState): string {
+function reads(state: BindingState, name: string): string {
   switch (state.kind) {
     case 'absent':
-      return t('effects.params.signalAbsent')
+      return t('effects.params.signalAbsent', { name })
     case 'fits':
       return t('effects.params.signalHeld', { value: state.value })
     case 'unfit':
@@ -222,7 +222,7 @@ const fields = computed<Field[]>(() =>
       label: localized(spec.label),
       source: signalChosen(id) ? ('signal' as const) : ('value' as const),
       name: drafts[id] ?? signal ?? '',
-      reads: signal === null ? null : reads(bindingState(spec, signal, props.signals)),
+      reads: signal === null ? null : reads(bindingState(spec, signal, props.signals), signal),
       refused: refused.has(id),
     }
     const v = props.values[id] ?? spec.default
@@ -347,9 +347,26 @@ function toSignal(id: string): void {
   void nextTick(() => document.getElementById(`${uid}-${id}-signal`)?.focus())
 }
 
+/**
+ * How long typing pauses before the name is taken. Enter and leaving the field
+ * take it at once; this is for neither: in the first try in the application, a
+ * name typed and left as it was bound nothing, and the setting looked broken.
+ */
+const NAME_PAUSE_MS = 700
+const pauses = new Map<string, ReturnType<typeof setTimeout>>()
+
 function onName(id: string, e: Event) {
   drafts[id] = input(e).value
+  clearTimeout(pauses.get(id))
+  pauses.set(
+    id,
+    setTimeout(() => onNameEnd(id), NAME_PAUSE_MS),
+  )
 }
+
+onBeforeUnmount(() => {
+  for (const pause of pauses.values()) clearTimeout(pause)
+})
 
 /**
  * The name is written: Enter, or leaving the field. A name never received is
@@ -358,6 +375,8 @@ function onName(id: string, e: Event) {
  * reads nothing and the row stays on Signal, waiting for a name.
  */
 function onNameEnd(id: string) {
+  clearTimeout(pauses.get(id))
+  pauses.delete(id)
   const name = (drafts[id] ?? readBy(id) ?? '').trim()
   if (name !== '' && !validSignalName(name)) {
     refused.add(id)
