@@ -1459,8 +1459,9 @@ onBeforeUnmount(() => {
                 titles name them on hover. Applied comes last, so its check
                 stays in one column down the list.
 
-                A keycap for an effect that reads the keys pressed: what it
-                reads is said on screen (`docs/design/key-input.md` §3). Waves,
+                A key pressed down for an effect that reads the keys pressed:
+                what it reads is said on screen (`docs/design/key-input.md`
+                §3). Not strokes around a key, which read as light here. Waves,
                 not the Wi-Fi fan, for a signal: it can come from this computer
                 alone.
               -->
@@ -1474,11 +1475,12 @@ onBeforeUnmount(() => {
                 fill="none"
                 stroke="currentColor"
                 stroke-width="1.4"
+                stroke-linecap="round"
                 stroke-linejoin="round"
               >
                 <title>{{ t('effects.readsKeys') }}</title>
-                <rect x="2" y="2.5" width="12" height="11" rx="2.5" />
-                <rect x="4.5" y="4.5" width="7" height="5" rx="1.2" />
+                <rect x="3" y="8.5" width="10" height="6" rx="1.8" />
+                <path d="M8 1.5v4.5M5.8 3.9L8 6.1l2.2-2.2" />
               </svg>
               <svg
                 v-if="readsSignalHere(c)"
