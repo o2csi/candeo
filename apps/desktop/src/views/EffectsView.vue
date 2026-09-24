@@ -1431,8 +1431,21 @@ onBeforeUnmount(() => {
             >
               <EffectSwatch class="mark" :colors="c.swatch" />
               <span class="fx-name">{{ c.name }}</span>
-              <!-- Waves, not the Wi-Fi fan: a signal can come from this computer
-                   alone. The button's label says it; the title, on hover. -->
+              <span v-if="activeId !== c.id && c.state === 'broken'" class="fx-state broken">
+                {{ t('effects.entryBroken') }}
+              </span>
+              <span v-else-if="activeId !== c.id && c.state === 'stale'" class="fx-state stale">
+                {{ t('effects.entryStale') }}
+              </span>
+              <!--
+                Marks rather than words, so that several fit side by side in a
+                narrow column (#224): the button's label reads them out, their
+                titles name them on hover. Applied comes last, so its check
+                stays in one column down the list.
+
+                Waves, not the Wi-Fi fan: a signal can come from this computer
+                alone.
+              -->
               <svg
                 v-if="readsSignalHere(c)"
                 class="fx-signal"
@@ -1450,13 +1463,22 @@ onBeforeUnmount(() => {
                 <path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6" />
                 <path d="M3 3a7 7 0 0 0 0 10M13 3a7 7 0 0 1 0 10" />
               </svg>
-              <span v-if="activeId === c.id" class="fx-state">{{ t('effects.entryApplied') }}</span>
-              <span v-else-if="c.state === 'broken'" class="fx-state broken">
-                {{ t('effects.entryBroken') }}
-              </span>
-              <span v-else-if="c.state === 'stale'" class="fx-state stale">
-                {{ t('effects.entryStale') }}
-              </span>
+              <svg
+                v-if="activeId === c.id"
+                class="fx-applied"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <title>{{ t('effects.entryApplied') }}</title>
+                <path d="M3.5 8.5l3 3 6-7" />
+              </svg>
             </button>
           </div>
         </template>
@@ -2007,6 +2029,11 @@ onBeforeUnmount(() => {
 .fx-signal {
   flex: none;
   color: var(--text-faint);
+}
+
+.fx-applied {
+  flex: none;
+  color: var(--accent);
 }
 
 /* The swatch is decorative: it already carries `aria-hidden`. Making it
