@@ -5,7 +5,7 @@
 //
 //   node packaging/store/listing.mjs <version>                   what would be sent
 //   node packaging/store/listing.mjs <version> <submission.json> the submission, updated
-//   node packaging/store/listing.mjs --preview                   the release pull request's comment
+//   node packaging/store/listing.mjs --preview [<version>]       the release pull request's comment
 //
 // The submission is what `msstore submission get` prints. The updated one goes to
 // standard output, for `msstore submission update`. Exit code 3 means no line was
@@ -22,6 +22,20 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const NEWS = 'news'
 // Marks the release pull request's comment, so each merge edits it rather than adding one.
 export const PREVIEW_MARKER = '<!-- store-news -->'
+
+// Where a release's full notes are: the Store's *What's new* ends with a link to them.
+const RELEASES = 'https://github.com/o2csi/candeo/releases/tag/'
+
+/**
+ * What frames the lines, by language: the version first, as Windows Terminal,
+ * Files and DevToys start theirs, then where every change is, as Files,
+ * PowerToys and EarTrumpet end theirs. Nobody writes the version by hand, so it
+ * is never the previous one.
+ */
+const FRAME = {
+  en: { version: 'Version {version}', all: 'All changes: {url}' },
+  fr: { version: 'Version {version}', all: 'Tous les changements : {url}' },
+}
 
 // Partner Center's limits, checked here rather than discovered at certification.
 const RELEASE_NOTES_MAX = 1500
@@ -94,9 +108,10 @@ export function parseFragment(text, languages) {
 
 /**
  * Each language's *What's new*: a bullet per fragment, in the order of their
- * file names, which is how an author puts one change first.
+ * file names, which is how an author puts one change first. With `version`,
+ * framed by that version and a link to its release.
  */
-export function whatsNew(fragments, languages) {
+export function whatsNew(fragments, languages, version) {
   const parsed = Object.keys(fragments)
     .sort()
     .map((name) => {
@@ -108,13 +123,21 @@ export function whatsNew(fragments, languages) {
     })
   return Object.fromEntries(
     languages.map((language) => {
-      const notes = parsed.map((lines) => `• ${lines[language]}`).join('\n')
+      const bullets = parsed.map((lines) => `• ${lines[language]}`).join('\n')
+      const notes = version ? framed(bullets, language, version) : bullets
       if (notes.length > RELEASE_NOTES_MAX) {
         throw new Error(`the ${language} What's new holds ${notes.length} characters, the Store takes ${RELEASE_NOTES_MAX}`)
       }
       return [language, notes]
     }),
   )
+}
+
+function framed(bullets, language, version) {
+  const frame = FRAME[language]
+  if (!frame) throw new Error(`no What's new frame for ${language}`)
+  const url = `${RELEASES}v${version}`
+  return [frame.version.replace('{version}', version), bullets, frame.all.replace('{url}', url)].join('\n\n')
 }
 
 /** The release pull request's comment: the *What's new* as the release will send it. */
@@ -224,15 +247,21 @@ export function newsAdded(since, ref = 'HEAD', cwd = HERE) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [version, submissionPath] = process.argv.slice(2)
-  const preview = version === '--preview'
-  if (!preview && !/^\d+\.\d+\.\d+$/.test(version ?? '')) {
-    console.error('usage: node packaging/store/listing.mjs <version> [submission.json] | --preview')
+  const [first, second] = process.argv.slice(2)
+  const preview = first === '--preview'
+  // In a preview, the version the release pull request proposes, when its title
+  // was read: the comment then shows exactly what will be sent.
+  const version = preview ? second : first
+  const submissionPath = preview ? undefined : second
+  const isVersion = /^\d+\.\d+\.\d+$/.test(version ?? '')
+  if (preview ? version !== undefined && !isVersion : !isVersion) {
+    console.error('usage: node packaging/store/listing.mjs <version> [submission.json] | --preview [<version>]')
     process.exit(2)
   }
 
   const listings = readListings()
   const languages = listings.map(languageOf)
+  // A preview counts from the last release; a release, from the one before it.
   const since = previousRelease(preview ? undefined : version)
   const added = newsAdded(since)
   const fragments = Object.fromEntries(added.map((path) => [path, readFileSync(join(HERE, path), 'utf8')]))
@@ -240,7 +269,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (preview) {
     let comment
     try {
-      comment = previewComment(since, added.length > 0 ? whatsNew(fragments, languages) : null)
+      comment = previewComment(since, added.length > 0 ? whatsNew(fragments, languages, version) : null)
     } catch (error) {
       comment = previewComment(since, null, error.message)
     }
@@ -252,7 +281,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`No line added to packaging/store/news/ since ${since}.`)
     process.exit(NO_NEWS)
   }
-  const news = whatsNew(fragments, languages)
+  const news = whatsNew(fragments, languages, version)
   const complete = listings.map((listing) => ({
     ...listing,
     fields: { ...listing.fields, releaseNotes: news[languageOf(listing)] },

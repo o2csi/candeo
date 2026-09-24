@@ -87,7 +87,8 @@ job submits it (#162):
 2. the texts of `packaging/store/listing-*.md` replace those of the draft (short
    description, description, features, search terms), with a *What's new*
    gathered from `packaging/store/news/`: a line per file added since the
-   previous release. The submission goes to certification;
+   previous release, after the version and before a link to its release notes.
+   The submission goes to certification;
 3. with no file added, the draft stays in Partner Center, with a warning on the
    run: write its *What's new* there and submit it by hand.
 
