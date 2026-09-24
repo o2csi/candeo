@@ -2890,6 +2890,21 @@ mod tests {
         assert!(with > without, "seconds on lit {with} keys, off {without}");
     }
 
+    /// Still, the time stays put while it fits: the same keys from one frame to
+    /// the next within a minute, the colon held; scrolling, they move.
+    #[test]
+    fn the_clock_effect_holds_the_time_still_when_asked() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Clock"), layout()).expect("load");
+        let len = layout().led_count();
+        let at = |params: &str, time: f64| {
+            render_with_inputs(&ctx, time, 0, params, "", 1_600_000_007_250.0, len).expect("render")
+        };
+        let still = r#"{"display":"still","blink":false}"#;
+        assert_eq!(at(still, 0.0), at(still, 2.5), "the time does not move");
+        let scrolling = r#"{"blink":false}"#;
+        assert_ne!(at(scrolling, 0.0), at(scrolling, 2.5), "unless it scrolls");
+    }
+
     /// Ripples draws its ring from the pressed key: at the instant of the press,
     /// the key itself takes the ring color; at rest, the background.
     #[test]

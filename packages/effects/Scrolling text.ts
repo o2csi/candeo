@@ -1,4 +1,4 @@
-// Scrolling text — any words across the keyboard, as Clock scrolls the time.
+// Scrolling text — any words across the keyboard, as Clock shows the time.
 //
 // Typed in the settings, or sent by another program: switch *Text* to a signal
 // and the keyboard shows what it says — a build's state, a message, a
@@ -6,12 +6,13 @@
 // over the five top rows, the bottom row dark. Upper case only; what the font
 // cannot draw is a space.
 //
-// Two ways to show it, each tried on a keyboard against the other before
-// shipping (#217):
-// - Scrolling, right to left in physical key units. Each key is lit by how much
-//   of its width the letters cover, not on or off by where its centre falls:
-//   the text glides instead of jumping from key to key across the staggered
-//   rows, and a wide key such as Shift does not light whole for a thin stroke.
+// Three displays, each tried on a keyboard against the others before shipping
+// (#217), and shared with Clock:
+// - Smooth scrolling, right to left in physical key units, each key lit by how
+//   much of its width the letters cover: the text glides instead of jumping
+//   from key to key across the staggered rows, and a wide key such as Shift
+//   does not light whole for a thin stroke.
+// - Sharp scrolling, each key on or off by where its centre falls.
 // - Still: text that fits stays centred; longer text comes a page of whole
 //   words at a time. Still text reads best on a grid this coarse, and a status
 //   sent by a signal is often a word or two.
@@ -45,16 +46,6 @@ function pagesOf(text = '', room = 0) {
   return cached.pages
 }
 
-/** How much of a key's width, in text columns from `left`, the lit pixels of its line cover. */
-function coverage(lines = NOTHING, line = 0, from = 0, to = 1) {
-  const width = lines[0].length
-  let lit = 0
-  for (let column = Math.max(0, Math.floor(from)); column < Math.min(width, Math.ceil(to)); column++) {
-    if (lines[line][column] === '#') lit += Math.min(to, column + 1) - Math.max(from, column)
-  }
-  return lit / (to - from)
-}
-
 export default defineEffect({
   description: {
     en: 'Any text across the keyboard, scrolling or still, typed here or sent by a signal',
@@ -68,10 +59,11 @@ export default defineEffect({
       kind: 'choice',
       label: { en: 'Display', fr: 'Affichage' },
       options: [
-        { value: 'scroll', label: { en: 'Scrolling', fr: 'Défilement' } },
+        { value: 'smooth', label: { en: 'Smooth scrolling', fr: 'Défilement lissé' } },
+        { value: 'sharp', label: { en: 'Sharp scrolling', fr: 'Défilement net' } },
         { value: 'still', label: { en: 'Still, a few words at a time', fr: 'Fixe, mot par mot' } },
       ],
-      default: 'scroll',
+      default: 'smooth',
     },
     color: { kind: 'color', label: { en: 'Letters', fr: 'Lettres' }, default: COLOR },
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },
@@ -101,11 +93,9 @@ export default defineEffect({
     const text = params.text ?? TEXT
     const area = bounds(layout)
 
-    if (params.display === 'still') {
-      const pages = pagesOf(text, Math.floor(area.w))
-      const lines = pages[Math.floor(time / Number(params.hold ?? 1.5)) % pages.length]
+    // On or off, by the text column each key's centre falls in.
+    const sharp = (lines = NOTHING, left = 0) => {
       const width = lines[0].length
-      const left = area.x + (area.w - width) / 2
       for (const key of layout.keys) {
         // The function row is the text's first line; the bottom row has none.
         const line = key.row
@@ -114,23 +104,40 @@ export default defineEffect({
           line >= 0 && line < 5 && column >= 0 && column < width && lines[line][column] === '#'
         frame.set(key, lit ? color : background)
       }
-      return
+    }
+    // By how much of each key's width, in text columns, the lit pixels cover.
+    const smooth = (lines = NOTHING, left = 0) => {
+      const width = lines[0].length
+      for (const key of layout.keys) {
+        const line = key.row
+        if (line < 0 || line >= 5) {
+          frame.set(key, background)
+          continue
+        }
+        const keyWidth = key.w ?? 1
+        const from = center(key).x - keyWidth / 2 - left
+        const to = from + keyWidth
+        const last = Math.min(width, Math.ceil(to))
+        let lit = 0
+        for (let column = Math.max(0, Math.floor(from)); column < last; column++) {
+          if (lines[line][column] === '#') lit += Math.min(to, column + 1) - Math.max(from, column)
+        }
+        frame.set(key, mix(background, color, lit / keyWidth))
+      }
     }
 
+    const display = params.display ?? 'smooth'
+    if (display === 'still') {
+      const pages = pagesOf(text, Math.floor(area.w))
+      const lines = pages[Math.floor(time / Number(params.hold ?? 1.5)) % pages.length]
+      sharp(lines, area.x + (area.w - lines[0].length) / 2)
+      return
+    }
     // The text comes in past the right edge and leaves past the left one, then
     // comes round again: a lap is the keyboard's width plus the text's own.
     const lines = banner(text)
-    const lap = area.w + lines[0].length
-    const left = area.x + area.w - ((time * Number(params.speed ?? 6)) % lap)
-    for (const key of layout.keys) {
-      const line = key.row
-      if (line < 0 || line >= 5) {
-        frame.set(key, background)
-        continue
-      }
-      const width = key.w ?? 1
-      const from = center(key).x - width / 2 - left
-      frame.set(key, mix(background, color, coverage(lines, line, from, from + width)))
-    }
+    const left = area.x + area.w - ((time * Number(params.speed ?? 6)) % (area.w + lines[0].length))
+    if (display === 'sharp') sharp(lines, left)
+    else smooth(lines, left)
   },
 })
