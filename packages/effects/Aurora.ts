@@ -12,15 +12,14 @@
 // With nothing playing, which is also how the swatch is sampled, the curtains
 // drift slowly and dimly.
 
-import { bounds, center, defineEffect, mix } from '@candeo/effects-api'
+import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 const LOW = { r: 20, g: 255, b: 140 }
 const HIGH = { r: 200, g: 60, b: 255 }
-const BLACK = { r: 0, g: 0, b: 0 }
 /** The lowest bands, below about 180 Hz: where the bass is. */
 const BASS_BANDS = 4
 /** How far a beat throws the curtains, in curtain widths per second. */
-const KICK = 1.4
+const KICK = 2.5
 /** How long a surge takes to die down, in seconds. */
 const SURGE = 0.35
 /** The tempo the pace is set against: 120 beats a minute, half a second apart. */
@@ -64,6 +63,25 @@ function toneOf(bands = [0]) {
   return bands.reduce((sum, b, i) => sum + b * i, 0) / total / (bands.length - 1)
 }
 
+/** A colour's hue, in degrees. */
+function hueOf(c = { r: 0, g: 0, b: 0 }) {
+  const max = Math.max(c.r, c.g, c.b)
+  const d = max - Math.min(c.r, c.g, c.b)
+  if (d === 0) return 0
+  const h = max === c.r ? ((c.g - c.b) / d) % 6 : max === c.g ? (c.b - c.r) / d + 2 : (c.r - c.g) / d + 4
+  return (h * 60 + 360) % 360
+}
+
+/**
+ * Between two hues the short way round the wheel, `t` from 0 to 1. Mixing the
+ * colours themselves passes through grey halfway: green and violet made a dull
+ * blue-grey.
+ */
+function hueBetween(from = 0, to = 0, t = 0) {
+  const turn = ((to - from + 540) % 360) - 180
+  return from + turn * t
+}
+
 /** `from` moved toward `to`, as far as `seconds` of easing allows in `dt`. */
 function ease(from = 0, to = 0, dt = 0, seconds = 1) {
   return from + (to - from) * (1 - Math.exp(-dt / seconds))
@@ -98,7 +116,7 @@ export default defineEffect({
       min: 0,
       max: 0.5,
       step: 0.05,
-      default: 0.1,
+      default: 0.04,
     },
     size: {
       kind: 'number',
@@ -106,15 +124,17 @@ export default defineEffect({
       min: 2,
       max: 12,
       step: 0.5,
-      default: 5,
+      default: 3.5,
     },
   },
   render({ layout, time, audio, frame, params }) {
     if (layout.keys.length === 0) return
     const low = params.low ?? LOW
     const high = params.high ?? HIGH
-    const rest = Number(params.rest ?? 0.1)
-    const size = Math.max(0.5, Number(params.size ?? 5))
+    const rest = Number(params.rest ?? 0.04)
+    const size = Math.max(0.5, Number(params.size ?? 3.5))
+    const lowHue = hueOf(low)
+    const highHue = hueOf(high)
 
     // A time before the last frame is a restart: the preview starts from zero.
     if (time < heard.at) {
@@ -155,14 +175,18 @@ export default defineEffect({
       // Stretched upright, the noise makes curtains; a second, finer one
       // shades their colour.
       const drift = noise(x + heard.flow, y * 0.6, heard.flow * 0.3)
-      const curtain = smooth(Math.min(1, Math.max(0, (drift - 0.3) / 0.5)))
+      const curtain = smooth(Math.min(1, Math.max(0, (drift - 0.4) / 0.35)))
       const shade = noise(x * 0.7 - heard.flow * 0.5, y, 7 + heard.flow * 0.2)
-      const color = mix(low, high, Math.min(1, Math.max(0, heard.tone + (shade - 0.5) * 0.7)))
+      const along = Math.min(1, Math.max(0, heard.tone + (shade - 0.5) * 0.7))
       // The bottom rows swell with the bass.
       const swell = heard.bass * Math.max(0, y - 0.3) * 1.2
       const light =
         rest + (1 - rest) * curtain * (0.2 + 0.8 * heard.level) + swell + 0.35 * heard.sheen * curtain
-      frame.set(key, mix(BLACK, color, Math.min(1, light)))
+      // Squared: a key's LED gives light in proportion to its value, where a
+      // screen darkens low values, so the dark between curtains stays dark on
+      // the keyboard as in the preview.
+      const shown = Math.min(1, light) ** 2
+      frame.set(key, hsv(hueBetween(lowHue, highHue, along), 1, shown))
     }
   },
 })
