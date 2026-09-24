@@ -219,6 +219,12 @@ export interface Audio {
   readonly bands: readonly number[]
   /** True on the frame a beat lands: a sudden jump in the low bands. */
   readonly beat: boolean
+  /**
+   * How strong that jump is now, 0 to 1, against the last moment's: `beat`
+   * starts at 0.5. An effect offering a sensitivity sets its own threshold on
+   * it — lower catches snares and hi-hats, higher only the big hits.
+   */
+  readonly onset: number
 }
 
 /** A key going down. See {@link EffectContext.presses}. */

@@ -44,6 +44,9 @@ pub struct Frame {
     pub peak: f32,
     pub bands: [f32; BANDS],
     pub beat: bool,
+    /// How strong the jump in the low bands is now, against the last moment:
+    /// 0.5 is where `beat` starts, so an effect can set its own threshold.
+    pub onset: f32,
 }
 
 impl Frame {
@@ -54,6 +57,7 @@ impl Frame {
         peak: 0.0,
         bands: [0.0; BANDS],
         beat: false,
+        onset: 0.0,
     };
 
     /// As the bootstrap reads it: numbers rounded to three decimals, which is
@@ -62,11 +66,12 @@ impl Frame {
         let round = |v: f32| (v * 1000.0).round() / 1000.0;
         let bands: Vec<String> = self.bands.iter().map(|b| round(*b).to_string()).collect();
         format!(
-            r#"{{"level":{},"peak":{},"bands":[{}],"beat":{}}}"#,
+            r#"{{"level":{},"peak":{},"bands":[{}],"beat":{},"onset":{}}}"#,
             round(self.level),
             round(self.peak),
             bands.join(","),
-            self.beat
+            self.beat,
+            round(self.onset)
         )
     }
 }
@@ -171,6 +176,20 @@ impl Analyzer {
         self.previous = now;
         let (mean, deviation) = mean_and_deviation(&self.flux);
         self.since_beat += dt;
+        // How many deviations above the usual the jump is, as 0..1 with the
+        // beat's own threshold at half.
+        let lift = if deviation > 1e-6 {
+            (flux - mean) / deviation
+        } else if flux > mean {
+            2.0 * BEAT_SENSITIVITY
+        } else {
+            0.0
+        };
+        let onset = if flux > BEAT_MIN_FLUX {
+            (lift / (2.0 * BEAT_SENSITIVITY)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let beat = flux > BEAT_MIN_FLUX
             && flux > mean + BEAT_SENSITIVITY * deviation
             && self.since_beat >= BEAT_MIN_GAP_S;
@@ -187,6 +206,7 @@ impl Analyzer {
             peak: self.peak,
             bands: self.bands,
             beat,
+            onset,
         }
     }
 }
@@ -348,9 +368,17 @@ mod tests {
             assert!(!a.analyse(&vec![0.0; WINDOW], dt).beat);
         }
         let kick = sine(60.0, 0.8, WINDOW);
-        assert!(a.analyse(&kick, dt).beat, "the kick");
+        let hit = a.analyse(&kick, dt);
+        assert!(hit.beat, "the kick");
+        assert!(
+            hit.onset >= 0.5,
+            "a beat's onset is past half: {}",
+            hit.onset
+        );
         for _ in 0..20 {
-            assert!(!a.analyse(&kick, dt).beat, "held, it is no new beat");
+            let held = a.analyse(&kick, dt);
+            assert!(!held.beat, "held, it is no new beat");
+            assert_eq!(held.onset, 0.0, "and no onset");
         }
     }
 
@@ -363,5 +391,6 @@ mod tests {
         assert_eq!(json["level"], 0.123);
         assert_eq!(json["bands"].as_array().unwrap().len(), BANDS);
         assert_eq!(json["beat"], true);
+        assert_eq!(json["onset"], 0.0);
     }
 }

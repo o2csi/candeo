@@ -86,6 +86,7 @@ const NO_AUDIO = Object.freeze({
   peak: 0,
   bands: Object.freeze(new Array(16).fill(0)),
   beat: false,
+  onset: 0,
 })
 
 // Buffer reused from one frame to the next: allocating it 30 times per second

@@ -2,10 +2,12 @@
 // moved by the sound playing.
 //
 // Value noise stretched upright makes the curtains (`inputs: ['audio']`). The
-// music moves them, on its rhythm: each beat throws them forward and they slow
-// down until the next, so they surge in time with the music; between beats they
-// drift at a pace set by the tempo, measured from the gaps between the last
-// beats, and by the level. The bottom rows swell with the bass, a beat sends a
+// music moves them, on its rhythm: each beat throws them forward and flashes
+// them, and they slow down until the next, so they surge in time with the
+// music; between beats they drift at a pace set by the tempo, measured from the
+// gaps between the last beats, and by the level. What counts as a beat is the
+// effect's own threshold on the onset's strength, so a song whose kicks are
+// soft can still drive it. The bottom rows swell with the bass, a beat sends a
 // sheen over them, and their colour slides from the low colour to the high one
 // as the music sits lower or higher across the bands.
 //
@@ -20,6 +22,8 @@ const HIGH = { r: 200, g: 60, b: 255 }
 const BASS_BANDS = 4
 /** How far a beat throws the curtains, in curtain widths per second. */
 const KICK = 2.5
+/** No two beats closer than this, whatever the sensitivity: 500 a minute. */
+const BEAT_MIN_GAP = 0.12
 /** How long a surge takes to die down, in seconds. */
 const SURGE = 0.35
 /** The tempo the pace is set against: 120 beats a minute, half a second apart. */
@@ -118,6 +122,22 @@ export default defineEffect({
       step: 0.05,
       default: 0.04,
     },
+    speed: {
+      kind: 'number',
+      label: { en: 'Speed', fr: 'Vitesse' },
+      min: 0.25,
+      max: 3,
+      step: 0.05,
+      default: 1,
+    },
+    sensitivity: {
+      kind: 'number',
+      label: { en: 'Beat sensitivity', fr: 'Sensibilité aux temps forts' },
+      min: 0,
+      max: 1,
+      step: 0.05,
+      default: 0.5,
+    },
     size: {
       kind: 'number',
       label: { en: 'Curtain width (keys)', fr: 'Largeur des voiles (touches)' },
@@ -133,6 +153,9 @@ export default defineEffect({
     const high = params.high ?? HIGH
     const rest = Number(params.rest ?? 0.04)
     const size = Math.max(0.5, Number(params.size ?? 3.5))
+    const speed = Number(params.speed ?? 1)
+    // Half, the default, is the analysis's own beat; more catches softer hits.
+    const threshold = Math.max(0.1, 1 - Number(params.sensitivity ?? 0.5))
     const lowHue = hueOf(low)
     const highHue = hueOf(high)
 
@@ -145,15 +168,16 @@ export default defineEffect({
     const bass = Math.max(...audio.bands.slice(0, BASS_BANDS))
     const level = ease(heard.level, audio.level, dt, 0.4)
 
-    if (audio.beat) {
+    const beat = audio.onset >= threshold && time - heard.beat >= BEAT_MIN_GAP
+    if (beat) {
       const gap = time - heard.beat
       if (gap >= GAP_MIN && gap <= GAP_MAX) gaps = [...gaps, gap].slice(-8)
     }
     // Faster for a fast song, slower for a slow one, within half and twice.
     const tempo = Math.min(2, Math.max(0.5, GAP_AT_120 / median(gaps)))
-    const pace = (0.12 + 0.5 * level) * tempo
+    const pace = (0.12 + 0.5 * level) * tempo * speed
     // A beat throws the curtains forward; the surge dies down to the pace.
-    const thrown = audio.beat ? heard.velocity + KICK * tempo : heard.velocity
+    const thrown = beat ? heard.velocity + KICK * tempo * speed : heard.velocity
     const velocity = pace + (thrown - pace) * Math.exp(-dt / SURGE)
 
     heard = {
@@ -163,8 +187,8 @@ export default defineEffect({
       tone: ease(heard.tone, audio.level > 0 ? toneOf([...audio.bands]) : heard.tone, dt, 1.2),
       flow: heard.flow + velocity * dt,
       velocity,
-      sheen: audio.beat ? 1 : heard.sheen * Math.exp(-dt / 0.25),
-      beat: audio.beat ? time : heard.beat,
+      sheen: beat ? 1 : heard.sheen * Math.exp(-dt / 0.2),
+      beat: beat ? time : heard.beat,
     }
 
     const area = bounds(layout)
@@ -181,7 +205,7 @@ export default defineEffect({
       // The bottom rows swell with the bass.
       const swell = heard.bass * Math.max(0, y - 0.3) * 1.2
       const light =
-        rest + (1 - rest) * curtain * (0.2 + 0.8 * heard.level) + swell + 0.35 * heard.sheen * curtain
+        rest + (1 - rest) * curtain * (0.2 + 0.8 * heard.level) + swell + 0.8 * heard.sheen * curtain
       // Squared: a key's LED gives light in proportion to its value, where a
       // screen darkens low values, so the dark between curtains stays dark on
       // the keyboard as in the preview.

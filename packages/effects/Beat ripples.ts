@@ -2,8 +2,8 @@
 // of the keyboard.
 //
 // Ripples, beaten by the music (`inputs: ['audio']`): a beat, a sudden jump in
-// the low bands, starts a ring at the keyboard's physical centre, and it spreads
-// and fades. Its colour can follow the sound: red when the music sits low, blue
+// the low bands strong enough for the sensitivity chosen, starts a ring at the
+// keyboard's physical centre, and it spreads and fades. Its colour can follow the sound: red when the music sits low, blue
 // when it sits high, from where its energy is across the bands at that beat.
 //
 // With nothing playing, which is also how the swatch is sampled, only the
@@ -46,6 +46,14 @@ export default defineEffect({
       default: true,
     },
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },
+    sensitivity: {
+      kind: 'number',
+      label: { en: 'Beat sensitivity', fr: 'Sensibilité aux temps forts' },
+      min: 0,
+      max: 1,
+      step: 0.05,
+      default: 0.5,
+    },
     speed: {
       kind: 'number',
       label: { en: 'Speed (keys per second)', fr: 'Vitesse (touches par seconde)' },
@@ -59,6 +67,9 @@ export default defineEffect({
     if (layout.keys.length === 0) return
     const background = params.background ?? BACKGROUND
     const speed = Number(params.speed ?? 18)
+    // Half, the default, is the analysis's own beat; more catches softer hits.
+    const threshold = Math.max(0.1, 1 - Number(params.sensitivity ?? 0.5))
+    const last = rings.length ? rings[rings.length - 1].start : -Infinity
     const area = bounds(layout)
     const cx = area.x + area.w / 2
     const cy = area.y + area.h / 2
@@ -67,7 +78,7 @@ export default defineEffect({
 
     // A time before the last ring is a restart: the preview starts from zero.
     if (rings.some((ring) => ring.start > time)) rings = []
-    if (audio.beat) {
+    if (audio.onset >= threshold && time - last >= 0.12) {
       const tone = toneOf([...audio.bands])
       const color = (params.follow ?? true) ? hsv(240 * tone, 1, 1) : (params.color ?? COLOR)
       rings.push({ start: time, color })

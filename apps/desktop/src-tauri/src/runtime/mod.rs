@@ -3953,8 +3953,9 @@ mod signal_tests {
     fn analysis(level: f64, bands: &[f64], beat: bool) -> String {
         let bands: Vec<String> = bands.iter().map(f64::to_string).collect();
         format!(
-            r#"{{"level":{level},"peak":{level},"bands":[{}],"beat":{beat}}}"#,
-            bands.join(",")
+            r#"{{"level":{level},"peak":{level},"bands":[{}],"beat":{beat},"onset":{}}}"#,
+            bands.join(","),
+            if beat { 1.0 } else { 0.0 }
         )
     }
 
