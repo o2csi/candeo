@@ -194,6 +194,31 @@ export interface EffectContext<P = undefined> {
    * knowing (`docs/design/inputs-and-automations.md` §2.3.1).
    */
   readonly signals: Readonly<Record<string, string | number | boolean>>
+  /**
+   * The sound the computer plays, analysed for this frame. Silence unless the
+   * effect declares `inputs: ['audio']`, and silence too while nothing plays or
+   * the sound cannot be captured: an effect need not tell them apart.
+   *
+   * Only these numbers reach the effect: the sound itself is neither kept nor
+   * recorded (`docs/design/inputs-and-automations.md` §2.2).
+   */
+  readonly audio: Audio
+}
+
+/** The sound playing. See {@link EffectContext.audio}. */
+export interface Audio {
+  /** How loud it is now, 0 for silence to 1 for full scale, in decibels. */
+  readonly level: number
+  /** The loudest recent sample, falling back slowly: a VU meter's needle. */
+  readonly peak: number
+  /**
+   * Sixteen bands from 40 Hz to 16 kHz, low to high, logarithmically spaced,
+   * each 0 to 1. They rise at once and fall within half a second, so bars do
+   * not flicker.
+   */
+  readonly bands: readonly number[]
+  /** True on the frame a beat lands: a sudden jump in the low bands. */
+  readonly beat: boolean
 }
 
 /** A key going down. See {@link EffectContext.presses}. */
@@ -222,7 +247,7 @@ export interface Clock {
 }
 
 /** What an effect reads besides time and its parameters. */
-export type Input = 'keys' | 'clock' | 'signals'
+export type Input = 'keys' | 'clock' | 'signals' | 'audio'
 
 /** An effect renders a frame at each call. */
 export type Effect = (ctx: EffectContext) => void
@@ -332,7 +357,9 @@ export interface EffectModule<P = undefined> {
    * `['clock']` gives it {@link EffectContext.clock}: nothing is captured for
    * it, so it is read whenever the effect asks
    * (`docs/design/inputs-and-automations.md` §2.1). `['signals']` gives it
-   * {@link EffectContext.signals}.
+   * {@link EffectContext.signals}. `['audio']` gives it
+   * {@link EffectContext.audio}: the sound playing is captured only while such
+   * an effect runs, and the gallery says so.
    */
   readonly inputs?: readonly Input[]
   readonly params?: P

@@ -11,12 +11,12 @@ Your keyboard's lighting, exactly the way you want it, without the maker's softw
 
 ## Description
 
-Make your keyboard light up exactly the way you want. Candeo drives every key directly — seventeen ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
+Make your keyboard light up exactly the way you want. Candeo drives every key directly — twenty-three ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
 
 Works with the Razer DeathStalker V2 Pro (wired) and the Alienware m18 R1, its keyboard and its lighting zones. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
 
 HIGHLIGHTS
-• Seventeen effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, a status row for what your other tools report… Tune each one while you watch it.
+• Twenty-three effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it.
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
@@ -29,7 +29,8 @@ Open source, under the GPL-3.0.
 
 ## Features (a short list, shown on the Store page)
 
-- Seventeen ready-made effects, tuned while you watch them
+- Twenty-three ready-made effects, tuned while you watch them
+- Effects that dance to the music you play
 - Every key its own colour, plus your device's firmware effects
 - Automations: the time on the hour, dark at night or when you step away
 - Write your own effects in TypeScript, with a live preview

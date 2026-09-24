@@ -240,7 +240,7 @@ watch(source, (value) => {
 // ---------------------------------------------------------------- engine
 
 /** The whole engine report, re-read at once: one round trip per second. */
-const report = ref<EngineReport>({ devices: [], preview: null })
+const report = ref<EngineReport>({ devices: [], preview: null, sound: 'idle' })
 
 const status = computed(() => {
   const device = current.value

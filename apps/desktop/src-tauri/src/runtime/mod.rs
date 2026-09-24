@@ -76,6 +76,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use candeo_device::{Keyboard, Layout};
 use candeo_protocol::Rgb;
+use rquickjs::function::Args;
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
 use rquickjs::runtime::InterruptHandler;
 use rquickjs::{CatchResultExt, Context, Function, Module, Runtime};
@@ -393,6 +394,9 @@ pub struct EngineReport {
     /// `None` when nothing is being previewed — which is the case as soon as
     /// the window is closed, see [`Engine::stop_preview`].
     pub preview: Option<PreviewStatus>,
+    /// Whether the sound playing is being captured, for the gallery to say when
+    /// an effect reading it cannot hear anything (#107).
+    pub sound: crate::audio::SoundState,
 }
 
 // ---------------------------------------------------------------- output
@@ -515,6 +519,8 @@ pub struct Engine {
     /// The signals held, shared with [`crate::signals`]: a loop reads the values
     /// bound to its parameters on every frame.
     signals: crate::signals::SharedStore,
+    /// The sound playing, captured while a loop runs an effect declaring it.
+    sound: Arc<crate::audio::Sound>,
 }
 
 /// The loop of **one** device.
@@ -783,6 +789,7 @@ impl Engine {
         EngineReport {
             devices: self.device_status(),
             preview: self.preview_status(),
+            sound: self.sound.state(),
         }
     }
 
@@ -956,6 +963,7 @@ impl Engine {
         Inputs {
             presses: Arc::clone(&self.presses),
             signals: Arc::clone(&self.signals),
+            sound: Arc::clone(&self.sound),
         }
     }
 
@@ -1017,7 +1025,11 @@ fn render_loop(
     inputs: Inputs,
     ready: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
-    let Inputs { presses, signals } = inputs;
+    let Inputs {
+        presses,
+        signals,
+        sound,
+    } = inputs;
     // **The span, and it is the reason `tracing` was chosen.** There is one
     // loop per device: "write refused" is useless without knowing which one.
     // Opened here, it carries the device and the effect until the thread ends,
@@ -1079,6 +1091,12 @@ fn render_loop(
     let reads_signals = ctx
         .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_signals"))
         .unwrap_or(false);
+    // The sound playing, for an effect declaring it: the capture runs while at
+    // least one loop holds it (§2.2).
+    let reads_audio = ctx
+        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_audio"))
+        .unwrap_or(false);
+    let _sound = reads_audio.then(|| sound.lease());
     let reads_private = reads_keys || reads_signals;
     shared.reads_private.store(reads_private, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
@@ -1108,6 +1126,11 @@ fn render_loop(
         };
         let now = Instant::now();
         let time = now.duration_since(started).as_secs_f64();
+        let heard = if reads_audio {
+            sound.latest()
+        } else {
+            String::new()
+        };
         let pressed = match &keys {
             Some((reading, positions)) => {
                 positions.to_json(&reading.since(started, now, keyboard), now, time)
@@ -1130,6 +1153,7 @@ fn render_loop(
                 clock_ms,
                 bound: &bound,
                 signals: &held,
+                audio: &heard,
             },
             frame_len,
         ) {
@@ -1413,6 +1437,7 @@ fn render_with_inputs(
             clock_ms,
             bound: "",
             signals: "",
+            audio: "",
         },
         frame_len,
     )
@@ -1429,6 +1454,8 @@ struct FrameInputs<'a> {
     bound: &'a str,
     /// Every signal held, for an effect declaring the `signals` input.
     signals: &'a str,
+    /// The latest analysis of the sound playing, for an effect declaring `audio`.
+    audio: &'a str,
 }
 
 /// What a loop reads besides its parameters: key presses and signals, shared
@@ -1436,6 +1463,7 @@ struct FrameInputs<'a> {
 struct Inputs {
     presses: Arc<Presses>,
     signals: crate::signals::SharedStore,
+    sound: Arc<crate::audio::Sound>,
 }
 
 fn render_with(
@@ -1451,16 +1479,22 @@ fn render_with(
             .get("__candeo_render")
             .map_err(|_| "the render function is gone from the context".to_string())?;
 
+        // A list rather than a tuple: rquickjs takes tuples of seven at most,
+        // and the sound made eight (#107).
+        let mut args = Args::new(ctx.clone(), 8);
+        let pushed = (|| {
+            args.push_arg(time)?;
+            args.push_arg(frame_index)?;
+            args.push_arg(inputs.params)?;
+            args.push_arg(inputs.presses)?;
+            args.push_arg(inputs.clock_ms)?;
+            args.push_arg(inputs.bound)?;
+            args.push_arg(inputs.signals)?;
+            args.push_arg(inputs.audio)
+        })();
+        pushed.map_err(|e| format!("the frame's inputs could not be handed over: {e}"))?;
         let out: Vec<u8> = render
-            .call((
-                time,
-                frame_index,
-                inputs.params,
-                inputs.presses,
-                inputs.clock_ms,
-                inputs.bound,
-                inputs.signals,
-            ))
+            .call_arg(args)
             .catch(&ctx)
             .map_err(|e| format!("{e}"))?;
 
@@ -3722,6 +3756,7 @@ mod signal_tests {
                 clock_ms: 0.0,
                 bound,
                 signals,
+                audio: "",
             },
             layout.led_count(),
         )
@@ -3802,6 +3837,7 @@ mod signal_tests {
                     clock_ms: 0.0,
                     bound,
                     signals: "",
+                    audio: "",
                 },
                 layout.led_count(),
             )
@@ -3856,6 +3892,7 @@ mod signal_tests {
                 clock_ms: 0.0,
                 bound: "",
                 signals: r#"{"tests":"running","build":"failed","deploy":"ok","cpu":1}"#,
+                audio: "",
             },
             layout.led_count(),
         )
@@ -3883,6 +3920,7 @@ mod signal_tests {
                 clock_ms: 0.0,
                 bound: "",
                 signals: r#"{"build":"failed","ci.tests":"ok","ci.build":"failed"}"#,
+                audio: "",
             },
             layout.led_count(),
         )
@@ -3890,6 +3928,329 @@ mod signal_tests {
         assert_eq!(at(&frame, row[0]), [235, 24, 24], "ci.build failed: red");
         assert_eq!(at(&frame, row[1]), [32, 200, 64], "ci.tests ok: green");
         assert_eq!(at(&frame, row[2]), [0, 0, 0], "build is not under ci.");
+    }
+
+    /// A frame of a shipped effect with this analysis of the sound playing.
+    fn heard(ctx: &Context, time: f64, audio: &str) -> Vec<u8> {
+        let layout = crate::default_layout();
+        render_with(
+            ctx,
+            time,
+            0,
+            &FrameInputs {
+                params: "{}",
+                presses: "",
+                clock_ms: 0.0,
+                bound: "",
+                signals: "",
+                audio,
+            },
+            layout.led_count(),
+        )
+        .expect("render")
+    }
+
+    fn analysis(level: f64, bands: &[f64], beat: bool) -> String {
+        let bands: Vec<String> = bands.iter().map(f64::to_string).collect();
+        format!(
+            r#"{{"level":{level},"peak":{level},"bands":[{}],"beat":{beat}}}"#,
+            bands.join(",")
+        )
+    }
+
+    /// An effect declaring `audio` reads the analysis; one that does not gets
+    /// silence, whatever plays.
+    #[test]
+    fn only_an_effect_declaring_audio_hears_the_sound() {
+        let paints = |declares: bool| {
+            format!(
+                "export default {{
+                    {}
+                    render({{ layout, audio, frame }}) {{
+                        frame.set(layout.keys[0], {{ r: audio.level * 100, g: audio.bands[3] * 100, b: audio.beat ? 255 : 0 }})
+                    }},
+                }}",
+                if declares { "inputs: ['audio']," } else { "" }
+            )
+        };
+        let loud = analysis(0.5, &[0.25; 16], true);
+        let (_rt, ctx) = prepare(&paints(true), crate::default_layout()).expect("load");
+        assert_eq!(key(&heard(&ctx, 0.0, &loud), 0), [50, 25, 255]);
+        let (_rt, ctx) = prepare(&paints(false), crate::default_layout()).expect("load");
+        assert_eq!(key(&heard(&ctx, 0.0, &loud), 0), [0, 0, 0]);
+    }
+
+    /// The shipped Equalizer: loud everywhere lights the keyboard up to the
+    /// top; only the lowest band lights the left side only.
+    #[test]
+    fn the_equalizer_draws_the_bands_as_bars() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Equalizer"), layout).expect("load");
+        let background = [4u8, 8, 14];
+        // The horizontal position of each key lit, in pitch units.
+        let lit = |frame: &[u8]| -> Vec<f32> {
+            layout
+                .keys
+                .iter()
+                .filter(|k| {
+                    let i = usize::from(k.index) * 3;
+                    frame[i..i + 3] != background
+                })
+                .map(|k| k.x)
+                .collect()
+        };
+
+        let silent = heard(&ctx, 0.0, &analysis(0.0, &[0.0; 16], false));
+        assert!(lit(&silent).is_empty(), "silence shows the background only");
+
+        let loud = heard(&ctx, 0.0, &analysis(1.0, &[1.0; 16], false));
+        assert_eq!(
+            lit(&loud).len(),
+            layout.keys.len(),
+            "every band full lights every key"
+        );
+
+        let mut bass = [0.0; 16];
+        bass[0] = 1.0;
+        let frame = heard(&ctx, 0.0, &analysis(0.5, &bass, false));
+        let middle = layout.keys.iter().map(|k| k.x).fold(0.0, f32::max) / 2.0;
+        let bars = lit(&frame);
+        assert!(!bars.is_empty(), "the lowest band shows");
+        assert!(bars.iter().all(|&x| x < middle), "and only on the left");
+    }
+
+    /// In rows, a band per row: the bass alone lights the bottom row only,
+    /// from the left.
+    #[test]
+    fn the_equalizer_draws_a_band_per_row_when_asked() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Equalizer"), layout).expect("load");
+        let background = [4u8, 8, 14];
+        let rows_params = r#"{"bars":"rows"}"#;
+        let frame = |audio: &str| {
+            render_with(
+                &ctx,
+                0.0,
+                0,
+                &FrameInputs {
+                    params: rows_params,
+                    presses: "",
+                    clock_ms: 0.0,
+                    bound: "",
+                    signals: "",
+                    audio,
+                },
+                layout.led_count(),
+            )
+            .expect("render")
+        };
+        // The top edge of each key lit: keys of a row share it.
+        let lit_tops = |frame: &[u8]| -> Vec<f32> {
+            layout
+                .keys
+                .iter()
+                .filter(|k| {
+                    let i = usize::from(k.index) * 3;
+                    frame[i..i + 3] != background
+                })
+                .map(|k| k.y)
+                .collect()
+        };
+        let bottom = layout.keys.iter().map(|k| k.y).fold(0.0, f32::max);
+
+        let loud = frame(&analysis(1.0, &[1.0; 16], false));
+        assert_eq!(lit_tops(&loud).len(), layout.keys.len(), "every row full");
+
+        let mut bass = [0.0; 16];
+        bass[0] = 1.0;
+        let only_bass = lit_tops(&frame(&analysis(0.5, &bass, false)));
+        assert!(!only_bass.is_empty(), "the bass shows");
+        assert!(
+            only_bass.iter().all(|&y| y >= bottom - 0.5),
+            "on the bottom row only: {only_bass:?}"
+        );
+    }
+
+    /// A frame of a shipped effect with these settings and this analysis.
+    fn heard_with(ctx: &Context, time: f64, params: &str, audio: &str) -> Vec<u8> {
+        render_with(
+            ctx,
+            time,
+            0,
+            &FrameInputs {
+                params,
+                presses: "",
+                clock_ms: 0.0,
+                bound: "",
+                signals: "",
+                audio,
+            },
+            crate::default_layout().led_count(),
+        )
+        .expect("render")
+    }
+
+    /// The horizontal positions of the keys a frame lights over its background.
+    fn lit_x(frame: &[u8], background: [u8; 3]) -> Vec<f32> {
+        crate::default_layout()
+            .keys
+            .iter()
+            .filter(|k| {
+                let i = usize::from(k.index) * 3;
+                frame[i..i + 3] != background
+            })
+            .map(|k| k.x)
+            .collect()
+    }
+
+    /// Mirrored, the lowest band lights the middle of the keyboard, not an edge.
+    #[test]
+    fn the_mirrored_equalizer_puts_low_notes_in_the_middle() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Equalizer"), layout).expect("load");
+        let mut bass = [0.0; 16];
+        bass[0] = 1.0;
+        let frame = heard_with(
+            &ctx,
+            0.0,
+            r#"{"bars":"mirror"}"#,
+            &analysis(0.5, &bass, false),
+        );
+        let width = layout.keys.iter().map(|k| k.x + k.w).fold(0.0, f32::max);
+        let lit = lit_x(&frame, [4, 8, 14]);
+        assert!(!lit.is_empty(), "the bass shows");
+        assert!(
+            lit.iter().all(|&x| (x - width / 2.0).abs() < width / 4.0),
+            "in the middle: {lit:?}"
+        );
+    }
+
+    /// Waterfall: a sound comes in on the right, then slides left.
+    #[test]
+    fn the_waterfall_slides_the_sound_from_right_to_left() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Waterfall"), layout).expect("load");
+        let background = [2, 4, 12];
+        let silent = analysis(0.0, &[0.0; 16], false);
+        let loud = analysis(1.0, &[1.0; 16], false);
+        let width = layout.keys.iter().map(|k| k.x + k.w).fold(0.0, f32::max);
+
+        assert!(lit_x(&heard_with(&ctx, 0.0, "{}", &silent), background).is_empty());
+        let now = lit_x(&heard_with(&ctx, 0.1, "{}", &loud), background);
+        assert!(!now.is_empty(), "the sound shows at once");
+        assert!(
+            now.iter().all(|&x| x > width / 2.0),
+            "on the right: {now:?}"
+        );
+        // One second of silence later, at ten keys a second, it is ten keys on.
+        let later = lit_x(&heard_with(&ctx, 1.1, "{}", &silent), background);
+        let leftmost = |xs: &[f32]| xs.iter().copied().fold(f32::MAX, f32::min);
+        assert!(!later.is_empty(), "it is still on its way");
+        assert!(
+            leftmost(&later) < leftmost(&now) - 5.0,
+            "further left: {later:?}"
+        );
+    }
+
+    /// Beat ripples: a beat starts a ring at the middle, which moves out.
+    #[test]
+    fn the_beat_ripples_spread_from_the_middle() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Beat ripples"), layout).expect("load");
+        let background = [4, 6, 16];
+        let silent = analysis(0.0, &[0.0; 16], false);
+        let width = layout.keys.iter().map(|k| k.x + k.w).fold(0.0, f32::max);
+        let spread = |xs: &[f32]| {
+            xs.iter()
+                .map(|x| (x - width / 2.0).abs())
+                .fold(0.0, f32::max)
+        };
+
+        assert!(lit_x(&heard_with(&ctx, 0.0, "{}", &silent), background).is_empty());
+        let _ = heard_with(&ctx, 1.0, "{}", &analysis(0.8, &[0.8; 16], true));
+        let soon = lit_x(&heard_with(&ctx, 1.1, "{}", &silent), background);
+        let later = lit_x(&heard_with(&ctx, 1.4, "{}", &silent), background);
+        assert!(!soon.is_empty() && !later.is_empty(), "the ring shows");
+        assert!(spread(&later) > spread(&soon), "and moves out");
+    }
+
+    /// Fireworks: a beat sets off bursts, which are gone within a second.
+    #[test]
+    fn the_fireworks_burst_on_a_beat_and_fade() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Fireworks"), layout).expect("load");
+        let background = [3, 3, 10];
+        let silent = analysis(0.0, &[0.0; 16], false);
+
+        assert!(lit_x(&heard_with(&ctx, 0.0, "{}", &silent), background).is_empty());
+        let burst = lit_x(
+            &heard_with(&ctx, 1.0, "{}", &analysis(1.0, &[1.0; 16], true)),
+            background,
+        );
+        assert!(!burst.is_empty(), "a beat sets off bursts");
+        let gone = lit_x(&heard_with(&ctx, 2.0, "{}", &silent), background);
+        assert!(gone.is_empty(), "gone a second later: {} keys", gone.len());
+    }
+
+    /// Ambience: dim at rest, brighter with bass, warm for low music and cool
+    /// for high.
+    #[test]
+    fn the_ambience_follows_the_bass_and_where_the_music_sits() {
+        let layout = crate::default_layout();
+        let brightness =
+            |frame: &[u8]| -> u32 { key(frame, 0).iter().map(|&c| u32::from(c)).sum() };
+        let low_music = {
+            let mut b = [0.0; 16];
+            b[0] = 1.0;
+            b[1] = 1.0;
+            analysis(0.8, &b, false)
+        };
+        let high_music = {
+            let mut b = [0.0; 16];
+            b[14] = 1.0;
+            b[15] = 1.0;
+            analysis(0.8, &b, false)
+        };
+
+        let (_rt, ctx) = prepare(crate::shipped::source("Ambience"), layout).expect("load");
+        let rest = brightness(&heard_with(
+            &ctx,
+            0.0,
+            "{}",
+            &analysis(0.0, &[0.0; 16], false),
+        ));
+        assert!(rest > 0, "it rests dimly");
+        let mut warm = Vec::new();
+        for i in 1..=60 {
+            warm = heard_with(&ctx, f64::from(i) * 0.1, "{}", &low_music);
+        }
+        assert!(brightness(&warm) > rest * 3, "bass brightens it");
+        let [r, _, b] = key(&warm, 0);
+        assert!(r > b, "low music is warm: {:?}", key(&warm, 0));
+
+        let (_rt, ctx) = prepare(crate::shipped::source("Ambience"), layout).expect("load");
+        let mut cool = Vec::new();
+        for i in 1..=60 {
+            cool = heard_with(&ctx, f64::from(i) * 0.1, "{}", &high_music);
+        }
+        let [r, _, b] = key(&cool, 0);
+        assert!(b > r, "high music is cool: {:?}", key(&cool, 0));
+    }
+
+    /// The shipped Beat pulse: a beat flashes the keyboard, which fades after.
+    #[test]
+    fn the_beat_pulse_flashes_on_a_beat_and_fades() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Beat pulse"), layout).expect("load");
+        let brightness =
+            |frame: &[u8]| -> u32 { key(frame, 0).iter().map(|&c| u32::from(c)).sum() };
+
+        let rest = brightness(&heard(&ctx, 0.0, &analysis(0.0, &[0.0; 16], false)));
+        assert!(rest > 0, "at rest the colour glows dimly");
+        let beat = brightness(&heard(&ctx, 1.0, &analysis(0.5, &[0.5; 16], true)));
+        assert!(beat > rest * 4, "a beat flashes: {beat} against {rest}");
+        let after = brightness(&heard(&ctx, 2.0, &analysis(0.0, &[0.0; 16], false)));
+        assert!(after < beat / 2, "and fades: {after} after {beat}");
     }
 
     #[test]

@@ -129,6 +129,10 @@ pub struct Manifest {
     /// says.
     #[serde(default)]
     pub reads_signals: bool,
+    /// The effect declares `inputs: ['audio']`: it is given the sound playing,
+    /// analysed (#107).
+    #[serde(default)]
+    pub reads_audio: bool,
 }
 
 /// Kind of effect: shipped with the application, or the user's.
@@ -1132,7 +1136,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// - 1: an effect's settings in the order it declares them (#177); before,
 ///   sorted by key.
 /// - 2: whether it reads signals (#108).
-const CACHE_FORMAT: u32 = 2;
+/// - 3: whether it reads the sound playing (#107).
+const CACHE_FORMAT: u32 = 3;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1161,6 +1166,8 @@ struct CacheRecord {
     reads_clock: bool,
     #[serde(default)]
     reads_signals: bool,
+    #[serde(default)]
+    reads_audio: bool,
     #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
@@ -2032,6 +2039,7 @@ fn library_entry(
                 reads_keys: r.reads_keys,
                 reads_clock: r.reads_clock,
                 reads_signals: r.reads_signals,
+                reads_audio: r.reads_audio,
             },
         ),
     };
@@ -2058,6 +2066,7 @@ fn library_entry(
             reads_keys: declared.reads_keys,
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
+            reads_audio: declared.reads_audio,
         },
     }
 }
@@ -2083,6 +2092,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_keys: declared.reads_keys,
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
+            reads_audio: declared.reads_audio,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -2099,6 +2109,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_keys: false,
             reads_clock: false,
             reads_signals: false,
+            reads_audio: false,
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -2134,6 +2145,7 @@ struct Declared {
     reads_keys: bool,
     reads_clock: bool,
     reads_signals: bool,
+    reads_audio: bool,
 }
 
 impl Declared {
@@ -2146,6 +2158,7 @@ impl Declared {
             reads_keys: false,
             reads_clock: false,
             reads_signals: false,
+            reads_audio: false,
         }
     }
 }
@@ -2189,6 +2202,7 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
         reads_keys: declares("keys"),
         reads_clock: declares("clock"),
         reads_signals: declares("signals"),
+        reads_audio: declares("audio"),
     })
 }
 
@@ -4661,6 +4675,7 @@ mod tests {
             reads_keys: false,
             reads_clock: false,
             reads_signals: false,
+            reads_audio: false,
         }
     }
 

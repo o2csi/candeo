@@ -263,6 +263,8 @@ interface Choice {
    * a signal is not this, and not said here: the person chose it.
    */
   readsSignals: boolean
+  /** It is given the sound playing: captured while it runs, said on screen. */
+  readsAudio: boolean
 }
 
 const library = ref<EffectEntry[]>([])
@@ -288,6 +290,7 @@ function fromEntry(e: EffectEntry): Choice {
     readsKeys: e.readsKeys ?? false,
     readsClock: e.readsClock ?? false,
     readsSignals: e.readsSignals ?? false,
+    readsAudio: e.readsAudio ?? false,
   }
 }
 
@@ -308,6 +311,7 @@ function fromHardware(e: HardwareEffect): Choice {
     readsKeys: false,
     readsClock: false,
     readsSignals: false,
+    readsAudio: false,
   }
 }
 
@@ -460,7 +464,7 @@ watch(deviceKey, () => {
  * what the simulator shows when the selected effect is not the one running.
  * Everything that speaks of "active" on this screen reads the first.
  */
-const report = ref<EngineReport>({ devices: [], preview: null })
+const report = ref<EngineReport>({ devices: [], preview: null, sound: 'idle' })
 
 function statusOf(d: { vid: number; pid: number } | null) {
   if (!d) return null
@@ -1020,10 +1024,16 @@ function entryLabel(c: Choice): string {
   const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
   const marks = [
     c.readsKeys ? t('effects.readsKeys') : null,
+    c.readsAudio ? t('effects.readsAudio') : null,
     readsSignalHere(c) ? t('effects.entrySignal') : null,
   ]
   return [name, ...marks.filter((mark) => mark !== null)].join(' · ')
 }
+
+/** The selected effect reads the sound, and it cannot be captured (#107): said under its settings. */
+const soundUnavailable = computed(
+  () => selectedEffect.value?.readsAudio === true && report.value.sound === 'unavailable',
+)
 
 /** The selected effect reads a signal that cannot arrive: said once, under its settings. */
 const signalsOff = computed(
@@ -1483,6 +1493,23 @@ onBeforeUnmount(() => {
                 <path d="M8 1.5v4.5M5.8 3.9L8 6.1l2.2-2.2" />
               </svg>
               <svg
+                v-if="c.readsAudio"
+                class="fx-sound"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <title>{{ t('effects.readsAudio') }}</title>
+                <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" />
+                <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
+              </svg>
+              <svg
                 v-if="readsSignalHere(c)"
                 class="fx-signal"
                 viewBox="0 0 16 16"
@@ -1628,6 +1655,9 @@ onBeforeUnmount(() => {
           <span v-if="selectedEffect.readsSignals" class="badge keys">{{
             t('effects.readsSignals')
           }}</span>
+          <span v-if="selectedEffect.readsAudio" class="badge keys">{{
+            t('effects.readsAudio')
+          }}</span>
         </header>
 
         <p class="desc">{{ selectedEffect.description }}</p>
@@ -1668,6 +1698,7 @@ onBeforeUnmount(() => {
         />
 
         <p v-if="signalsOff" class="warn">{{ t('effects.signalsOff') }}</p>
+        <p v-if="soundUnavailable" class="warn">{{ t('effects.soundUnavailable') }}</p>
 
         <!-- What is remembered, said where it is made. See `savedNote`. -->
         <p v-if="savedNote" class="cost">{{ savedNote }}</p>
@@ -2063,6 +2094,7 @@ onBeforeUnmount(() => {
 }
 
 .fx-keys,
+.fx-sound,
 .fx-signal {
   flex: none;
   color: var(--text-faint);
