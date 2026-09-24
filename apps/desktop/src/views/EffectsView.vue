@@ -1018,7 +1018,11 @@ function readsSignalHere(c: Choice): boolean {
 /** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
 function entryLabel(c: Choice): string {
   const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
-  return readsSignalHere(c) ? `${name} · ${t('effects.entrySignal')}` : name
+  const marks = [
+    c.readsKeys ? t('effects.readsKeys') : null,
+    readsSignalHere(c) ? t('effects.entrySignal') : null,
+  ]
+  return [name, ...marks.filter((mark) => mark !== null)].join(' · ')
 }
 
 /** The selected effect reads a signal that cannot arrive: said once, under its settings. */
@@ -1455,9 +1459,27 @@ onBeforeUnmount(() => {
                 titles name them on hover. Applied comes last, so its check
                 stays in one column down the list.
 
-                Waves, not the Wi-Fi fan: a signal can come from this computer
+                A keycap for an effect that reads the keys pressed: what it
+                reads is said on screen (`docs/design/key-input.md` §3). Waves,
+                not the Wi-Fi fan, for a signal: it can come from this computer
                 alone.
               -->
+              <svg
+                v-if="c.readsKeys"
+                class="fx-keys"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linejoin="round"
+              >
+                <title>{{ t('effects.readsKeys') }}</title>
+                <rect x="2" y="2.5" width="12" height="11" rx="2.5" />
+                <rect x="4.5" y="4.5" width="7" height="5" rx="1.2" />
+              </svg>
               <svg
                 v-if="readsSignalHere(c)"
                 class="fx-signal"
@@ -2038,6 +2060,7 @@ onBeforeUnmount(() => {
   color: var(--text-faint);
 }
 
+.fx-keys,
 .fx-signal {
   flex: none;
   color: var(--text-faint);
