@@ -68,6 +68,11 @@ const props = defineProps<{
   /** The signals held now: their names are suggested, and a bound row says what its signal holds. */
   signals: readonly HeldSignal[]
   /**
+   * Whether Candeo receives signals. When it does not, a row does not say it
+   * waits for one: the screen says once that none can arrive (#224).
+   */
+  receiving: boolean
+  /**
    * Why the controls are inert, or `null` if they are live.
    *
    * The reason **is** the message: a greyed-out form with no explanation leaves
@@ -173,10 +178,10 @@ function signalChosen(id: string): boolean {
   return readBy(id) !== null || pending.has(id)
 }
 
-function reads(state: BindingState, name: string): string {
+function reads(state: BindingState, name: string): string | null {
   switch (state.kind) {
     case 'absent':
-      return t('effects.params.signalAbsent', { name })
+      return props.receiving ? t('effects.params.signalAbsent', { name }) : null
     case 'fits':
       return t('effects.params.signalHeld', { value: state.value })
     case 'unfit':

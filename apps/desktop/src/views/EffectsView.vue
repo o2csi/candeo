@@ -74,6 +74,7 @@ import {
   engineStatus,
   getDefaultLayout,
   getLayout,
+  getSignalsApi,
   listSignals,
   onSignalsChanged,
   resumeDevice,
@@ -88,6 +89,7 @@ import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
 import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
+import { readsSignal } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -991,6 +993,32 @@ async function readSignals(): Promise<void> {
 }
 
 /**
+ * Whether Candeo receives signals. Assumed until read, so that no effect is said
+ * to read in vain before anyone knows. Turned on or off in Settings, another
+ * tab: this one is mounted again when it comes back.
+ */
+const receiving = ref(true)
+
+/** Whether an effect reads a signal on this device: marked in the list (#224). */
+function readsSignalHere(c: Choice): boolean {
+  return !c.hardware && readsSignal(c.readsSignals, bindingsFor(selectedDevice.value, c.id, c.params))
+}
+
+/** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
+function entryLabel(c: Choice): string {
+  const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
+  return readsSignalHere(c) ? `${name} · ${t('effects.entrySignal')}` : name
+}
+
+/** The selected effect reads a signal that cannot arrive: said once, under its settings. */
+const signalsOff = computed(
+  () =>
+    !receiving.value &&
+    selectedEffect.value !== null &&
+    readsSignal(selectedEffect.value.readsSignals, paramBindings.value),
+)
+
+/**
  * Why the controls are inert, or `null` if they are live.
  *
  * **They are live almost always, now.** They used to be live only for the
@@ -1161,6 +1189,11 @@ onMounted(async () => {
   // Pushed rather than polled, expiry included: a bound setting says what its
   // signal holds without a second timer beside the engine's.
   void readSignals()
+  void getSignalsApi()
+    .then((api) => {
+      receiving.value = api.enabled
+    })
+    .catch(() => null)
   void onSignalsChanged(() => void readSignals())
     .then((stop) => {
       if (alive) unlistenSignals = stop
@@ -1392,12 +1425,31 @@ onBeforeUnmount(() => {
               type="button"
               :data-effect="c.id"
               :aria-pressed="selectedEffect?.id === c.id"
-              :aria-label="activeId === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name"
+              :aria-label="entryLabel(c)"
               :title="c.name"
               @click="chosenEffect = c.id"
             >
               <EffectSwatch class="mark" :colors="c.swatch" />
               <span class="fx-name">{{ c.name }}</span>
+              <!-- Waves, not the Wi-Fi fan: a signal can come from this computer
+                   alone. The button's label says it; the title, on hover. -->
+              <svg
+                v-if="readsSignalHere(c)"
+                class="fx-signal"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              >
+                <title>{{ t('effects.entrySignal') }}</title>
+                <circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none" />
+                <path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6" />
+                <path d="M3 3a7 7 0 0 0 0 10M13 3a7 7 0 0 1 0 10" />
+              </svg>
               <span v-if="activeId === c.id" class="fx-state">{{ t('effects.entryApplied') }}</span>
               <span v-else-if="c.state === 'broken'" class="fx-state broken">
                 {{ t('effects.entryBroken') }}
@@ -1548,6 +1600,7 @@ onBeforeUnmount(() => {
           :bindings="paramBindings"
           :bindable="selectedEffect.hardware === null"
           :signals="held"
+          :receiving="receiving"
           :frozen="frozen"
           :empty="noParams"
           @change="onParamChange"
@@ -1555,6 +1608,8 @@ onBeforeUnmount(() => {
           @bind="onParamBind"
           @reset="onParamReset"
         />
+
+        <p v-if="signalsOff" class="warn">{{ t('effects.signalsOff') }}</p>
 
         <!-- What is remembered, said where it is made. See `savedNote`. -->
         <p v-if="savedNote" class="cost">{{ savedNote }}</p>
@@ -1949,6 +2004,11 @@ onBeforeUnmount(() => {
   color: var(--text-faint);
 }
 
+.fx-signal {
+  flex: none;
+  color: var(--text-faint);
+}
+
 /* The swatch is decorative: it already carries `aria-hidden`. Making it
    transparent to the pointer lets the button's tooltip through: once the column
    is collapsed, it is the only place where the effect's name can still be read. */
@@ -2194,6 +2254,16 @@ onBeforeUnmount(() => {
   max-width: 68ch;
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* As Automations says it: the same state, the same look. */
+.warn {
+  margin: 0;
+  padding: var(--gap-2) var(--gap-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  font-size: 13px;
 }
 
 .preview {

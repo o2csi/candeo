@@ -6,7 +6,7 @@
 
 import type { ParamSpec } from '@candeo/effects-api'
 
-import type { Bindings, HeldSignal, RuleShow, SignalValue } from '../api/candeo'
+import type { Bindings, HeldSignal, Rule, RuleShow, SignalValue } from '../api/candeo'
 import { validSignalName } from './rules'
 import { signalText } from './signals'
 
@@ -109,4 +109,22 @@ export function bindingState(
   if (!signal) return { kind: 'absent' }
   const value = signalText(signal.value)
   return converts(spec, signal.value) ? { kind: 'fits', value } : { kind: 'unfit', value }
+}
+
+/**
+ * Whether an effect reads a signal: a parameter bound to one, or all of them
+ * through its declared `inputs: ['signals']`. Turning signals off leaves it
+ * showing its own values, so the window says so where it is set up (#224).
+ */
+export function readsSignal(declared: boolean | undefined, bindings: Bindings): boolean {
+  return declared === true || Object.keys(bindings).length > 0
+}
+
+/** Whether a rule needs signals: to start, or for the effect it shows. */
+export function ruleReadsSignal(
+  rule: Rule,
+  declared: boolean | undefined,
+  bindings: Bindings,
+): boolean {
+  return rule.when.kind === 'signal' || readsSignal(declared, bindings)
 }

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { ParamSpec } from '@candeo/effects-api'
 
-import type { HeldSignal } from '../api/candeo'
+import type { HeldSignal, Rule } from '../api/candeo'
 import {
   bindingState,
   boundSignal,
   converts,
   declaredBindings,
+  readsSignal,
   rebound,
+  ruleReadsSignal,
   signalSource,
   withBinding,
 } from './bindings'
@@ -142,5 +144,37 @@ describe('bindingState', () => {
       kind: 'fits',
       value: 'true',
     })
+  })
+})
+
+describe('readsSignal', () => {
+  it('holds for a bound parameter or a declared input, and nothing else', () => {
+    expect(readsSignal(undefined, {})).toBe(false)
+    expect(readsSignal(false, {})).toBe(false)
+    expect(readsSignal(undefined, { colour: 'signal:status' })).toBe(true)
+    expect(readsSignal(true, {})).toBe(true)
+  })
+})
+
+describe('ruleReadsSignal', () => {
+  const rule = (when: Rule['when']): Rule => ({
+    id: 'r',
+    name: '',
+    enabled: true,
+    devices: [],
+    when,
+    show: { effect: 'Clock', params: {} },
+    for: { seconds: 10 },
+  })
+  const hourly = rule({ kind: 'cron', expr: '0 * * * *' })
+
+  it('holds for a rule a signal starts', () => {
+    expect(ruleReadsSignal(rule({ kind: 'signal', name: 'build', equals: 'failed' }), false, {})).toBe(true)
+  })
+
+  it('holds for a rule whose effect reads a signal, whatever starts it', () => {
+    expect(ruleReadsSignal(hourly, false, {})).toBe(false)
+    expect(ruleReadsSignal(hourly, false, { colour: 'signal:status' })).toBe(true)
+    expect(ruleReadsSignal(hourly, true, {})).toBe(true)
   })
 })
