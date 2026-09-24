@@ -48,7 +48,7 @@ import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
-import { declaredBindings, withBinding } from '../composables/bindings'
+import { declaredBindings, ruleReadsSignal, withBinding } from '../composables/bindings'
 import { hardwareEffectsFor, named, type HardwareEffect } from '../composables/useEffects'
 import {
   EVERY_DAY,
@@ -590,6 +590,7 @@ function onDrop(to: number): void {
                 :bindings="bindings(raw)"
                 bindable
                 :signals="held"
+                :receiving="receiving"
                 :frozen="null"
                 :empty="t('automations.noSettings')"
                 @change="(id, value) => onParam(raw, id, value)"
@@ -606,7 +607,10 @@ function onDrop(to: number): void {
           <p v-if="raw.when.kind === 'idle' && !idleHere" class="warn">
             {{ t('automations.idleRuleUnavailable') }}
           </p>
-          <p v-if="raw.when.kind === 'signal' && !receiving" class="warn">
+          <p
+            v-if="!receiving && ruleReadsSignal(raw, manifest(raw)?.readsSignals, bindings(raw))"
+            class="warn"
+          >
             {{ t('automations.signalsOff') }}
           </p>
         </template>
