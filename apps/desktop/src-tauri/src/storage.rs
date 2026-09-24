@@ -3441,6 +3441,67 @@ mod tests {
         );
     }
 
+    /// A shipped effect is its code and nothing else: pasted into a new effect of
+    /// one's own, or duplicated from the gallery, it gives the same effect — the
+    /// same settings, description, inputs, swatch and state. Nothing the gallery
+    /// shows, a setting following a signal included, is kept for shipped effects
+    /// alone; only the section they are listed in differs.
+    #[test]
+    fn every_shipped_effect_is_its_code_and_nothing_else() {
+        let (tmp, store) = temp_store();
+        store.seed_shipped(&crate::shipped::ALL).unwrap();
+        fs::create_dir_all(effects_dir(&tmp)).unwrap();
+
+        for s in &crate::shipped::ALL {
+            let hash = sha256_hex(s.source.as_bytes());
+            // The window compiles the TypeScript; shipped sources run as they are.
+            let shipped = store
+                .cache_effect(&EffectKey::shipped(s.name), &hash, s.source)
+                .unwrap();
+
+            let pasted_name = format!("Pasted {}", s.name);
+            fs::write(
+                effects_dir(&tmp).join(format!("{pasted_name}.ts")),
+                s.source,
+            )
+            .unwrap();
+            let pasted = store
+                .cache_effect(&EffectKey::user(&pasted_name), &hash, s.source)
+                .unwrap();
+
+            let copy = store
+                .duplicate_effect(&EffectKey::shipped(s.name))
+                .unwrap()
+                .to_string();
+            let duplicated = store
+                .list_effects()
+                .unwrap()
+                .into_iter()
+                .find(|e| e.id == copy)
+                .unwrap_or_else(|| panic!("{}: the copy is not listed", s.name));
+
+            for (how, other) in [("pasted", &pasted), ("duplicated", &duplicated)] {
+                let what = format!("{}, {how}", s.name);
+                assert_eq!(other.kind, EffectKind::User, "{what}");
+                assert_eq!(other.state, shipped.state, "{what}: state");
+                assert_eq!(other.error, shipped.error, "{what}: error");
+                assert_eq!(
+                    serde_json::to_value(&other.swatch).unwrap(),
+                    serde_json::to_value(&shipped.swatch).unwrap(),
+                    "{what}: swatch"
+                );
+                assert_eq!(
+                    Manifest {
+                        name: shipped.manifest.name.clone(),
+                        ..other.manifest.clone()
+                    },
+                    shipped.manifest,
+                    "{what}: manifest"
+                );
+            }
+        }
+    }
+
     /// An update never overwrites a line someone wrote: only a copy that still
     /// has the hash recorded when it was copied is replaced.
     #[test]
