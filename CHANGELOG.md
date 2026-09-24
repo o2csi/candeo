@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/o2csi/candeo/compare/v0.10.0...v0.11.0) (2026-09-24)
+
+
+### Features
+
+* mark effects that read a signal, and say when signals are off ([d60dc08](https://github.com/o2csi/candeo/commit/d60dc088db88856bef0256e4337d916165509c2c))
+* mark the applied effect with a check ([f771872](https://github.com/o2csi/candeo/commit/f7718720f936cc04a287d6d888acae4d47eb1162))
+
+
+### Bug Fixes
+
+* report a syntax error in an effect file ([c6eceaf](https://github.com/o2csi/candeo/commit/c6eceaf211d0a5b1bb3a64c79d7fe3bb87f88202))
+
+
+### CI/CD
+
+* gather the Store's What's new from news fragments ([76a0dfa](https://github.com/o2csi/candeo/commit/76a0dfa62d50ade75441a0acf71143797871e810))
+* run the packaging tests ([e49aa3c](https://github.com/o2csi/candeo/commit/e49aa3cbcdcdd5dceec45d368427af8bbcb1fbf6))
+
 ## [0.10.0](https://github.com/o2csi/candeo/compare/v0.9.0...v0.10.0) (2026-09-24)
 
 
