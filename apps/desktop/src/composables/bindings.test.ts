@@ -128,6 +128,13 @@ describe('converts', () => {
     expect(converts(specs.mode, 'wild')).toBe(true)
     expect(converts(specs.mode, 'Wild')).toBe(false)
   })
+
+  it('takes any value as text', () => {
+    const words: ParamSpec = { kind: 'text', label: 'Words', default: '' }
+    expect(converts(words, 'build failed')).toBe(true)
+    expect(converts(words, 21.5)).toBe(true)
+    expect(converts(words, false)).toBe(true)
+  })
 })
 
 describe('bindingState', () => {

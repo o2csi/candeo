@@ -88,6 +88,9 @@ export function converts(spec: ParamSpec, raw: SignalValue): boolean {
       const value = String(raw)
       return spec.options.some((o) => (typeof o === 'string' ? o : o.value) === value)
     }
+    // Any value reads as its text, cut at the parameter's length.
+    case 'text':
+      return true
   }
 }
 

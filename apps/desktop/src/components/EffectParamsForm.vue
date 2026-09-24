@@ -49,7 +49,7 @@ import type { Bindings, EffectParams, HeldSignal } from '../api/candeo'
 import { bindingState, boundSignal, signalSource, type BindingState } from '../composables/bindings'
 import { validSignalName } from '../composables/rules'
 import { signalText } from '../composables/signals'
-import { sameValue } from '../composables/useSettings'
+import { sameValue, textLimit } from '../composables/useSettings'
 import { t } from '../i18n'
 import { localized } from '../i18n/text'
 
@@ -218,6 +218,7 @@ type Field =
   | (Common & { kind: 'color'; hex: string })
   | (Common & { kind: 'boolean'; on: boolean })
   | (Common & { kind: 'choice'; value: string; options: { value: string; label: string }[] })
+  | (Common & { kind: 'text'; value: string; maxLength: number })
 
 const fields = computed<Field[]>(() =>
   Object.entries(props.specs).map(([id, spec]): Field => {
@@ -262,6 +263,11 @@ const fields = computed<Field[]>(() =>
         )
         const shown = options.find((o) => o.value === value)?.label ?? value
         return { ...head, kind: 'choice', value, options, shown }
+      }
+      // Not spelled out beside the label: the field already shows every word.
+      case 'text': {
+        const value = typeof v === 'string' ? v : spec.default
+        return { ...head, kind: 'text', value, maxLength: textLimit(spec), shown: '' }
       }
     }
   }),
@@ -321,6 +327,17 @@ function onBoolean(id: string, e: Event) {
 
 function onChoice(id: string, e: Event) {
   emit('change', id, (e.target as HTMLSelectElement).value)
+  emit('commit')
+}
+
+// Words stream as they are typed, like a slider's drag, and are written when
+// the field is left: one write per edit, not per key.
+function onText(id: string, e: Event) {
+  emit('change', id, input(e).value)
+}
+
+function onTextEnd(id: string, e: Event) {
+  onText(id, e)
   emit('commit')
 }
 
@@ -443,7 +460,7 @@ function onReset() {
             <label :for="`${uid}-${f.id}`">{{ f.label }}</label>
             <!-- The value spelled out as well: no information is carried by
                  a slider's position alone or a patch's hue alone. -->
-            <span class="num shown">{{ f.shown }}</span>
+            <span v-if="f.kind !== 'text'" class="num shown">{{ f.shown }}</span>
             <!--
               Two buttons rather than two radios: a radio keeps its own checked
               state, and a binding the parent does not take (no device to keep
@@ -515,6 +532,20 @@ function onReset() {
             :checked="f.on"
             :disabled="f.source === 'signal'"
             @change="onBoolean(f.id, $event)"
+          />
+
+          <input
+            v-else-if="f.kind === 'text'"
+            :id="`${uid}-${f.id}`"
+            class="text"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            :maxlength="f.maxLength"
+            :value="f.value"
+            :disabled="f.source === 'signal'"
+            @input="onText(f.id, $event)"
+            @change="onTextEnd(f.id, $event)"
           />
 
           <!--
@@ -707,7 +738,8 @@ label {
   margin: 2px 0;
 }
 
-.choice {
+.choice,
+.text {
   width: 100%;
   padding: 5px var(--gap-2);
   background: var(--raised);
@@ -788,7 +820,7 @@ label {
  * A value a signal holds back: faded as the inert form is, but alone. Not under
  * an inert `fieldset`, which already fades everything: the two would multiply.
  */
-.fields:not(:disabled) :is(.slider, .color, .check, .choice):disabled {
+.fields:not(:disabled) :is(.slider, .color, .check, .choice, .text):disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

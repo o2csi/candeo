@@ -110,6 +110,32 @@ describe('values', () => {
   })
 })
 
+describe('text', () => {
+  const words: Record<string, ParamSpec> = {
+    words: { kind: 'text', label: 'Words', maxLength: 4, default: 'hi' },
+  }
+
+  it('keeps words within their length, and falls back to the default past it', async () => {
+    const s = await fresh({
+      effectParams: [
+        { ...keyboard, effect: 'Ticker', values: { words: 'abcd' } },
+        { ...other, effect: 'Ticker', values: { words: 'abcde' } },
+      ],
+    })
+
+    expect(s.valuesFor(keyboard, 'Ticker', words)).toEqual({ words: 'abcd' })
+    expect(s.valuesFor(other, 'Ticker', words)).toEqual({ words: 'hi' })
+  })
+
+  it('takes 64 characters unless the effect says, and never more than 256', async () => {
+    const { textLimit } = await import('./useSettings')
+    expect(textLimit({})).toBe(64)
+    expect(textLimit({ maxLength: 10 })).toBe(10)
+    expect(textLimit({ maxLength: 1000 })).toBe(256)
+    expect(textLimit({ maxLength: 0 })).toBe(64)
+  })
+})
+
 describe('adjust', () => {
   it('leaves the device alone when the effect is only previewed', async () => {
     const s = await fresh()

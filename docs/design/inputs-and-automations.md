@@ -323,7 +323,8 @@ the settings form.
 **What converts**, as implemented: `color` takes `#rrggbb` or `#rgb`, the `#`
 optional; `number` takes a number or its text, clamped to `min`/`max`;
 `boolean` takes `true`/`false`, `1`/`0`, or their text; `choice` takes one of
-its options' values. Anything else — and a parameter the effect does not
+its options' values; `text` takes any value as its text, cut at `maxLength`
+(#217). Anything else — and a parameter the effect does not
 declare — leaves the configured value. Restoring an effect's declared settings
 unbinds its parameters too: it starts again from the effect as written.
 

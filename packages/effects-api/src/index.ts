@@ -251,7 +251,9 @@ type ValueOfSpec<S> = S extends { kind: 'number' }
       ? boolean
       : S extends { kind: 'choice' }
         ? string
-        : ParamValue
+        : S extends { kind: 'text' }
+          ? string
+          : ParamValue
 
 /**
  * The parameters as `render` receives them.
@@ -293,6 +295,12 @@ export type ParamSpec =
   | { kind: 'color'; label: Text; default: Rgb }
   | { kind: 'boolean'; label: Text; default: boolean }
   | { kind: 'choice'; label: Text; options: readonly ChoiceOption[]; default: string }
+  /**
+   * Words: typed in the settings, or sent by a signal. At most `maxLength`
+   * characters, 64 unless the effect says otherwise, and never more than 256,
+   * a signal's longest value. {@link banner} draws them on the keys.
+   */
+  | { kind: 'text'; label: Text; default: string; maxLength?: number }
 
 /** A kind of device an effect can target. The list grows with the devices. */
 export type DeviceKind = 'keyboard'
@@ -459,6 +467,98 @@ export function bounds(layout: Layout): Rect {
   }
 
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+}
+
+// ---------------------------------------------------------------------- text
+//
+// A 3×5 font, for an effect that reads the keyboard as a small display
+// (`docs/design/effects-library.md`, text parameters). `api.js` holds the
+// engine's copy of this table, and a test compares the two line by line.
+
+/** Each glyph's five lines, `#` lit and `.` dark. */
+const FONT: Readonly<Record<string, readonly string[]>> = {
+  // font:begin
+  ' ': ['.', '.', '.', '.', '.'],
+  '!': ['#', '#', '#', '.', '#'],
+  '"': ['#.#', '#.#', '...', '...', '...'],
+  "'": ['#', '#', '.', '.', '.'],
+  '%': ['#.#', '..#', '.#.', '#..', '#.#'],
+  '(': ['.#', '#.', '#.', '#.', '.#'],
+  ')': ['#.', '.#', '.#', '.#', '#.'],
+  '*': ['...', '#.#', '.#.', '#.#', '...'],
+  '+': ['...', '.#.', '###', '.#.', '...'],
+  ',': ['.', '.', '.', '#', '#'],
+  '-': ['...', '...', '###', '...', '...'],
+  '.': ['.', '.', '.', '.', '#'],
+  '/': ['..#', '..#', '.#.', '#..', '#..'],
+  '0': ['###', '#.#', '#.#', '#.#', '###'],
+  '1': ['.#.', '##.', '.#.', '.#.', '###'],
+  '2': ['###', '..#', '###', '#..', '###'],
+  '3': ['###', '..#', '.##', '..#', '###'],
+  '4': ['#.#', '#.#', '###', '..#', '..#'],
+  '5': ['###', '#..', '###', '..#', '###'],
+  '6': ['###', '#..', '###', '#.#', '###'],
+  '7': ['###', '..#', '..#', '..#', '..#'],
+  '8': ['###', '#.#', '###', '#.#', '###'],
+  '9': ['###', '#.#', '###', '..#', '###'],
+  ':': ['.', '#', '.', '#', '.'],
+  ';': ['.', '#', '.', '#', '#'],
+  '<': ['..#', '.#.', '#..', '.#.', '..#'],
+  '=': ['...', '###', '...', '###', '...'],
+  '>': ['#..', '.#.', '..#', '.#.', '#..'],
+  '?': ['##.', '..#', '.#.', '...', '.#.'],
+  A: ['.#.', '#.#', '###', '#.#', '#.#'],
+  B: ['##.', '#.#', '##.', '#.#', '##.'],
+  C: ['.##', '#..', '#..', '#..', '.##'],
+  D: ['##.', '#.#', '#.#', '#.#', '##.'],
+  E: ['###', '#..', '##.', '#..', '###'],
+  F: ['###', '#..', '##.', '#..', '#..'],
+  G: ['.##', '#..', '#.#', '#.#', '.##'],
+  H: ['#.#', '#.#', '###', '#.#', '#.#'],
+  I: ['###', '.#.', '.#.', '.#.', '###'],
+  J: ['..#', '..#', '..#', '#.#', '.#.'],
+  K: ['#.#', '#.#', '##.', '#.#', '#.#'],
+  L: ['#..', '#..', '#..', '#..', '###'],
+  M: ['#.#', '###', '###', '#.#', '#.#'],
+  N: ['##.', '#.#', '#.#', '#.#', '#.#'],
+  O: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  P: ['##.', '#.#', '##.', '#..', '#..'],
+  Q: ['.#.', '#.#', '#.#', '##.', '.##'],
+  R: ['##.', '#.#', '##.', '#.#', '#.#'],
+  S: ['.##', '#..', '.#.', '..#', '##.'],
+  T: ['###', '.#.', '.#.', '.#.', '.#.'],
+  U: ['#.#', '#.#', '#.#', '#.#', '###'],
+  V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
+  W: ['#.#', '#.#', '###', '###', '#.#'],
+  X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+  Y: ['#.#', '#.#', '.#.', '.#.', '.#.'],
+  Z: ['###', '..#', '.#.', '#..', '###'],
+  _: ['...', '...', '...', '...', '###'],
+  '°': ['##', '##', '..', '..', '..'],
+  // font:end
+}
+
+/**
+ * The five lines of `text` in a 3×5 font, `#` lit and `.` dark, one dark column
+ * between glyphs: `lines[row][column]`, the function row being row 0 on a
+ * keyboard. *Clock* and *Scrolling text* draw with it.
+ *
+ * Upper case only, as a 3×5 cell has no room for a legible lower case: letters
+ * are upper-cased and accents dropped, `é` reading `E`.
+ * What the font cannot draw is a space, one column wide.
+ *
+ * ```ts
+ * banner('HI')  // ['#.#.###', '#.#..#.', '###..#.', '#.#..#.', '#.#.###']
+ * ```
+ */
+export function banner(text: string): string[] {
+  const lines = ['', '', '', '', '']
+  const plain = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
+  Array.from(plain).forEach((char, i) => {
+    const glyph = FONT[char] ?? FONT[' ']
+    for (let line = 0; line < 5; line++) lines[line] += (i === 0 ? '' : '.') + glyph[line]
+  })
+  return lines
 }
 
 /**
