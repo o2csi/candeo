@@ -4,8 +4,6 @@ The French listing for the Microsoft Store submission (#126), the translation of
 `listing-en.md`. It uses the words the French interface uses: *piloter*,
 *appareil*, *effets*, *paramètres*.
 
-Version described: **0.10.0**. Its *What's new* covers everything since 0.9.0.
-
 ## Description courte (affichée dans les résultats de recherche)
 
 L'éclairage de votre clavier, exactement comme vous le voulez, sans le logiciel du fabricant.
@@ -38,14 +36,6 @@ Open source, sous licence GPL-3.0.
 - Des signaux venus de scripts et de Home Assistant pilotent règles et paramètres
 - Aucun compte, rien de collecté, aucune requête réseau
 - Français et anglais, thème clair et sombre
-
-## Nouveautés de cette version (0.10.0)
-
-• Un paramètre peut suivre un signal : dans la galerie, passez une couleur, une vitesse ou tout autre paramètre sur Signal, et il prend la valeur qu'envoie un autre programme — une couleur calculée par un script, un niveau venu de Home Assistant. Tant que rien n'arrive, il garde sa propre valeur.
-• Les paramètres d'une règle peuvent suivre un signal de la même façon.
-• Les Réglages montrent ce que pilote chaque signal — un paramètre sur un appareil, une règle — et les noms attendus mais pas encore reçus.
-• Status row, un nouvel effet : une touche de la rangée du haut par signal reçu, verte, ambre ou rouge selon ce qu'il dit.
-• Les effets que vous écrivez peuvent lire tous les signaux reçus, en le déclarant.
 
 ## Termes de recherche (7 au maximum, 30 caractères chacun)
 

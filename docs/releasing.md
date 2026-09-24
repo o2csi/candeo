@@ -84,16 +84,17 @@ The `windows` job builds the MSIX package from the executable it just built
 job submits it (#162):
 
 1. the package is uploaded to a **draft** submission;
-2. if `packaging/store/listing-*.md` describe this version — *Version described*
-   and the *What's new* heading both say it — their five texts replace those of
-   the draft (short description, description, features, what's new, search
-   terms), and the submission goes to certification;
-3. otherwise the draft stays in Partner Center, with a warning on the run: write
-   its *What's new* there and submit it by hand.
+2. the texts of `packaging/store/listing-*.md` replace those of the draft (short
+   description, description, features, search terms), with a *What's new*
+   gathered from `packaging/store/news/`: a line per file added since the
+   previous release. The submission goes to certification;
+3. with no file added, the draft stays in Partner Center, with a warning on the
+   run: write its *What's new* there and submit it by hand.
 
-So **the listing for a version is written before its release pull request is
-merged**, in both languages; `node packaging/store/listing.mjs X.Y.Z` prints what
-would be sent, or says which file is behind.
+So **a change users will see brings its line**, in both languages, in its own
+pull request (`packaging/store/news/README.md`). The release pull request
+carries a comment with the *What's new* as it will be sent, updated at each
+merge; `node packaging/store/listing.mjs X.Y.Z` prints everything that would be.
 
 What the job needs, set once under *Settings → Secrets and variables → Actions*:
 
