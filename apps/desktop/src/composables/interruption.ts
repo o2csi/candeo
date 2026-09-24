@@ -68,3 +68,19 @@ function pad(n: number): string {
 export function goesLive(effect: string, applied: string | null, interrupted: boolean): boolean {
   return !interrupted && effect === applied
 }
+
+/**
+ * Whether the simulator shows the device's own frames for the selected effect:
+ * only when the device runs it now.
+ *
+ * Under an interruption the device runs the rule's effect, and its frames under
+ * the applied effect's name would show one effect while naming another. The
+ * applied effect is then previewed, like any effect the device does not run.
+ */
+export function showsDeviceFrames(
+  loopRuns: boolean,
+  selectedIsApplied: boolean,
+  interrupted: boolean,
+): boolean {
+  return loopRuns && selectedIsApplied && !interrupted
+}

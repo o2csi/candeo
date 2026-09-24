@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { goesLive, interruptionLine } from './interruption'
+import { goesLive, interruptionLine, showsDeviceFrames } from './interruption'
 
 const NOW = new Date(2026, 8, 17, 14, 0, 0).getTime()
 
@@ -76,5 +76,20 @@ describe('goesLive', () => {
 
   it('keeps it from the rule an interruption runs, even for the applied effect', () => {
     expect(goesLive('shipped:Bubbles', 'shipped:Bubbles', true)).toBe(false)
+  })
+})
+
+describe('showsDeviceFrames', () => {
+  it('shows the device when it runs the selected effect', () => {
+    expect(showsDeviceFrames(true, true, false)).toBe(true)
+  })
+
+  it('previews an effect the device does not run, or runs nothing', () => {
+    expect(showsDeviceFrames(true, false, false)).toBe(false)
+    expect(showsDeviceFrames(false, true, false)).toBe(false)
+  })
+
+  it('previews the applied effect while a rule runs its own', () => {
+    expect(showsDeviceFrames(true, true, true)).toBe(false)
   })
 })

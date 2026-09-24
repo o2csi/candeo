@@ -95,7 +95,7 @@ import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
-import { goesLive, interruptionLine } from '../composables/interruption'
+import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
 import { illustrates } from '../keyboard/illustration'
@@ -615,8 +615,10 @@ const deviceTrouble = computed(() => {
   return said === hushed.value ? null : said
 })
 
-/** True when the simulator must show the device's stream. */
-const showsDevice = computed(() => runningHere.value && applied.value)
+/** True when the simulator must show the device's stream: not a rule's, under the applied effect's name. */
+const showsDevice = computed(() =>
+  showsDeviceFrames(runningHere.value, applied.value, Boolean(status.value?.interruption)),
+)
 
 const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
@@ -665,8 +667,12 @@ const previewNote = computed(() => {
     return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
   }
 
-  const running = effectName(activeId.value)
-  const elsewhere = runningHere.value && running !== null
+  // Under an interruption, what the keyboard shows is the rule's effect.
+  const interruption = status.value?.interruption
+  const running = interruption
+    ? interruption.name || (effectName(interruption.effect) ?? interruption.effect)
+    : effectName(activeId.value)
+  const elsewhere = (runningHere.value || Boolean(interruption)) && running !== null
   if (preview.value) {
     // Without a controlled device, do not promise Apply: the button is
     // disabled, and announcing it would send people looking for why it does not
