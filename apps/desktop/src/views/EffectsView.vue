@@ -95,7 +95,7 @@ import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
-import { interruptionLine } from '../composables/interruption'
+import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
 import { illustrates } from '../keyboard/illustration'
@@ -515,6 +515,11 @@ function deviceLine(d: { vid: number; pid: number }): string {
 const activeId = computed(() => runningOn(selectedDevice.value))
 
 const status = computed(() => statusOf(selectedDevice.value))
+
+/** Whether a change to this effect's settings reaches the selected device live (#218). */
+function live(effect: string, applied: string | null = activeId.value): boolean {
+  return goesLive(effect, applied, Boolean(status.value?.interruption))
+}
 const runningHere = computed(() => status.value?.running === true)
 
 /** The preview in progress, when it does show the selected effect. */
@@ -610,8 +615,10 @@ const deviceTrouble = computed(() => {
   return said === hushed.value ? null : said
 })
 
-/** True when the simulator must show the device's stream. */
-const showsDevice = computed(() => runningHere.value && applied.value)
+/** True when the simulator must show the device's stream: not a rule's, under the applied effect's name. */
+const showsDevice = computed(() =>
+  showsDeviceFrames(runningHere.value, applied.value, Boolean(status.value?.interruption)),
+)
 
 const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
@@ -660,8 +667,12 @@ const previewNote = computed(() => {
     return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
   }
 
-  const running = effectName(activeId.value)
-  const elsewhere = runningHere.value && running !== null
+  // Under an interruption, what the keyboard shows is the rule's effect.
+  const interruption = status.value?.interruption
+  const running = interruption
+    ? interruption.name || (effectName(interruption.effect) ?? interruption.effect)
+    : effectName(activeId.value)
+  const elsewhere = (runningHere.value || Boolean(interruption)) && running !== null
   if (preview.value) {
     // Without a controlled device, do not promise Apply: the button is
     // disabled, and announcing it would send people looking for why it does not
@@ -1074,7 +1085,8 @@ const savedNote = computed<string | null>(() => {
  * `selectedEffect` is the one being **watched**, not the one that is applied.
  * Adjusting the color of a previewed effect therefore changed the lighting in
  * use, and could stop the applied effect: one effect's values arrived in
- * another's loop.
+ * another's loop. The same holds while a rule interrupts the device: the
+ * applied effect is marked applied, but the loop runs the rule's (#218).
  *
  * The disk always remembers: the setting belongs to the device/effect pair and
  * will hold at the next launch of this effect.
@@ -1089,7 +1101,7 @@ function onParamChange(id: string, value: ParamValue): void {
     specs.value,
     id,
     value,
-    c.id === activeId.value,
+    live(c.id),
   )
   if (preview.value) adjustPreview(complete)
 }
@@ -1107,7 +1119,7 @@ function onParamCommit(): void {
   // holds the last colour it was given, so reaching it means sending the effect
   // again. At the end of the gesture, not at every shade a picker travels
   // through, and only on the device already showing it.
-  if (c.hardware && c.id === appliedOn(device)) {
+  if (c.hardware && live(c.id, appliedOn(device))) {
     void apply(device, c.hardware, colourBytes(paramValues.value))
   }
 }
@@ -1126,7 +1138,7 @@ function onParamBind(id: string, source: string | null): void {
     specs.value,
     id,
     source,
-    c.id === activeId.value,
+    live(c.id),
   )
   if (preview.value) bindPreview(bindings)
 }
@@ -1136,7 +1148,7 @@ function onParamReset(): void {
   const d = selectedDevice.value
   const c = selectedEffect.value
   if (!d || !c) return
-  const declared = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, c.id === activeId.value)
+  const declared = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, live(c.id))
   if (preview.value) {
     adjustPreview(declared)
     bindPreview({})

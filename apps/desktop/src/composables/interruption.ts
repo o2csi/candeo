@@ -56,3 +56,31 @@ export function interruptionLine(
 function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
+
+/**
+ * Whether a change to an effect's settings goes to the device live: only when
+ * the device runs that effect now.
+ *
+ * Under an interruption the applied effect does not run, the rule's does, and
+ * its loop would take settings meant for another effect (#218). The change is
+ * still saved, and the applied effect comes back with it.
+ */
+export function goesLive(effect: string, applied: string | null, interrupted: boolean): boolean {
+  return !interrupted && effect === applied
+}
+
+/**
+ * Whether the simulator shows the device's own frames for the selected effect:
+ * only when the device runs it now.
+ *
+ * Under an interruption the device runs the rule's effect, and its frames under
+ * the applied effect's name would show one effect while naming another. The
+ * applied effect is then previewed, like any effect the device does not run.
+ */
+export function showsDeviceFrames(
+  loopRuns: boolean,
+  selectedIsApplied: boolean,
+  interrupted: boolean,
+): boolean {
+  return loopRuns && selectedIsApplied && !interrupted
+}
