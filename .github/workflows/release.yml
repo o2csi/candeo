@@ -348,6 +348,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          # Every tag: What's new counts from the previous release.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: 24 }
@@ -373,14 +375,14 @@ jobs:
           msstore publish "msix/Candeo_${VERSION}_x64.msix" --appId "$PRODUCT_ID" --noCommit
           msstore submission get "$PRODUCT_ID" > "$RUNNER_TEMP/submission.json"
 
-          # What's new is written by hand for each release (packaging/store/). A
-          # listing still describing the previous version would tell Store users
-          # about changes they already had: the draft waits for it instead.
+          # What's new is gathered from the lines added to packaging/store/news/
+          # since the previous release. With none, Store users would be told
+          # nothing: the draft waits for someone to write it instead.
           status=0
           node packaging/store/listing.mjs "$VERSION" "$RUNNER_TEMP/submission.json" \
             > "$RUNNER_TEMP/updated.json" || status=$?
           if [ "$status" -eq 3 ]; then
-            echo "::warning::The Store listing does not describe $VERSION. The package is uploaded and the submission waits in Partner Center as a draft: write its What's new there, then submit it."
+            echo "::warning::No line added to packaging/store/news/ since the previous release. The package is uploaded and the submission waits in Partner Center as a draft: write its What's new there, then submit it."
             exit 0
           fi
           [ "$status" -eq 0 ] || exit "$status"

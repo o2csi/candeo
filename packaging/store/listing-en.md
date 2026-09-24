@@ -1,11 +1,9 @@
 # Store listing — English (en-US)
 
 For the Microsoft Store submission (#126). The release workflow sends this text
-and `listing-fr.md` to Partner Center when both describe the version released
-(#162, `docs/releasing.md`); keep the five sections in this order. **What's new**
-is rewritten at every release; the rest changes only when the application does.
-
-Version described: **0.10.0**. Its *What's new* covers everything since 0.9.0.
+and `listing-fr.md` to Partner Center at every release (#162,
+`docs/releasing.md`); keep the four sections in this order. *What's new* is not
+here: each change adds its line to `news/` (#220).
 
 ## Short description (shown in search results)
 
@@ -39,14 +37,6 @@ Open source, under the GPL-3.0.
 - Signals from scripts and Home Assistant drive rules and settings
 - No account, nothing collected, no network request
 - English and French, light and dark themes
-
-## What's new in this version (0.10.0)
-
-• A setting can follow a signal: in the gallery, switch a colour, a speed or any other setting to Signal, and it takes the value another program sends — a colour computed by a script, a level from Home Assistant. While nothing arrives, it keeps its own value.
-• A rule's settings can follow a signal the same way.
-• Settings shows what each signal drives — a setting on a device, a rule — and the names expected but not received yet.
-• Status row, a new effect: one key of the top row per signal received, green, amber or red by what it says.
-• Effects you write can read every signal received, by declaring it.
 
 ## Search terms (7 at most, 30 characters each)
 
