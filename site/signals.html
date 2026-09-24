@@ -171,13 +171,18 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
                 <td>Choice</td>
                 <td>one of its choices</td>
               </tr>
+              <tr>
+                <td>Text</td>
+                <td>any value, as its text, up to the setting's length</td>
+              </tr>
             </tbody>
           </table>
         </div>
         <p>
           Anything else leaves the setting as it was. So a script computing a colour sends
           <code>{"status": "#ff0000"}</code> and the colour follows; a word like <code>failed</code>
-          is for a rule. The effects the device's firmware runs are the exception: their colour is
+          is for a rule, or for <strong>Scrolling text</strong>, which shows on the keys whatever
+          its <em>Text</em> setting receives. The effects the device's firmware runs are the exception: their colour is
           written into the device once, not drawn frame by frame, and they have no switch.
         </p>
 
@@ -185,7 +190,9 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
         <p>
           <strong>Status row</strong>, shipped with Candeo, gives each signal a key of the top row,
           in the order of their names, green, amber or red by what it says — <code>ok</code>,
-          <code>running</code>, <code>failed</code> — and a number as a level. An effect you write
+          <code>running</code>, <code>failed</code> — and a number as a level. A prefix keeps only
+          the names starting with it, <code>ci.</code> for <code>ci.build</code> and
+          <code>ci.tests</code>. An effect you write
           does the same by declaring <code>inputs: ['signals']</code>; the
           <a href="{{repository}}/blob/main/docs/api/signals.md#reading-signals-in-an-effect-you-write"
             >signals documentation</a

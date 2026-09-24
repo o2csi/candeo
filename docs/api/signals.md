@@ -135,11 +135,13 @@ What the sender sends is converted to the setting's kind:
 | number | a number or its text, kept within the setting's range |
 | on/off | `true`, `false`, `1`, `0` |
 | choice | one of the choices, by its value |
+| text | any value, as its text, up to the setting's length |
 
 Anything else — and a signal absent or expired — leaves the setting's own value,
 which is what the effect shows meanwhile. So a sender computing a colour sends
 `{"status": "#ff0000"}` and the colour follows; a word like `failed` is for a
-rule.
+rule, or for *Scrolling text*, which shows on the keys whatever its *Text*
+setting receives.
 
 ## Reading signals in an effect you write
 
@@ -148,7 +150,7 @@ An effect declaring `inputs: ['signals']` receives every value held, by name, in
 senders using those exact names; binding a setting, above, works with any effect.
 
 *Status row*, shipped with Candeo, is one: a key of the top row per signal, by
-name. Another, to copy into your effects folder as `Meters.ts` — each number
+name, only those starting with its *prefix* setting when it has one. Another, to copy into your effects folder as `Meters.ts` — each number
 received drawn as a bar, one row per signal:
 
 ```ts

@@ -2786,6 +2786,49 @@ mod tests {
         );
     }
 
+    /// Scrolling text draws its words as Clock draws the time: keys lit over a
+    /// lap, never on the bottom row, more for a longer text, none for none.
+    #[test]
+    fn the_scrolling_text_effect_scrolls_its_text() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Scrolling text"), layout()).expect("load");
+        let len = layout().led_count();
+        const BACKGROUND: [u8; 3] = [4, 6, 12];
+        let cols = usize::from(layout().cols);
+        let bottom_row: Vec<usize> = layout().matrix[layout().matrix.len() - cols..]
+            .iter()
+            .filter(|&&index| index != u16::MAX)
+            .map(|&index| usize::from(index))
+            .collect();
+
+        let lit_over_a_lap = |params: &str| -> Vec<usize> {
+            (0..40)
+                .flat_map(|i| {
+                    let frame =
+                        render_once(&ctx, f64::from(i) * 0.25, 0, params, len).expect("render");
+                    layout()
+                        .keys
+                        .iter()
+                        .map(|k| k.index as usize)
+                        .filter(|&i| frame[i * 3..i * 3 + 3] != BACKGROUND)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+
+        let short = lit_over_a_lap(r#"{"text":"HI"}"#);
+        let long = lit_over_a_lap(r#"{"text":"HELLO WORLD"}"#);
+        assert!(!short.is_empty(), "HI lights keys");
+        assert!(long.len() > short.len(), "a longer text lights more");
+        assert!(
+            long.iter().all(|i| !bottom_row.contains(i)),
+            "the bottom row stays dark"
+        );
+        assert!(
+            lit_over_a_lap(r#"{"text":""}"#).is_empty(),
+            "no text, nothing lit"
+        );
+    }
+
     /// With the seconds on, the banner carries two more digits and a colon, so
     /// over the same ten seconds it lights more keys than without.
     #[test]
@@ -3007,9 +3050,54 @@ mod tests {
             export default {
               name: 'X',
               render({ frame }) {
-                const missing = ['rgb','hsv','mix','lerp','BLACK','defineEffect','center','bounds'].filter(n => api[n] === undefined)
+                const missing = ['rgb','hsv','mix','lerp','BLACK','defineEffect','center','bounds','banner'].filter(n => api[n] === undefined)
                 if (missing.length) throw new Error('missing from api.js: ' + missing.join(', '))
                 frame.fill(api.BLACK)
+              },
+            }
+        "#;
+        let (_rt, ctx) = prepare(js, layout()).expect("load");
+        render_once(&ctx, 0.0, 0, "{}", layout().led_count()).expect("render");
+    }
+
+    /// The font's lines between the markers, as written.
+    fn font_table(source: &str) -> Vec<&str> {
+        source
+            .lines()
+            .skip_while(|line| !line.contains("font:begin"))
+            .take_while(|line| !line.contains("font:end"))
+            .collect()
+    }
+
+    /// The editor draws with `index.ts`, the engine with `api.js`: a glyph
+    /// changed in one only would preview one way and light the keys another.
+    #[test]
+    fn the_font_is_the_same_in_both_api_files() {
+        let typescript = font_table(include_str!(
+            "../../../../../packages/effects-api/src/index.ts"
+        ));
+        let engine = font_table(API_JS);
+        assert!(typescript.len() > 50, "the TypeScript font has its glyphs");
+        assert_eq!(typescript, engine);
+    }
+
+    /// Upper case, accents dropped, a space for what the font cannot draw,
+    /// one dark column between glyphs: in QuickJS, which has to know
+    /// `normalize` for the accents.
+    #[test]
+    fn banner_draws_text_in_the_engine() {
+        let js = r#"
+            import { banner } from '@candeo/effects-api'
+            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+            export default {
+              render({ frame }) {
+                const hi = ['#.#.###', '#.#..#.', '###..#.', '#.#..#.', '#.#.###']
+                if (!same(banner('HI'), hi)) throw new Error('HI: ' + banner('HI'))
+                if (!same(banner('hi'), hi)) throw new Error('lower case: ' + banner('hi'))
+                if (!same(banner('É'), banner('E'))) throw new Error('accent: ' + banner('É'))
+                if (!same(banner('~'), banner(' '))) throw new Error('unknown: ' + banner('~'))
+                if (!same(banner(''), ['', '', '', '', ''])) throw new Error('empty')
+                frame.fill({ r: 1, g: 1, b: 1 })
               },
             }
         "#;
@@ -3649,6 +3737,49 @@ mod signal_tests {
         assert_eq!(key(&drawn, 1), [50, 0, 0]);
     }
 
+    /// A `text` setting takes any scalar as its text, cut at its `maxLength`.
+    #[test]
+    fn a_bound_text_takes_any_value_as_text_cut_at_its_length() {
+        let js = "export default {
+            params: { words: { kind: 'text', label: 'Words', maxLength: 4, default: 'hi' } },
+            render({ layout, params, frame }) {
+                const w = params.words
+                frame.set(layout.keys[0], {
+                    r: w.length,
+                    g: w === 'abcd' ? 1 : w === 'hi' ? 2 : 0,
+                    b: w === '1' ? 1 : w === 'true' ? 2 : 0,
+                })
+            },
+        }";
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(js, layout).expect("load");
+        let drawn = |bound: &str| {
+            let frame = render_with(
+                &ctx,
+                0.0,
+                0,
+                &FrameInputs {
+                    params: r#"{"words":"hi"}"#,
+                    presses: "",
+                    clock_ms: 0.0,
+                    bound,
+                    signals: "",
+                },
+                layout.led_count(),
+            )
+            .expect("render");
+            key(&frame, 0)
+        };
+        assert_eq!(drawn(""), [2, 2, 0], "configured");
+        assert_eq!(
+            drawn(r#"{"words":"abcdef"}"#),
+            [4, 1, 0],
+            "cut at maxLength"
+        );
+        assert_eq!(drawn(r#"{"words":1}"#), [1, 0, 1], "a number as its text");
+        assert_eq!(drawn(r#"{"words":true}"#), [4, 0, 2], "a flag as its text");
+    }
+
     #[test]
     fn an_effect_declaring_signals_is_handed_them_frozen() {
         assert_eq!(key(&frame("", r#"{"count":7}"#), 2), [7, 1, 0]);
@@ -3702,6 +3833,25 @@ mod signal_tests {
             "tests running: amber, {tests:?}"
         );
         assert_eq!(at(&frame, row[4]), [0, 0, 0], "no fifth signal");
+
+        // With a prefix, only the names starting with it take a key.
+        let frame = render_with(
+            &ctx,
+            0.25,
+            0,
+            &FrameInputs {
+                params: r#"{"prefix":"ci."}"#,
+                presses: "",
+                clock_ms: 0.0,
+                bound: "",
+                signals: r#"{"build":"failed","ci.tests":"ok","ci.build":"failed"}"#,
+            },
+            layout.led_count(),
+        )
+        .expect("render");
+        assert_eq!(at(&frame, row[0]), [235, 24, 24], "ci.build failed: red");
+        assert_eq!(at(&frame, row[1]), [32, 200, 64], "ci.tests ok: green");
+        assert_eq!(at(&frame, row[2]), [0, 0, 0], "build is not under ci.");
     }
 
     #[test]

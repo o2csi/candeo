@@ -34,7 +34,7 @@ pub struct Shipped {
 ///
 /// Named in English: a name is a file name and is not translated, and English
 /// is the reference language of the interface.
-pub static ALL: [Shipped; 16] = [
+pub static ALL: [Shipped; 17] = [
     Shipped {
         name: "Radial wave",
         former_id: Some("onde-radiale"),
@@ -114,6 +114,11 @@ pub static ALL: [Shipped; 16] = [
         name: "Status row",
         former_id: None,
         source: include_str!("../../../../packages/effects/Status row.ts"),
+    },
+    Shipped {
+        name: "Scrolling text",
+        former_id: None,
+        source: include_str!("../../../../packages/effects/Scrolling text.ts"),
     },
 ];
 

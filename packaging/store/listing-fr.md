@@ -10,12 +10,12 @@ L'éclairage de votre clavier, exactement comme vous le voulez, sans le logiciel
 
 ## Description
 
-Faites briller votre clavier exactement comme vous l'entendez. Candeo pilote chaque touche directement — seize effets prêts à l'emploi, un aperçu en direct, des règles qui changent l'éclairage d'elles-mêmes — sans logiciel du fabricant, sans service en arrière-plan et sans compte.
+Faites briller votre clavier exactement comme vous l'entendez. Candeo pilote chaque touche directement — dix-sept effets prêts à l'emploi, un aperçu en direct, des règles qui changent l'éclairage d'elles-mêmes — sans logiciel du fabricant, sans service en arrière-plan et sans compte.
 
 Compatible avec le Razer DeathStalker V2 Pro (filaire) et l'Alienware m18 R1, son clavier et ses zones lumineuses. Un appareil pris en charge est nécessaire ; la liste s'allonge sur https://o2csi.github.io/candeo/devices.html.
 
 POINTS FORTS
-• Seize effets prêts à l'emploi : des ondes qui suivent votre frappe, la pluie, un ciel étoilé, des éclairs, une horloge qui fait défiler l'heure sur les touches, une rangée d'état pour ce que disent vos autres outils… Réglez chacun en le regardant.
+• Dix-sept effets prêts à l'emploi : des ondes qui suivent votre frappe, la pluie, un ciel étoilé, des éclairs, une horloge qui fait défiler l'heure sur les touches, le texte de votre choix qui défile de la même façon, une rangée d'état pour ce que disent vos autres outils… Réglez chacun en le regardant.
 • Chaque touche, sa couleur : toute la matrice, des dégradés, et les effets intégrés au micrologiciel de votre appareil.
 • Un éclairage qui suit votre journée : l'heure à chaque heure pile, le clavier éteint la nuit ou quand vous vous absentez — puis votre effet revient tout seul.
 • Écrivez les vôtres : un effet est un petit fichier TypeScript, prévisualisé en direct sur un simulateur de clavier avant d'atteindre le matériel. Modifiez-le dans Candeo ou dans l'éditeur dont vous avez l'habitude.
@@ -28,7 +28,7 @@ Open source, sous licence GPL-3.0.
 
 ## Fonctionnalités (liste courte, affichée sur la page du Store)
 
-- Seize effets prêts à l'emploi, réglables en les regardant
+- Dix-sept effets prêts à l'emploi, réglables en les regardant
 - Chaque touche sa couleur, et les effets du micrologiciel de votre appareil
 - Automatisations : l'heure à chaque heure pile, éteint la nuit ou pendant votre absence
 - Écrivez vos propres effets en TypeScript, avec aperçu en direct

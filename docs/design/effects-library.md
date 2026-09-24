@@ -86,6 +86,25 @@ export default defineEffect({
 - Defaults no longer need to be literals: the manifest is read by running the
   module (§3), not from the syntax tree.
 
+### Text parameters and the 3×5 font (#217)
+
+- **A `text` kind** takes words: `{ kind: 'text', label, default, maxLength }`.
+  `maxLength` defaults to 64 and cannot exceed 256, a signal's longest value, so
+  a bound signal always fits. The form shows a one-line field: the effect
+  follows each keystroke, the value is saved when the field is left. A bound
+  signal converts from any scalar to its text (`1`, `true`), cut at
+  `maxLength`.
+- **`banner(text)`**, in `@candeo/effects-api`, draws text for an effect that
+  reads the keyboard as a small display: five strings, `#` lit and `.` dark,
+  one dark column between glyphs. Upper case only — a 3×5 cell has no room for
+  a legible lower case — so letters are upper-cased and accents dropped
+  (`é` → `E`). Letters, digits and `-+=_/?%*<>"` are three columns wide; the
+  space, `.,:;!'` one; `()°` two. What it cannot draw is a space.
+- **It lives in the API** because shipped effects import nothing else: *Clock*
+  and *Scrolling text* draw with the same font, and so can any effect written
+  by hand. `api.js` holds the engine's copy, and a test compares the two
+  tables.
+
 ## 3. Compiling and the cache
 
 The Rust side cannot strip TypeScript types, and the webview already can: the

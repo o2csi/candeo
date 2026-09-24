@@ -185,7 +185,19 @@ function fits(spec: ParamSpec, v: ParamValue): boolean {
       return typeof v === 'boolean'
     case 'choice':
       return typeof v === 'string' && spec.options.some((o) => (typeof o === 'string' ? o : o.value) === v)
+    case 'text':
+      return typeof v === 'string' && Array.from(v).length <= textLimit(spec)
   }
+}
+
+/**
+ * How many characters a `text` parameter takes: its `maxLength`, 64 unless it
+ * says, and never more than 256, a signal's longest value. `textLimit` in the
+ * bootstrap cuts a bound value at the same length.
+ */
+export function textLimit(spec: { maxLength?: number }): number {
+  const declared = Number.isInteger(spec.maxLength) && spec.maxLength! > 0 ? spec.maxLength! : 64
+  return Math.min(declared, 256)
 }
 
 /** Equality of parameter values, colors included. */

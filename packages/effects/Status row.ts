@@ -4,7 +4,9 @@
 // `ok`, `tests` are `running`. Each signal takes a key of the top row, left to
 // right in the alphabetical order of its name, so it keeps its key whatever order
 // the signals arrive in; the key's colour says how it is going. Signals beyond
-// the row's length are not shown.
+// the row's length are not shown. A prefix keeps only the names that start
+// with it — `ci.` for `ci.build` and `ci.tests` — when other signals are held
+// for other things.
 //
 // It reads every signal held (`inputs: ['signals']`) — the case the bag is for:
 // many values at once, without knowing how many. With none, which is how the
@@ -61,6 +63,11 @@ export default defineEffect({
       label: { en: 'Pulse what is under way', fr: 'Faire pulser ce qui est en cours' },
       default: true,
     },
+    prefix: {
+      kind: 'text',
+      label: { en: 'Only the names starting with', fr: 'Seulement les noms commençant par' },
+      default: '',
+    },
   },
   render({ layout, time, signals, frame, params }) {
     if (layout.keys.length === 0) return
@@ -72,7 +79,10 @@ export default defineEffect({
     // device that has only zones.
     const top = Math.min(...layout.keys.map((key) => key.row))
     const row = layout.keys.filter((key) => key.row === top).sort((a, b) => a.col - b.col)
-    const names = Object.keys(signals).sort()
+    const prefix = params.prefix ?? ''
+    const names = Object.keys(signals)
+      .filter((name) => name.startsWith(prefix))
+      .sort()
 
     if (names.length === 0) {
       const breath = 0.5 + 0.5 * Math.sin(time * 1.5)

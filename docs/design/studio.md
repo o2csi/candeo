@@ -535,7 +535,7 @@ a slider. The whole rest of the app has served those who write effects;
 this column serves the others.
 
 The controls are **generated from the manifest**, never written for a particular
-effect. The form knows the four kinds of `ParamSpec`, and nothing
+effect. The form knows the five kinds of `ParamSpec`, and nothing
 else: an effect installed tomorrow gets its settings without anything changing
 here.
 
@@ -545,6 +545,7 @@ here.
 | `color` | color picker | the `#rrggbb` code, spelled out |
 | `boolean` | checkbox | "activé" / "désactivé" (enabled / disabled) |
 | `choice` | list | the selected option |
+| `text` | one-line field, at most `maxLength` characters | nothing: the field shows it |
 
 A color picker *is* a color — it is the only place in
 the app where color is the subject and not an interface role, and it is

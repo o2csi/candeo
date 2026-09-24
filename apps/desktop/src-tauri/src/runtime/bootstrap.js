@@ -170,9 +170,20 @@ function converted(spec, raw) {
       const known = spec.options.some((o) => (typeof o === 'string' ? o : o.value) === value)
       return known ? value : undefined
     }
+    // Any scalar as its text, `1` or `true` included, cut where the setting
+    // stops: a signal holds up to 256 characters, a setting may take fewer.
+    case 'text':
+      if (!['string', 'number', 'boolean'].includes(typeof raw)) return undefined
+      return Array.from(String(raw)).slice(0, textLimit(spec)).join('')
     default:
       return undefined
   }
+}
+
+// What a `text` setting takes: its `maxLength`, 64 unless it says, 256 at most.
+function textLimit(spec) {
+  const declared = Number.isInteger(spec.maxLength) && spec.maxLength > 0 ? spec.maxLength : 64
+  return Math.min(declared, 256)
 }
 
 // `#rrggbb` or `#rgb`, the `#` optional: what a sender computing a colour writes.
