@@ -1,2 +1,2 @@
-en: Scrolling text, a new effect: any text scrolling across the keyboard, typed in the settings or sent by a signal. Status row can keep only the signals whose name starts with a prefix.
-fr: Scrolling text, un nouvel effet : n'importe quel texte qui défile sur le clavier, tapé dans les paramètres ou envoyé par un signal. Status row peut ne garder que les signaux dont le nom commence par un préfixe.
+en: Scrolling text, a new effect: any text on the keyboard, scrolling or still, typed in the settings or sent by a signal. Status row can keep only the signals whose name starts with a prefix.
+fr: Scrolling text, un nouvel effet : n'importe quel texte sur le clavier, qui défile ou fixe, tapé dans les paramètres ou envoyé par un signal. Status row peut ne garder que les signaux dont le nom commence par un préfixe.

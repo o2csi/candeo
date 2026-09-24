@@ -2829,6 +2829,29 @@ mod tests {
         );
     }
 
+    /// Still, text that fits stays put, and longer text comes a page of words
+    /// at a time: the same keys from one frame to the next within a page,
+    /// others on the next page.
+    #[test]
+    fn the_scrolling_text_effect_holds_still_text_page_by_page() {
+        let (_rt, ctx) = prepare(crate::shipped::source("Scrolling text"), layout()).expect("load");
+        let len = layout().led_count();
+        let still = |text: &str, time: f64| {
+            let params = format!(r#"{{"text":"{text}","display":"still","hold":1}}"#);
+            render_once(&ctx, time, 0, &params, len).expect("render")
+        };
+
+        assert_eq!(
+            still("OK", 0.0),
+            still("OK", 3.7),
+            "a text that fits does not move"
+        );
+        assert_ne!(still("OK", 0.0), still("", 0.0), "and it is drawn");
+        let long = "BUILD FAILED AGAIN";
+        assert_eq!(still(long, 0.1), still(long, 0.9), "one page for a second");
+        assert_ne!(still(long, 0.5), still(long, 1.5), "then the next");
+    }
+
     /// With the seconds on, the banner carries two more digits and a colon, so
     /// over the same ten seconds it lights more keys than without.
     #[test]
