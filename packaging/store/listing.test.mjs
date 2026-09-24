@@ -89,6 +89,16 @@ test('the what’s new is a bullet per fragment, in the order of their names', (
   })
 })
 
+test('a release’s what’s new starts with its version and ends with a link to its notes', () => {
+  const news = whatsNew({ 'news/a.md': 'en: One.\nfr: Un.' }, LANGUAGES, '1.2.0')
+  assert.equal(news.en, 'Version 1.2.0\n\n• One.\n\nAll changes: https://github.com/o2csi/candeo/releases/tag/v1.2.0')
+  assert.equal(
+    news.fr,
+    'Version 1.2.0\n\n• Un.\n\nTous les changements : https://github.com/o2csi/candeo/releases/tag/v1.2.0',
+  )
+  assert.throws(() => whatsNew({ 'news/a.md': 'de: Eins.' }, ['de'], '1.2.0'), /no What's new frame for de/)
+})
+
 test('a fragment missing a language, or holding anything else, is refused by name', () => {
   assert.throws(() => whatsNew({ 'news/a.md': 'en: Only English.' }, LANGUAGES), /news\/a\.md: no fr line/)
   assert.throws(

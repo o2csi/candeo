@@ -70,10 +70,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label "autorelease: pending" \
-            --json number --jq '.[0].number // empty')
-          [ -n "$pr" ] || exit 0
-          node packaging/store/listing.mjs --preview > "$RUNNER_TEMP/news.md"
+          read -r pr title < <(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --label "autorelease: pending" --json number,title \
+            --jq '.[0] | select(.) | "\(.number) \(.title)"') || true
+          [ -n "${pr:-}" ] || exit 0
+          # The version it proposes, from its title (`Go release vX.Y.Z 🚀`): the
+          # preview then carries the version line and link the release sends.
+          version=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' <<< "$title" | sed -n 1p || true)
+          node packaging/store/listing.mjs --preview $version > "$RUNNER_TEMP/news.md"
 
           # One comment, edited at each merge rather than added again.
           id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr/comments" \

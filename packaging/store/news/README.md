@@ -10,4 +10,5 @@ fr: Status row, un nouvel effet : une touche de la rangée du haut par signal re
 ```
 
 A release sends the lines of the files added since the previous release, in the
-order of their names (#220, `docs/releasing.md`). Released files stay.
+order of their names, after its version and before a link to its notes (#220,
+`docs/releasing.md`). Released files stay.
