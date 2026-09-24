@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.10.0](https://github.com/o2csi/candeo/compare/v0.9.0...v0.10.0) (2026-09-24)
+
+
+### Features
+
+* an effect's settings and its code can read signals ([145cab3](https://github.com/o2csi/candeo/commit/145cab3fa33456c2b544565d7677ad1b01cc3e29))
+* bind effect settings to signals in the settings form ([09a46c9](https://github.com/o2csi/candeo/commit/09a46c91ae10b79d0bc427a74312fdd0c6cb0235))
+* mark effects that read every signal in the gallery ([deb4c33](https://github.com/o2csi/candeo/commit/deb4c332d7e9f6d140cc5b8a7bfa1342b7a5b632))
+* Settings shows what each signal drives ([3cc62e2](https://github.com/o2csi/candeo/commit/3cc62e27f4e41f38ebec2c326fcd2bc979cd7c4a))
+* Status row shows one key per signal on the top row ([3ea6408](https://github.com/o2csi/candeo/commit/3ea640855f50cfbc64c21a56c2e78063bd38fc9e))
+
+
+### Bug Fixes
+
+* a signal name is taken once typing pauses, and waiting says so ([66b02d3](https://github.com/o2csi/candeo/commit/66b02d3db9536ac201df29c6f0aab0e3fbe216db))
+* the log names no network address the API listens on ([a83403d](https://github.com/o2csi/candeo/commit/a83403df97cb8621d335bdc1f3a47ad08f9b2784))
+
+
+### Documentation
+
+* a sender's value reaches only what someone bound or ruled ([3ee834a](https://github.com/o2csi/candeo/commit/3ee834a92ce4eff5d1e3a59abd55a91b0ac5cd64))
+* a setting can read a signal ([13a1eda](https://github.com/o2csi/candeo/commit/13a1eda48ec4c5aae2b170eecbb56282575a463e))
+* a signals page on the site ([b7bb282](https://github.com/o2csi/candeo/commit/b7bb28270c444807d53db454570b6a3986e340b4))
+* sixteen effects, and Meters as an example of reading signals ([e7a2ef9](https://github.com/o2csi/candeo/commit/e7a2ef9b4a14b9232ef9bc3431de95cf8d9ba846))
+* the 0.10.0 listing says what Settings shows of signals ([3019411](https://github.com/o2csi/candeo/commit/3019411d353dc9f3b2c43ad2c0132fa44e772632))
+* the site and the Store listing describe settings following signals ([1947409](https://github.com/o2csi/candeo/commit/194740937a62a97b3f824d5c62710c9d2fcbb3a6))
+* the Store description and features say what signals drive now ([7036ee0](https://github.com/o2csi/candeo/commit/7036ee000af87b579e2df70a440e1caa969d47e9))
+
 ## [0.9.0](https://github.com/o2csi/candeo/compare/v0.8.0...v0.9.0) (2026-09-23)
 
 
