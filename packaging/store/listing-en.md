@@ -22,7 +22,7 @@ HIGHLIGHTS
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
-• Signals from your other tools: a build script or Home Assistant tells Candeo what happened, and your rules decide what lights up. Off until you turn it on.
+• Signals from your other tools: a build script or Home Assistant tells Candeo what happened. A rule switches the lighting while it holds, or any setting of the effect running follows the value sent — a colour, a speed. Off until you turn it on.
 • Always on, never in the way: effects keep running with the window closed, from the notification area.
 • Private by design: no account, nothing collected, nothing sent — this Store version makes no network request at all, and updates come from the Store.
 • Starts with Windows if you want it to. Light and dark themes. English and French.
@@ -36,7 +36,7 @@ Open source, under the GPL-3.0.
 - Automations: the time on the hour, dark at night or when you step away
 - Write your own effects in TypeScript, with a live preview
 - Keeps running with the window closed, from the notification area
-- Signals from scripts and Home Assistant, through a local API
+- Signals from scripts and Home Assistant drive rules and settings
 - No account, nothing collected, no network request
 - English and French, light and dark themes
 

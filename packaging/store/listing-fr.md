@@ -21,7 +21,7 @@ POINTS FORTS
 • Chaque touche, sa couleur : toute la matrice, des dégradés, et les effets intégrés au micrologiciel de votre appareil.
 • Un éclairage qui suit votre journée : l'heure à chaque heure pile, le clavier éteint la nuit ou quand vous vous absentez — puis votre effet revient tout seul.
 • Écrivez les vôtres : un effet est un petit fichier TypeScript, prévisualisé en direct sur un simulateur de clavier avant d'atteindre le matériel. Modifiez-le dans Candeo ou dans l'éditeur dont vous avez l'habitude.
-• Des signaux venus de vos autres outils : un script de compilation ou Home Assistant dit à Candeo ce qui se passe, et vos règles décident de ce qui s'allume. Désactivé tant que vous ne l'activez pas.
+• Des signaux venus de vos autres outils : un script de compilation ou Home Assistant dit à Candeo ce qui se passe. Une règle change l'éclairage tant que c'est le cas, ou n'importe quel paramètre de l'effet en cours suit la valeur envoyée — une couleur, une vitesse. Désactivé tant que vous ne l'activez pas.
 • Toujours là, jamais encombrant : les effets continuent fenêtre fermée, depuis la zone de notification.
 • Respect de la vie privée : aucun compte, rien de collecté, rien d'envoyé — cette version du Store ne fait aucune requête réseau, et les mises à jour viennent du Store.
 • Démarrage avec Windows si vous le souhaitez. Thème clair et sombre. Français et anglais.
@@ -35,7 +35,7 @@ Open source, sous licence GPL-3.0.
 - Automatisations : l'heure à chaque heure pile, éteint la nuit ou pendant votre absence
 - Écrivez vos propres effets en TypeScript, avec aperçu en direct
 - Continue de tourner fenêtre fermée, depuis la zone de notification
-- Des signaux venus de scripts et de Home Assistant, par une API locale
+- Des signaux venus de scripts et de Home Assistant pilotent règles et paramètres
 - Aucun compte, rien de collecté, aucune requête réseau
 - Français et anglais, thème clair et sombre
 
