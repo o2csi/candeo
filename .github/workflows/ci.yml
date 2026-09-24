@@ -244,6 +244,9 @@ jobs:
       # Types cannot see a value routed to the wrong place (#67). Node only, no
       # browser: a few seconds on top of the job.
       - run: pnpm --filter @candeo/desktop test
+      # The release scripts: a Store listing or a What's new line that the
+      # release would refuse fails here, in its own pull request.
+      - run: pnpm test:packaging
 
   # The only job that actually builds the application. `fmt`, `clippy`, the
   # tests and `vue-tsc` never compile `candeo-desktop`: a break in the Tauri

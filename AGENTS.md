@@ -19,6 +19,7 @@ pnpm lint:rust        # cargo clippy --workspace --all-targets -- -D warnings
 pnpm test:rust        # cargo test --workspace
 pnpm --filter @candeo/desktop exec vue-tsc --noEmit
 pnpm test:web         # vitest run, in apps/desktop
+pnpm test:packaging   # node --test, the release scripts
 ```
 
 Front-end tests sit next to the module they cover (`useSettings.test.ts`), run
