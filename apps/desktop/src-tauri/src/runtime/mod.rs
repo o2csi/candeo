@@ -4192,49 +4192,54 @@ mod signal_tests {
         assert!(gone.is_empty(), "gone a second later: {} keys", gone.len());
     }
 
-    /// Ambience: dim at rest, brighter with bass, warm for low music and cool
-    /// for high.
+    /// Aurora: dim at rest, brighter with the bass, the low colour for low
+    /// music and the high one for high music.
     #[test]
-    fn the_ambience_follows_the_bass_and_where_the_music_sits() {
+    fn the_aurora_follows_the_bass_and_where_the_music_sits() {
         let layout = crate::default_layout();
-        let brightness =
-            |frame: &[u8]| -> u32 { key(frame, 0).iter().map(|&c| u32::from(c)).sum() };
-        let low_music = {
+        // Summed over every key: the curtains leave some keys dark.
+        let totals = |frame: &[u8]| -> [u32; 3] {
+            let mut sum = [0u32; 3];
+            for k in layout.keys {
+                let i = usize::from(k.index) * 3;
+                for c in 0..3 {
+                    sum[c] += u32::from(frame[i + c]);
+                }
+            }
+            sum
+        };
+        let music = |bands: &[usize]| {
             let mut b = [0.0; 16];
-            b[0] = 1.0;
-            b[1] = 1.0;
+            for &i in bands {
+                b[i] = 1.0;
+            }
             analysis(0.8, &b, false)
         };
-        let high_music = {
-            let mut b = [0.0; 16];
-            b[14] = 1.0;
-            b[15] = 1.0;
-            analysis(0.8, &b, false)
+        let played = |audio: &str| {
+            let (_rt, ctx) = prepare(crate::shipped::source("Aurora"), layout).expect("load");
+            let mut last = Vec::new();
+            for i in 0..=60 {
+                last = heard_with(&ctx, f64::from(i) * 0.1, "{}", audio);
+            }
+            totals(&last)
         };
 
-        let (_rt, ctx) = prepare(crate::shipped::source("Ambience"), layout).expect("load");
-        let rest = brightness(&heard_with(
-            &ctx,
-            0.0,
-            "{}",
-            &analysis(0.0, &[0.0; 16], false),
-        ));
-        assert!(rest > 0, "it rests dimly");
-        let mut warm = Vec::new();
-        for i in 1..=60 {
-            warm = heard_with(&ctx, f64::from(i) * 0.1, "{}", &low_music);
-        }
-        assert!(brightness(&warm) > rest * 3, "bass brightens it");
-        let [r, _, b] = key(&warm, 0);
-        assert!(r > b, "low music is warm: {:?}", key(&warm, 0));
-
-        let (_rt, ctx) = prepare(crate::shipped::source("Ambience"), layout).expect("load");
-        let mut cool = Vec::new();
-        for i in 1..=60 {
-            cool = heard_with(&ctx, f64::from(i) * 0.1, "{}", &high_music);
-        }
-        let [r, _, b] = key(&cool, 0);
-        assert!(b > r, "high music is cool: {:?}", key(&cool, 0));
+        let rest = played(&analysis(0.0, &[0.0; 16], false));
+        assert!(rest.iter().sum::<u32>() > 0, "it drifts dimly at rest");
+        let low = played(&music(&[0, 1]));
+        assert!(
+            low.iter().sum::<u32>() > rest.iter().sum::<u32>() * 3 / 2,
+            "music brightens it: {low:?} against {rest:?}"
+        );
+        assert!(
+            low[1] > low[0],
+            "low music takes the low colour, green: {low:?}"
+        );
+        let high = played(&music(&[14, 15]));
+        assert!(
+            high[2] > high[1],
+            "high music takes the high colour, violet: {high:?}"
+        );
     }
 
     /// The shipped Beat pulse: a beat flashes the keyboard, which fades after.

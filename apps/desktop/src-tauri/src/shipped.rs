@@ -146,9 +146,9 @@ pub static ALL: [Shipped; 23] = [
         source: include_str!("../../../../packages/effects/Fireworks.ts"),
     },
     Shipped {
-        name: "Ambience",
+        name: "Aurora",
         former_id: None,
-        source: include_str!("../../../../packages/effects/Ambience.ts"),
+        source: include_str!("../../../../packages/effects/Aurora.ts"),
     },
 ];
 

@@ -279,7 +279,7 @@ The effects shipped with the application — Radial wave, Diagonal wave,
 Breathing, Sweep, Fixed gradient, Color wheel, Noise map, Rain, Starry night,
 Bubbles, Lightning, Crossing beams, Swirl circles, Ripples, Clock, Status row,
 Scrolling text, Equalizer, Beat pulse, Waterfall, Beat ripples, Fireworks,
-Ambience — are written against this same API, in
+Aurora — are written against this same API, in
 [`packages/effects/`](packages/effects/). They are copied into your effects folder
 at first launch and kept up to date. The application does not change them:
 Duplicate one to make it yours, and Restore brings back one changed or removed in
