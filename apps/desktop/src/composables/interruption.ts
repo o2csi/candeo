@@ -56,3 +56,15 @@ export function interruptionLine(
 function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
+
+/**
+ * Whether a change to an effect's settings goes to the device live: only when
+ * the device runs that effect now.
+ *
+ * Under an interruption the applied effect does not run, the rule's does, and
+ * its loop would take settings meant for another effect (#218). The change is
+ * still saved, and the applied effect comes back with it.
+ */
+export function goesLive(effect: string, applied: string | null, interrupted: boolean): boolean {
+  return !interrupted && effect === applied
+}

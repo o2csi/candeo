@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { interruptionLine } from './interruption'
+import { goesLive, interruptionLine } from './interruption'
 
 const NOW = new Date(2026, 8, 17, 14, 0, 0).getTime()
 
@@ -61,5 +61,20 @@ describe('interruptionLine', () => {
       NOW,
     )
     expect(line.params.seconds).toBe(0)
+  })
+})
+
+describe('goesLive', () => {
+  it('sends a change to the device running that effect', () => {
+    expect(goesLive('shipped:Bubbles', 'shipped:Bubbles', false)).toBe(true)
+  })
+
+  it('keeps it from a device running another effect, or none', () => {
+    expect(goesLive('shipped:Rain', 'shipped:Bubbles', false)).toBe(false)
+    expect(goesLive('shipped:Rain', null, false)).toBe(false)
+  })
+
+  it('keeps it from the rule an interruption runs, even for the applied effect', () => {
+    expect(goesLive('shipped:Bubbles', 'shipped:Bubbles', true)).toBe(false)
   })
 })
