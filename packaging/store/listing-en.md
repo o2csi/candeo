@@ -44,6 +44,7 @@ Open source, under the GPL-3.0.
 
 • A setting can follow a signal: in the gallery, switch a colour, a speed or any other setting to Signal, and it takes the value another program sends — a colour computed by a script, a level from Home Assistant. While nothing arrives, it keeps its own value.
 • A rule's settings can follow a signal the same way.
+• Settings shows what each signal drives — a setting on a device, a rule — and the names expected but not received yet.
 • Status row, a new effect: one key of the top row per signal received, green, amber or red by what it says.
 • Effects you write can read every signal received, by declaring it.
 

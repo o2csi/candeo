@@ -43,6 +43,7 @@ Open source, sous licence GPL-3.0.
 
 • Un paramètre peut suivre un signal : dans la galerie, passez une couleur, une vitesse ou tout autre paramètre sur Signal, et il prend la valeur qu'envoie un autre programme — une couleur calculée par un script, un niveau venu de Home Assistant. Tant que rien n'arrive, il garde sa propre valeur.
 • Les paramètres d'une règle peuvent suivre un signal de la même façon.
+• Les Réglages montrent ce que pilote chaque signal — un paramètre sur un appareil, une règle — et les noms attendus mais pas encore reçus.
 • Status row, un nouvel effet : une touche de la rangée du haut par signal reçu, verte, ambre ou rouge selon ce qu'il dit.
 • Les effets que vous écrivez peuvent lire tous les signaux reçus, en le déclarant.
 
