@@ -47,11 +47,17 @@ function compiler(): Promise<typeof TS> {
  * Type errors do not stop it — the editor checks them before saving, and a file
  * dropped in the folder is the author's business. A module that does not load
  * is reported by Rust when the JavaScript is recorded.
+ *
+ * A syntax error does stop it. The compiler repairs what it can without a word:
+ * a file edited outside Candeo with a parenthesis missing ran as the compiler's
+ * guess, listed as ready (#226). The module throws the error instead, so Rust
+ * records an effect that does not load, saying why, as it does for any other.
  */
 export async function transpile(source: string): Promise<string> {
   const ts = await compiler()
-  return ts.transpileModule(source, {
+  const { outputText, diagnostics } = ts.transpileModule(source, {
     fileName: FILE,
+    reportDiagnostics: true,
     compilerOptions: {
       target: ts.ScriptTarget.ES2020,
       // **Not CommonJS.** `import { hsv } from '@candeo/effects-api'` must stay
@@ -59,5 +65,15 @@ export async function transpile(source: string): Promise<string> {
       // module.
       module: ts.ModuleKind.ESNext,
     },
-  }).outputText
+  })
+  const first = diagnostics?.find((d) => d.category === ts.DiagnosticCategory.Error)
+  return first ? `throw new SyntaxError(${JSON.stringify(located(ts, first))})\n` : outputText
+}
+
+/** A diagnostic as its author finds it: the line and column, then what is wrong. */
+function located(ts: typeof TS, diagnostic: TS.Diagnostic): string {
+  const text = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')
+  if (!diagnostic.file || diagnostic.start === undefined) return text
+  const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
+  return `line ${line + 1}, column ${character + 1}: ${text}`
 }
