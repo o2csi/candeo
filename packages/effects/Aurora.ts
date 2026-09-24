@@ -2,11 +2,12 @@
 // moved by the sound playing.
 //
 // Value noise stretched upright makes the curtains (`inputs: ['audio']`). The
-// music moves them: they drift faster when it is loud, the bottom rows swell
-// with the bass, a beat sends a sheen over them, and their colour slides from
-// the low colour to the high one as the music sits lower or higher across the
-// bands. Everything eases, so it sways rather than blinks: a background for
-// working with music on.
+// music moves them, on its rhythm: each beat throws them forward and they slow
+// down until the next, so they surge in time with the music; between beats they
+// drift at a pace set by the tempo, measured from the gaps between the last
+// beats, and by the level. The bottom rows swell with the bass, a beat sends a
+// sheen over them, and their colour slides from the low colour to the high one
+// as the music sits lower or higher across the bands.
 //
 // With nothing playing, which is also how the swatch is sampled, the curtains
 // drift slowly and dimly.
@@ -18,6 +19,15 @@ const HIGH = { r: 200, g: 60, b: 255 }
 const BLACK = { r: 0, g: 0, b: 0 }
 /** The lowest bands, below about 180 Hz: where the bass is. */
 const BASS_BANDS = 4
+/** How far a beat throws the curtains, in curtain widths per second. */
+const KICK = 1.4
+/** How long a surge takes to die down, in seconds. */
+const SURGE = 0.35
+/** The tempo the pace is set against: 120 beats a minute, half a second apart. */
+const GAP_AT_120 = 0.5
+/** Gaps between beats taken as a tempo, 30 to 240 a minute; others are missed or doubled beats. */
+const GAP_MIN = 0.25
+const GAP_MAX = 2
 
 // A value in [0, 1[ for a point of the integer lattice, the same on every run.
 function lattice(x = 0, y = 0, z = 0) {
@@ -59,8 +69,18 @@ function ease(from = 0, to = 0, dt = 0, seconds = 1) {
   return from + (to - from) * (1 - Math.exp(-dt / seconds))
 }
 
-// What the music did lately, eased, and how far the curtains have drifted.
-let heard = { at: 0, level: 0, bass: 0, tone: 0.5, flow: 0, sheen: 0 }
+/** The middle value: a missed or doubled beat does not move it. */
+function median(values = [0]) {
+  const sorted = [...values].sort((a, b) => a - b)
+  return sorted[Math.floor(sorted.length / 2)]
+}
+
+const START = { at: 0, level: 0, bass: 0, tone: 0.5, flow: 0, velocity: 0, sheen: 0, beat: -Infinity }
+
+// What the music did lately, eased; how far and how fast the curtains move; and
+// the gaps between the last beats, for the tempo.
+let heard = START
+let gaps = [GAP_AT_120]
 
 export default defineEffect({
   description: {
@@ -97,18 +117,34 @@ export default defineEffect({
     const size = Math.max(0.5, Number(params.size ?? 5))
 
     // A time before the last frame is a restart: the preview starts from zero.
-    if (time < heard.at) heard = { at: 0, level: 0, bass: 0, tone: 0.5, flow: 0, sheen: 0 }
+    if (time < heard.at) {
+      heard = START
+      gaps = [GAP_AT_120]
+    }
     const dt = time - heard.at
     const bass = Math.max(...audio.bands.slice(0, BASS_BANDS))
     const level = ease(heard.level, audio.level, dt, 0.4)
+
+    if (audio.beat) {
+      const gap = time - heard.beat
+      if (gap >= GAP_MIN && gap <= GAP_MAX) gaps = [...gaps, gap].slice(-8)
+    }
+    // Faster for a fast song, slower for a slow one, within half and twice.
+    const tempo = Math.min(2, Math.max(0.5, GAP_AT_120 / median(gaps)))
+    const pace = (0.12 + 0.5 * level) * tempo
+    // A beat throws the curtains forward; the surge dies down to the pace.
+    const thrown = audio.beat ? heard.velocity + KICK * tempo : heard.velocity
+    const velocity = pace + (thrown - pace) * Math.exp(-dt / SURGE)
+
     heard = {
       at: time,
       level,
       bass: ease(heard.bass, bass, dt, 0.12),
       tone: ease(heard.tone, audio.level > 0 ? toneOf([...audio.bands]) : heard.tone, dt, 1.2),
-      // Slow at rest, several times faster when the music is loud.
-      flow: heard.flow + dt * (0.15 + 1.2 * level),
+      flow: heard.flow + velocity * dt,
+      velocity,
       sheen: audio.beat ? 1 : heard.sheen * Math.exp(-dt / 0.25),
+      beat: audio.beat ? time : heard.beat,
     }
 
     const area = bounds(layout)

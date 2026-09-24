@@ -4242,6 +4242,35 @@ mod signal_tests {
         );
     }
 
+    /// Aurora moves on the beat: frames change more just after a beat than
+    /// the same music without one.
+    #[test]
+    fn the_aurora_surges_on_the_beat() {
+        let layout = crate::default_layout();
+        let music = analysis(0.6, &[0.6; 16], false);
+        let beat = analysis(0.6, &[0.6; 16], true);
+        // How much the frame moves over a tenth of a second after `at`.
+        let change = |beats: bool| -> u32 {
+            let (_rt, ctx) = prepare(crate::shipped::source("Aurora"), layout).expect("load");
+            for i in 0..20 {
+                let _ = heard_with(&ctx, f64::from(i) * 0.05, "{}", &music);
+            }
+            let before = heard_with(&ctx, 1.0, "{}", if beats { &beat } else { &music });
+            let after = heard_with(&ctx, 1.1, "{}", &music);
+            before
+                .iter()
+                .zip(&after)
+                .map(|(a, b)| u32::from(a.abs_diff(*b)))
+                .sum()
+        };
+        let calm = change(false);
+        let surged = change(true);
+        assert!(
+            surged > calm * 3 / 2,
+            "a beat moves it more: {surged} against {calm}"
+        );
+    }
+
     /// The shipped Beat pulse: a beat flashes the keyboard, which fades after.
     #[test]
     fn the_beat_pulse_flashes_on_a_beat_and_fades() {
