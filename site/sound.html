@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — sound</title>
+    <meta
+      name="description"
+      content="Candeo lights your keyboard to the music you play: effects that dance to it, and any setting of any effect that follows it. The sound is analysed on your computer and never recorded."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Sound</h1>
+      <p class="lead">
+        Candeo lights your keyboard to the music you play: effects that dance to it, and any setting
+        of any effect that follows it — a speed that rises with the volume, a colour that turns with
+        the bass. The sound is analysed on your computer, and never recorded.
+      </p>
+
+      <section>
+        <h2>What Candeo hears</h2>
+        <p>
+          <strong>What goes to your speakers or headphones</strong> — the output Windows plays on,
+          which Candeo follows when you switch it. <strong>Never the microphone.</strong>
+        </p>
+        <p>
+          It listens only while it has a use for it: while an effect that reacts to sound runs,
+          while a setting follows the sound, or while <strong>Settings › Sound</strong> is open.
+          Sixty times a second, what plays is turned into a handful of numbers — how loud, how much
+          bass, mids or treble, where the sound sits from low to high, whether a beat lands — and
+          only those numbers reach the effects. The sound itself is not kept, not written to disk,
+          and never leaves the computer; the log says only when listening starts and stops.
+        </p>
+        <p>Windows only for now.</p>
+      </section>
+
+      <section>
+        <h2>Effects that dance</h2>
+        <p>Six ship with Candeo, marked with a speaker in the gallery:</p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Effect</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Equalizer</td>
+                <td>
+                  bars by frequency: sixteen columns rising, mirrored with the bass in the middle,
+                  or a band per row growing to the right
+                </td>
+              </tr>
+              <tr>
+                <td>Waterfall</td>
+                <td>the music as it goes by, sliding from right to left, a row per pitch</td>
+              </tr>
+              <tr>
+                <td>Beat pulse</td>
+                <td>the whole keyboard flashing on each beat, glowing with the sound in between</td>
+              </tr>
+              <tr>
+                <td>Beat ripples</td>
+                <td>a ring from the middle of the keyboard on each beat, red for low music, blue for high</td>
+              </tr>
+              <tr>
+                <td>Fireworks</td>
+                <td>bursts of light on random keys at each beat, more when it is loud</td>
+              </tr>
+              <tr>
+                <td>Aurora</td>
+                <td>curtains of colour swaying like northern lights, surging on the beat, at the song's tempo</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Any setting follows the sound</h2>
+        <p>
+          In the gallery, a number, a switch or a colour of any effect has a
+          <strong>Value | Signal | Sound</strong> switch. On <em>Sound</em>, a list chooses what it
+          follows:
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>What it measures</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Volume</td>
+                <td>how loud it plays now</td>
+              </tr>
+              <tr>
+                <td>Beat</td>
+                <td>a pulse on each beat, dying down in a moment</td>
+              </tr>
+              <tr>
+                <td>Bass</td>
+                <td>below about 250 Hz: kick drum, bass line</td>
+              </tr>
+              <tr>
+                <td>Mids</td>
+                <td>from 250 Hz to 4 kHz: voices, guitars, most instruments</td>
+              </tr>
+              <tr>
+                <td>Highs</td>
+                <td>above 4 kHz: cymbals, hi-hats, the air</td>
+              </tr>
+              <tr>
+                <td>Tone</td>
+                <td>where the sound sits, from low to high</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          A number goes over its whole range, silence at its minimum; a switch turns on past half; a
+          colour turns around the colour wheel from the one you set, and silence leaves it as it is.
+          So <em>Color wheel</em>'s speed on <em>Volume</em> spins with the music and nearly stops in
+          the quiet, and <em>Breathing</em>'s colour on <em>Tone</em> changes from a low song to a
+          high one. A rule's settings follow the sound the same way.
+        </p>
+      </section>
+
+      <section>
+        <h2>Tuning it to your music</h2>
+        <p>
+          <strong>Settings › Sound</strong> sets how Candeo hears, once for every effect and every
+          setting following the sound:
+        </p>
+        <ul>
+          <li>
+            <strong>Gain</strong>, for music played low or mastered quietly: the bars reach higher,
+            the settings go further.
+          </li>
+          <li>
+            <strong>Beat sensitivity</strong>: higher counts snares and hi-hats as beats, lower only
+            the big hits.
+          </li>
+        </ul>
+        <p>
+          A meter beside them shows what Candeo hears, live, as an audio meter reads: green, then
+          amber, then red near the top. Music at a good level moves in the amber and touches the
+          red on its peaks; if it stays in the green, raise the gain. Music with a steady kick —
+          electronic, pop — beats clearly; jazz and classical, without one, beat less, and their
+          volume, mids and tone speak more.
+        </p>
+      </section>
+
+      <section>
+        <h2>Writing an effect that listens</h2>
+        <p>
+          An effect declaring <code>inputs: ['audio']</code> receives the analysis at every frame,
+          as <code>audio</code>: the level, sixteen bands from 40 Hz to 16 kHz, the beat and its
+          strength.
+        </p>
+        <pre>import { defineEffect, hsv } from '@candeo/effects-api'
+
+const WHITE = { r: 255, g: 255, b: 255 }
+
+export default defineEffect({
+  inputs: ['audio'],
+  render({ layout, audio, frame }) {
+    const lit = hsv(200, 1, audio.level)
+    for (const key of layout.keys) frame.set(key, audio.beat ? WHITE : lit)
+  },
+})</pre>
+        <p>
+          The six shipped effects are the best reading of what can be done with it, in
+          <a href="{{repository}}/tree/main/packages/effects">packages/effects</a>, and the reasons
+          behind these choices are in
+          <a href="{{repository}}/blob/main/docs/design/inputs-and-automations.md"
+            >docs/design/inputs-and-automations.md</a
+          >.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>

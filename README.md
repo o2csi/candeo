@@ -290,6 +290,15 @@ Key presses are read only while such an effect runs, as key positions, never as
 characters, and are neither logged nor kept beyond a few seconds
 ([`docs/design/key-input.md`](docs/design/key-input.md)). Windows only for now.
 
+An effect can react to the sound the computer plays, by declaring
+`inputs: ['audio']`: Equalizer, Waterfall, Beat pulse, Beat ripples, Fireworks and
+Aurora do. Any setting of any effect can follow it too, from the gallery. What
+goes to the speakers — never the microphone — is analysed on the computer into a
+level, sixteen bands and a beat, and never recorded; Settings › Sound tunes the
+gain and the beat sensitivity for all of them
+([`docs/design/inputs-and-automations.md`](docs/design/inputs-and-automations.md)
+§2.2). Windows only for now.
+
 ---
 
 ## Development
