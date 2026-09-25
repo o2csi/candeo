@@ -39,8 +39,9 @@ import { computed, watch } from 'vue'
 
 import { error } from '../api/journal'
 import { t } from '../i18n'
-import type { Rgb } from '../api/types'
+import type { KeyShape, Rgb } from '../api/types'
 import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
+import { archPath, archStroke } from '../keyboard/shapes'
 
 const props = defineProps<{
   layout: LayoutView
@@ -63,7 +64,7 @@ const RADIUS = 0.1
 
 const BLACK: Rgb = [0, 0, 0]
 
-const size = computed(() => extent(props.layout.keys))
+const size = computed(() => extent(props.layout.keys, props.layout.outline))
 
 function byte(v: number): number {
   return v < 0 ? 0 : v > 255 ? 255 : v | 0
@@ -88,6 +89,11 @@ interface Cap {
   w: number
   h: number
   fill: string
+  /** Absent: a keycap. Otherwise the light's own shape (§4 of `studio.md`). */
+  shape?: KeyShape
+  /** For an arch: its path and stroke. */
+  path?: string
+  stroke?: number
 }
 
 /**
@@ -98,14 +104,26 @@ interface Cap {
  * this hardware's trap (`docs/api/commands.md`, "Layout").
  */
 const caps = computed<Cap[]>(() =>
-  props.layout.keys.map((k) => ({
-    index: k.index,
-    x: k.x + GAP,
-    y: k.y + GAP,
-    w: Math.max(0, k.w - 2 * GAP),
-    h: Math.max(0, k.h - 2 * GAP),
-    fill: css(props.frame[k.index] ?? BLACK),
-  })),
+  props.layout.keys.map((k) => {
+    const fill = css(props.frame[k.index] ?? BLACK)
+    // A shaped light is drawn as its rectangle says, without the seam between
+    // keycaps: the two halves of a ring meet edge to edge.
+    if (k.shape === 'archUp' || k.shape === 'archDown') {
+      const path = archPath(k, k.shape === 'archUp')
+      return { index: k.index, x: k.x, y: k.y, w: k.w, h: k.h, fill, shape: k.shape, path, stroke: archStroke(k) }
+    }
+    if (k.shape === 'disc') {
+      return { index: k.index, x: k.x, y: k.y, w: k.w, h: k.h, fill, shape: k.shape }
+    }
+    return {
+      index: k.index,
+      x: k.x + GAP,
+      y: k.y + GAP,
+      w: Math.max(0, k.w - 2 * GAP),
+      h: Math.max(0, k.h - 2 * GAP),
+      fill,
+    }
+  }),
 )
 
 /**
@@ -152,16 +170,44 @@ if (import.meta.env.DEV) {
           : t('effects.simulator', { layout: layout.name, keys: layout.keys.length })
       "
     >
+      <!-- What lights nothing: drawn first, faint, and themed like the chassis. -->
       <rect
-        v-for="cap in caps"
-        :key="cap.index"
-        :x="cap.x"
-        :y="cap.y"
-        :width="cap.w"
-        :height="cap.h"
-        :rx="RADIUS"
-        :fill="cap.fill"
+        v-for="(part, i) in layout.outline ?? []"
+        :key="`part-${i}`"
+        class="part"
+        :x="part.x"
+        :y="part.y"
+        :width="part.w"
+        :height="part.h"
+        :rx="part.r"
+        vector-effect="non-scaling-stroke"
       />
+      <template v-for="cap in caps" :key="cap.index">
+        <path
+          v-if="cap.path"
+          :d="cap.path"
+          fill="none"
+          :stroke="cap.fill"
+          :stroke-width="cap.stroke"
+        />
+        <ellipse
+          v-else-if="cap.shape === 'disc'"
+          :cx="cap.x + cap.w / 2"
+          :cy="cap.y + cap.h / 2"
+          :rx="cap.w / 2"
+          :ry="cap.h / 2"
+          :fill="cap.fill"
+        />
+        <rect
+          v-else
+          :x="cap.x"
+          :y="cap.y"
+          :width="cap.w"
+          :height="cap.h"
+          :rx="RADIUS"
+          :fill="cap.fill"
+        />
+      </template>
     </svg>
   </div>
 </template>
@@ -192,5 +238,13 @@ if (import.meta.env.DEV) {
   width: 100%;
   height: auto;
   max-height: 100%;
+}
+
+/* A lid, a base, a port: interface, so it follows the theme, and faint enough
+   that the lights stay what the eye reads. */
+.part {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1;
 }
 </style>
