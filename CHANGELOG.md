@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.13.0](https://github.com/o2csi/candeo/compare/v0.12.0...v0.13.0) (2026-09-25)
+
+
+### Features
+
+* dim a device's frames with the sound or a signal ([a5b2615](https://github.com/o2csi/candeo/commit/a5b26154471b722ca80c47334b52b4d1f6aaea49))
+* draw the key-press mark as a key pressed down ([ee5a0ac](https://github.com/o2csi/candeo/commit/ee5a0ac3a1adfdc678346cf7f1a6fa1ee63c3159))
+* effects that react to the sound playing ([5888ac5](https://github.com/o2csi/candeo/commit/5888ac571cc59eaa991110b7dd4014e9c57daeb4))
+* let a device's brightness follow the sound or a signal ([788a59d](https://github.com/o2csi/candeo/commit/788a59dc26e16f2bca039e7f2b1ba7c4996171e8))
+* let any setting follow the sound, tuned once in Settings ([fdfc857](https://github.com/o2csi/candeo/commit/fdfc857202de4ef7d0c89dde104aa391b5a24673))
+* let beat effects set their own sensitivity ([0cbd686](https://github.com/o2csi/candeo/commit/0cbd6867326d9ecb060a9552514b17abc27985ca))
+* mark effects that react to key presses in the list ([d76dcd4](https://github.com/o2csi/candeo/commit/d76dcd4fadc9c16b004a5a883ee7c24a0d10e5d3))
+* move Aurora on the beat and at the song's tempo ([7d20426](https://github.com/o2csi/candeo/commit/7d204267321235ac682ef4015db8889390a8eba9))
+* replace Ambience with Aurora ([d4176bf](https://github.com/o2csi/candeo/commit/d4176bfeddba07a293a94dd85411faed1c0bbfc4))
+
+
+### Bug Fixes
+
+* keep Aurora vivid and contrasted on the keyboard ([985ede9](https://github.com/o2csi/candeo/commit/985ede9ca87c8f7e47ae6de189df1f0c19abfb99))
+* keep settings from the rule's effect during an interruption ([501f7d0](https://github.com/o2csi/candeo/commit/501f7d08720505b9d12711da14519d759bbf27ea))
+* keep the sound tuning out of the window's settings mirror ([af048c2](https://github.com/o2csi/candeo/commit/af048c2107590b034e6701742ebbae2269681e91))
+* preview the applied effect while a rule interrupts its device ([f3548ce](https://github.com/o2csi/candeo/commit/f3548cef72c7f3313ccccf8741c85de60b82bbac))
+
+
+### Documentation
+
+* add a guide to writing effects on the site ([0cff2fb](https://github.com/o2csi/candeo/commit/0cff2fbebd1f2248b674fe6488e1e6f7dd13bdd1))
+* colour the site's code when it is built ([e3dba4f](https://github.com/o2csi/candeo/commit/e3dba4fcc4d469b2037941153c3c2834fe672922))
+* design a brightness that follows the sound or a signal ([cb586f4](https://github.com/o2csi/candeo/commit/cb586f4123006a978ea38b9e4d149c0485286c22))
+* document the sound on the site, the README and the privacy policy ([c09eb20](https://github.com/o2csi/candeo/commit/c09eb209d758eebc034eec3259424d7088b092f8))
+* run the home page's example on a lit keyboard ([6bbfbe7](https://github.com/o2csi/candeo/commit/6bbfbe7068c7ea19ddaa2cb7b241ea5d994418a5))
+* say a device's brightness can follow the sound or a signal ([22bf365](https://github.com/o2csi/candeo/commit/22bf36525c4a762d817a4986a0e0d728b6aaa28b))
+* shorten the README and move the Linux notes to docs/linux.md ([26f32db](https://github.com/o2csi/candeo/commit/26f32db914b492d0b3f8759c72c44f07aa4b054f))
+* show the shipped effects and fresh screenshots on the home page ([ab19ef4](https://github.com/o2csi/candeo/commit/ab19ef47bb8cec1fd9384001188ee2da01237d80))
+* turn off ligatures in the site's code ([1c1561b](https://github.com/o2csi/candeo/commit/1c1561b5207e2676411da04a5d39859a58040697))
+
 ## [0.12.0](https://github.com/o2csi/candeo/compare/v0.11.0...v0.12.0) (2026-09-24)
 
 
