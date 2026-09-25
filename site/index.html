@@ -112,30 +112,30 @@
       <section>
         <h2>Twenty-three effects, ready to go</h2>
         <div class="ways">
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #ff3b3b, #ffb13b, #f5ff3b, #3bff6e, #3bd5ff, #6b3bff, #ff3bd5)">
             <h3>Colour and motion</h3>
             <p>
               Radial wave, Diagonal wave, Sweep, Color wheel, Swirl circles, Crossing beams,
               Breathing, Noise map, Fixed gradient
             </p>
           </div>
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #0b1d4d, #1f4fbf, #9fc2ff, #1f4fbf, #0b1d4d)">
             <h3>Weather and night</h3>
             <p>Rain, Starry night, Lightning, Bubbles</p>
           </div>
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #2a1a08, #f2a33c 38%, #fff3d6 50%, #f2a33c 62%, #2a1a08)">
             <h3>Your typing</h3>
             <p>Ripples: a ring from every key you press</p>
           </div>
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #2a2833 0 18px, #7cc7ff 18px 54px, #2a2833 54px 72px, #7cc7ff 72px 126px, #2a2833 126px)">
             <h3>Time and words</h3>
             <p>Clock, and Scrolling text for any words, typed or sent by another program</p>
           </div>
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #22c55e 0 34%, #f2a33c 34% 67%, #ef4444 67%)">
             <h3>Your other tools</h3>
             <p>Status row: a key per signal received, green, amber or red</p>
           </div>
-          <div class="way">
+          <div class="way" style="--tint: linear-gradient(90deg, #ff2d95, #8b5cf6, #22d3ee, #8b5cf6, #ff2d95)">
             <h3>Your music</h3>
             <p>Equalizer, Waterfall, Beat pulse, Beat ripples, Fireworks, Aurora</p>
           </div>
@@ -155,7 +155,7 @@
           <code>Documents\candeo\effects</code>: ordinary files, editable here or in the editor you
           already use.
         </p>
-        <pre><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+        <pre data-file="Rainbow.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'A rainbow sweeping across the keyboard',

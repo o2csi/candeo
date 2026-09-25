@@ -16,6 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     />
     <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
   </head>
   <body>
     <main class="subpage">
@@ -36,7 +37,7 @@
             <strong>Save</strong>: the simulator plays it. Nothing reaches the keyboard yet.</li>
           <li><strong>Apply</strong> it on your device when it looks right.</li>
         </ol>
-        <pre><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+        <pre data-file="Rainbow.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'A rainbow sweeping across the keyboard',
@@ -132,7 +133,7 @@ export default defineEffect({
           <code>params</code> typed from its declaration — no casts. Labels and the description
           take a string or one per language.
         </p>
-        <pre><code>import { defineEffect, mix, BLACK } from '@candeo/effects-api'
+        <pre data-file="Breathing glow.ts"><code>import { defineEffect, mix, BLACK } from '@candeo/effects-api'
 
 export default defineEffect({
   description: { en: 'A colour breathing in and out', fr: 'Une couleur qui respire' },
@@ -239,7 +240,7 @@ export default defineEffect({
         <h2>Recipes</h2>
 
         <h3>Rings from the middle</h3>
-        <pre><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+        <pre data-file="Rings.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'Rings of colour spreading from the middle of the keyboard',
@@ -257,7 +258,7 @@ export default defineEffect({
 })</code></pre>
 
         <h3>Keys that glow when you type</h3>
-        <pre><code>import { center, defineEffect, mix, BLACK } from '@candeo/effects-api'
+        <pre data-file="Typing glow.ts"><code>import { center, defineEffect, mix, BLACK } from '@candeo/effects-api'
 
 const GLOW = { r: 255, g: 120, b: 0 }
 
@@ -284,7 +285,7 @@ export default defineEffect({
         </p>
 
         <h3>A word on the keys</h3>
-        <pre><code>import { banner, bounds, center, defineEffect } from '@candeo/effects-api'
+        <pre data-file="Hello.ts"><code>import { banner, bounds, center, defineEffect } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'A word, still, in the middle of the keyboard',
@@ -304,7 +305,7 @@ export default defineEffect({
 })</code></pre>
 
         <h3>A level meter from the sound</h3>
-        <pre><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+        <pre data-file="Level meter.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'The top row as a level meter of the sound playing',
@@ -320,7 +321,7 @@ export default defineEffect({
 })</code></pre>
 
         <h3>A value another program sends</h3>
-        <pre><code>import { defineEffect, mix } from '@candeo/effects-api'
+        <pre data-file="CPU load.ts"><code>import { defineEffect, mix } from '@candeo/effects-api'
 
 const CALM = { r: 0, g: 200, b: 80 }
 const BUSY = { r: 255, g: 30, b: 0 }

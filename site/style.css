@@ -14,6 +14,16 @@
   --accent: #f2a33c;
   --accent-ink: #14131a;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 18px 48px rgb(0 0 0 / 34%);
+
+  /* Code, coloured when the site is built. */
+  --code-ground: #100f15;
+  --token-keyword: #c4a7ff;
+  --token-string: #9fd49a;
+  --token-number: #f2a33c;
+  --token-function: #7cc7ff;
+  --token-class: #6fd3c4;
+  --token-variable: #f38ba8;
+  --token-comment: #7f7a90;
 }
 
 @media (prefers-color-scheme: light) {
@@ -27,6 +37,15 @@
     --accent: #985c08;
     --accent-ink: #fff;
     --shadow: 0 1px 2px rgb(26 24 34 / 8%), 0 18px 48px rgb(26 24 34 / 10%);
+
+    --code-ground: #f6f5f9;
+    --token-keyword: #7b3fd1;
+    --token-string: #2f7d32;
+    --token-number: #985c08;
+    --token-function: #1f6fb2;
+    --token-class: #0f7a6c;
+    --token-variable: #b4235a;
+    --token-comment: #736d82;
   }
 }
 
@@ -58,8 +77,18 @@ a {
 
 code,
 pre,
+.command,
 .mono {
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+}
+
+/* A name or a value inside a sentence, set apart without shouting. */
+:not(pre) > code {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.05em 0.35em;
+  font-size: 0.88em;
 }
 
 /* ---------------------------------------------------------------- header */
@@ -76,6 +105,7 @@ header img {
   width: 96px;
   height: 96px;
   border-radius: 22px;
+  box-shadow: 0 12px 44px rgb(242 163 60 / 28%);
 }
 
 h1 {
@@ -174,6 +204,18 @@ li::marker {
   margin-top: 0;
 }
 
+/* A row of keys lit the way the effects in the card light them. */
+.way[style*="--tint"]::before {
+  content: "";
+  display: block;
+  height: 10px;
+  margin-bottom: 14px;
+  border-radius: 2px;
+  background: var(--tint);
+  mask: repeating-linear-gradient(90deg, #000 0 14px, transparent 14px 18px);
+  box-shadow: 0 0 12px rgb(255 255 255 / 10%);
+}
+
 .way p {
   color: var(--muted);
   font-size: 14px;
@@ -182,7 +224,7 @@ li::marker {
 
 .command,
 pre {
-  background: var(--ground);
+  background: var(--code-ground);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 44px 10px 12px;
@@ -192,7 +234,73 @@ pre {
 
 pre {
   padding: 16px 48px 16px 16px;
-  line-height: 1.5;
+  line-height: 1.55;
+}
+
+/* A block named after the file it would be: the header is part of the block. */
+.code {
+  margin: 1em 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--code-ground);
+}
+
+.code .file {
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--faint);
+  font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
+
+.code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.hljs-keyword,
+.hljs-meta,
+.hljs-selector-tag {
+  color: var(--token-keyword);
+}
+
+.hljs-string,
+.hljs-regexp {
+  color: var(--token-string);
+}
+
+.hljs-number,
+.hljs-literal {
+  color: var(--token-number);
+}
+
+.hljs-title.function_,
+.hljs-built_in {
+  color: var(--token-function);
+}
+
+.hljs-title.class_,
+.hljs-type {
+  color: var(--token-class);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params .hljs-variable {
+  color: var(--token-variable);
+}
+
+.hljs-attr,
+.hljs-property {
+  color: var(--muted);
+}
+
+.hljs-comment {
+  color: var(--token-comment);
+  font-style: italic;
 }
 
 /* ---------------------------------------------------------------- copying */

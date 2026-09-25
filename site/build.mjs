@@ -2,16 +2,26 @@
 //
 //   node site/build.mjs
 //
-// Two things happen here. The download links are filled in from the latest
-// release, so the page names a version that exists — a page that says "download
-// 0.4.0" a year later is worse than one that says nothing. And the privacy
-// policy is rendered from `PRIVACY.md`, which stays the only copy of it: a
-// policy that exists twice is a policy that disagrees with itself.
+// The download links are filled in from the latest release, so the page names a
+// version that exists — a page that says "download 0.4.0" a year later is worse
+// than one that says nothing. The privacy policy is rendered from `PRIVACY.md`,
+// which stays the only copy of it: a policy that exists twice is a policy that
+// disagrees with itself. Code is coloured here, so the pages carry no highlighter.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import hljs from 'highlight.js/lib/core'
+import bash from 'highlight.js/lib/languages/bash'
+import powershell from 'highlight.js/lib/languages/powershell'
+import typescript from 'highlight.js/lib/languages/typescript'
+import yaml from 'highlight.js/lib/languages/yaml'
 import { marked } from 'marked'
+
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('powershell', powershell)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('yaml', yaml)
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -110,6 +120,46 @@ const values = {
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 
+const entities = { lt: '<', gt: '>', amp: '&', quot: '"', '#39': "'", '#x27': "'" }
+
+/** The text a block says, from the escaped form the page holds it in. */
+function unescaped(html, where) {
+  if (/<[a-z/]/i.test(html)) {
+    throw new Error(`${where}: a code block holds markup, which highlighting would lose`)
+  }
+  return html.replaceAll(/&(lt|gt|amp|quot|#39|#x27);/g, (_, name) => entities[name])
+}
+
+/** The value of one attribute, or `undefined`. */
+function attribute(attributes, name) {
+  return new RegExp(`\\b${name}="([^"]*)"`).exec(attributes)?.[1]
+}
+
+/**
+ * Colours the code blocks when the page is built, so the page itself carries no
+ * highlighter. TypeScript unless the block says otherwise with `data-lang`;
+ * `data-file` names the block above it.
+ */
+function highlighted(page, name) {
+  const block = /<pre([^>]*)>(?:<code>)?([\s\S]*?)(?:<\/code>)?<\/pre>/g
+  const command = /<div class="command"([^>]*)>([\s\S]*?)<\/div>/g
+  return page
+    .replaceAll(block, (_, attributes, html) => {
+      const text = unescaped(html, name)
+      const language = attribute(attributes, 'data-lang') ?? 'typescript'
+      const file = attribute(attributes, 'data-file')
+      const code = hljs.highlight(text, { language }).value
+      const kept = attributes.replaceAll(/\s*data-(?:lang|file)="[^"]*"/g, '')
+      const pre = `<pre${kept}><code class="hljs language-${language}">${code}</code></pre>`
+      return file ? `<div class="code"><div class="file">${file}</div>${pre}</div>` : pre
+    })
+    .replaceAll(command, (_, attributes, html) => {
+      const language = attribute(attributes, 'data-lang') ?? 'bash'
+      const code = hljs.highlight(unescaped(html, name), { language }).value
+      return `<div class="command">${code}</div>`
+    })
+}
+
 /** One page, with what it asks for filled in. */
 function render(name) {
   const page = readFileSync(join(here, name), 'utf8').replaceAll(/\{\{(\w+)\}\}/g, (_, key) => {
@@ -118,7 +168,7 @@ function render(name) {
     }
     return values[key]
   })
-  writeFileSync(join(out, name), page)
+  writeFileSync(join(out, name), highlighted(page, name))
 }
 
 render('index.html')
