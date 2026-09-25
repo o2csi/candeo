@@ -518,36 +518,31 @@ mod tests {
         }
     }
 
-    /// The zones' definition gives, byte for byte, what the Rust family it
-    /// replaces gave — whatever the colours, repeated or not.
+    /// §4 of `docs/design/studio.md`: the zones seen from behind — the logo on
+    /// the lid above the ring, the ring's upper half right above its lower one,
+    /// and every light within what the outline draws.
     #[test]
-    fn the_zones_definition_gives_what_the_zones_family_gave() {
-        let json = BUILTIN[0].1;
-        let frames = [
-            [
-                Rgb::new(255, 0, 0),
-                Rgb::new(0, 255, 0),
-                Rgb::new(0, 0, 255),
-            ],
-            [Rgb::new(9, 9, 9); 3],
-            [Rgb::new(1, 2, 3), Rgb::new(1, 2, 3), Rgb::new(0, 0, 0)],
-            [Rgb::new(0, 0, 0), Rgb::new(200, 100, 50), Rgb::new(0, 0, 0)],
-        ];
-        for frame in frames {
-            let (layout, _) = parse(json).unwrap();
-            let family = crate::lighting::AlienwareZones::new();
-            let theirs: Vec<Vec<u8>> = family
-                .frame(&crate::ALIENWARE_M18_R1_ZONES, &frame)
-                .into_iter()
-                .map(|o| o.bytes)
-                .collect();
-            let ours: Vec<Vec<u8>> = layout
-                .lighting
-                .frame(&layout, &frame)
-                .into_iter()
-                .map(|o| o.bytes)
-                .collect();
-            assert_eq!(ours, theirs, "{frame:?}");
+    fn the_zones_are_drawn_from_behind() {
+        let layout = load(BUILTIN[0].1).unwrap();
+        assert_eq!(layout.lights, Lights::Zones);
+        let by = |index: u16| {
+            layout
+                .keys
+                .iter()
+                .find(|k| k.index == index)
+                .expect("a zone")
+        };
+        let (upper, lower, logo) = (by(0), by(1), by(2));
+        assert_eq!(
+            (upper.shape, lower.shape, logo.shape),
+            (Shape::ArchUp, Shape::ArchDown, Shape::Disc)
+        );
+        assert!(logo.y + logo.h < upper.y, "the logo is above the ring");
+        assert_eq!(upper.y + upper.h, lower.y, "the halves meet");
+        let right = layout.outline.iter().fold(0.0f32, |m, o| m.max(o.x + o.w));
+        let bottom = layout.outline.iter().fold(0.0f32, |m, o| m.max(o.y + o.h));
+        for k in layout.keys {
+            assert!(k.x >= 0.0 && k.y >= 0.0 && k.x + k.w <= right && k.y + k.h <= bottom);
         }
     }
 

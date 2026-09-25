@@ -304,7 +304,7 @@ enum Availability {
 /// situation.
 fn controlled_devices(settings: &storage::Settings, state: &AppState) -> Vec<ControlledDevice> {
     let api = crate::hid().ok();
-    crate::LAYOUTS
+    crate::layouts()
         .iter()
         .copied()
         .filter_map(|layout| {

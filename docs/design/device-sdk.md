@@ -679,7 +679,8 @@ interpreter, written and tested once in Rust, turns it into reports:
   the code gave.
 
 The prototype is the zones of the Alienware m18 R1, the simplest family: its
-definition replaces `AlienwareZones`, then the keyboard and the Razer follow.
+definition replaced the `AlienwareZones` family on 2026-09-25, giving byte for
+byte what it sent; the keyboard and the Razer follow.
 
 ---
 

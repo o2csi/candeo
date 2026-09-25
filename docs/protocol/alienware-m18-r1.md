@@ -207,6 +207,15 @@ One zone, lit, is then:
 carry several colour entries; the two pairs of bytes are durations
 (`07d0` = 2000, `03e8` = 1000).
 
+### Changes, not a stream
+
+Measured on 2026-09-18: an engine pushing thirty images a second put some three
+hundred reports a second on a bus where the maker's software sends seven, and
+the writes started failing — `HidD_SetOutputReport` refusing until the runtime
+gave up on the device. Four lights need no more than ten changes a second, and
+an image that did not change needs none: that is the `pace` of this device's
+definition, `crates/candeo-device/devices/alienware-m18-r1-zones.json`.
+
 ### It can stop applying, for everyone
 
 Seen twice on 2026-09-18, hours apart: the device goes on **acknowledging every
