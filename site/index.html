@@ -17,6 +17,7 @@
     />
     <link rel="stylesheet" href="style.css" />
     <script src="copy.js" defer></script>
+    <script src="live.js" type="module"></script>
   </head>
   <body>
     <header>
@@ -30,6 +31,14 @@
 
     <main>
       <section>
+        <figure class="live" hidden>
+          <canvas width="2550" height="950" aria-hidden="true"></canvas>
+          <figcaption>
+            <a href="#example">The example below</a>, running in this page with the engine's own
+            helpers, on the layout Candeo draws for the DeathStalker V2 Pro.
+          </figcaption>
+        </figure>
+
         <p class="lead">
           No vendor runtime, no background service, no account. Candeo writes to the device over the
           HID interface the system already exposes, and the effects you write run inside the
@@ -155,7 +164,7 @@
           <code>Documents\candeo\effects</code>: ordinary files, editable here or in the editor you
           already use.
         </p>
-        <pre data-file="Rainbow.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+        <pre id="example" data-file="Rainbow.ts" data-run="rainbow"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: 'A rainbow sweeping across the keyboard',
