@@ -16,6 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     />
     <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
   </head>
   <body>
     <main class="subpage">
@@ -172,7 +173,7 @@
           as <code>audio</code>: the level, sixteen bands from 40 Hz to 16 kHz, the beat and its
           strength.
         </p>
-        <pre>import { defineEffect, hsv } from '@candeo/effects-api'
+        <pre data-file="Bass glow.ts">import { defineEffect, hsv } from '@candeo/effects-api'
 
 const WHITE = { r: 255, g: 255, b: 255 }
 

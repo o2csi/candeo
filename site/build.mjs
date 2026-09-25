@@ -2,16 +2,27 @@
 //
 //   node site/build.mjs
 //
-// Two things happen here. The download links are filled in from the latest
-// release, so the page names a version that exists — a page that says "download
-// 0.4.0" a year later is worse than one that says nothing. And the privacy
-// policy is rendered from `PRIVACY.md`, which stays the only copy of it: a
-// policy that exists twice is a policy that disagrees with itself.
+// The download links are filled in from the latest release, so the page names a
+// version that exists — a page that says "download 0.4.0" a year later is worse
+// than one that says nothing. The privacy policy is rendered from `PRIVACY.md`,
+// which stays the only copy of it: a policy that exists twice is a policy that
+// disagrees with itself. Code is coloured here, and the landing page's keyboard
+// runs its example with the engine's helpers, on the geometry the app draws.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import hljs from 'highlight.js/lib/core'
+import bash from 'highlight.js/lib/languages/bash'
+import powershell from 'highlight.js/lib/languages/powershell'
+import typescript from 'highlight.js/lib/languages/typescript'
+import yaml from 'highlight.js/lib/languages/yaml'
 import { marked } from 'marked'
+
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('powershell', powershell)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('yaml', yaml)
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -108,7 +119,59 @@ const values = {
 }
 
 rmSync(out, { recursive: true, force: true })
-mkdirSync(out, { recursive: true })
+mkdirSync(join(out, 'live'), { recursive: true })
+
+const entities = { lt: '<', gt: '>', amp: '&', quot: '"', '#39': "'", '#x27': "'" }
+
+/** The text a block says, from the escaped form the page holds it in. */
+function unescaped(html, where) {
+  if (/<[a-z/]/i.test(html)) {
+    throw new Error(`${where}: a code block holds markup, which highlighting would lose`)
+  }
+  return html.replaceAll(/&(lt|gt|amp|quot|#39|#x27);/g, (_, name) => entities[name])
+}
+
+/** The value of one attribute, or `undefined`. */
+function attribute(attributes, name) {
+  return new RegExp(`\\b${name}="([^"]*)"`).exec(attributes)?.[1]
+}
+
+/**
+ * Examples to run in the page are written out beside `live/api.mjs`, the
+ * engine's own helpers, as `.mjs` so the build can import them too. They must be
+ * plain JavaScript already: one that grows a type annotation fails here, when
+ * the build imports it, not in a visitor's browser.
+ */
+const runnable = new Map()
+
+/**
+ * Colours the code blocks when the page is built, so the page itself carries no
+ * highlighter. TypeScript unless the block says otherwise with `data-lang`;
+ * `data-file` names the block above it, `data-run` also writes it out to run.
+ */
+function highlighted(page, name) {
+  const block = /<pre([^>]*)>(?:<code>)?([\s\S]*?)(?:<\/code>)?<\/pre>/g
+  const command = /<div class="command"([^>]*)>([\s\S]*?)<\/div>/g
+  return page
+    .replaceAll(block, (_, attributes, html) => {
+      const text = unescaped(html, name)
+      const language = attribute(attributes, 'data-lang') ?? 'typescript'
+      const file = attribute(attributes, 'data-file')
+      const run = attribute(attributes, 'data-run')
+      if (run) {
+        runnable.set(run, text)
+      }
+      const code = hljs.highlight(text, { language }).value
+      const kept = attributes.replaceAll(/\s*data-(?:lang|file|run)="[^"]*"/g, '')
+      const pre = `<pre${kept}><code class="hljs language-${language}">${code}</code></pre>`
+      return file ? `<div class="code"><div class="file">${file}</div>${pre}</div>` : pre
+    })
+    .replaceAll(command, (_, attributes, html) => {
+      const language = attribute(attributes, 'data-lang') ?? 'bash'
+      const code = hljs.highlight(unescaped(html, name), { language }).value
+      return `<div class="command">${code}</div>`
+    })
+}
 
 /** One page, with what it asks for filled in. */
 function render(name) {
@@ -118,7 +181,40 @@ function render(name) {
     }
     return values[key]
   })
-  writeFileSync(join(out, name), page)
+  writeFileSync(join(out, name), highlighted(page, name))
+}
+
+/**
+ * The keyboard the landing page lights, read from the one place its geometry is
+ * written and tested, `crates/candeo-device/src/layout.rs`: a copy here would be
+ * a second drawing, and would drift without a sound.
+ */
+function keyboard() {
+  const source = readFileSync(join(root, 'crates/candeo-device/src/layout.rs'), 'utf8')
+  const start = source.indexOf('pub static DEATHSTALKER_V2_PRO')
+  const block = source.slice(start, source.indexOf('pub static', start + 1))
+  // `k(index, scancode, x, y)`, `kw(…, w)` and `kh(…, w, h)`.
+  const n = String.raw`\s*([\d.]+)\s*`
+  const call = new RegExp(
+    String.raw`\bk[wh]?\(\s*(\d+)\s*,\s*\w+\s*,${n},${n}(?:,${n})?(?:,${n})?\)`,
+    'g',
+  )
+  const keys = [...block.matchAll(call)].map(([, index, x, y, w, h]) => ({
+    index: Number(index),
+    // The matrix is 6 × 22, a row after another: what the engine hands an effect.
+    row: Math.floor(Number(index) / 22),
+    col: Number(index) % 22,
+    x: Number(x),
+    y: Number(y),
+    w: Number(w ?? 1),
+    h: Number(h ?? 1),
+  }))
+  // A key per lit position, which `layout.rs` tests; a count off means the
+  // reading above no longer matches how the file is written.
+  if (start < 0 || keys.length !== 106) {
+    throw new Error(`layout.rs: ${keys.length} keys read for the DeathStalker, 106 expected`)
+  }
+  return { name: 'Razer DeathStalker V2 Pro', rows: 6, cols: 22, frameLen: 132, keys }
 }
 
 render('index.html')
@@ -126,6 +222,7 @@ render('devices.html')
 render('automations.html')
 render('signals.html')
 render('sound.html')
+render('effects.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))
@@ -157,8 +254,26 @@ ${policy}
 `,
 )
 
+// What the landing page runs: the example as written, the engine's helpers, the
+// keyboard. Each example is imported and drawn once here, so a page that would
+// throw in the browser fails the build instead.
+const layout = keyboard()
+writeFileSync(join(out, 'live', 'layout.json'), JSON.stringify(layout))
+cpSync(join(root, 'apps/desktop/src-tauri/src/runtime/api.js'), join(out, 'live', 'api.mjs'))
+for (const [name, text] of runnable) {
+  const file = join(out, 'live', `${name}.mjs`)
+  writeFileSync(file, text.replace(`from '@candeo/effects-api'`, `from './api.mjs'`))
+  const { default: effect } = await import(pathToFileURL(file).href)
+  const lit = new Set()
+  effect.render({ layout, time: 1, params: {}, frame: { set: (key) => lit.add(key.index) } })
+  if (lit.size !== layout.keys.length) {
+    throw new Error(`${name}: ${lit.size} keys lit of ${layout.keys.length}`)
+  }
+}
+
 cpSync(join(here, 'style.css'), join(out, 'style.css'))
 cpSync(join(here, 'copy.js'), join(out, 'copy.js'))
+cpSync(join(here, 'live.js'), join(out, 'live.js'))
 cpSync(join(here, 'filter.js'), join(out, 'filter.js'))
 cpSync(join(here, 'assets'), join(out, 'assets'), { recursive: true })
 

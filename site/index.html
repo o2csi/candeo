@@ -17,6 +17,7 @@
     />
     <link rel="stylesheet" href="style.css" />
     <script src="copy.js" defer></script>
+    <script src="live.js" type="module"></script>
   </head>
   <body>
     <header>
@@ -30,6 +31,14 @@
 
     <main>
       <section>
+        <figure class="live" hidden>
+          <canvas width="2550" height="950" aria-hidden="true"></canvas>
+          <figcaption>
+            <a href="#example">The example below</a>, running in this page with the engine's own
+            helpers, on the layout Candeo draws for the DeathStalker V2 Pro.
+          </figcaption>
+        </figure>
+
         <p class="lead">
           No vendor runtime, no background service, no account. Candeo writes to the device over the
           HID interface the system already exposes, and the effects you write run inside the
@@ -39,13 +48,14 @@
         <figure>
           <img
             src="assets/gallery.png"
-            alt="The Candeo gallery: a device panel on the left, the effect library in the middle, and the running effect previewed on a drawn keyboard."
-            width="1920"
-            height="1080"
+            alt="The Candeo gallery: the devices on the left, the effects in the middle marked by what they react to, and the effect applied drawn on a keyboard with its settings, each switching between a value, a signal and the sound."
+            width="1272"
+            height="1356"
           />
           <figcaption>
-            The preview draws the frames the engine sends to the keyboard — the same ones, not an
-            imitation.
+            The gallery. The preview draws the frames the engine sends to the keyboard — the same
+            ones, not an imitation — and a mark beside an effect says what it reacts to: the sound,
+            your typing, a signal.
           </figcaption>
         </figure>
 
@@ -109,6 +119,43 @@
       </section>
 
       <section>
+        <h2>Twenty-three effects, ready to go</h2>
+        <div class="ways">
+          <div class="way" style="--tint: linear-gradient(90deg, #ff3b3b, #ffb13b, #f5ff3b, #3bff6e, #3bd5ff, #6b3bff, #ff3bd5)">
+            <h3>Colour and motion</h3>
+            <p>
+              Radial wave, Diagonal wave, Sweep, Color wheel, Swirl circles, Crossing beams,
+              Breathing, Noise map, Fixed gradient
+            </p>
+          </div>
+          <div class="way" style="--tint: linear-gradient(90deg, #0b1d4d, #1f4fbf, #9fc2ff, #1f4fbf, #0b1d4d)">
+            <h3>Weather and night</h3>
+            <p>Rain, Starry night, Lightning, Bubbles</p>
+          </div>
+          <div class="way" style="--tint: linear-gradient(90deg, #2a1a08, #f2a33c 38%, #fff3d6 50%, #f2a33c 62%, #2a1a08)">
+            <h3>Your typing</h3>
+            <p>Ripples: a ring from every key you press</p>
+          </div>
+          <div class="way" style="--tint: linear-gradient(90deg, #2a2833 0 18px, #7cc7ff 18px 54px, #2a2833 54px 72px, #7cc7ff 72px 126px, #2a2833 126px)">
+            <h3>Time and words</h3>
+            <p>Clock, and Scrolling text for any words, typed or sent by another program</p>
+          </div>
+          <div class="way" style="--tint: linear-gradient(90deg, #22c55e 0 34%, #f2a33c 34% 67%, #ef4444 67%)">
+            <h3>Your other tools</h3>
+            <p>Status row: a key per signal received, green, amber or red</p>
+          </div>
+          <div class="way" style="--tint: linear-gradient(90deg, #ff2d95, #8b5cf6, #22d3ee, #8b5cf6, #ff2d95)">
+            <h3>Your music</h3>
+            <p>Equalizer, Waterfall, Beat pulse, Beat ripples, Fireworks, Aurora</p>
+          </div>
+        </div>
+        <p>
+          Each is tuned while you watch it, and every setting can follow a signal or the music. The
+          effects your keyboard's firmware runs are there too.
+        </p>
+      </section>
+
+      <section>
         <h2>An effect is a file you can read</h2>
         <p>
           Effects are TypeScript, compiled and run by the application on the Rust side. They receive
@@ -117,17 +164,22 @@
           <code>Documents\candeo\effects</code>: ordinary files, editable here or in the editor you
           already use.
         </p>
-        <pre><code>import { defineEffect, hsv } from '@candeo/effects-api'
+        <pre id="example" data-file="Rainbow.ts" data-run="rainbow"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
-  description: 'A hue that travels down the rows',
-  kinds: ['keyboard'],
+  description: 'A rainbow sweeping across the keyboard',
   render({ layout, time, frame }) {
+    const area = bounds(layout)
     for (const key of layout.keys) {
-      frame.set(key, hsv((key.row * 40 + time * 90) % 360, 1, 1))
+      const across = (center(key).x - area.x) / area.w
+      frame.set(key, hsv(across * 360 - time * 60, 1, 1))
     }
   },
 })</code></pre>
+        <p class="note">
+          <a href="effects.html">Write your own →</a> — your first effect step by step, what an
+          effect receives, its settings, and recipes: rings, typing, words, sound, signals.
+        </p>
         <figure>
           <img
             src="assets/editor.png"
@@ -178,6 +230,17 @@ export default defineEffect({
           few numbers on your computer; the sound is never recorded.
           <a href="sound.html">See how sound works →</a>
         </p>
+        <figure>
+          <img
+            src="assets/sound.png"
+            alt="Settings, Sound: a gain and a beat sensitivity above a live meter of the volume, the beat, the bass, the mids, the highs and the tone, each bar going from green to amber to red."
+            width="880"
+            height="305"
+          />
+          <figcaption>
+            Settings › Sound: how Candeo hears, once for every effect, beside what it hears now.
+          </figcaption>
+        </figure>
       </section>
 
       <section>
@@ -215,8 +278,8 @@ export default defineEffect({
             a protocol contribution has to carry to be reviewable by someone without the hardware.
           </li>
           <li>
-            <a href="https://github.com/o2csi/candeo/issues/107">Effects that react to sound</a> —
-            what the computer plays, analysed on the Rust side, never recorded.
+            <a href="https://github.com/o2csi/candeo/issues/183">Automations on Linux</a> — the
+            <em>nobody at the computer</em> trigger there, then the sound playing.
           </li>
           <li>
             <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing and updating

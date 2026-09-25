@@ -1,6 +1,6 @@
-// A copy button on the blocks someone is meant to run or paste: the winget
-// command and the effect example. Commands written inside a sentence keep none:
-// a button between two words is noise.
+// A copy button on the blocks someone is meant to run or paste: commands and
+// code. Commands written inside a sentence keep none: a button between two
+// words is noise.
 //
 // The buttons are built here rather than written into the page, so a browser
 // without a clipboard never shows a button that does nothing. The text is read

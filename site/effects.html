@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — write an effect</title>
+    <meta
+      name="description"
+      content="Write your own lighting effect for Candeo: a small TypeScript file, previewed live on a keyboard simulator. Your first effect step by step, what an effect receives, its settings, and recipes."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+      <a class="back" href="./">← Candeo</a>
+      <h1>Write an effect</h1>
+      <p class="lead">
+        An effect is a small TypeScript file: a function that, thirty times a second, is given the
+        keyboard and the time and paints every key. You write it in Candeo, next to a simulator
+        drawing what it would send, and apply it when it looks right.
+      </p>
+
+      <section>
+        <h2>Your first effect</h2>
+        <ol>
+          <li>In <strong>Effects</strong>, click <strong>＋ New effect</strong>. The editor opens
+            on a template, with the keyboard simulator on the right.</li>
+          <li>Replace the code with the one below, name it <em>Rainbow</em>, and
+            <strong>Save</strong>: the simulator plays it. Nothing reaches the keyboard yet.</li>
+          <li><strong>Apply</strong> it on your device when it looks right.</li>
+        </ol>
+        <pre data-file="Rainbow.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: 'A rainbow sweeping across the keyboard',
+  render({ layout, time, frame }) {
+    const area = bounds(layout)
+    for (const key of layout.keys) {
+      const across = (center(key).x - area.x) / area.w
+      frame.set(key, hsv(across * 360 - time * 60, 1, 1))
+    }
+  },
+})</code></pre>
+        <p>
+          Every key gets a hue from where it sits across the keyboard, and the whole rainbow
+          slides as <code>time</code> goes by. The file lands in
+          <code>Documents\candeo\effects\Rainbow.ts</code>: its name is the effect's name. Edit it in
+          the editor you already use if you prefer, then <strong>Refresh</strong> in the gallery.
+          The editor checks the types as you write, with completion for everything below.
+        </p>
+      </section>
+
+      <section>
+        <h2>What an effect receives</h2>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>What it is</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>layout</code></td>
+                <td>
+                  the device: its <code>keys</code>, each with its place in the matrix
+                  (<code>row</code>, <code>col</code>), its keycap in key units (<code>x</code>,
+                  <code>y</code>, <code>w</code>, <code>h</code>), its name in your keyboard layout
+                  and its scancode
+                </td>
+              </tr>
+              <tr>
+                <td><code>time</code></td>
+                <td>seconds since the effect started: animate on it</td>
+              </tr>
+              <tr>
+                <td><code>frame</code></td>
+                <td><code>frame.set(key, colour)</code> and <code>frame.fill(colour)</code></td>
+              </tr>
+              <tr>
+                <td><code>params</code></td>
+                <td>the settings you declare, as the person set them — see below</td>
+              </tr>
+              <tr>
+                <td><code>presses</code></td>
+                <td>
+                  the keys pressed in the last ten seconds, each with its key and when
+                  (<code>inputs: ['keys']</code>)
+                </td>
+              </tr>
+              <tr>
+                <td><code>clock</code></td>
+                <td>
+                  the local time: hours, minutes, seconds, the date (<code>inputs: ['clock']</code>)
+                </td>
+              </tr>
+              <tr>
+                <td><code>signals</code></td>
+                <td>
+                  every value other programs sent, by name (<code>inputs: ['signals']</code>, see
+                  <a href="signals.html">signals</a>)
+                </td>
+              </tr>
+              <tr>
+                <td><code>audio</code></td>
+                <td>
+                  the sound playing: level, sixteen bands, beat (<code>inputs: ['audio']</code>, see
+                  <a href="sound.html">sound</a>)
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          An input is given only to an effect that declares it, and the gallery marks it: key
+          presses are read, and the sound captured, only while such an effect runs.
+        </p>
+      </section>
+
+      <section>
+        <h2>Settings people can change</h2>
+        <p>
+          Declared in <code>params</code>, a setting gets its control in the gallery, and arrives in
+          <code>params</code> typed from its declaration — no casts. Labels and the description
+          take a string or one per language.
+        </p>
+        <pre data-file="Breathing glow.ts"><code>import { defineEffect, mix, BLACK } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: { en: 'A colour breathing in and out', fr: 'Une couleur qui respire' },
+  params: {
+    color: { kind: 'color', label: { en: 'Colour', fr: 'Couleur' }, default: { r: 0, g: 160, b: 255 } },
+    speed: { kind: 'number', label: { en: 'Breaths a minute', fr: 'Respirations par minute' }, min: 5, max: 60, default: 15 },
+  },
+  render({ time, frame, params }) {
+    const breath = 0.5 - 0.5 * Math.cos((time * params.speed * Math.PI * 2) / 60)
+    frame.fill(mix(BLACK, params.color, breath))
+  },
+})</code></pre>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Control</th>
+                <th>Declares</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>number</code></td>
+                <td>a slider</td>
+                <td><code>min</code>, <code>max</code>, <code>step</code></td>
+              </tr>
+              <tr>
+                <td><code>color</code></td>
+                <td>a colour picker</td>
+                <td>a default <code>{ r, g, b }</code></td>
+              </tr>
+              <tr>
+                <td><code>boolean</code></td>
+                <td>a switch</td>
+                <td></td>
+              </tr>
+              <tr>
+                <td><code>choice</code></td>
+                <td>a list</td>
+                <td><code>options</code>, a value each, with a label if you like</td>
+              </tr>
+              <tr>
+                <td><code>text</code></td>
+                <td>a one-line field</td>
+                <td><code>maxLength</code>, 64 unless said, 256 at most</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Every setting can follow a signal, and a number, a switch or a colour can follow the
+          sound, from the gallery: your effect needs no code for it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Helpers</h2>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>From <code>@candeo/effects-api</code></th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>hsv(h, s, v)</code></td>
+                <td>a colour from a hue in degrees, saturation and value 0 to 1</td>
+              </tr>
+              <tr>
+                <td><code>rgb(r, g, b)</code>, <code>BLACK</code></td>
+                <td>a colour, each channel clamped to 0–255</td>
+              </tr>
+              <tr>
+                <td><code>mix(a, b, t)</code>, <code>lerp(a, b, t)</code></td>
+                <td>between two colours, or two numbers, <code>t</code> from 0 to 1</td>
+              </tr>
+              <tr>
+                <td><code>center(key)</code></td>
+                <td>the middle of a keycap, in key units: where its LED is</td>
+              </tr>
+              <tr>
+                <td><code>bounds(layout)</code></td>
+                <td>the keyboard's footprint: <code>x</code>, <code>y</code>, <code>w</code>, <code>h</code></td>
+              </tr>
+              <tr>
+                <td><code>banner(text)</code></td>
+                <td>text in a 3×5 font, five lines of <code>#</code> and <code>.</code>, as Clock draws</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Distances are in key units — one is the width of a letter key — so "a ring every six keys"
+          looks the same on a full keyboard and a small one. Find the middle with
+          <code>bounds</code>, never from rows and columns: a space bar is one cell of the matrix
+          but six keys wide.
+        </p>
+      </section>
+
+      <section>
+        <h2>Recipes</h2>
+
+        <h3>Rings from the middle</h3>
+        <pre data-file="Rings.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: 'Rings of colour spreading from the middle of the keyboard',
+  render({ layout, time, frame }) {
+    const area = bounds(layout)
+    const cx = area.x + area.w / 2
+    const cy = area.y + area.h / 2
+    for (const key of layout.keys) {
+      const c = center(key)
+      // In keys: a ring every six keys, whatever the keyboard's size.
+      const d = Math.hypot(c.x - cx, c.y - cy)
+      frame.set(key, hsv(d * 60 - time * 120, 1, 1))
+    }
+  },
+})</code></pre>
+
+        <h3>Keys that glow when you type</h3>
+        <pre data-file="Typing glow.ts"><code>import { center, defineEffect, mix, BLACK } from '@candeo/effects-api'
+
+const GLOW = { r: 255, g: 120, b: 0 }
+
+export default defineEffect({
+  description: 'Each key you press glows, and its neighbours with it',
+  inputs: ['keys'],
+  render({ layout, time, presses, frame }) {
+    for (const key of layout.keys) {
+      const c = center(key)
+      let light = 0
+      for (const press of presses) {
+        const p = center(press.key)
+        const near = Math.max(0, 1 - Math.hypot(c.x - p.x, c.y - p.y) / 2)
+        const fading = Math.max(0, 1 - (time - press.at) / 0.8)
+        light = Math.max(light, near * fading)
+      }
+      frame.set(key, mix(BLACK, GLOW, light))
+    }
+  },
+})</code></pre>
+        <p>
+          Presses are key positions and times, never characters, and are not kept beyond ten
+          seconds.
+        </p>
+
+        <h3>A word on the keys</h3>
+        <pre data-file="Hello.ts"><code>import { banner, bounds, center, defineEffect } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: 'A word, still, in the middle of the keyboard',
+  params: {
+    word: { kind: 'text', label: 'Word', maxLength: 5, default: 'HI' },
+  },
+  render({ layout, frame, params }) {
+    const lines = banner(params.word)
+    const area = bounds(layout)
+    const left = area.x + (area.w - lines[0].length) / 2
+    for (const key of layout.keys) {
+      const column = Math.floor(center(key).x - left)
+      const lit = key.row &lt; 5 &amp;&amp; lines[key.row]?.[column] === '#'
+      frame.set(key, lit ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 30 })
+    }
+  },
+})</code></pre>
+
+        <h3>A level meter from the sound</h3>
+        <pre data-file="Level meter.ts"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
+
+export default defineEffect({
+  description: 'The top row as a level meter of the sound playing',
+  inputs: ['audio'],
+  render({ layout, audio, frame }) {
+    const area = bounds(layout)
+    for (const key of layout.keys) {
+      const across = (center(key).x - area.x) / area.w
+      const lit = key.row === 0 &amp;&amp; across &lt; audio.level
+      frame.set(key, lit ? hsv(120 - across * 120, 1, 1) : hsv(0, 0, audio.beat ? 0.3 : 0))
+    }
+  },
+})</code></pre>
+
+        <h3>A value another program sends</h3>
+        <pre data-file="CPU load.ts"><code>import { defineEffect, mix } from '@candeo/effects-api'
+
+const CALM = { r: 0, g: 200, b: 80 }
+const BUSY = { r: 255, g: 30, b: 0 }
+
+export default defineEffect({
+  description: 'The keyboard from green to red with the CPU load a script sends',
+  inputs: ['signals'],
+  render({ signals, frame }) {
+    const load = Number(signals.cpu ?? 0)
+    frame.fill(mix(CALM, BUSY, Math.min(1, Math.max(0, load))))
+  },
+})</code></pre>
+        <p>
+          For a single value, a setting following the signal is simpler: this reads every signal
+          at once, for an effect drawing many.
+        </p>
+      </section>
+
+      <section>
+        <h2>What the engine expects</h2>
+        <ul>
+          <li>
+            <strong>Animate on <code>time</code></strong>, not on the frame number: the engine aims
+            at thirty frames a second but does not make up the ones a busy computer misses.
+          </li>
+          <li>
+            <strong>Ten milliseconds a frame, 32 MB in all</strong>: plenty for a loop over every key.
+            An effect failing thirty frames in a row is stopped, the keyboard turned off, and the
+            gallery says why.
+          </li>
+          <li>
+            <strong>No browser, no Node</strong>: effects run in an engine of their own, with no
+            <code>document</code>, no <code>fetch</code>, no <code>console</code>, no file access.
+            An effect reaches nothing but its keys.
+          </li>
+          <li>
+            <strong>State between frames</strong> lives outside <code>render</code>, in the module:
+            a list of rings, a moving average. It starts over when the effect restarts.
+          </li>
+          <li>
+            <strong>Layouts without geometry</strong>: <code>center</code> and
+            <code>bounds</code> fail loudly, naming the key, rather than drawing black. Rows and
+            columns always work.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Learn from the shipped ones</h2>
+        <p>
+          The twenty-three effects that ship with Candeo are written against this same API. Open one
+          in the editor, or <strong>Duplicate</strong> it to make it yours:
+          <a href="{{repository}}/tree/main/packages/effects">packages/effects</a>. An effect is a
+          file: share it, drop one in <code>Documents\candeo\effects</code>, and
+          <strong>Refresh</strong>.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <a href="./">Candeo</a>
+      <a href="{{repository}}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="{{repository}}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>
+  </body>
+</html>

@@ -16,6 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
     />
     <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
   </head>
   <body>
     <main class="subpage">
@@ -62,11 +63,11 @@
       <section>
         <h2>Sending one</h2>
         <p>PowerShell, at the end of a build script:</p>
-        <pre>$headers = @{ Authorization = "Bearer $env:CANDEO_TOKEN" }
+        <pre data-lang="powershell">$headers = @{ Authorization = "Bearer $env:CANDEO_TOKEN" }
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
   -Headers $headers -ContentType "application/json" -Body '{"build":"failed"}'</pre>
         <p><code>curl</code>, which Windows 10 and later ship, and every Linux:</p>
-        <pre>curl -H "Authorization: Bearer $CANDEO_TOKEN" -H "Content-Type: application/json" \
+        <pre data-lang="bash">curl -H "Authorization: Bearer $CANDEO_TOKEN" -H "Content-Type: application/json" \
   -d '{"build":"ok","tests":"running"}' http://127.0.0.1:7317/signals</pre>
         <p>
           The answer says what was taken and when it expires — <code>?ttl=</code> sets the lifetime
@@ -234,7 +235,7 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
           Once the interface is ticked, a <code>rest_command</code> in
           <code>configuration.yaml</code>, with the address of the computer running Candeo:
         </p>
-        <pre>rest_command:
+        <pre data-lang="yaml" data-file="configuration.yaml">rest_command:
   candeo_signal:
     url: "http://192.0.2.23:7317/signals"
     method: post
@@ -246,7 +247,7 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
           with <code>candeo_bearer: "Bearer &lt;token&gt;"</code> in <code>secrets.yaml</code>, and
           an automation calling it:
         </p>
-        <pre>action:
+        <pre data-lang="yaml">action:
   - action: rest_command.candeo_signal
     data:
       name: doorbell
