@@ -11,9 +11,7 @@ pub mod layout;
 pub mod lighting;
 
 pub use inspection::{Check, Inspection, Verdict, Warning};
-pub use layout::{
-    Key, Layout, Lights, Outline, Port, Shape, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO, NO_SCANCODE,
-};
+pub use layout::{Key, Layout, Lights, Outline, Port, Shape, DEATHSTALKER_V2_PRO, NO_SCANCODE};
 pub use lighting::{Lighting, Outgoing, Wire};
 
 #[derive(Debug, thiserror::Error)]

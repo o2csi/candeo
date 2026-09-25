@@ -680,7 +680,9 @@ interpreter, written and tested once in Rust, turns it into reports:
 
 The prototype is the zones of the Alienware m18 R1, the simplest family: its
 definition replaced the `AlienwareZones` family on 2026-09-25, giving byte for
-byte what it sent; the keyboard and the Razer follow.
+byte what it sent. The keyboard followed on 2026-09-26 — its keys, fifteen to a
+report, its brightness and its firmware effects, again byte for byte — and the
+Razer is next.
 
 ---
 

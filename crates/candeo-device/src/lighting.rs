@@ -9,9 +9,9 @@
 //! So `Keyboard` knows how to send bytes and check a refusal, and knows nothing
 //! about who it is talking to (#34).
 
-use candeo_protocol::{alienware, CommandId, Effect, Report, Rgb};
+use candeo_protocol::{CommandId, Effect, Report, Rgb};
 
-use crate::layout::{Layout, EMPTY};
+use crate::layout::Layout;
 
 /// How a report reaches the device, which is not a detail of plumbing.
 ///
@@ -38,16 +38,6 @@ pub struct Outgoing {
     /// what lets an inspection refuse to send it. `None` where a family has no
     /// such notion.
     pub command: Option<CommandId>,
-}
-
-impl Outgoing {
-    fn plain(bytes: Vec<u8>) -> Self {
-        Self {
-            bytes,
-            wire: Wire::Feature,
-            command: None,
-        }
-    }
 }
 
 /// How one family of devices is driven.
@@ -186,84 +176,3 @@ fn report(report: Report) -> Outgoing {
         wire: Wire::Feature,
     }
 }
-
-/// Alienware: a frame of per-key colours, opened and closed.
-pub struct AlienwareKeys;
-
-impl Lighting for AlienwareKeys {
-    fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing> {
-        // Each colour goes out under **the address the layout gives its
-        // position**: this family names keys, and no arithmetic here could know
-        // how the next model numbers them.
-        //
-        // Positions with no address are left out rather than sent black: the
-        // device would take one for another key.
-        let lit: Vec<(u8, Rgb)> = layout
-            .matrix
-            .iter()
-            .zip(frame)
-            .filter_map(|(&address, &colour)| (address != EMPTY).then_some((address as u8, colour)))
-            .collect();
-        let mut out = vec![Outgoing::plain(alienware::open().to_vec())];
-        out.extend(
-            lit.chunks(alienware::KEYS_PER_REPORT)
-                .map(|chunk| Outgoing::plain(alienware::colours(chunk).to_vec())),
-        );
-        out.push(Outgoing::plain(alienware::close().to_vec()));
-        out
-    }
-
-    /// An open and a close, then the level.
-    ///
-    /// The level alone is accepted and does nothing: this device takes it only
-    /// after a frame has been opened and closed, measured both ways on
-    /// 18/09/2026. The frame carries no colour — nothing on screen changes.
-    fn brightness(&self, level: u8) -> Option<Vec<Outgoing>> {
-        Some(vec![
-            Outgoing::plain(alienware::open().to_vec()),
-            Outgoing::plain(alienware::close().to_vec()),
-            Outgoing::plain(alienware::brightness(level).to_vec()),
-        ])
-    }
-
-    /// The sixteen kinds its firmware runs, `hardware:m18-00` to
-    /// `hardware:m18-0f`, and *Off*.
-    ///
-    /// **Off is a kind here, not a black frame.** Once the firmware animates, it
-    /// redraws over anything the host pushes: an image of black is overwritten
-    /// within the second, and the keyboard never goes dark.
-    ///
-    /// Colours are taken as given, and the kinds that paint their own palette
-    /// are unaffected by them: the layout says which take one, so an effect that
-    /// would ignore a colour is never asked for one.
-    fn firmware_effect(&self, id: &str, colours: &[Rgb]) -> Option<Outgoing> {
-        let kind = match id {
-            "hardware:off" => ALIENWARE_STEADY,
-            _ => u8::from_str_radix(id.strip_prefix(ALIENWARE_EFFECT)?, 16).ok()?,
-        };
-        // A kind that paints what it is given, given nothing, shows nothing —
-        // which is exactly what `Off` is here.
-        let one = colours.first().copied().unwrap_or_default();
-        let two = colours.get(1).copied().unwrap_or(one);
-        Some(Outgoing::plain(
-            alienware::effect(kind, 0x05, one, two).to_vec(),
-        ))
-    }
-
-    fn inspect(
-        &self,
-        _device: &hidapi::HidDevice,
-        accept: &mut dyn FnMut(Option<&str>) -> bool,
-    ) -> Option<crate::Inspection> {
-        accept(None).then(crate::Inspection::unread)
-    }
-}
-
-/// What an Alienware keyboard's firmware effects are called, before the two
-/// hexadecimal digits of the kind.
-pub const ALIENWARE_EFFECT: &str = "hardware:m18-";
-
-/// The kind that paints the colour it is given and nothing else, which on black
-/// is how this keyboard goes dark. Read off the keyboard on 18/09/2026, where
-/// every kind carrying no colour showed nothing.
-const ALIENWARE_STEADY: u8 = 0x01;
