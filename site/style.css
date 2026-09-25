@@ -80,6 +80,8 @@ pre,
 .command,
 .mono {
   font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+  /* `--ignore-missing` must read as typed: a ligature makes it a dash. */
+  font-variant-ligatures: none;
 }
 
 /* A name or a value inside a sentence, set apart without shouting. */
