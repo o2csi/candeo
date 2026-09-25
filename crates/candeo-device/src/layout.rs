@@ -56,6 +56,35 @@ pub struct Key {
     pub w: f32,
     /// Height.
     pub h: f32,
+    /// How it is drawn inside that rectangle. The rectangle stays what an effect
+    /// measures with: the shape changes the drawing, not the geometry.
+    pub shape: Shape,
+}
+
+/// How a light is drawn inside its rectangle (`docs/design/studio.md` §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    /// The rectangle itself: a key.
+    Rect,
+    /// A disc, or an ellipse, inscribed in the rectangle.
+    Disc,
+    /// The upper half of a rounded ring, a thick stroke inside the rectangle.
+    ArchUp,
+    /// Its lower half.
+    ArchDown,
+}
+
+/// A part of a device that lights nothing — a lid, a base, a port — drawn
+/// faintly under its lights, in the same units. A keyboard has none: its keys
+/// are its outline.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Outline {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// Corner radius.
+    pub r: f32,
 }
 
 /// What a device's lights **are**.
@@ -155,6 +184,8 @@ pub struct Layout {
     pub matrix: &'static [u16],
     /// Name and geometry of each occupied position, in position order.
     pub keys: &'static [Key],
+    /// What the simulator draws under the lights. Empty for a keyboard.
+    pub outline: &'static [Outline],
 }
 
 impl Layout {
@@ -244,6 +275,7 @@ const fn k(index: u16, scancode: u16, x: f32, y: f32) -> Key {
         y,
         w: 1.0,
         h: 1.0,
+        shape: Shape::Rect,
     }
 }
 
@@ -256,6 +288,7 @@ const fn kw(index: u16, scancode: u16, x: f32, y: f32, w: f32) -> Key {
         y,
         w,
         h: 1.0,
+        shape: Shape::Rect,
     }
 }
 
@@ -268,7 +301,26 @@ const fn kh(index: u16, scancode: u16, x: f32, y: f32, w: f32, h: f32) -> Key {
         y,
         w,
         h,
+        shape: Shape::Rect,
     }
+}
+
+/// A light that is not a key: no scancode, and a shape of its own.
+const fn zone(index: u16, shape: Shape, x: f32, y: f32, w: f32, h: f32) -> Key {
+    Key {
+        index,
+        scancode: NO_SCANCODE,
+        x,
+        y,
+        w,
+        h,
+        shape,
+    }
+}
+
+/// A part that lights nothing, with rounded corners.
+const fn part(x: f32, y: f32, w: f32, h: f32, r: f32) -> Outline {
+    Outline { x, y, w, h, r }
 }
 
 /// Razer DeathStalker V2 Pro, wired.
@@ -388,6 +440,7 @@ pub static DEATHSTALKER_V2_PRO: Layout = Layout {
         kw(128, 0x52,  18.5,  5.5, 2.0),
         k(129, 0x53,   20.5,  5.5),
     ],
+    outline: &[],
 };
 
 /// Alienware m18 R1, the keyboard built into the laptop.
@@ -560,6 +613,7 @@ pub static ALIENWARE_M18_R1: Layout = Layout {
         kw(117, 0x52,       16.5,  5.0, 2.0),
         k( 118, 0x53,       18.5,  5.0),
     ],
+    outline: &[],
 };
 
 /// The lights around that keyboard: the ring at the rear, the logo on the lid,
@@ -592,15 +646,28 @@ pub static ALIENWARE_M18_R1_ZONES: Layout = Layout {
     rows: 1,
     cols: 3,
     // The zone ids the device answers to. `3` lights nothing on this machine and
-    // `4`, the power button, never keeps what it is given.
+    // `4`, the power button, takes no colour written live and shows the power
+    // state: it is left to the firmware (`docs/protocol/alienware-m18-r1.md` §2).
     matrix: &[0, 1, 2],
+    // The machine seen from behind, lid open — what someone looks at to check
+    // the effect lit them (`docs/design/studio.md` §4): the lid and its logo
+    // above, the ring around the rear ports below, its halves one above the
+    // other. No scancode — nothing here is a key.
     #[rustfmt::skip]
     keys: &[
-        // A top-down view of the machine: the lid above, the ring across the
-        // back. No scancode — nothing here is a key.
-        kh(0, NO_SCANCODE, 0.0, 1.5, 8.0, 0.5),   // ring, upper half
-        kh(1, NO_SCANCODE, 0.0, 2.0, 8.0, 0.5),   // ring, lower half
-        kh(2, NO_SCANCODE, 3.0, 0.0, 2.0, 1.0),   // logo on the lid
+        zone(0, Shape::ArchUp,   2.0, 7.9, 9.0, 1.1),   // ring, upper half
+        zone(1, Shape::ArchDown, 2.0, 9.0, 9.0, 1.1),   // ring, lower half
+        zone(2, Shape::Disc,     5.5, 2.5, 2.0, 2.0),   // logo on the lid
+    ],
+    #[rustfmt::skip]
+    outline: &[
+        part(0.5, 0.0, 12.0, 7.0, 0.5),                 // the lid, from behind
+        part(0.0, 7.4, 13.0, 3.2, 0.8),                 // the base's rear edge
+        part(3.2, 8.65, 0.8, 0.7, 0.12),                // the ports inside the ring
+        part(4.4, 8.65, 1.4, 0.7, 0.12),
+        part(6.2, 8.65, 0.6, 0.7, 0.12),
+        part(7.2, 8.65, 1.4, 0.7, 0.12),
+        part(9.0, 8.65, 0.8, 0.7, 0.12),
     ],
 };
 
@@ -910,6 +977,29 @@ mod tests {
         assert_eq!(DEATHSTALKER_V2_PRO.lights, Lights::Keys);
         assert_eq!(ALIENWARE_M18_R1.lights, Lights::Keys);
         assert_eq!(ALIENWARE_M18_R1_ZONES.lights, Lights::Zones);
+    }
+
+    /// §4 of `docs/design/studio.md`: the zones seen from behind — the logo on
+    /// the lid above the ring, the ring's upper half right above its lower one,
+    /// and every light within what the outline draws.
+    #[test]
+    fn the_zones_are_drawn_from_behind() {
+        let keys = ALIENWARE_M18_R1_ZONES.keys;
+        let by = |index: u16| keys.iter().find(|k| k.index == index).expect("a zone");
+        let (upper, lower, logo) = (by(0), by(1), by(2));
+        assert_eq!(
+            (upper.shape, lower.shape, logo.shape),
+            (Shape::ArchUp, Shape::ArchDown, Shape::Disc)
+        );
+        assert!(logo.y + logo.h < upper.y, "the logo is above the ring");
+        assert_eq!(upper.y + upper.h, lower.y, "the halves meet");
+
+        let outline = ALIENWARE_M18_R1_ZONES.outline;
+        let right = outline.iter().fold(0.0f32, |m, o| m.max(o.x + o.w));
+        let bottom = outline.iter().fold(0.0f32, |m, o| m.max(o.y + o.h));
+        for k in keys {
+            assert!(k.x >= 0.0 && k.y >= 0.0 && k.x + k.w <= right && k.y + k.h <= bottom);
+        }
     }
 
     /// The drawing fits within the footprint of a full-size ISO keyboard.

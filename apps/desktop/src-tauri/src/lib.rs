@@ -163,6 +163,21 @@ pub struct KeyInfo {
     pub y: f32,
     pub w: f32,
     pub h: f32,
+    /// How the simulator draws it: `disc`, `archUp` or `archDown`; absent for a
+    /// rectangle, which every key is. See `candeo_device::Shape`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shape: Option<&'static str>,
+}
+
+/// A part that lights nothing, drawn under the lights. Mirror of
+/// `candeo_device::Outline`.
+#[derive(Serialize)]
+pub struct OutlineInfo {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub r: f32,
 }
 
 #[derive(Serialize)]
@@ -188,6 +203,8 @@ pub struct LayoutInfo {
     /// The gallery reads it to stop offering, to a surface nobody types on, an
     /// effect that reads key presses — it would never see one.
     pub lights: &'static str,
+    /// What the simulator draws under the lights: empty for a keyboard.
+    pub outline: Vec<OutlineInfo>,
 }
 
 /// One firmware effect, as the gallery needs it. Mirror of
@@ -252,6 +269,12 @@ impl From<&'static Layout> for LayoutInfo {
                     y: k.y,
                     w: k.w,
                     h: k.h,
+                    shape: match k.shape {
+                        candeo_device::Shape::Rect => None,
+                        candeo_device::Shape::Disc => Some("disc"),
+                        candeo_device::Shape::ArchUp => Some("archUp"),
+                        candeo_device::Shape::ArchDown => Some("archDown"),
+                    },
                 });
             }
         }
@@ -273,6 +296,17 @@ impl From<&'static Layout> for LayoutInfo {
                 candeo_device::Lights::Keys => "keys",
                 candeo_device::Lights::Zones => "zones",
             },
+            outline: l
+                .outline
+                .iter()
+                .map(|o| OutlineInfo {
+                    x: o.x,
+                    y: o.y,
+                    w: o.w,
+                    h: o.h,
+                    r: o.r,
+                })
+                .collect(),
         }
     }
 }
@@ -1559,6 +1593,7 @@ mod tests {
         cols: 1,
         matrix: &[0],
         keys: &[],
+        outline: &[],
     };
     static SECOND: Layout = Layout {
         name: "Second",
@@ -1573,6 +1608,7 @@ mod tests {
         cols: 1,
         matrix: &[0],
         keys: &[],
+        outline: &[],
     };
 
     /// A serial specific to each layout, as in a real enumeration.
