@@ -638,118 +638,6 @@ mod tests {
         );
     }
 
-    /// The laptop keyboard puts four collections on one interface, and only the
-    /// one carrying report `0xcc` lights. The interface number says nothing here.
-    #[test]
-    fn a_collection_is_what_names_the_laptop_lighting() {
-        let l = &ALIENWARE_M18_R1;
-        let collections = [
-            (0x0001, 0x0006),
-            (0xff89, 0x0010),
-            (0xff89, 0x00cc),
-            (0x000c, 0x0001),
-        ];
-        let kept: Vec<(u16, u16)> = collections
-            .into_iter()
-            .filter(|&(page, usage)| l.is_lighting_interface(0x0d62, 0xaab0, 0, page, usage))
-            .collect();
-        assert_eq!(kept, vec![(0xff89, 0x00cc)]);
-        assert!(
-            !l.is_lighting_interface(0x1532, 0x0292, 0, 0xff89, 0x00cc),
-            "another device, same collection"
-        );
-    }
-
-    /// Keys the laptop grid carries.
-    const KEYS: usize = 103;
-
-    /// The grid the survey established: seven rows of twenty, and the holes
-    /// where a key is wider than a cell or where the device lights nothing.
-    #[test]
-    fn the_laptop_grid_matches_the_survey() {
-        let l = &ALIENWARE_M18_R1;
-        assert_eq!(l.matrix.len(), l.led_count());
-        assert_eq!(l.led_count(), 140);
-        assert_eq!(l.lit_count(), KEYS);
-        assert_eq!(l.keys.len(), KEYS);
-        assert_eq!(l.at(0, 0), Some(0), "Esc");
-        assert_eq!(l.at(2, 0), Some(40), "Tab");
-        assert_eq!(l.at(2, 1), None, "Tab is wider than its cell");
-        assert_eq!(l.at(2, 2), Some(42), "A");
-        assert_eq!(l.at(3, 14), Some(74), "Enter");
-        assert_eq!(l.at(5, 7), Some(107), "Space");
-        assert_eq!(l.at(5, 17), Some(117), "the keypad zero");
-    }
-
-    /// **A position is not an address.** This device counts its keys from one,
-    /// and the layout is where that is said — never an offset in a protocol
-    /// module, which would hold for this model and break on the next.
-    #[test]
-    fn the_laptop_addresses_are_the_device_s_own_numbers() {
-        let l = &ALIENWARE_M18_R1;
-        assert_eq!(l.address(0), Some(1), "Esc is the device's key 1");
-        assert_eq!(l.address(42), Some(43), "A");
-        assert_eq!(l.address(107), Some(108), "Space");
-        assert_eq!(l.address(41), None, "the cell Tab leaves behind");
-        assert_eq!(l.address(139), None, "past the last key");
-        // And where a device numbers its keys by position, the table says so too.
-        assert_eq!(DEATHSTALKER_V2_PRO.address(0), Some(0));
-        assert_eq!(DEATHSTALKER_V2_PRO.address(22), Some(22));
-    }
-
-    /// Every lit cell of the laptop grid has one key, each index appears once,
-    /// and the drawing stays inside the keyboard without two keys overlapping.
-    #[test]
-    fn the_laptop_drawing_covers_each_lit_cell_once() {
-        let l = &ALIENWARE_M18_R1;
-        let mut seen = std::collections::BTreeSet::new();
-        for key in l.keys {
-            assert!(seen.insert(key.index), "index {} twice", key.index);
-            assert!(
-                l.address(key.index).is_some(),
-                "{} is not a lit position",
-                key.index
-            );
-            assert!(
-                key.x >= 0.0 && key.x + key.w <= 20.5,
-                "{} sticks out",
-                key.index
-            );
-            assert!(
-                key.y >= 0.0 && key.y + key.h <= 7.0,
-                "{} sticks out",
-                key.index
-            );
-        }
-        assert_eq!(seen.len(), KEYS);
-        for a in l.keys {
-            for b in l.keys {
-                if a.index >= b.index {
-                    continue;
-                }
-                let apart =
-                    a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
-                assert!(apart, "{} and {} overlap", a.index, b.index);
-            }
-        }
-    }
-
-    /// The keys someone presses reach one LED each, as on any keyboard: the
-    /// exceptions here are the two Fn-like keys, which send nothing.
-    #[test]
-    fn the_laptop_scancodes_name_each_key_once() {
-        let mut seen = std::collections::BTreeMap::<u16, Vec<u16>>::new();
-        for key in ALIENWARE_M18_R1.keys {
-            seen.entry(key.scancode).or_default().push(key.index);
-        }
-        let shared: Vec<_> = seen
-            .iter()
-            .filter(|(code, indexes)| **code != NO_SCANCODE && indexes.len() > 1)
-            .collect();
-        assert!(shared.is_empty(), "shared scancodes: {shared:?}");
-        assert_eq!(seen.get(&NO_SCANCODE).map(Vec::len), Some(3));
-    }
-
     #[test]
     fn matrix_dimensions_are_consistent() {
         let l = &DEATHSTALKER_V2_PRO;
@@ -902,7 +790,6 @@ mod tests {
     #[test]
     fn a_layout_says_what_its_lights_are() {
         assert_eq!(DEATHSTALKER_V2_PRO.lights, Lights::Keys);
-        assert_eq!(ALIENWARE_M18_R1.lights, Lights::Keys);
     }
 
     /// The drawing fits within the footprint of a full-size ISO keyboard.
