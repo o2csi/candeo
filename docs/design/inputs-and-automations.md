@@ -111,6 +111,37 @@ render({ audio }) // { level, peak, bands: number[16], beat }
 The microphone is the same pipeline on an input device; it comes only if an
 effect needs it (a "microphone muted" light is better served by signals, §2.3).
 
+#### 2.2.1 Decided for #107
+
+- **Two parts**, as signals were. The first: capture, analysis, the `audio`
+  input, two shipped effects (*Equalizer*, *Beat pulse*) and the gallery's
+  mark. The second: any setting follows the sound, a third position beside
+  *Value* and *Signal*.
+- **Windows first.** WASAPI loopback on the default output, through the
+  `windows` crate already in the tree rather than `cpal`, which would bring a
+  second copy of it. Linux (the default sink's monitor) is an issue of its own;
+  until then the gallery says the sound cannot be read there.
+- **One capture, leased.** It starts when the first loop running an effect that
+  declares `audio` starts, preview included, and stops when the last one ends.
+  It follows the default output when it changes.
+- **Analysis on the capture thread**, 60 times a second, whatever the number of
+  loops reading it; a loop takes the latest result at each frame. A 2048-point
+  FFT at 48 kHz is about 43 ms, the window §2.2 asks for; it is written here
+  rather than taken from a crate, a hundred lines covered by tests.
+- **Loopback gives nothing while nothing plays**: the missing time is counted as
+  silence, so levels fall back to zero instead of freezing.
+- **Settings follow six sources** in the second part, each 0..1: *volume*,
+  *beat* (a short pulse), *bass* (below 250 Hz), *mids* (250 Hz to 4 kHz),
+  *highs*, and *tone*, how high the sound sits (its spectral centroid, low to
+  high). No pitch nor tempo: on music several notes sound at once, and a tempo
+  takes seconds of listening and stays approximate.
+- **How a setting takes a source:** a number across its whole range, silence at
+  its minimum; a flag on when the source passes half; a colour by its hue,
+  turned around the wheel from the colour set, so *tone* makes low sounds and
+  high ones different colours.
+- **Choosing it:** *Sound* is a third position beside *Value* and *Signal*, with
+  a list of the six sources where *Signal* has a name field.
+
 ### 2.3 External signals
 
 Named values that other software sends to Candeo:

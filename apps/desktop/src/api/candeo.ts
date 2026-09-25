@@ -192,6 +192,8 @@ export interface EffectManifest {
    * bound to a signal needs no declaration, and is not what this says.
    */
   readsSignals?: boolean
+  /** Declares `inputs: ['audio']`: the sound playing is captured while it runs. */
+  readsAudio?: boolean
 }
 
 /**
@@ -795,6 +797,12 @@ export interface EngineReport {
   devices: DeviceEngineStatus[]
   /** `null` when nothing is previewed — including as soon as the window is folded away. */
   preview: PreviewStatus | null
+  /**
+   * Whether the sound playing is captured: `idle` while no effect reads it,
+   * `unavailable` when one does and it cannot be (#107). Mirror of
+   * `SoundState`, in `src-tauri/src/audio/mod.rs`.
+   */
+  sound: 'idle' | 'capturing' | 'unavailable'
 }
 
 /**

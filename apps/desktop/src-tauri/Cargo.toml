@@ -111,7 +111,17 @@ windows-sys = { version = "0.61", features = [
 # Tauri.
 [target.'cfg(windows)'.dependencies.windows]
 version = "0.61"
-features = ["ApplicationModel", "ApplicationModel_Activation", "Foundation"]
+features = [
+  "ApplicationModel",
+  "ApplicationModel_Activation",
+  "Foundation",
+  # The sound playing, through WASAPI loopback (`src/audio/wasapi.rs`, #107):
+  # COM interfaces, which `windows-sys` does not carry either.
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Variant",
+]
 
 # Kernel uevents for devices plugged in and unplugged (`src/hotplug.rs`). Already
 # in the tree.

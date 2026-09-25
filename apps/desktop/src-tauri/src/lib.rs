@@ -18,6 +18,7 @@ use tauri::{AppHandle, Manager, State};
 use failure::Failure;
 use storage::{DeviceState, Settings};
 
+mod audio;
 mod automations;
 mod autostart;
 mod failure;

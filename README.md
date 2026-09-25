@@ -24,7 +24,7 @@ software running.
 | `candeo-device` — HID transport and layouts | done, verified on hardware |
 | Tauri commands | wired and documented — see [`docs/api/`](docs/api/commands.md) |
 | Vue interface | three screens — library, devices, editor; decisions in [`docs/design/`](docs/design/studio.md) |
-| User effects engine | single `rquickjs` engine on the Rust side; storage, settings and **seventeen shipped effects** done |
+| User effects engine | single `rquickjs` engine on the Rust side; storage, settings and **twenty-three shipped effects** done |
 
 ---
 
@@ -278,7 +278,8 @@ export default defineEffect({
 The effects shipped with the application — Radial wave, Diagonal wave,
 Breathing, Sweep, Fixed gradient, Color wheel, Noise map, Rain, Starry night,
 Bubbles, Lightning, Crossing beams, Swirl circles, Ripples, Clock, Status row,
-Scrolling text — are written against this same API, in
+Scrolling text, Equalizer, Beat pulse, Waterfall, Beat ripples, Fireworks,
+Aurora — are written against this same API, in
 [`packages/effects/`](packages/effects/). They are copied into your effects folder
 at first launch and kept up to date. The application does not change them:
 Duplicate one to make it yours, and Restore brings back one changed or removed in

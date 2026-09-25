@@ -52,6 +52,11 @@ const READS_CLOCK = Array.isArray(effect.inputs) && effect.inputs.includes('cloc
 const READS_SIGNALS = Array.isArray(effect.inputs) && effect.inputs.includes('signals')
 globalThis.__candeo_reads_signals = READS_SIGNALS
 
+// And the sound playing: the loop leases the capture only for an effect that
+// declares it (§2.2, #107).
+const READS_AUDIO = Array.isArray(effect.inputs) && effect.inputs.includes('audio')
+globalThis.__candeo_reads_audio = READS_AUDIO
+
 // The declared parameters, against which a bound value is converted.
 const SPECS = effect.params ?? {}
 
@@ -73,6 +78,16 @@ const NO_CLOCK = Object.freeze({
 
 // Likewise for signals, for an effect that does not declare them.
 const NO_SIGNALS = Object.freeze({})
+
+// And for the sound: silence, which is also what an effect reading it gets
+// when nothing plays or nothing can be captured.
+const NO_AUDIO = Object.freeze({
+  level: 0,
+  peak: 0,
+  bands: Object.freeze(new Array(16).fill(0)),
+  beat: false,
+  onset: 0,
+})
 
 // Buffer reused from one frame to the next: allocating it 30 times per second
 // would make the garbage collector work for nothing. The rate went down, not
@@ -148,6 +163,14 @@ function signals(signalsJson) {
   return Object.freeze(JSON.parse(signalsJson))
 }
 
+// `audioJson` is the latest analysis of the sound playing, or empty.
+function audio(audioJson) {
+  if (!READS_AUDIO || !audioJson) return NO_AUDIO
+  const heard = JSON.parse(audioJson)
+  Object.freeze(heard.bands)
+  return Object.freeze(heard)
+}
+
 // A bound value, raw as a sender sent it, converted against the parameter's
 // spec: `undefined` when it does not fit, and the configured value then stays.
 // Here and not in Rust, which keeps parameter values untyped on purpose — the
@@ -216,6 +239,7 @@ globalThis.__candeo_render = (
   clockMs,
   boundJson,
   signalsJson,
+  audioJson,
 ) => {
   // Every frame starts again from black: a frame is complete by definition, and
   // an effect that writes only part of the keyboard must not silently inherit
@@ -231,6 +255,7 @@ globalThis.__candeo_render = (
     presses: presses(pressesJson),
     clock: clock(clockMs),
     signals: signals(signalsJson),
+    audio: audio(audioJson),
   })
 
   return buf
