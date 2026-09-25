@@ -2,9 +2,8 @@
 // and glows with its level in between.
 //
 // A beat is a sudden jump in the low bands (`inputs: ['audio']`), where a kick
-// drum lands, strong enough for the sensitivity chosen: `audio.onset` against
-// the effect's own threshold, so soft kicks can drive it too. The flash fades
-// over the chosen time; between beats the keys keep a glow that follows the
+// drum lands, as sensitive as Settings › Sound says. The flash fades over the
+// chosen time; between beats the keys keep a glow that follows the
 // level, so quiet passages are not dark. The colour can turn a step around the
 // colour wheel at each beat.
 //
@@ -51,14 +50,6 @@ export default defineEffect({
       step: 0.05,
       default: 0.3,
     },
-    sensitivity: {
-      kind: 'number',
-      label: { en: 'Beat sensitivity', fr: 'Sensibilité aux temps forts' },
-      min: 0,
-      max: 1,
-      step: 0.05,
-      default: 0.5,
-    },
     turn: {
       kind: 'boolean',
       label: { en: 'Change colour on each beat', fr: 'Changer de couleur à chaque temps' },
@@ -68,12 +59,10 @@ export default defineEffect({
   render({ layout, time, audio, frame, params }) {
     const base = params.color ?? COLOR
     const fade = Math.max(0.01, Number(params.fade ?? 0.3))
-    // Half, the default, is the analysis's own beat; more catches softer hits.
-    const threshold = Math.max(0.1, 1 - Number(params.sensitivity ?? 0.5))
 
     // A time before the last beat is a restart: the preview starts from zero.
     if (time < lastBeat) lastBeat = -Infinity
-    if (audio.onset >= threshold && time - lastBeat >= 0.12) {
+    if (audio.beat) {
       lastBeat = time
       turns += 1
     }

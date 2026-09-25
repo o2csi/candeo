@@ -159,9 +159,19 @@
       "on": "activé",
       "off": "désactivé",
       "reset": "Rétablir les valeurs de l'effet",
-      "source": "{name} : valeur ou signal",
+      "source": "{name} : valeur, signal ou son",
       "fromValue": "Valeur",
       "fromSignal": "Signal",
+      "fromSound": "Son",
+      "soundOf": "Son suivi par {name}",
+      "sound": {
+        "volume": "Volume",
+        "beat": "Temps fort",
+        "bass": "Graves",
+        "mids": "Médiums",
+        "highs": "Aigus",
+        "tone": "Tonalité, grave à aiguë"
+      },
       "signalName": "nom du signal",
       "signalOf": "Signal lu par {name}",
       "signalHeld": "Reçu en ce moment : « {value} »",
@@ -377,6 +387,14 @@
       "loginDetail": "Candeo démarre replié dans la zone de notification, sans fenêtre.",
       "loginUnavailable": "Seulement dans l'application installée.",
       "loginUnsupported": "Pas sur ce système."
+    },
+    "sound": {
+      "title": "Son",
+      "gain": "Gain",
+      "gainValue": "×{value}",
+      "sensitivity": "Sensibilité aux temps forts",
+      "sensitivityValue": "{value} %",
+      "unavailable": "Le son joué ne peut pas être capté sur cet ordinateur."
     },
     "signals": {
       "title": "Signaux",

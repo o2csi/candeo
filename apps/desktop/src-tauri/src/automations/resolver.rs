@@ -146,10 +146,10 @@ impl Rule {
             .show
             .bindings
             .iter()
-            .find(|(_, source)| crate::signals::store::bound_signal(source).is_none())
+            .find(|(_, source)| !crate::runtime::is_source(source))
             .map(|(param, _)| param)
         {
-            return Some(format!("\"{param}\" is bound to no signal"));
+            return Some(format!("\"{param}\" is bound to no signal nor sound"));
         }
         if self.show.effect.is_empty() {
             return Some("the rule shows no effect".into());

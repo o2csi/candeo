@@ -17,6 +17,33 @@ import { signalText } from './signals'
  */
 const SIGNAL = 'signal:'
 
+/** How a source names the sound playing (§2.2.1). */
+const SOUND = 'sound:'
+
+/** What a setting can follow of the sound, in the order the list offers them. */
+export const SOUND_SOURCES = ['volume', 'beat', 'bass', 'mids', 'highs', 'tone'] as const
+export type SoundSource = (typeof SOUND_SOURCES)[number]
+
+/** The source that follows `name` of the sound playing. */
+export function soundSource(name: SoundSource): string {
+  return `${SOUND}${name}`
+}
+
+/** What of the sound a source follows, or `null` when Rust would refuse it. */
+export function boundSound(source: string): SoundSource | null {
+  if (!source.startsWith(SOUND)) return null
+  const name = source.slice(SOUND.length)
+  return SOUND_SOURCES.find((s) => s === name) ?? null
+}
+
+/**
+ * Whether a parameter can follow the sound: a number over its range, a flag
+ * past half, a colour by its hue. A list or a text has no order a level maps to.
+ */
+export function takesSound(spec: ParamSpec | undefined): boolean {
+  return spec?.kind === 'number' || spec?.kind === 'boolean' || spec?.kind === 'color'
+}
+
 /** The source that reads the signal `name`. */
 export function signalSource(name: string): string {
   return `${SIGNAL}${name}`
@@ -42,7 +69,8 @@ export function boundSignal(source: string): string | null {
 export function declaredBindings(specs: Record<string, ParamSpec>, kept: Bindings): Bindings {
   const out: Bindings = {}
   for (const [id, source] of Object.entries(kept)) {
-    if (id in specs && boundSignal(source) !== null) out[id] = source
+    const reads = boundSignal(source) !== null || (boundSound(source) !== null && takesSound(specs[id]))
+    if (id in specs && reads) out[id] = source
   }
   return out
 }
@@ -120,7 +148,16 @@ export function bindingState(
  * showing its own values, so the window says so where it is set up (#224).
  */
 export function readsSignal(declared: boolean | undefined, bindings: Bindings): boolean {
-  return declared === true || Object.keys(bindings).length > 0
+  return declared === true || Object.values(bindings).some((s) => boundSignal(s) !== null)
+}
+
+/**
+ * Whether an effect reads the sound playing: a parameter following it, or all
+ * of it through its declared `inputs: ['audio']`. It is captured while such an
+ * effect runs, which the gallery marks (#107).
+ */
+export function readsSound(declared: boolean | undefined, bindings: Bindings): boolean {
+  return declared === true || Object.values(bindings).some((s) => boundSound(s) !== null)
 }
 
 /** Whether a rule needs signals: to start, or for the effect it shows. */

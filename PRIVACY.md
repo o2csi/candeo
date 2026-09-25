@@ -31,8 +31,8 @@ being drawn. Nothing is written to the log or to disk, and nothing leaves the
 computer.
 
 **The sound the computer plays is not captured**, except while an effect that
-declares it reacts to sound runs — and then only what goes to the speakers, never
-the microphone. It is turned, in memory, into a few numbers per frame (how loud,
+reacts to sound runs, a setting follows the sound, or Settings › Sound shows its
+meter — and then only what goes to the speakers, never the microphone. It is turned, in memory, into a few numbers per frame (how loud,
 how much bass or treble, whether a beat lands) for the effect being drawn. The
 sound itself is not recorded, not written to disk, and never leaves the computer;
 the log says only when capture starts and stops.

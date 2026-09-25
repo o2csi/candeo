@@ -29,12 +29,103 @@ const BEAT_BANDS: usize = 6;
 /// About 0.7 s of flux at 60 analyses a second: the "usual" a beat stands out
 /// from.
 const FLUX_HISTORY: usize = 43;
-/// A beat is a jump this many deviations above the usual flux…
-const BEAT_SENSITIVITY: f32 = 1.5;
+/// At the default sensitivity, a beat is a jump this many deviations above the
+/// usual flux…
+const BEAT_DEVIATIONS: f32 = 1.5;
 /// …and at least this much, so a quiet flutter is not taken for one.
 const BEAT_MIN_FLUX: f32 = 0.08;
+
+/// How the analysis hears, set once for everything in Settings (§2.2.1): the
+/// music playing and how loud the computer plays it are the listener's, not an
+/// effect's.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Tuning {
+    /// A factor on what is heard, 0.5 to 3: for music played low or mastered
+    /// quietly.
+    pub gain: f32,
+    /// 0 to 1, 0.5 by default: higher counts softer hits as beats — a snare, a
+    /// hi-hat — lower only the big ones.
+    pub sensitivity: f32,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Tuning {
+            gain: 1.0,
+            sensitivity: 0.5,
+        }
+    }
+}
+
+impl Tuning {
+    pub fn is_default(&self) -> bool {
+        *self == Tuning::default()
+    }
+
+    /// Within what Settings offers, whatever the file says.
+    pub fn clamped(self) -> Tuning {
+        Tuning {
+            gain: if self.gain.is_finite() {
+                self.gain.clamp(0.5, 3.0)
+            } else {
+                1.0
+            },
+            sensitivity: if self.sensitivity.is_finite() {
+                self.sensitivity.clamp(0.0, 1.0)
+            } else {
+                0.5
+            },
+        }
+    }
+
+    /// How many deviations above the usual a beat stands: 1.5 at the default,
+    /// none at full sensitivity, twice as many at none.
+    fn deviations(self) -> f32 {
+        2.0 * BEAT_DEVIATIONS * (1.0 - self.sensitivity)
+    }
+
+    /// The least jump a beat is: halved at full sensitivity.
+    fn min_flux(self) -> f32 {
+        BEAT_MIN_FLUX * (1.5 - self.sensitivity)
+    }
+}
 /// No two beats closer than this: 500 beats a minute is more than music plays.
 const BEAT_MIN_GAP_S: f32 = 0.12;
+/// How long the beat's pulse takes to die down, in seconds: a setting following
+/// the beat jumps and settles rather than blinking for one frame.
+const PULSE_S: f32 = 0.15;
+
+/// Where the bass ends and the mids, then the highs, begin, as band indices:
+/// about 250 Hz and 4 kHz with the edges above.
+const MIDS_FROM: usize = 5;
+const HIGHS_FROM: usize = 12;
+
+/// What a setting can follow (§2.2.1), each 0..1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    Volume,
+    Beat,
+    Bass,
+    Mids,
+    Highs,
+    Tone,
+}
+
+impl Source {
+    /// The source a binding names, `sound:bass`, or `None` for any other.
+    pub fn parse(source: &str) -> Option<Source> {
+        match source.strip_prefix("sound:")? {
+            "volume" => Some(Source::Volume),
+            "beat" => Some(Source::Beat),
+            "bass" => Some(Source::Bass),
+            "mids" => Some(Source::Mids),
+            "highs" => Some(Source::Highs),
+            "tone" => Some(Source::Tone),
+            _ => None,
+        }
+    }
+}
 
 /// What one analysis gives: every value 0..1, `beat` true on the analysis an
 /// onset is found.
@@ -47,6 +138,15 @@ pub struct Frame {
     /// How strong the jump in the low bands is now, against the last moment:
     /// 0.5 is where `beat` starts, so an effect can set its own threshold.
     pub onset: f32,
+    /// What a setting follows: the bass, mids and highs, each the mean of its
+    /// bands; the tone, where the energy sits from low (0) to high (1), 0 in
+    /// silence so a colour following it rests on its own; and the beat as a
+    /// pulse, 1 on a beat and dying down after.
+    pub bass: f32,
+    pub mids: f32,
+    pub highs: f32,
+    pub tone: f32,
+    pub pulse: f32,
 }
 
 impl Frame {
@@ -58,7 +158,24 @@ impl Frame {
         bands: [0.0; BANDS],
         beat: false,
         onset: 0.0,
+        bass: 0.0,
+        mids: 0.0,
+        highs: 0.0,
+        tone: 0.0,
+        pulse: 0.0,
     };
+
+    /// The value a setting following `source` takes, 0..1.
+    pub fn source(&self, source: Source) -> f32 {
+        match source {
+            Source::Volume => self.level,
+            Source::Beat => self.pulse,
+            Source::Bass => self.bass,
+            Source::Mids => self.mids,
+            Source::Highs => self.highs,
+            Source::Tone => self.tone,
+        }
+    }
 
     /// As the bootstrap reads it: numbers rounded to three decimals, which is
     /// finer than any LED shows.
@@ -99,6 +216,12 @@ pub struct Analyzer {
     previous: [f32; BANDS],
     flux: std::collections::VecDeque<f32>,
     since_beat: f32,
+    pulse: f32,
+}
+
+/// The mean of some bands.
+fn average(bands: &[f32]) -> f32 {
+    bands.iter().sum::<f32>() / bands.len().max(1) as f32
 }
 
 impl Analyzer {
@@ -131,21 +254,23 @@ impl Analyzer {
             previous: [0.0; BANDS],
             flux: std::collections::VecDeque::with_capacity(FLUX_HISTORY),
             since_beat: f32::INFINITY,
+            pulse: 0.0,
         }
     }
 
     /// Analyses the latest samples, mono, oldest first: [`WINDOW`] of them, or
     /// fewer, the missing ones counted as silence before. `dt` is the time since
     /// the previous analysis, in seconds.
-    pub fn analyse(&mut self, samples: &[f32], dt: f32) -> Frame {
+    pub fn analyse(&mut self, samples: &[f32], dt: f32, tuning: Tuning) -> Frame {
+        let gain = tuning.gain;
         let recent = &samples[samples.len().saturating_sub(WINDOW)..];
         let offset = WINDOW - recent.len();
 
         let rms = (recent.iter().map(|s| s * s).sum::<f32>() / WINDOW as f32).sqrt();
-        let level = scaled(rms);
+        let level = scaled(rms * gain);
         let loudest = recent.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         let fall = FALL_PER_SECOND * dt;
-        self.peak = scaled(loudest).max(self.peak - fall);
+        self.peak = scaled(loudest * gain).max(self.peak - fall);
 
         let mut re = vec![0.0f32; WINDOW];
         let mut im = vec![0.0f32; WINDOW];
@@ -159,7 +284,7 @@ impl Analyzer {
             // The band's whole energy, not its average: a note spreads over a
             // few bins, and averaging them over a wide band would hide it.
             let power: f32 = (first..last).map(|k| re[k] * re[k] + im[k] * im[k]).sum();
-            now[band] = scaled(2.0 * power.sqrt() / self.window_sum);
+            now[band] = scaled(2.0 * power.sqrt() * gain / self.window_sum);
         }
 
         // Bars rise at once and fall at a set pace.
@@ -178,20 +303,23 @@ impl Analyzer {
         self.since_beat += dt;
         // How many deviations above the usual the jump is, as 0..1 with the
         // beat's own threshold at half.
+        let needed = tuning.deviations();
         let lift = if deviation > 1e-6 {
             (flux - mean) / deviation
         } else if flux > mean {
-            2.0 * BEAT_SENSITIVITY
+            2.0 * needed.max(f32::EPSILON)
         } else {
             0.0
         };
-        let onset = if flux > BEAT_MIN_FLUX {
-            (lift / (2.0 * BEAT_SENSITIVITY)).clamp(0.0, 1.0)
-        } else {
+        let onset = if flux <= tuning.min_flux() {
             0.0
+        } else if needed > 0.0 {
+            (lift / (2.0 * needed)).clamp(0.0, 1.0)
+        } else {
+            f32::from(u8::from(lift > 0.0))
         };
-        let beat = flux > BEAT_MIN_FLUX
-            && flux > mean + BEAT_SENSITIVITY * deviation
+        let beat = flux > tuning.min_flux()
+            && flux > mean + needed * deviation
             && self.since_beat >= BEAT_MIN_GAP_S;
         if beat {
             self.since_beat = 0.0;
@@ -201,12 +329,35 @@ impl Analyzer {
         }
         self.flux.push_back(flux);
 
+        self.pulse = if beat {
+            1.0
+        } else {
+            self.pulse * (-dt / PULSE_S).exp()
+        };
+        let total: f32 = self.bands.iter().sum();
+        let tone = if total > 0.0 {
+            let weighted: f32 = self
+                .bands
+                .iter()
+                .enumerate()
+                .map(|(i, b)| i as f32 * b)
+                .sum();
+            weighted / total / (BANDS - 1) as f32
+        } else {
+            0.0
+        };
+
         Frame {
             level,
             peak: self.peak,
             bands: self.bands,
             beat,
             onset,
+            bass: average(&self.bands[..MIDS_FROM]),
+            mids: average(&self.bands[MIDS_FROM..HIGHS_FROM]),
+            highs: average(&self.bands[HIGHS_FROM..]),
+            tone,
+            pulse: self.pulse,
         }
     }
 }
@@ -301,14 +452,17 @@ mod tests {
     #[test]
     fn silence_is_zero_everywhere() {
         let mut a = Analyzer::new(RATE);
-        assert_eq!(a.analyse(&[], 1.0 / 60.0), Frame::SILENT);
-        assert_eq!(a.analyse(&vec![0.0; WINDOW], 1.0 / 60.0), Frame::SILENT);
+        assert_eq!(a.analyse(&[], 1.0 / 60.0, Tuning::default()), Frame::SILENT);
+        assert_eq!(
+            a.analyse(&vec![0.0; WINDOW], 1.0 / 60.0, Tuning::default()),
+            Frame::SILENT
+        );
     }
 
     #[test]
     fn a_tone_lights_its_band_and_not_the_far_ones() {
         let mut a = Analyzer::new(RATE);
-        let frame = a.analyse(&sine(1_000.0, 0.5, WINDOW), 1.0 / 60.0);
+        let frame = a.analyse(&sine(1_000.0, 0.5, WINDOW), 1.0 / 60.0, Tuning::default());
         let own = band_of(1_000.0);
         let loudest = (0..BANDS)
             .max_by(|&x, &y| frame.bands[x].total_cmp(&frame.bands[y]))
@@ -332,7 +486,7 @@ mod tests {
     #[test]
     fn a_low_tone_lands_in_a_low_band() {
         let mut a = Analyzer::new(RATE);
-        let frame = a.analyse(&sine(60.0, 0.5, WINDOW), 1.0 / 60.0);
+        let frame = a.analyse(&sine(60.0, 0.5, WINDOW), 1.0 / 60.0, Tuning::default());
         let loudest = (0..BANDS)
             .max_by(|&x, &y| frame.bands[x].total_cmp(&frame.bands[y]))
             .unwrap();
@@ -343,9 +497,9 @@ mod tests {
     #[test]
     fn bars_fall_at_a_set_pace_when_the_sound_stops() {
         let mut a = Analyzer::new(RATE);
-        let lit = a.analyse(&sine(1_000.0, 0.5, WINDOW), 1.0 / 60.0);
+        let lit = a.analyse(&sine(1_000.0, 0.5, WINDOW), 1.0 / 60.0, Tuning::default());
         let own = band_of(1_000.0);
-        let after = a.analyse(&vec![0.0; WINDOW], 0.1);
+        let after = a.analyse(&vec![0.0; WINDOW], 0.1, Tuning::default());
         let expected = lit.bands[own] - FALL_PER_SECOND * 0.1;
         assert!(
             (after.bands[own] - expected).abs() < 1e-4,
@@ -354,7 +508,7 @@ mod tests {
             after.bands[own]
         );
         assert_eq!(after.level, 0.0, "the level follows at once");
-        let gone = a.analyse(&vec![0.0; WINDOW], 1.0);
+        let gone = a.analyse(&vec![0.0; WINDOW], 1.0, Tuning::default());
         assert_eq!(gone.bands, [0.0; BANDS]);
     }
 
@@ -365,10 +519,10 @@ mod tests {
         let mut a = Analyzer::new(RATE);
         let dt = 1.0 / 60.0;
         for _ in 0..30 {
-            assert!(!a.analyse(&vec![0.0; WINDOW], dt).beat);
+            assert!(!a.analyse(&vec![0.0; WINDOW], dt, Tuning::default()).beat);
         }
         let kick = sine(60.0, 0.8, WINDOW);
-        let hit = a.analyse(&kick, dt);
+        let hit = a.analyse(&kick, dt, Tuning::default());
         assert!(hit.beat, "the kick");
         assert!(
             hit.onset >= 0.5,
@@ -376,10 +530,104 @@ mod tests {
             hit.onset
         );
         for _ in 0..20 {
-            let held = a.analyse(&kick, dt);
+            let held = a.analyse(&kick, dt, Tuning::default());
             assert!(!held.beat, "held, it is no new beat");
             assert_eq!(held.onset, 0.0, "and no onset");
         }
+    }
+
+    /// Each source reads what its name says: a low tone is bass and a low
+    /// tone, a high one highs and a high tone, and a beat's pulse dies down.
+    #[test]
+    fn the_sources_read_what_they_name() {
+        let dt = 1.0 / 60.0;
+        let mut a = Analyzer::new(RATE);
+        let low = a.analyse(&sine(80.0, 0.5, WINDOW), dt, Tuning::default());
+        assert!(low.bass > 0.2 && low.highs < 0.05, "{low:?}");
+        assert!(low.tone < 0.2, "a low tone: {}", low.tone);
+
+        let mut a = Analyzer::new(RATE);
+        let high = a.analyse(&sine(8_000.0, 0.5, WINDOW), dt, Tuning::default());
+        assert!(high.highs > 0.2 && high.bass < 0.05, "{high:?}");
+        assert!(high.tone > 0.8, "a high tone: {}", high.tone);
+
+        let mut a = Analyzer::new(RATE);
+        for _ in 0..30 {
+            a.analyse(&vec![0.0; WINDOW], dt, Tuning::default());
+        }
+        let hit = a.analyse(&sine(60.0, 0.8, WINDOW), dt, Tuning::default());
+        assert_eq!(hit.source(Source::Beat), 1.0, "the pulse on the beat");
+        let after = a.analyse(&sine(60.0, 0.8, WINDOW), PULSE_S, Tuning::default());
+        assert!(
+            (after.pulse - (-1.0f32).exp()).abs() < 1e-3,
+            "then dies down: {}",
+            after.pulse
+        );
+
+        assert_eq!(Frame::SILENT.tone, 0.0, "silence has no tone");
+        assert_eq!(Source::parse("sound:bass"), Some(Source::Bass));
+        assert_eq!(Source::parse("sound:pitch"), None);
+        assert_eq!(Source::parse("signal:bass"), None);
+    }
+
+    /// The gain makes quiet music read louder; the sensitivity lets a softer
+    /// jump count as a beat.
+    #[test]
+    fn the_tuning_sets_how_loud_and_how_sensitive() {
+        let dt = 1.0 / 60.0;
+        let quiet = sine(1_000.0, 0.05, WINDOW);
+        let plain = Analyzer::new(RATE).analyse(&quiet, dt, Tuning::default());
+        let louder = Analyzer::new(RATE).analyse(
+            &quiet,
+            dt,
+            Tuning {
+                gain: 3.0,
+                ..Tuning::default()
+            },
+        );
+        assert!(
+            louder.level > plain.level + 0.1,
+            "{} then {}",
+            plain.level,
+            louder.level
+        );
+
+        // A soft kick after steady music: a beat only when listening closely.
+        let soft_kick = |tuning: Tuning| {
+            let mut a = Analyzer::new(RATE);
+            let hum = sine(60.0, 0.05, WINDOW);
+            for _ in 0..40 {
+                a.analyse(&hum, dt, tuning);
+            }
+            a.analyse(&sine(60.0, 0.12, WINDOW), dt, tuning).beat
+        };
+        assert!(
+            !soft_kick(Tuning {
+                sensitivity: 0.0,
+                ..Tuning::default()
+            }),
+            "deaf to it"
+        );
+        assert!(
+            soft_kick(Tuning {
+                sensitivity: 1.0,
+                ..Tuning::default()
+            }),
+            "heard closely"
+        );
+
+        let wild = Tuning {
+            gain: f32::NAN,
+            sensitivity: 7.0,
+        }
+        .clamped();
+        assert_eq!(
+            wild,
+            Tuning {
+                gain: 1.0,
+                sensitivity: 1.0
+            }
+        );
     }
 
     #[test]

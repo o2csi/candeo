@@ -1014,6 +1014,49 @@ export interface SignalsApi {
   portInUse: boolean
 }
 
+// ---------------------------------------------------------------- sound
+
+/**
+ * How the sound playing is heard, for every effect and every setting following
+ * it: Settings › Sound (#107). Mirror of `Tuning`, in
+ * `src-tauri/src/audio/analysis.rs`.
+ */
+export interface SoundTuning {
+  /** A factor on what is heard, 0.5 to 3. */
+  gain: number
+  /** 0 to 1, 0.5 by default: higher counts softer hits as beats. */
+  sensitivity: number
+}
+
+export function getSoundSettings(): Promise<SoundTuning> {
+  return invoke('get_sound_settings')
+}
+
+/** Sets and keeps it; Rust clamps it to what Settings offers. */
+export function setSoundSettings(gain: number, sensitivity: number): Promise<SoundTuning> {
+  return invoke('set_sound_settings', { gain, sensitivity })
+}
+
+/** Holds the capture on for the meter while Settings shows it, or lets it go. */
+export function watchSound(on: boolean): Promise<void> {
+  return invoke('watch_sound', { on })
+}
+
+/** What the meter shows: each source a setting can follow, 0..1. Mirror of `SoundNow`. */
+export interface SoundNow {
+  state: 'idle' | 'capturing' | 'unavailable'
+  volume: number
+  beat: number
+  bass: number
+  mids: number
+  highs: number
+  tone: number
+}
+
+export function soundNow(): Promise<SoundNow> {
+  return invoke('sound_now')
+}
+
 export function getSignalsApi(): Promise<SignalsApi> {
   return invoke('get_signals_api')
 }

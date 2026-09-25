@@ -1,9 +1,8 @@
 // Fireworks — bursts of light on random keys at each beat of the sound
 // playing, more of them when it is loud.
 //
-// Each beat (`inputs: ['audio']`), a jump in the low bands strong enough for the
-// sensitivity chosen, sets off one to four bursts, by the level: each opens
-// from a key, a disc of light that widens and fades in about half a second, in
+// Each beat (`inputs: ['audio']`), a jump in the low bands, sets off one to
+// four bursts, by the level: each opens from a key, a disc of light that widens and fades in about half a second, in
 // a colour of its own. Where two meet, the brighter shows.
 //
 // With nothing playing, which is also how the swatch is sampled, only the
@@ -37,14 +36,6 @@ export default defineEffect({
   inputs: ['audio'],
   params: {
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },
-    sensitivity: {
-      kind: 'number',
-      label: { en: 'Beat sensitivity', fr: 'Sensibilité aux temps forts' },
-      min: 0,
-      max: 1,
-      step: 0.05,
-      default: 0.5,
-    },
     saturation: {
       kind: 'number',
       label: { en: 'Colour saturation', fr: 'Saturation des couleurs' },
@@ -58,13 +49,10 @@ export default defineEffect({
     if (layout.keys.length === 0) return
     const background = params.background ?? BACKGROUND
     const saturation = Number(params.saturation ?? 0.85)
-    // Half, the default, is the analysis's own beat; more catches softer hits.
-    const threshold = Math.max(0.1, 1 - Number(params.sensitivity ?? 0.5))
-    const last = bursts.length ? bursts[bursts.length - 1].start : -Infinity
 
     // A time before the last burst is a restart: the preview starts from zero.
     if (bursts.some((burst) => burst.start > time)) bursts = []
-    if (audio.onset >= threshold && time - last >= 0.12) {
+    if (audio.beat) {
       const count = 1 + Math.floor(Math.min(1, audio.level) * 3)
       for (let i = 0; i < count; i++) {
         fired += 1

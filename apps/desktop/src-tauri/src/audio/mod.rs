@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use analysis::{Analyzer, Frame, WINDOW};
+use analysis::{Analyzer, Frame, Tuning, WINDOW};
 use serde::Serialize;
 
 /// How often the capture thread analyses what it heard: about twice an effect's
@@ -46,9 +46,11 @@ pub enum SoundState {
 #[derive(Default)]
 pub struct Sound {
     inner: Mutex<Inner>,
-    /// The latest analysis, as the bootstrap reads it; empty when none.
-    latest: Arc<Mutex<String>>,
+    /// The latest analysis, `None` when there is none.
+    latest: Arc<Mutex<Option<Frame>>>,
     state: Arc<Mutex<SoundState>>,
+    /// The gain and sensitivity set in Settings, read at every analysis.
+    tuning: Arc<Mutex<Tuning>>,
     /// Which capture thread may still write `latest` and `state`: one stopping
     /// must not overwrite what the next one, already started, reports.
     generation: Arc<AtomicU64>,
@@ -84,10 +86,11 @@ impl Sound {
                 let stop = Arc::clone(&stop);
                 let latest = Arc::clone(&self.latest);
                 let state = Arc::clone(&self.state);
+                let tuning = Arc::clone(&self.tuning);
                 let current = Arc::clone(&self.generation);
                 std::thread::Builder::new()
                     .name("sound".into())
-                    .spawn(move || capture(&stop, &latest, &state, &current, generation))
+                    .spawn(move || capture(&stop, &latest, &state, &tuning, &current, generation))
                     .ok()
             };
             inner.stop = Some(stop);
@@ -118,16 +121,21 @@ impl Sound {
 
     /// The latest analysis, as the bootstrap reads it.
     pub fn latest(&self) -> String {
-        let latest = self.latest.lock().unwrap();
-        if latest.is_empty() {
-            Frame::SILENT.to_json()
-        } else {
-            latest.clone()
-        }
+        self.frame().to_json()
+    }
+
+    /// The latest analysis, silence when there is none.
+    pub fn frame(&self) -> Frame {
+        self.latest.lock().unwrap().unwrap_or(Frame::SILENT)
     }
 
     pub fn state(&self) -> SoundState {
         *self.state.lock().unwrap()
+    }
+
+    /// How the analysis hears from now on.
+    pub fn tune(&self, tuning: Tuning) {
+        *self.tuning.lock().unwrap() = tuning.clamped();
     }
 }
 
@@ -135,8 +143,9 @@ impl Sound {
 /// trying again after a failure.
 fn capture(
     stop: &AtomicBool,
-    latest: &Mutex<String>,
+    latest: &Mutex<Option<Frame>>,
     state: &Mutex<SoundState>,
+    tuning: &Mutex<Tuning>,
     current: &AtomicU64,
     generation: u64,
 ) {
@@ -145,9 +154,10 @@ fn capture(
     let mut said_unavailable = false;
     while !stop.load(Ordering::Relaxed) {
         let mut heard = |samples: &[f32], rate: u32| {
-            if let Some(frame) = listener.heard(samples, rate) {
+            let tuned = *tuning.lock().unwrap();
+            if let Some(frame) = listener.heard(samples, rate, tuned) {
                 if mine() {
-                    *latest.lock().unwrap() = frame.to_json();
+                    *latest.lock().unwrap() = Some(frame);
                     *state.lock().unwrap() = SoundState::Capturing;
                 }
             }
@@ -164,7 +174,7 @@ fn capture(
                     said_unavailable = true;
                 }
                 if mine() {
-                    latest.lock().unwrap().clear();
+                    *latest.lock().unwrap() = None;
                     *state.lock().unwrap() = SoundState::Unavailable;
                 }
                 let until = Instant::now() + RETRY_AFTER;
@@ -175,7 +185,7 @@ fn capture(
         }
     }
     if mine() {
-        latest.lock().unwrap().clear();
+        *latest.lock().unwrap() = None;
         *state.lock().unwrap() = SoundState::Idle;
     }
     if listener.started {
@@ -216,7 +226,7 @@ struct Listener {
 impl Listener {
     /// Takes samples as they come, and analyses them every [`ANALYSIS_PERIOD`]:
     /// the analysis when one is due.
-    fn heard(&mut self, samples: &[f32], rate: u32) -> Option<Frame> {
+    fn heard(&mut self, samples: &[f32], rate: u32, tuning: Tuning) -> Option<Frame> {
         if !self.started {
             self.started = true;
             tracing::info!(rate, "sound capture started");
@@ -236,7 +246,75 @@ impl Listener {
         self.last = Some(now);
         let (analyzer, _) = self.analyzer.as_mut()?;
         let window: Vec<f32> = self.samples.iter().copied().collect();
-        Some(analyzer.analyse(&window, dt.as_secs_f32()))
+        Some(analyzer.analyse(&window, dt.as_secs_f32(), tuning))
+    }
+}
+
+/// The capture held open for Settings' meter while it is shown, so the gain
+/// and sensitivity can be set against what plays.
+#[derive(Default)]
+pub struct Meter(Mutex<Option<Lease>>);
+
+/// What the meter shows: each source a setting can follow, and where capture
+/// stands.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SoundNow {
+    pub state: SoundState,
+    pub volume: f32,
+    pub beat: f32,
+    pub bass: f32,
+    pub mids: f32,
+    pub highs: f32,
+    pub tone: f32,
+}
+
+#[tauri::command]
+pub fn get_sound_settings(app: tauri::AppHandle) -> crate::CmdResult<Tuning> {
+    Ok(crate::storage::store(&app)?.read_settings()?.sound)
+}
+
+/// Sets how the analysis hears, for every effect and every setting following
+/// the sound, and keeps it.
+#[tauri::command]
+pub fn set_sound_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::AppState>,
+    gain: f32,
+    sensitivity: f32,
+) -> crate::CmdResult<Tuning> {
+    let tuning = Tuning { gain, sensitivity }.clamped();
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    settings.sound = tuning;
+    store.write_settings(&settings)?;
+    state.engine.sound().tune(tuning);
+    Ok(tuning)
+}
+
+/// Holds the capture on while Settings shows the meter, or lets it go.
+#[tauri::command]
+pub fn watch_sound(
+    state: tauri::State<'_, crate::AppState>,
+    meter: tauri::State<'_, Meter>,
+    on: bool,
+) {
+    let lease = on.then(|| state.engine.sound().lease());
+    *meter.0.lock().unwrap() = lease;
+}
+
+#[tauri::command]
+pub fn sound_now(state: tauri::State<'_, crate::AppState>) -> SoundNow {
+    let sound = state.engine.sound();
+    let frame = sound.frame();
+    SoundNow {
+        state: sound.state(),
+        volume: frame.level,
+        beat: frame.pulse,
+        bass: frame.bass,
+        mids: frame.mids,
+        highs: frame.highs,
+        tone: frame.tone,
     }
 }
 
@@ -254,7 +332,7 @@ mod tests {
             .map(|i| 0.5 * (2.0 * std::f32::consts::PI * 1000.0 * i as f32 / 48_000.0).sin())
             .collect();
         for _ in 0..10 {
-            published.extend(listener.heard(&tone, 48_000));
+            published.extend(listener.heard(&tone, 48_000, Tuning::default()));
         }
         assert_eq!(
             published.len(),
@@ -267,7 +345,7 @@ mod tests {
             published[0].level
         );
         std::thread::sleep(ANALYSIS_PERIOD);
-        published.extend(listener.heard(&tone, 48_000));
+        published.extend(listener.heard(&tone, 48_000, Tuning::default()));
         assert_eq!(published.len(), 2, "and another once the period has passed");
     }
 

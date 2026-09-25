@@ -89,7 +89,7 @@ import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
 import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
-import { readsSignal } from '../composables/bindings'
+import { readsSignal, readsSound } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -1019,12 +1019,17 @@ function readsSignalHere(c: Choice): boolean {
   return !c.hardware && readsSignal(c.readsSignals, bindingsFor(selectedDevice.value, c.id, c.params))
 }
 
+/** Whether an effect reads the sound on this device: declared, or a setting following it. */
+function readsSoundHere(c: Choice): boolean {
+  return !c.hardware && readsSound(c.readsAudio, bindingsFor(selectedDevice.value, c.id, c.params))
+}
+
 /** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
 function entryLabel(c: Choice): string {
   const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
   const marks = [
     c.readsKeys ? t('effects.readsKeys') : null,
-    c.readsAudio ? t('effects.readsAudio') : null,
+    readsSoundHere(c) ? t('effects.readsAudio') : null,
     readsSignalHere(c) ? t('effects.entrySignal') : null,
   ]
   return [name, ...marks.filter((mark) => mark !== null)].join(' · ')
@@ -1032,7 +1037,10 @@ function entryLabel(c: Choice): string {
 
 /** The selected effect reads the sound, and it cannot be captured (#107): said under its settings. */
 const soundUnavailable = computed(
-  () => selectedEffect.value?.readsAudio === true && report.value.sound === 'unavailable',
+  () =>
+    selectedEffect.value !== null &&
+    readsSound(selectedEffect.value.readsAudio, paramBindings.value) &&
+    report.value.sound === 'unavailable',
 )
 
 /** The selected effect reads a signal that cannot arrive: said once, under its settings. */
@@ -1493,7 +1501,7 @@ onBeforeUnmount(() => {
                 <path d="M8 1.5v4.5M5.8 3.9L8 6.1l2.2-2.2" />
               </svg>
               <svg
-                v-if="c.readsAudio"
+                v-if="readsSoundHere(c)"
                 class="fx-sound"
                 viewBox="0 0 16 16"
                 width="14"

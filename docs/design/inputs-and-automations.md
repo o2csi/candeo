@@ -141,6 +141,11 @@ effect needs it (a "microphone muted" light is better served by signals, §2.3).
   high ones different colours.
 - **Choosing it:** *Sound* is a third position beside *Value* and *Signal*, with
   a list of the six sources where *Signal* has a name field.
+- **One calibration, in Settings › Sound:** a gain and a beat sensitivity,
+  applied in the analysis, so every effect and every setting following the
+  sound hears alike. How loud the computer plays and what kind of music it is
+  are the listener's, not an effect's: no effect carries its own. A live meter
+  of the six sources sits beside them, the capture running while it is shown.
 
 ### 2.3 External signals
 

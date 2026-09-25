@@ -1283,6 +1283,10 @@ pub fn run() {
             ))));
 
             let state = AppState::default();
+            // How the sound is heard, before any effect reading it starts.
+            if let Ok(settings) = storage::store(app.handle()).and_then(|s| s.read_settings()) {
+                state.engine.sound().tune(settings.sound);
+            }
             // Before `manage`: the state is afterwards only reachable through
             // the manager, and adoption needs nothing but the state.
             apply_adoptions(app.handle(), &state, &HashSet::new());
@@ -1290,6 +1294,7 @@ pub fn run() {
             // Before anything starts an effect: starting one asks whether a
             // rule interrupts the device.
             app.manage(automations::Automations::default());
+            app.manage(audio::Meter::default());
             // Before the automations start: a tick reads what is held.
             // The store the engine's loops read bound values from: one for both.
             let store = app.state::<AppState>().engine.signals();
@@ -1395,6 +1400,10 @@ pub fn run() {
             automations::set_automations_paused,
             automations::set_rules,
             automations::try_rule,
+            audio::get_sound_settings,
+            audio::set_sound_settings,
+            audio::watch_sound,
+            audio::sound_now,
             signals::get_signals_api,
             signals::set_signals_api,
             signals::renew_signals_token,

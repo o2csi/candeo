@@ -532,6 +532,13 @@ pub struct Settings {
     /// from the file until someone turns it on. See [`crate::signals`].
     #[serde(skip_serializing_if = "crate::signals::SignalsConfig::is_default")]
     pub signals: crate::signals::SignalsConfig,
+    /// How the sound playing is heard (#107): the gain and beat sensitivity set
+    /// in Settings. Absent while they are the defaults.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::audio::analysis::Tuning::is_default"
+    )]
+    pub sound: crate::audio::analysis::Tuning,
     /// The log level as an earlier version wrote it, **at the root**.
     ///
     /// Read, never written back (`skip_serializing`): [`Store::read_settings`]
@@ -567,6 +574,7 @@ impl Default for Settings {
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
             signals: crate::signals::SignalsConfig::default(),
+            sound: crate::audio::analysis::Tuning::default(),
             legacy_log_level: None,
         }
     }
@@ -3995,6 +4003,10 @@ mod tests {
                 port: 7400,
                 token: "0f".repeat(32),
                 interfaces: vec!["Wi-Fi".into()],
+            },
+            sound: crate::audio::analysis::Tuning {
+                gain: 1.5,
+                sensitivity: 0.7,
             },
             legacy_log_level: None,
         };
