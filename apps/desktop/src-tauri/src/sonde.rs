@@ -2,8 +2,9 @@
 //!
 //! Each test here answers a question from
 //! `docs/protocol/deathstalker-v2-pro.md` by querying a real
-//! DeathStalker V2 Pro. All of them are `#[ignore]`: they require the device, so
-//! CI never runs them.
+//! DeathStalker V2 Pro, and the last one from `docs/protocol/alienware-m18-r1.md`
+//! on an Alienware m18 R1. All of them are `#[ignore]`: they require the device,
+//! so CI never runs them.
 //!
 //! ```text
 //! cargo test -p candeo-desktop sonde -- --ignored --nocapture
@@ -515,5 +516,126 @@ fn probe_inspection_on_open() {
     }
     for a in i.warnings(layout) {
         println!("WARNING: {a}");
+    }
+}
+
+// ---------------------------------------------------------------- Alienware zones
+
+/// The zones around the Alienware m18 R1 keyboard, one id at a time: the map
+/// of `docs/protocol/alienware-m18-r1.md` §2, "Which zone is which", to check
+/// again on another machine, another firmware, or after the device stopped
+/// applying and was power cycled.
+///
+/// Each id alone in its own colour for six seconds, the others black, rewritten
+/// every 150 ms as the survey did: the maker's lighting agent repaints within a
+/// second otherwise. What each step should show is printed as it starts. Written
+/// the way Candeo writes, through the live preview of §2.
+///
+/// ⚠️ **Candeo closed, someone watching the machine.** The zones keep the last
+/// colour written until something else writes them.
+#[test]
+#[ignore]
+fn probe_alienware_zones() {
+    use candeo_protocol::alienware_elc::{colour, open, select, show};
+    use candeo_protocol::Rgb;
+
+    let api = hidapi::HidApi::new().expect("HID");
+    let info = api
+        .device_list()
+        .find(|d| {
+            d.vendor_id() == 0x187c
+                && d.product_id() == 0x0551
+                && d.usage_page() == 0xff00
+                && d.usage() == 0x0001
+        })
+        .expect("AW-ELC not found — an Alienware m18 R1?");
+    let device = info.open_device(&api).expect("open");
+
+    // No report id of its own: the API wants a zero in front, as the maker's
+    // software sends it.
+    let send = |report: &[u8]| {
+        let mut buffer = vec![0u8];
+        buffer.extend_from_slice(report);
+        device.send_output_report(&buffer)
+    };
+    // Every id is written in every transaction: black unless a group names it.
+    let paint = |groups: &[(&[u8], Rgb)]| -> Result<(), hidapi::HidError> {
+        let named: Vec<u8> = groups
+            .iter()
+            .flat_map(|(ids, _)| ids.iter().copied())
+            .collect();
+        let dark: Vec<u8> = (0..=4).filter(|id| !named.contains(id)).collect();
+        send(&open())?;
+        if !dark.is_empty() {
+            send(&select(&dark))?;
+            send(&colour(Rgb::new(0, 0, 0)))?;
+        }
+        for (ids, rgb) in groups {
+            send(&select(ids))?;
+            send(&colour(*rgb))?;
+        }
+        send(&show())?;
+        Ok(())
+    };
+
+    const RED: Rgb = Rgb::new(255, 0, 0);
+    const GREEN: Rgb = Rgb::new(0, 255, 0);
+    /// Zones lit in one transaction, each group in its colour.
+    type Groups<'a> = &'a [(&'a [u8], Rgb)];
+    let steps: [(Groups, &str); 7] = [
+        (&[(&[0], RED)], "id 0 red: the ring, upper half"),
+        (&[(&[1], GREEN)], "id 1 green: the ring, lower half"),
+        (
+            &[(&[2], Rgb::new(0, 0, 255))],
+            "id 2 blue: the logo on the lid",
+        ),
+        (
+            &[(&[3], Rgb::new(255, 255, 0))],
+            "id 3 yellow: nothing, on this machine",
+        ),
+        (
+            &[(&[4], Rgb::new(255, 0, 255))],
+            "id 4 magenta: the power button, until it pulses",
+        ),
+        (
+            &[(&[0, 1], Rgb::new(255, 255, 255))],
+            "ids 0 and 1 white: the whole ring",
+        ),
+        (
+            &[(&[0], RED), (&[1], GREEN)],
+            "id 0 red and id 1 green together: two halves, or one ring",
+        ),
+    ];
+    // `CANDEO_STEPS=7` replays only those steps, counted from 1: the one thing
+    // someone watching missed, without the whole run again.
+    let only: Option<Vec<usize>> = std::env::var("CANDEO_STEPS").ok().map(|list| {
+        list.split(',')
+            .filter_map(|n| n.trim().parse().ok())
+            .collect()
+    });
+    for (n, (groups, expected)) in steps.iter().enumerate() {
+        if only.as_ref().is_some_and(|only| !only.contains(&(n + 1))) {
+            continue;
+        }
+        println!(
+            "
+{}. {expected}",
+            n + 1
+        );
+        let until = Instant::now() + Duration::from_secs(6);
+        let (mut sent, mut failed) = (0u32, 0u32);
+        while Instant::now() < until {
+            match paint(groups) {
+                Ok(()) => sent += 1,
+                Err(e) => {
+                    if failed == 0 {
+                        println!("  write failed: {e}");
+                    }
+                    failed += 1;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+        println!("  {sent} transactions written, {failed} failed");
     }
 }
