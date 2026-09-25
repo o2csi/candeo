@@ -251,8 +251,10 @@ halves show only when both are lit, each in its own colour.
 **The power button is not ours.** It pulses by itself, and more slowly on
 battery than on mains. Command Center sets it only through the configuration
 the device keeps (`03 22`), one entry per power state, never through the live
-families; written live, on 2026-09-25, it stopped pulsing for a moment in its
-own colour and took none of ours. Candeo leaves it out of the matrix.
+families, and it takes none of the colours written live. What the live preview
+does change, on 2026-09-25: while it is in force the button **stops pulsing** and
+holds its own colour, even when no report names it. Candeo leaves it out of the
+matrix.
 
 ## 3. Writing works, and what it costs
 
