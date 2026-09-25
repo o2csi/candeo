@@ -1,0 +1,53 @@
+{
+  "name": "Alienware m18 R1 zones",
+  "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001" },
+  "report": { "wire": "output", "length": 33, "prefix": "00" },
+  "frame": {
+    "pace": { "atLeastMs": 100, "skipUnchanged": true },
+    "open": ["03 21 00 01 ff ff"],
+    "each": {
+      "group": "colour",
+      "chunk": 4,
+      "send": ["03 23 01 00 {count} {addresses}", "03 24 00 07 d0 00 fa {r} {g} {b}"]
+    },
+    "close": ["03 21 00 03 00 ff"]
+  },
+  "lights": {
+    "kind": "zones",
+    "items": [
+      { "name": "ring, upper half", "address": 0, "shape": "archUp", "rect": [2, 7.9, 9, 1.1] },
+      { "name": "ring, lower half", "address": 1, "shape": "archDown", "rect": [2, 9, 9, 1.1] },
+      { "name": "logo on the lid", "address": 2, "shape": "disc", "rect": [5.5, 2.5, 2, 2] }
+    ]
+  },
+  "outline": [
+    { "rect": [0.5, 0, 12, 7], "r": 0.5 },
+    { "rect": [0, 7.4, 13, 3.2], "r": 0.8 },
+    { "rect": [3.2, 8.65, 0.8, 0.7], "r": 0.12 },
+    { "rect": [4.4, 8.65, 1.4, 0.7], "r": 0.12 },
+    { "rect": [6.2, 8.65, 0.6, 0.7], "r": 0.12 },
+    { "rect": [7.2, 8.65, 1.4, 0.7], "r": 0.12 },
+    { "rect": [9, 8.65, 0.8, 0.7], "r": 0.12 }
+  ],
+  "examples": [
+    {
+      "colours": ["ff0000", "00ff00", "0000ff"],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 01 00", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 01", "03 24 00 07 d0 00 fa 00 ff 00",
+        "03 23 01 00 01 02", "03 24 00 07 d0 00 fa 00 00 ff",
+        "03 21 00 03 00 ff"
+      ]
+    },
+    {
+      "colours": ["ff0000", "ff0000", "000000"],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 02 00 01", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 02", "03 24 00 07 d0 00 fa",
+        "03 21 00 03 00 ff"
+      ]
+    }
+  ]
+}

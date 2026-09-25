@@ -440,6 +440,8 @@ version = "0.13.0"
 dependencies = [
  "candeo-protocol",
  "hidapi",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 
