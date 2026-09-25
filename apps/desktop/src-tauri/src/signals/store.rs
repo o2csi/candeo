@@ -237,6 +237,15 @@ impl Store {
         &self.held
     }
 
+    /// The value held under `name`, unless it expired: what a device's
+    /// brightness following that signal reads at each frame (§2.2.2).
+    pub fn value(&self, name: &str, now: i64) -> Option<&Scalar> {
+        self.held
+            .get(name)
+            .filter(|held| held.alive(now))
+            .map(|held| &held.value)
+    }
+
     /// What one frame of an effect reads of the signals, as the render entry point
     /// takes it: the raw values bound to its parameters, by parameter, and — when
     /// it declares the `signals` input — every value held, by name. An empty

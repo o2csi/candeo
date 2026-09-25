@@ -1135,6 +1135,49 @@ fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> C
     with_keyboard(&state, device, |kb| Ok(kb.set_brightness(level)?))
 }
 
+/// Makes this device's brightness follow the sound or a signal, or nothing,
+/// live: its loop, and a preview on its layout, read it from the next frame
+/// (`docs/design/inputs-and-automations.md` §2.2.2). The hardware brightness is
+/// not touched. Remembering it is [`remember_dimming`].
+#[tauri::command]
+fn set_dimming(
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    dimming: Option<runtime::dimming::Dimming>,
+) -> CmdResult<()> {
+    let dimming = dimming
+        .map(runtime::dimming::Dimming::checked)
+        .transpose()?;
+    state.engine.set_dimming(device, dimming);
+    Ok(())
+}
+
+/// Stores what this device's brightness follows, as [`remember_brightness`]
+/// stores its level: read, changed and written here in one go.
+#[tauri::command]
+fn remember_dimming(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    dimming: Option<runtime::dimming::Dimming>,
+) -> CmdResult<()> {
+    let dimming = dimming
+        .map(runtime::dimming::Dimming::checked)
+        .transpose()?;
+    let layout = find_layout(device)?;
+    let serial = known_serial(
+        state.inspection(device).as_ref(),
+        hid().ok().and_then(|api| plugged(&api, layout)).flatten(),
+    );
+
+    let store = storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    if !settings.set_dimming(device.vid, device.pid, serial.as_deref(), dimming) {
+        return Ok(());
+    }
+    store.write_settings(&settings)
+}
+
 /// Stores this device's brightness, without touching the keyboard.
 ///
 /// The disk counterpart of [`set_brightness`]. As with
@@ -1284,8 +1327,10 @@ pub fn run() {
 
             let state = AppState::default();
             // How the sound is heard, before any effect reading it starts.
+            // And what each device's brightness follows, before any loop reads it.
             if let Ok(settings) = storage::store(app.handle()).and_then(|s| s.read_settings()) {
                 state.engine.sound().tune(settings.sound);
+                state.engine.set_dimmings(settings.dimmings());
             }
             // Before `manage`: the state is afterwards only reachable through
             // the manager, and adoption needs nothing but the state.
@@ -1379,6 +1424,8 @@ pub fn run() {
             get_default_layout,
             set_brightness,
             remember_brightness,
+            set_dimming,
+            remember_dimming,
             set_effect,
             present,
             write_row,

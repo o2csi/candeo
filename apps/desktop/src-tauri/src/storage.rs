@@ -67,6 +67,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::failure::Failure;
 use crate::journal::LogLevel;
 use crate::language::LanguageSetting;
+use crate::runtime::dimming::Dimming;
 use crate::runtime::swatch::{self, Swatch};
 use crate::shipped::Shipped;
 use crate::{AppState, CmdResult, DeviceRef};
@@ -276,6 +277,11 @@ pub struct DeviceRecord {
     /// `detected` **without** brightness disappears: see [`Self::is_inert`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
+    /// What this device's brightness follows, the sound or a signal (§2.2.2 of
+    /// `inputs-and-automations.md`). Absent while it follows nothing: the
+    /// slider's brightness, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimming: Option<Dimming>,
 }
 
 impl DeviceRecord {
@@ -285,7 +291,7 @@ impl DeviceRecord {
     /// entry says. Keeping it would tell nothing to whoever rereads their
     /// settings, and would grow the file by one line per device touched once.
     fn is_inert(&self) -> bool {
-        self.state == DeviceState::Detected && self.brightness.is_none()
+        self.state == DeviceState::Detected && self.brightness.is_none() && self.dimming.is_none()
     }
 
     /// True if this entry designates the enumerated device.
@@ -647,9 +653,71 @@ impl Settings {
                 serial: serial.map(str::to_owned),
                 state,
                 brightness: None,
+                dimming: None,
             }),
         }
         self.prune();
+    }
+
+    /// Keeps what this device's brightness follows; `None` forgets it, and a
+    /// device for which it was the only decision disappears, as with
+    /// [`Self::set_brightness`].
+    ///
+    /// Returns true if something changed.
+    pub fn set_dimming(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        serial: Option<&str>,
+        dimming: Option<Dimming>,
+    ) -> bool {
+        match self.position(vid, pid, serial) {
+            Some(i) => {
+                if self.devices[i].dimming == dimming {
+                    return false;
+                }
+                self.devices[i].dimming = dimming;
+                if self.devices[i].serial.is_none() {
+                    self.devices[i].serial = serial.map(str::to_owned);
+                }
+            }
+            None => {
+                let Some(dimming) = dimming else { return false };
+                self.devices.push(DeviceRecord {
+                    vid,
+                    pid,
+                    serial: serial.map(str::to_owned),
+                    state: DeviceState::default(),
+                    brightness: None,
+                    dimming: Some(dimming),
+                });
+            }
+        }
+        self.prune();
+        true
+    }
+
+    /// Every device's, for the engine at startup. The engine knows a device by
+    /// model: of two units of one, the first entry holds. One edited by hand
+    /// into a source nothing reads is left out, and said.
+    pub fn dimmings(&self) -> std::collections::HashMap<DeviceRef, Dimming> {
+        let mut all = std::collections::HashMap::new();
+        for record in &self.devices {
+            let Some(dimming) = record.dimming.clone() else {
+                continue;
+            };
+            let device = DeviceRef {
+                vid: record.vid,
+                pid: record.pid,
+            };
+            match dimming.checked() {
+                Ok(dimming) => {
+                    all.entry(device).or_insert(dimming);
+                }
+                Err(e) => tracing::warn!(device = %device, "stored brightness source ignored: {e}"),
+            }
+        }
+        all
     }
 
     /// The brightness kept for this device, or [`DEFAULT_BRIGHTNESS`].
@@ -692,6 +760,7 @@ impl Settings {
                     serial: serial.map(str::to_owned),
                     state: DeviceState::default(),
                     brightness: Some(level),
+                    dimming: None,
                 });
             }
         }
@@ -2540,6 +2609,7 @@ pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<(
     let store = store(&app)?;
     crate::release_devices(&state);
     store.reset_settings()?;
+    state.engine.set_dimmings(Default::default());
     crate::journal::reset_level_to_default();
     // The API goes off with the rest, and stops listening now rather than at
     // the next look.
@@ -3974,6 +4044,7 @@ mod tests {
                 serial: Some("XY01".into()),
                 state: DeviceState::Adopted,
                 brightness: Some(128),
+                dimming: None,
             }],
             active_effects: vec![ActiveEffectRecord {
                 vid: 0x1532,
@@ -4112,6 +4183,54 @@ mod tests {
 
         // Nothing new: no file rewrite for the same value.
         assert!(!settings.set_brightness(VID, PID, Some("XY01"), 40));
+    }
+
+    fn following(source: &str) -> Dimming {
+        Dimming {
+            source: source.into(),
+            floor: 20,
+        }
+    }
+
+    /// What a brightness follows is kept per device, survives a reload, and
+    /// going back to nothing leaves no entry that decides nothing (§2.2.2).
+    #[test]
+    fn what_a_brightness_follows_is_kept_per_device() {
+        let (_tmp, store) = temp_store();
+        let mut settings = Settings::default();
+
+        assert!(settings.set_dimming(VID, PID, None, Some(following("sound:bass"))));
+        assert!(!settings.set_dimming(VID, PID, None, Some(following("sound:bass"))));
+        assert_eq!(
+            settings.dimmings().get(&DeviceRef {
+                vid: VID,
+                pid: PID + 1
+            }),
+            None
+        );
+        store.write_settings(&settings).unwrap();
+
+        let mut reloaded = store.read_settings().unwrap();
+        assert_eq!(
+            reloaded.dimmings().get(&DeviceRef { vid: VID, pid: PID }),
+            Some(&following("sound:bass"))
+        );
+
+        assert!(reloaded.set_dimming(VID, PID, None, None));
+        assert!(
+            reloaded.devices.is_empty(),
+            "an entry that no longer decides anything stayed: {:?}",
+            reloaded.devices
+        );
+    }
+
+    /// A source edited by hand into one nothing reads is left out at startup,
+    /// rather than refused at every frame.
+    #[test]
+    fn a_stored_source_nothing_reads_is_left_out() {
+        let mut settings = Settings::default();
+        settings.set_dimming(VID, PID, None, Some(following("sound:pitch")));
+        assert!(settings.dimmings().is_empty());
     }
 
     /// The default is not written, and going back to the maximum is what
@@ -4850,8 +4969,10 @@ mod tests {
                 serial: Some("SN".into()),
                 state: DeviceState::Adopted,
                 brightness: Some(DEFAULT_BRIGHTNESS),
+                dimming: Some(following("sound:bass")),
             },
         );
+        mirror("Dimming", &following("sound:bass"));
         mirror(
             "ActiveEffectRecord",
             &ActiveEffectRecord {
