@@ -150,7 +150,11 @@ test('a language the Store listing does not have is skipped and said', () => {
 test('the listings and the fragments in the repository parse', () => {
   const listings = readListings()
   assert.deepEqual(listings.map((listing) => listing.locale), ['en-us', 'fr-fr'])
-  whatsNew(readNews(), listings.map(languageOf))
+  // Each on its own: released fragments stay (news/README.md), so all of them
+  // together outgrow what one release sends. A release's own length is checked
+  // on its pull request, from the fragments added since the previous one.
+  const languages = listings.map(languageOf)
+  for (const [name, text] of Object.entries(readNews())) whatsNew({ [name]: text }, languages)
 })
 
 test('a release gathers the fragments added since the previous one', (t) => {
