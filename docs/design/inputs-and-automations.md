@@ -147,6 +147,31 @@ effect needs it (a "microphone muted" light is better served by signals, §2.3).
   are the listener's, not an effect's: no effect carries its own. A live meter
   of the six sources sits beside them, the capture running while it is shown.
 
+#### 2.2.2 A device's brightness follows too (#239)
+
+A setting following the sound makes one effect react; making every effect
+react that way would mean a setting in each. The device's brightness is the
+one value every effect shares, so it follows instead.
+
+- **Per device, beside the Brightness slider**, with the same *Value* /
+  *Signal* / *Sound* switch. It belongs to the device, not the effect: it holds
+  when the effect changes, when a rule takes over and when the app restarts.
+- **The slider stays the ceiling**, written to the hardware as before. What
+  follows is a factor from a floor to 1 on the colours of each frame, applied by
+  the engine before the frame goes to the device and to the simulator. Writing
+  the hardware brightness instead would be one more HID report per frame, three
+  on the Alienware, for a value the firmware may keep; scaling the frame costs
+  nothing on the bus, and the simulator still shows what the device is sent.
+- **The sound:** the six sources of §2.2.1, from the floor in silence to 1.
+  *Beat* is already a pulse dying down, so the light jumps and settles.
+- **A signal:** a number is a percent, held between the floor and 100, as a
+  number setting takes a signal; anything else leaves the factor at 1.
+- **The floor**, 20 % unless moved, keeps an effect visible between two beats.
+- **The preview** borrows the device's factor with its layout: it shows what
+  applying the effect would give.
+- **Firmware effects** send no frame, so nothing scales them: the switch is
+  disabled while one is applied.
+
 ### 2.3 External signals
 
 Named values that other software sends to Candeo:
