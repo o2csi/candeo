@@ -12,7 +12,7 @@
  * read from the device".
  */
 
-import type { KeyInfo, Rgb } from '../api/types'
+import type { KeyInfo, OutlinePart, Rgb } from '../api/types'
 
 /**
  * What the simulator asks of a layout.
@@ -35,6 +35,8 @@ export interface LayoutView {
    * are read as keys, as before a device could say.
    */
   lights?: 'keys' | 'zones'
+  /** What lights nothing and is drawn under the lights. Absent: nothing. */
+  outline?: readonly OutlinePart[]
 }
 
 /**
@@ -43,10 +45,15 @@ export interface LayoutView {
  * Computed and not hard-coded: it is what lets the `viewBox` follow any layout,
  * whatever the model Rust returns.
  */
-export function extent(keys: readonly KeyInfo[]): { w: number; h: number } {
+export function extent(
+  keys: readonly KeyInfo[],
+  outline: readonly OutlinePart[] = [],
+): { w: number; h: number } {
   let w = 0
   let h = 0
-  for (const k of keys) {
+  // The outline counts too: a lid drawn wider than the lights it carries must
+  // not be cut off at their edge.
+  for (const k of [...keys, ...outline]) {
     if (k.x + k.w > w) w = k.x + k.w
     if (k.y + k.h > h) h = k.y + k.h
   }

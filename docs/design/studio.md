@@ -289,6 +289,39 @@ Consequence: a new keyboard model will require a drawing, not just a
 matrix. This is deliberate — the alternative, a grid of squares, makes the simulator
 useless for judging an effect.
 
+### A device that is not a keyboard is drawn as it is seen (#243)
+
+The zones around the Alienware m18's keyboard were three rectangles, which
+told nobody that one is the logo on the lid and the two others the halves of a
+ring around the rear ports. They are drawn instead **from behind, lid open**:
+the lid with its logo, and below it the ring around the ports — what someone
+looks at when they check that the effect lit them.
+
+- **A light has a shape.** A rectangle, as every key has; a **disc** inscribed
+  in its rectangle; or an **arch**, the upper or lower half of a rounded ring,
+  drawn as a thick stroke inside its rectangle. The rectangle stays what an
+  effect measures with (`center`, `bounds`): the shape changes the drawing, not
+  the geometry.
+- **A device can carry an outline**: rounded rectangles that light nothing — a
+  lid, a base, the ports — drawn as faint strokes under the lights. A keyboard
+  has none: its keys are its outline.
+- **Both are part of the layout, in `candeo-device`**, with the rectangles. The
+  simulator draws; the engine hands the same rectangles to effects. Kept apart,
+  a drawing in the window and positions in the engine could disagree without a
+  sound: the preview would show the logo above the ring while an effect
+  sweeping from the top lit the ring first.
+- **No maker's artwork.** The logo is drawn as a plain disc: the maker's logo
+  is a registered trademark, and its renders are not ours to ship.
+- **The power button is not drawn.** It shows the machine's power state, takes
+  no colour written live, and is left to the firmware
+  ([`../protocol/alienware-m18-r1.md`](../protocol/alienware-m18-r1.md) §2).
+
+Compiled layouts are one source among those to come, not a rule: the geometry of
+a light strip, which only its owner knows, or a scene placing several devices
+in one space, will be data — edited in the window, kept in `settings.json`,
+read by Rust — and the same principle holds: one description, read by the
+engine and the simulator alike.
+
 ---
 
 ## 5. What was removed

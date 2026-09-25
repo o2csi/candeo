@@ -341,13 +341,9 @@ impl Lighting for AlienwareZones {
             *when = Some(Instant::now());
         }
 
-        // Always the common target: the others are stored profiles, and writing
-        // one would change what the machine shows with nothing running.
-        let target = alienware_elc::COMMON;
-        let mut out: Vec<Outgoing> = alienware_elc::begin(target)
-            .iter()
-            .map(|report| Outgoing::output(report))
-            .collect();
+        // The live preview: it lights what it carries and stores nothing, so
+        // the machine shows its own profiles again when Candeo is not there.
+        let mut out = vec![Outgoing::output(&alienware_elc::open())];
 
         // Zones sharing a colour are named together, as the maker's software
         // does for the two halves of the ring: one selection, one colour.
@@ -368,11 +364,7 @@ impl Lighting for AlienwareZones {
             }
         }
 
-        out.extend(
-            alienware_elc::commit(target)
-                .iter()
-                .map(|report| Outgoing::output(report)),
-        );
+        out.push(Outgoing::output(&alienware_elc::show()));
         out
     }
 

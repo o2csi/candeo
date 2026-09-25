@@ -166,10 +166,11 @@ While a rainbow animation ran, the colours went past in the clear — `ff0000`,
 `ffa500`, `ffff00`, `008000`, `00bfff`, `0000ff`, `800080` — rewritten every
 150 ms.
 
-### Writing to it, established on 2026-09-18
+### Writing to it
 
-Three things had to be right at once, and getting any one of them wrong looks
-exactly like a device that ignores everything.
+Established on 2026-09-18, and corrected on 2026-09-25 from a capture of the
+maker's Command Center and direct writes, on a machine where its own changes
+lit the zones.
 
 **The control endpoint, not the interrupt one.** A plain HID write leaves through
 the interrupt endpoint; this device acts only on `SET_REPORT` of its output
@@ -177,28 +178,29 @@ report, which is what the maker's software sends. Verified by capturing our own
 writes and comparing them with Command Center's: same bytes, different path,
 no effect. With `hidapi`, that is `send_output_report`, not `write`.
 
-**The transaction that applies, not the one that stores.** Two families sit side
-by side and only one shows:
+**Three families, and only one is for a live host.** Command Center uses all
+three:
 
-| Family | What it does |
+| Framing | What it does |
 |---|---|
-| `03 22 00 04/01/02 00 <tx>` | writes the configuration the device keeps |
-| `03 21 00 04/01/02/06 00 <tx>` | the transaction whose colours are **lit** |
+| `03 21 00 01 ff ff` … `03 21 00 03 00 ff` | its **live preview**, while a colour is picked: lights what it carries, stores nothing |
+| `03 21 00 04 00 <id>`, `…01…` … `…02…`, `03 21 00 06 00 <id>` | applies a colour; Command Center sends `61` as the id |
+| `03 22 00 04/01/02 00 <id>` … | the configuration the device keeps, one id per power state (`5b` to `60`); written with animations, and alone for the power button |
 
-A change through `03 22` alone is accepted, answers nothing, and shows nothing.
-
-**A transaction is numbered.** `<tx>` walks (`5e`, `5f`, `60`…). Reusing a number
-the device has already seen looks like a repeat.
+The byte after `00` in the last two is not a counter: Command Center writes the
+same few values again and again. On 2026-09-25 the applying family with `ff`
+for the id — what Candeo sent until then — was acknowledged report by report
+and showed nothing, while the live preview lit at once. After applying,
+Command Center sometimes follows with `03 20 02` and
+`03 26 00 00 04 00 01 02 03`; neither is needed for the preview to light.
 
 One zone, lit, is then:
 
 ```
-03 21 00 04 00 <tx>          opens
-03 21 00 01 00 <tx>
+03 21 00 01 ff ff            opens
 03 23 01 00 <count> <ids…>   selects zones by id
 03 24 <mode> <hi lo> <hi lo> <R G B> [more entries]
-03 21 00 02 00 <tx>          commits
-03 21 00 06 00 <tx>
+03 21 00 03 00 ff            shows
 ```
 
 `<mode>` is `00` for a fixed colour, `01` and `02` for the animated ones, which
@@ -221,11 +223,19 @@ So a host that drives these zones cannot take silence for success, and cannot
 read a refusal as its own mistake. The reports here are the ones the maker sends;
 when they stop working, the device is the thing to reset.
 
+On 2026-09-25 the same symptom — every write acknowledged, none shown — came
+from the family Candeo was using, not from the device: Command Center still
+lit the zones, and the live preview did too. Before calling the device stuck,
+check that its maker's software cannot change it either.
+
 ### Which zone is which
 
 Established by writing one zone at a time, each in its own colour, and reading
 the machine — with the colours **rewritten every 150 ms**, because the maker's
 lighting agent restarts on its own and repaints within a second otherwise.
+Checked again on 2026-09-25 through the live preview, with
+`probe_alienware_zones` in `apps/desktop/src-tauri/src/sonde.rs`, and matching
+what Command Center's own changes lit on the same day.
 
 | Id | Light |
 |---|---|
@@ -234,13 +244,17 @@ lighting agent restarts on its own and repaints within a second otherwise.
 | 2 | the logo on the lid |
 | 4 | the power button |
 
-Id `3` lights nothing on this machine. Ids 0 and 1 are always addressed together
-by the maker's software, which is why the ring looked like one light until each
-half was written alone.
+Id `3` lights nothing on this machine. Ids 0 and 1 are addressed together by the
+maker's software, and one half lit alone spreads through the whole ring: the
+halves show only when both are lit, each in its own colour.
 
-**The power button is not only ours.** It pulses by itself, and more slowly on
-battery than on mains: that state is the device's own, not something a host
-writes. Anything Candeo sets there is overwritten when the firmware pulses.
+**The power button is not ours.** It pulses by itself, and more slowly on
+battery than on mains. Command Center sets it only through the configuration
+the device keeps (`03 22`), one entry per power state, never through the live
+families, and it takes none of the colours written live. What the live preview
+does change, on 2026-09-25: while it is in force the button **stops pulsing** and
+holds its own colour, even when no report names it. Candeo leaves it out of the
+matrix.
 
 ## 3. Writing works, and what it costs
 
@@ -272,8 +286,10 @@ the device per frame measures its own startup.
 - What `cc 8c 01 01`, `cc 8c 13 00` and the three `00`/`01` maps mean.
 - What the two duration pairs of `03 24` really measure, and what modes `01` and
   `02` do beyond carrying several colours.
-- Whether the power button can be held against its own pulsing, and where that
-  pulse is configured.
+- Whether the power button can be held against its own pulsing: its pulse is
+  configured in the kept `03 22` entries, one per power state.
+- What `03 20 02` and `03 26 00 00 04 00 01 02 03`, sent after an applied
+  colour, do.
 - What the keyboard does with a **faster stream** than twelve frames a second,
   and whether it keeps its colours when the machine sleeps.
 
@@ -305,6 +321,10 @@ changed the lighting; the reports were then pulled out of the capture by matchin
 the `SET_REPORT` setup packet and reading the bytes that follow. Lighting one key
 at a time, with everything else off, is what turns a stream of colours into a key
 index.
+
+The zone families of §2 were read the same way on 2026-09-25, from a capture
+of the zones' device alone (`USBPcapCMD --devices <address>`) while Command
+Center changed a colour, then written back one at a time.
 
 The grid came the other way around: **writing** ranges of indexes, each range in
 its own colour, then reading the keyboard off a photograph. Five indexes per

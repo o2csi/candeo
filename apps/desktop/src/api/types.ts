@@ -105,6 +105,24 @@ export interface KeyInfo {
   y: number
   w: number
   h: number
+  /**
+   * How the simulator draws it inside that rectangle. Absent: the rectangle, as
+   * every key is. The rectangle stays what effects measure with.
+   */
+  shape?: KeyShape
+}
+
+/** Mirror of `candeo_device::Shape`, less the rectangle, which goes unsaid. */
+export type KeyShape = 'disc' | 'archUp' | 'archDown'
+
+/** A part of a device that lights nothing, drawn under its lights. Mirror of `OutlineInfo`. */
+export interface OutlinePart {
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Corner radius. */
+  r: number
 }
 
 /** Mirror of `LayoutInfo`, in `src-tauri/src/lib.rs`. */
@@ -146,6 +164,8 @@ export interface LayoutInfo {
    * never offered an effect reading key presses: it would never see one.
    */
   lights: 'keys' | 'zones'
+  /** What the simulator draws under the lights — a lid, a base, ports. Empty for a keyboard. */
+  outline: OutlinePart[]
 }
 
 /**
