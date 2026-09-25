@@ -30,7 +30,8 @@ closed.
   value to a local API, and a rule or a setting follows it.
   [Signals](https://o2csi.github.io/candeo/signals.html)
 - **Lights follow your music**, and any setting can follow the sound: a speed
-  with the volume, a colour with the bass. Never the microphone, never recorded.
+  with the volume, a colour with the bass, a device's brightness with the beat.
+  Never the microphone, never recorded.
   [Sound](https://o2csi.github.io/candeo/sound.html)
 - **Sends nothing**: no account, no telemetry. In English and French.
 
