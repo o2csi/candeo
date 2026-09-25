@@ -299,6 +299,7 @@
   "devices": {
     "title": "Devices",
     "search": "Search",
+    "searchTitle": "Look for devices and read your definitions again",
     "status": {
       "controlled": "controlled",
       "notOpen": "not open",
@@ -333,7 +334,14 @@
         "effect": "effect",
         "row": "row"
       }
-    }
+    },
+    "groups": {
+      "builtIn": "Built-in",
+      "yours": "Yours"
+    },
+    "openFolder": "Open the folder",
+    "yoursNone": "No definition of yours.",
+    "yoursNote": "Nobody reviewed your definitions: they send your devices exactly what they say."
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
@@ -488,7 +496,7 @@
       "forgetDevices": "Each device's applied effect and brightness are forgotten: everything starts again at full brightness, with no effect.",
       "forgetParams": "The settings kept for each effect, on each device, are forgotten.",
       "forgetRules": "Automation rules are deleted.",
-    "forgetSignals": "Signals are no longer received, and their token is forgotten.",
+      "forgetSignals": "Signals are no longer received, and their token is forgotten.",
       "effectsKept": "Your effects are not touched.",
       "effectsKeptDetail": "Deleting them is another action, one effect at a time, from the library.",
       "confirm": "Reset to default",

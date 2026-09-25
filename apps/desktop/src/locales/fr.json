@@ -299,6 +299,7 @@
   "devices": {
     "title": "Périphériques",
     "search": "Rechercher",
+    "searchTitle": "Chercher les appareils et relire vos définitions",
     "status": {
       "controlled": "piloté",
       "notOpen": "non ouvert",
@@ -333,7 +334,14 @@
         "effect": "effet",
         "row": "rangée"
       }
-    }
+    },
+    "groups": {
+      "builtIn": "Intégrés",
+      "yours": "À vous"
+    },
+    "openFolder": "Ouvrir le dossier",
+    "yoursNone": "Aucune définition à vous.",
+    "yoursNote": "Personne n'a relu vos définitions : elles envoient à vos appareils exactement ce qu'elles disent."
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",

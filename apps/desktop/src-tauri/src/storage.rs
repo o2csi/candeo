@@ -1620,6 +1620,24 @@ impl Store {
         Ok(&self.user_dir)
     }
 
+    /// Where your device definitions are read from, beside your effects
+    /// (`docs/design/device-sdk.md` §9). Not created by reading it: a folder
+    /// nobody made holds none.
+    pub fn user_devices_path(&self) -> PathBuf {
+        self.user_dir
+            .parent()
+            .unwrap_or(&self.user_dir)
+            .join("devices")
+    }
+
+    /// The same folder, created if it does not exist yet: opening it is how a
+    /// first definition gets added.
+    pub fn user_devices_dir(&self) -> CmdResult<PathBuf> {
+        let dir = self.user_devices_path();
+        create_dir(&dir)?;
+        Ok(dir)
+    }
+
     /// Deletes one of the user's effects, and its cache.
     pub fn delete_effect(&self, key: &EffectKey) -> CmdResult<()> {
         // Checked again rather than assumed: between the command's refusal and
@@ -2489,6 +2507,27 @@ pub fn restore_builtin(app: AppHandle, name: String) -> CmdResult<()> {
 ///
 /// Adding an effect is saving a `.ts` file there: the folder has to be one click
 /// away, not a path to look up.
+/// Opens the folder of your device definitions, created if needed.
+#[tauri::command]
+pub fn open_devices_dir(app: AppHandle) -> CmdResult<()> {
+    let store = store(&app)?;
+    let dir = store.user_devices_dir()?;
+    app.opener()
+        .open_path(dir.display().to_string(), None::<&str>)
+        .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&dir))))
+}
+
+/// Reads the folder of your device definitions again, and says which files
+/// drive nothing and why. A device already open keeps the definition it was
+/// opened with until it opens again.
+#[tauri::command]
+pub fn reload_device_definitions(app: AppHandle) -> CmdResult<Vec<crate::catalog::Problem>> {
+    let store = store(&app)?;
+    Ok(crate::catalog::reload(Some(&store.user_devices_path()))
+        .problems
+        .clone())
+}
+
 #[tauri::command]
 pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let store = store(&app)?;

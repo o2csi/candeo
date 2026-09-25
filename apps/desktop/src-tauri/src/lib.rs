@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
+use candeo_device::{Inspection, Keyboard, Layout, Warning};
 use candeo_protocol::Rgb;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -18,6 +18,7 @@ use storage::{DeviceState, Settings};
 mod audio;
 mod automations;
 mod autostart;
+mod catalog;
 mod failure;
 mod hotplug;
 mod i18n;
@@ -39,26 +40,14 @@ mod taskbar;
 mod tray;
 mod update;
 
-/// Known layouts: the ones written in Rust, then the built-in definitions
-/// (`docs/design/device-sdk.md` §9), read once.
+/// Known layouts: the ones written in Rust, the built-in definitions, then
+/// yours — see [`catalog`].
 ///
 /// Visible in the crate: the [`journal`] diagnostic lists the same devices as
 /// [`list_devices`], and copying them over there would make a second list that
-/// would diverge at the first added layout. A definition that does not load is
-/// left out and said in the log: the tests replay every built-in one, so this is
-/// a build nobody tested.
+/// would diverge at the first added layout.
 pub(crate) fn layouts() -> &'static [&'static Layout] {
-    static ALL: std::sync::OnceLock<Vec<&'static Layout>> = std::sync::OnceLock::new();
-    ALL.get_or_init(|| {
-        let mut all: Vec<&'static Layout> = vec![&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
-        for (name, json) in candeo_device::definition::BUILTIN {
-            match candeo_device::definition::load(json) {
-                Ok(layout) => all.push(layout),
-                Err(e) => tracing::error!(definition = name, "device definition not loaded: {e}"),
-            }
-        }
-        all
-    })
+    catalog::current().layouts.as_slice()
 }
 
 // ---------------------------------------------------------------- exposed types
@@ -141,6 +130,8 @@ pub struct DeviceInfo {
     /// byte confirms that a command exists, never that its arguments are right.
     /// None of these warnings blocks anything. In the interface language.
     pub warnings: Vec<String>,
+    /// Whose definition it is known by: built in, or a file of yours.
+    pub origin: catalog::Origin,
 }
 
 /// A key, as the simulator must draw it.
@@ -899,6 +890,7 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 name: l.name.to_string(),
                 vid: l.vid,
                 pid: l.pid,
+                origin: catalog::current().origin(l),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
@@ -1370,6 +1362,10 @@ pub fn run() {
             let state = AppState::default();
             // How the sound is heard, before any effect reading it starts.
             // And what each device's brightness follows, before any loop reads it.
+            // Your device definitions, before anything opens a device.
+            if let Ok(store) = storage::store(app.handle()) {
+                catalog::reload(Some(&store.user_devices_path()));
+            }
             if let Ok(settings) = storage::store(app.handle()).and_then(|s| s.read_settings()) {
                 state.engine.sound().tune(settings.sound);
                 state.engine.set_dimmings(settings.dimmings());
@@ -1512,6 +1508,8 @@ pub fn run() {
             storage::missing_builtins,
             storage::restore_builtin,
             storage::open_effects_dir,
+            storage::open_devices_dir,
+            storage::reload_device_definitions,
             storage::forget_effect_settings,
             storage::get_settings,
             storage::set_settings,
