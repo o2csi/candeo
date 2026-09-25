@@ -147,6 +147,11 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
           needs no code for it: every effect that ships with Candeo, and every one you write,
           follows a signal this way. A rule's settings bind the same way.
         </p>
+        <p>
+          A device's <strong>Brightness</strong> follows one the same way, under its slider: send
+          a number from 0 to 100, <code>{"lux": 40}</code>, and the keyboard dims to that percent of
+          the slider, whatever effect runs.
+        </p>
         <div class="scroller">
           <table>
             <thead>

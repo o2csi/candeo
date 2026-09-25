@@ -80,6 +80,7 @@ import {
   resumeDevice,
   startEffect,
   stopEffect,
+  type Dimming,
   type EffectEntry,
   type EffectState,
   type EngineReport,
@@ -88,6 +89,7 @@ import {
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
 import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
+import BrightnessFollow from '../components/BrightnessFollow.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import { readsSignal, readsSound } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
@@ -155,6 +157,8 @@ const {
   lastAppliedOn,
   brightnessOf,
   setBrightness,
+  dimmingOf,
+  setDimming,
   flush: flushParams,
   error: paramsError,
   dismissError: dismissParamsError,
@@ -1208,6 +1212,21 @@ function onBrightness(event: Event, commit: boolean): void {
   setBrightness({ vid: d.vid, pid: d.pid }, level, commit)
 }
 
+/** What the selected device's brightness follows (§2.2.2). */
+const dimming = computed(() => dimmingOf(selectedDevice.value))
+
+/** A hardware effect runs there: no frame of ours, so nothing to dim. */
+const firmwareRuns = computed(() => {
+  const id = runningOn(selectedDevice.value)
+  return id !== null && choices.value.some((c) => c.id === id && c.hardware !== null)
+})
+
+function onDimming(next: Dimming | null, commit: boolean): void {
+  const d = selectedDevice.value
+  if (!d) return
+  setDimming({ vid: d.vid, pid: d.pid }, next, commit)
+}
+
 // ---------------------------------------------------------------- lifecycle
 
 let statusTimer = 0
@@ -1378,6 +1397,13 @@ onBeforeUnmount(() => {
               :disabled="!d.open"
               @input="onBrightness($event, false)"
               @change="onBrightness($event, true)"
+            />
+            <BrightnessFollow
+              :id="`brightness-${key(d)}`"
+              :dimming="dimming"
+              :firmware="firmwareRuns"
+              :signals="held"
+              @change="onDimming"
             />
           </div>
         </div>

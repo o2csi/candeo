@@ -85,6 +85,7 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::journal;
 
+pub mod dimming;
 pub mod presses;
 pub mod swatch;
 
@@ -521,6 +522,9 @@ pub struct Engine {
     signals: crate::signals::SharedStore,
     /// The sound playing, captured while a loop runs an effect declaring it.
     sound: Arc<crate::audio::Sound>,
+    /// What each device's brightness follows (§2.2.2). Here rather than in a
+    /// loop's [`Shared`]: it belongs to the device, and outlives the effect.
+    dimming: dimming::Table,
 }
 
 /// The loop of **one** device.
@@ -969,7 +973,24 @@ impl Engine {
             presses: Arc::clone(&self.presses),
             signals: Arc::clone(&self.signals),
             sound: Arc::clone(&self.sound),
+            dimming: Arc::clone(&self.dimming),
         }
+    }
+
+    /// What this device's brightness follows, `None` for nothing: its loop and
+    /// a preview on its layout read it from the next frame.
+    pub fn set_dimming(&self, device: DeviceRef, dimming: Option<dimming::Dimming>) {
+        let mut table = self.dimming.lock().unwrap();
+        match dimming {
+            Some(d) => table.insert(device, d),
+            None => table.remove(&device),
+        };
+    }
+
+    /// Every device's at once, as the file keeps them: at startup, and when the
+    /// configuration is reset.
+    pub fn set_dimmings(&self, all: HashMap<DeviceRef, dimming::Dimming>) {
+        *self.dimming.lock().unwrap() = all;
     }
 
     pub fn set_to_keyboard(&self, device: DeviceRef, on: bool) {
@@ -1034,6 +1055,7 @@ fn render_loop(
         presses,
         signals,
         sound,
+        dimming,
     } = inputs;
     // **The span, and it is the reason `tracing` was chosen.** There is one
     // loop per device: "write refused" is useless without knowing which one.
@@ -1111,6 +1133,9 @@ fn render_loop(
         Target::Device(d) => Some((d.vid, d.pid)),
         Target::Preview(_) => None,
     };
+    // The preview borrows the device's brightness with its layout: it shows
+    // what applying the effect there would give (§2.2.2).
+    let (Target::Device(device) | Target::Preview(device)) = target;
 
     let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
     let mut deadline = Instant::now();
@@ -1134,14 +1159,31 @@ fn render_loop(
         let follows_sound = bindings
             .values()
             .any(|s| crate::audio::analysis::Source::parse(s).is_some());
-        match (reads_audio || follows_sound, hearing.is_some()) {
+        let dims = dimming.lock().unwrap().get(&device).cloned();
+        let dims_by_sound = dims.as_ref().is_some_and(|d| d.sound().is_some());
+        match (
+            reads_audio || follows_sound || dims_by_sound,
+            hearing.is_some(),
+        ) {
             (true, false) => hearing = Some(sound.lease()),
             (false, true) => hearing = None,
             _ => {}
         }
-        if follows_sound {
-            bound = with_sound(&bound, sound_bound(&bindings, &sound.frame()));
+        let heard_now = (follows_sound || dims_by_sound).then(|| sound.frame());
+        if let (true, Some(frame)) = (follows_sound, &heard_now) {
+            bound = with_sound(&bound, sound_bound(&bindings, frame));
         }
+        let factor = match (&dims, &heard_now) {
+            (None, _) => 1.0,
+            (Some(d), Some(frame)) if dims_by_sound => d.sound_factor(frame),
+            (Some(d), _) => {
+                let store = signals.lock().unwrap();
+                d.signal_factor(
+                    d.signal()
+                        .and_then(|name| store.value(name, clock_ms as i64)),
+                )
+            }
+        };
         let now = Instant::now();
         let time = now.duration_since(started).as_secs_f64();
         let heard = if reads_audio {
@@ -1175,8 +1217,9 @@ fn render_loop(
             },
             frame_len,
         ) {
-            Ok(bytes) => {
+            Ok(mut bytes) => {
                 consecutive_errors = 0;
+                dimming::dim(&mut bytes, factor);
                 // The effect recovered: clear the error, otherwise the
                 // interface would show a stale one indefinitely.
                 let before = shared.error.lock().unwrap().take();
@@ -1482,6 +1525,7 @@ struct Inputs {
     presses: Arc<Presses>,
     signals: crate::signals::SharedStore,
     sound: Arc<crate::audio::Sound>,
+    dimming: dimming::Table,
 }
 
 fn render_with(
@@ -2318,6 +2362,58 @@ mod tests {
             "the simulator lost the device when its effect changed",
             || received.load(Ordering::Relaxed) > before + 3,
         );
+        engine.stop(FIRST);
+    }
+
+    /// §2.2.2: a device's brightness following a signal dims the frames its
+    /// loop writes, from the next frame, and holds across a change of effect.
+    #[test]
+    fn a_brightness_following_a_signal_dims_the_frames_written() {
+        let engine = Engine::default();
+        let output = Arc::new(Output::default());
+        let brightest = |out: &Output| {
+            let last = out.last.lock().unwrap();
+            last.iter()
+                .map(|c| c.r.max(c.g).max(c.b))
+                .max()
+                .unwrap_or(0)
+        };
+        let now = wall_clock_ms() as i64;
+        engine
+            .signals()
+            .lock()
+            .unwrap()
+            .apply(&serde_json::json!({ "lux": 50 }), None, now)
+            .unwrap();
+
+        start(&engine, FIRST, "applied", Arc::clone(&output));
+        wait_for("the effect never lit the device fully", || {
+            brightest(&output) == 255
+        });
+
+        engine.set_dimming(
+            FIRST,
+            Some(dimming::Dimming {
+                source: "signal:lux".into(),
+                floor: 20,
+            }),
+        );
+        wait_for("the brightness did not follow the signal", || {
+            brightest(&output) == 128
+        });
+
+        // What a rule does: another effect on the device. The brightness is
+        // the device's, not the effect's.
+        let next = Arc::new(Output::default());
+        start(&engine, FIRST, "rule", Arc::clone(&next));
+        wait_for("the brightness was lost with the effect", || {
+            brightest(&next) == 128
+        });
+
+        engine.set_dimming(FIRST, None);
+        wait_for("the brightness did not come back", || {
+            brightest(&next) == 255
+        });
         engine.stop(FIRST);
     }
 

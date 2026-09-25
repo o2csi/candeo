@@ -107,6 +107,23 @@ export function rememberBrightness(device: DeviceRef, level: number): Promise<vo
   return invoke('remember_brightness', { device, level })
 }
 
+/** Mirror of `DEFAULT_FLOOR` in `src-tauri/src/runtime/dimming.rs`. */
+export const DIMMING_FLOOR_DEFAULT = 20
+
+/**
+ * Makes a device's brightness follow the sound or a signal, `null` for nothing,
+ * live. The hardware brightness is not touched, and nothing is remembered: that
+ * is {@link rememberDimming}, same split as for the brightness itself.
+ */
+export function setDimming(device: DeviceRef, dimming: Dimming | null): Promise<void> {
+  return invoke('set_dimming', { device, dimming })
+}
+
+/** Remembers what a device's brightness follows, `null` forgetting it. */
+export function rememberDimming(device: DeviceRef, dimming: Dimming | null): Promise<void> {
+  return invoke('remember_dimming', { device, dimming })
+}
+
 /**
  * Puts a firmware effect on a device, by the id the gallery uses.
  *
@@ -382,6 +399,21 @@ export interface DeviceRecord {
    * level.
    */
   brightness?: number
+  /** What this device's brightness follows. Absent: nothing, the slider's level. */
+  dimming?: Dimming
+}
+
+/**
+ * What a device's brightness follows, the sound or a signal: a factor from
+ * `floor` to 100 % on its frames, under the slider's level
+ * (`docs/design/inputs-and-automations.md` §2.2.2). Mirror of `Dimming` in
+ * `src-tauri/src/runtime/dimming.rs`.
+ */
+export interface Dimming {
+  /** Named as a setting's binding names it: `sound:bass`, `signal:lux`. */
+  source: string
+  /** The percent the brightness never goes under. */
+  floor: number
 }
 
 /**

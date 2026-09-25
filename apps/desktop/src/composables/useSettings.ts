@@ -61,7 +61,7 @@ import { computed, readonly, ref } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
-import type { Bindings, EffectParams } from '../api/candeo'
+import type { Bindings, Dimming, EffectParams } from '../api/candeo'
 import { message } from '../api/journal'
 import type { DeviceRef } from '../api/types'
 import { declaredBindings, rebound } from './bindings'
@@ -134,6 +134,9 @@ const applied = ref<Record<string, string>>({})
 
 /** The brightness remembered per device, key `vid:pid`. Absent = the default. */
 const brightness = ref<Record<string, number>>({})
+
+/** What each device's brightness follows, key `vid:pid`. Absent = nothing (§2.2.2). */
+const dimming = ref<Record<string, Dimming>>({})
 
 /** What prevented reading, adjusting or remembering. Already readable. */
 const error = ref<string | null>(null)
@@ -534,6 +537,11 @@ function read(): Promise<void> {
           .filter((r) => r.brightness !== undefined)
           .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.brightness as number]),
       )
+      dimming.value = Object.fromEntries(
+        s.devices
+          .filter((r) => r.dimming !== undefined)
+          .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.dimming as Dimming]),
+      )
 
       // What is still waiting for the disk is more recent than the disk: the
       // write only goes out when the slider rests, and `reload` does not choose
@@ -789,6 +797,31 @@ export function useSettings() {
     if (commit) void api.rememberBrightness(device, level).catch(fail)
   }
 
+  /** What this device's brightness follows, or `null` for nothing. */
+  function dimmingOf(device: DeviceRef | null): Dimming | null {
+    return device ? (dimming.value[deviceKey(device)] ?? null) : null
+  }
+
+  /**
+   * Makes a device's brightness follow the sound or a signal, `null` for
+   * nothing: memory, engine, and disk if asked — the floor slider moves live and
+   * is written once, like the brightness.
+   */
+  function setDimming(device: DeviceRef, next: Dimming | null, commit: boolean): void {
+    error.value = null
+    const k = deviceKey(device)
+    const all = { ...dimming.value }
+    if (next === null) delete all[k]
+    else all[k] = next
+    dimming.value = all
+
+    const fail = (e: unknown) => {
+      error.value = message(e)
+    }
+    void api.setDimming(device, next).catch(fail)
+    if (commit) void api.rememberDimming(device, next).catch(fail)
+  }
+
   /**
    * The effect `settings.json` remembers as applied on this device.
    *
@@ -901,6 +934,7 @@ export function useSettings() {
     // closed everything.
     applied.value = {}
     brightness.value = {}
+    dimming.value = {}
   }
 
   /**
@@ -941,6 +975,8 @@ export function useSettings() {
     lastAppliedOn,
     brightnessOf,
     setBrightness,
+    dimmingOf,
+    setDimming,
     flush: flushAll,
     error: readonly(error),
     dismissError,
