@@ -560,8 +560,6 @@ export interface Settings {
    * erase them.
    */
   rules: Rule[]
-  /** How the sound playing is heard; absent while it is the defaults. */
-  sound?: SoundTuning
 }
 
 /**
