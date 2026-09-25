@@ -159,9 +159,19 @@
       "on": "on",
       "off": "off",
       "reset": "Restore the effect's values",
-      "source": "{name}: value or signal",
+      "source": "{name}: value, signal or sound",
       "fromValue": "Value",
       "fromSignal": "Signal",
+      "fromSound": "Sound",
+      "soundOf": "Sound followed by {name}",
+      "sound": {
+        "volume": "Volume",
+        "beat": "Beat",
+        "bass": "Bass",
+        "mids": "Mids",
+        "highs": "Highs",
+        "tone": "Tone, low to high"
+      },
       "signalName": "signal name",
       "signalOf": "Signal read by {name}",
       "signalHeld": "Held now: “{value}”",
@@ -377,6 +387,14 @@
       "loginDetail": "Candeo starts hidden in the notification area, with no window.",
       "loginUnavailable": "Only in the installed application.",
       "loginUnsupported": "Not on this system."
+    },
+    "sound": {
+      "title": "Sound",
+      "gain": "Gain",
+      "gainValue": "×{value}",
+      "sensitivity": "Beat sensitivity",
+      "sensitivityValue": "{value}%",
+      "unavailable": "The sound playing cannot be captured on this computer."
     },
     "signals": {
       "title": "Signals",

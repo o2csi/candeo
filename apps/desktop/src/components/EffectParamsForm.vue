@@ -46,7 +46,17 @@
 import { computed, nextTick, onBeforeUnmount, reactive, useId, watch } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 import type { Bindings, EffectParams, HeldSignal } from '../api/candeo'
-import { bindingState, boundSignal, signalSource, type BindingState } from '../composables/bindings'
+import {
+  bindingState,
+  boundSignal,
+  boundSound,
+  signalSource,
+  soundSource,
+  SOUND_SOURCES,
+  takesSound,
+  type BindingState,
+  type SoundSource,
+} from '../composables/bindings'
 import { validSignalName } from '../composables/rules'
 import { signalText } from '../composables/signals'
 import { sameValue, textLimit } from '../composables/useSettings'
@@ -178,6 +188,22 @@ function signalChosen(id: string): boolean {
   return readBy(id) !== null || pending.has(id)
 }
 
+/** What of the sound a row follows, or `null` while it does not (#107). */
+function soundBy(id: string): SoundSource | null {
+  const source = props.bindable ? props.bindings[id] : undefined
+  return source === undefined ? null : boundSound(source)
+}
+
+/** Each source of the sound, as the list names it. */
+const SOUND_LABELS = {
+  volume: 'effects.params.sound.volume',
+  beat: 'effects.params.sound.beat',
+  bass: 'effects.params.sound.bass',
+  mids: 'effects.params.sound.mids',
+  highs: 'effects.params.sound.highs',
+  tone: 'effects.params.sound.tone',
+} as const satisfies Record<SoundSource, string>
+
 function reads(state: BindingState, name: string): string | null {
   switch (state.kind) {
     case 'absent':
@@ -203,8 +229,12 @@ interface Common {
   label: string
   /** The current value, spelled out. */
   shown: string
-  /** What holds the parameter: its value, or a signal. The other is shown disabled. */
-  source: 'value' | 'signal'
+  /** What holds the parameter: its value, a signal or the sound. The value is shown disabled otherwise. */
+  source: 'value' | 'signal' | 'sound'
+  /** Whether the sound is offered: a number, a flag or a colour. */
+  sounds: boolean
+  /** What of the sound the row follows, or would. */
+  sound: SoundSource
   /** The name in the signal field. */
   name: string
   /** What the signal read holds now, spelled out; `null` while none is read. */
@@ -226,7 +256,14 @@ const fields = computed<Field[]>(() =>
     const head = {
       id,
       label: localized(spec.label),
-      source: signalChosen(id) ? ('signal' as const) : ('value' as const),
+      source:
+        soundBy(id) !== null
+          ? ('sound' as const)
+          : signalChosen(id)
+            ? ('signal' as const)
+            : ('value' as const),
+      sounds: takesSound(spec),
+      sound: soundBy(id) ?? SOUND_SOURCES[0],
       name: drafts[id] ?? signal ?? '',
       reads: signal === null ? null : reads(bindingState(spec, signal, props.signals), signal),
       refused: refused.has(id),
@@ -347,10 +384,33 @@ function onTextEnd(id: string, e: Event) {
 function toValue(id: string): void {
   pending.delete(id)
   refused.delete(id)
+  if (soundBy(id) !== null) {
+    emit('bind', id, null)
+    return
+  }
   const signal = readBy(id)
   if (signal === null) return
   drafts[id] ??= signal
   emit('bind', id, null)
+}
+
+/**
+ * To the sound: the volume first, the source most settings mean; the list next
+ * to it picks another.
+ */
+function toSound(id: string): void {
+  if (soundBy(id) !== null) return
+  pending.delete(id)
+  refused.delete(id)
+  const signal = readBy(id)
+  if (signal !== null) drafts[id] ??= signal
+  emit('bind', id, soundSource(SOUND_SOURCES[0]))
+}
+
+function onSound(id: string, e: Event) {
+  const name = (e.target as HTMLSelectElement).value
+  const chosen = SOUND_SOURCES.find((s) => s === name)
+  if (chosen) emit('bind', id, soundSource(chosen))
 }
 
 /**
@@ -359,6 +419,8 @@ function toValue(id: string): void {
  */
 function toSignal(id: string): void {
   if (signalChosen(id)) return
+  // Off the sound first: the row waits for a name on its own value.
+  if (soundBy(id) !== null) emit('bind', id, null)
   const name = (drafts[id] ?? '').trim()
   if (validSignalName(name)) {
     delete drafts[id]
@@ -488,6 +550,15 @@ function onReset() {
               >
                 {{ t('effects.params.fromSignal') }}
               </button>
+              <button
+                v-if="f.sounds"
+                type="button"
+                class="seg"
+                :aria-pressed="f.source === 'sound'"
+                @click="toSound(f.id)"
+              >
+                {{ t('effects.params.fromSound') }}
+              </button>
             </span>
           </div>
 
@@ -504,7 +575,7 @@ function onReset() {
             :max="f.max"
             :step="f.step"
             :value="f.value"
-            :disabled="f.source === 'signal'"
+            :disabled="f.source !== 'value'"
             @input="onNumber(f.id, $event)"
             @change="onNumberEnd(f.id, $event)"
           />
@@ -519,7 +590,7 @@ function onReset() {
             class="color"
             type="color"
             :value="f.hex"
-            :disabled="f.source === 'signal'"
+            :disabled="f.source !== 'value'"
             @input="onColor(f.id, $event)"
             @change="onColorEnd(f.id, $event)"
           />
@@ -530,7 +601,7 @@ function onReset() {
             class="check"
             type="checkbox"
             :checked="f.on"
-            :disabled="f.source === 'signal'"
+            :disabled="f.source !== 'value'"
             @change="onBoolean(f.id, $event)"
           />
 
@@ -543,7 +614,7 @@ function onReset() {
             autocomplete="off"
             :maxlength="f.maxLength"
             :value="f.value"
-            :disabled="f.source === 'signal'"
+            :disabled="f.source !== 'value'"
             @input="onText(f.id, $event)"
             @change="onTextEnd(f.id, $event)"
           />
@@ -566,11 +637,23 @@ function onReset() {
             :id="`${uid}-${f.id}`"
             class="choice"
             :value="f.value"
-            :disabled="f.source === 'signal'"
+            :disabled="f.source !== 'value'"
             @change="onChoice(f.id, $event)"
           >
             <option v-for="o in f.options" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
+
+          <!-- A list where Signal has a name field: six sources, not a word to type. -->
+          <div v-if="f.source === 'sound'" class="bind">
+            <select
+              class="choice"
+              :aria-label="t('effects.params.soundOf', { name: f.label })"
+              :value="f.sound"
+              @change="onSound(f.id, $event)"
+            >
+              <option v-for="s in SOUND_SOURCES" :key="s" :value="s">{{ t(SOUND_LABELS[s]) }}</option>
+            </select>
+          </div>
 
           <div v-if="f.source === 'signal'" class="bind">
             <input

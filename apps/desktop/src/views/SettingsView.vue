@@ -34,6 +34,7 @@ import {
 import { error, message } from '../api/journal'
 import FailureNote from '../components/FailureNote.vue'
 import SignalsSettings from '../components/SignalsSettings.vue'
+import SoundSettings from '../components/SoundSettings.vue'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
 import { useSettings } from '../composables/useSettings'
@@ -371,6 +372,8 @@ onMounted(() => {
     </section>
 
     <SignalsSettings :key="resets" />
+
+    <SoundSettings :key="resets" />
 
     <section v-if="update" class="block" aria-labelledby="version-title">
       <h2 id="version-title">{{ t('settings.version.title', { version: update.version }) }}</h2>

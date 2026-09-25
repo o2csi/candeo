@@ -7,10 +7,14 @@ import {
   boundSignal,
   converts,
   declaredBindings,
+  boundSound,
   readsSignal,
+  readsSound,
   rebound,
   ruleReadsSignal,
   signalSource,
+  soundSource,
+  takesSound,
   withBinding,
 } from './bindings'
 
@@ -183,5 +187,35 @@ describe('ruleReadsSignal', () => {
     expect(ruleReadsSignal(hourly, false, {})).toBe(false)
     expect(ruleReadsSignal(hourly, false, { colour: 'signal:status' })).toBe(true)
     expect(ruleReadsSignal(hourly, true, {})).toBe(true)
+  })
+})
+
+describe('sound', () => {
+  it('names a source of the sound the way Rust reads it back', () => {
+    expect(soundSource('bass')).toBe('sound:bass')
+    expect(boundSound('sound:tone')).toBe('tone')
+    expect(boundSound('sound:pitch')).toBeNull()
+    expect(boundSound('signal:bass')).toBeNull()
+  })
+
+  it('offers the sound to numbers, flags and colours, not to lists', () => {
+    expect(takesSound(specs.speed)).toBe(true)
+    expect(takesSound(specs.reverse)).toBe(true)
+    expect(takesSound(specs.colour)).toBe(true)
+    expect(takesSound(specs.mode)).toBe(false)
+  })
+
+  it('keeps a sound binding only where the parameter can take it', () => {
+    expect(
+      declaredBindings(specs, { speed: 'sound:volume', mode: 'sound:bass', colour: 'sound:pitch' }),
+    ).toEqual({ speed: 'sound:volume' })
+  })
+
+  it('tells a signal from the sound', () => {
+    const both = { speed: 'sound:beat', colour: 'signal:status' }
+    expect(readsSignal(false, { speed: 'sound:beat' })).toBe(false)
+    expect(readsSound(false, { speed: 'sound:beat' })).toBe(true)
+    expect(readsSignal(false, both) && readsSound(false, both)).toBe(true)
+    expect(readsSound(true, {})).toBe(true)
   })
 })

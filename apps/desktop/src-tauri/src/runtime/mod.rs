@@ -954,6 +954,11 @@ impl Engine {
         }
     }
 
+    /// The sound playing, for Settings to tune and to meter.
+    pub fn sound(&self) -> Arc<crate::audio::Sound> {
+        Arc::clone(&self.sound)
+    }
+
     /// The signal store the loops read, for [`crate::signals`] to hold.
     pub fn signals(&self) -> crate::signals::SharedStore {
         Arc::clone(&self.signals)
@@ -1096,7 +1101,9 @@ fn render_loop(
     let reads_audio = ctx
         .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_audio"))
         .unwrap_or(false);
-    let _sound = reads_audio.then(|| sound.lease());
+    // Held while the effect declares it or a setting follows the sound; the
+    // bindings change while the loop runs, so it is taken and let go per frame.
+    let mut hearing = reads_audio.then(|| sound.lease());
     let reads_private = reads_keys || reads_signals;
     shared.reads_private.store(reads_private, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
@@ -1116,7 +1123,7 @@ fn render_loop(
         let clock_ms = wall_clock_ms();
         // The store is touched only when something reads it: most effects bind
         // nothing and declare nothing.
-        let (bound, held) = if bindings.is_empty() && !reads_signals {
+        let (mut bound, held) = if bindings.is_empty() && !reads_signals {
             (String::new(), String::new())
         } else {
             signals
@@ -1124,6 +1131,17 @@ fn render_loop(
                 .unwrap()
                 .frame_inputs(&bindings, reads_signals, clock_ms as i64)
         };
+        let follows_sound = bindings
+            .values()
+            .any(|s| crate::audio::analysis::Source::parse(s).is_some());
+        match (reads_audio || follows_sound, hearing.is_some()) {
+            (true, false) => hearing = Some(sound.lease()),
+            (false, true) => hearing = None,
+            _ => {}
+        }
+        if follows_sound {
+            bound = with_sound(&bound, sound_bound(&bindings, &sound.frame()));
+        }
         let now = Instant::now();
         let time = now.duration_since(started).as_secs_f64();
         let heard = if reads_audio {
@@ -2041,13 +2059,48 @@ pub fn set_effect_bindings(
 /// value for a parameter an effect no longer has.
 pub(crate) fn checked_bindings(bindings: Bindings) -> CmdResult<Bindings> {
     for (param, source) in &bindings {
-        if crate::signals::store::bound_signal(source).is_none() {
+        if !is_source(source) {
             return Err(Failure::new("bindingInvalid")
                 .with("param", param)
                 .with("source", source));
         }
     }
     Ok(bindings)
+}
+
+/// The bound values the signals gave, with the sound's added.
+fn with_sound(bound: &str, sound: serde_json::Map<String, serde_json::Value>) -> String {
+    let mut all: serde_json::Map<String, serde_json::Value> = if bound.is_empty() {
+        serde_json::Map::new()
+    } else {
+        serde_json::from_str(bound).unwrap_or_default()
+    };
+    all.extend(sound);
+    serde_json::Value::Object(all).to_string()
+}
+
+/// Whether a binding names something a setting can follow: a signal, or the
+/// sound playing (§2.2.1).
+pub(crate) fn is_source(source: &str) -> bool {
+    crate::signals::store::bound_signal(source).is_some()
+        || crate::audio::analysis::Source::parse(source).is_some()
+}
+
+/// The values of the settings following the sound, as the bootstrap converts
+/// them: `{"speed": {"sound": 0.42}}`, each 0..1 and mapped by the setting's
+/// kind rather than taken as a sender's raw value.
+fn sound_bound(
+    bindings: &Bindings,
+    frame: &crate::audio::analysis::Frame,
+) -> serde_json::Map<String, serde_json::Value> {
+    bindings
+        .iter()
+        .filter_map(|(param, source)| {
+            let source = crate::audio::analysis::Source::parse(source)?;
+            let value = (f64::from(frame.source(source)) * 1000.0).round() / 1000.0;
+            Some((param.clone(), serde_json::json!({ "sound": value })))
+        })
+        .collect()
 }
 
 /// Turns a device's keyboard output on or off, without touching the simulator.
@@ -3798,6 +3851,53 @@ mod signal_tests {
         assert_eq!(key(&drawn, 1), [100, 255, 255]);
         let drawn = frame(r#"{"level":-4,"on":1}"#, "");
         assert_eq!(key(&drawn, 1), [0, 255, 0]);
+    }
+
+    /// A setting following the sound takes it across what it accepts: a number
+    /// over its range, a flag past half, a colour's hue turned from the one set.
+    #[test]
+    fn a_setting_following_the_sound_takes_it_by_its_kind() {
+        let drawn = frame(
+            r#"{"level":{"sound":0.25},"on":{"sound":0.6},"colour":{"sound":0.5},"mode":{"sound":1}}"#,
+            "",
+        );
+        assert_eq!(
+            key(&drawn, 1),
+            [25, 255, 0],
+            "a quarter of 0..100, on past half, the mode kept"
+        );
+        let still = frame(r#"{"colour":{"sound":0}}"#, "");
+        assert_eq!(
+            key(&still, 0),
+            [1, 2, 3],
+            "silence leaves the colour as set"
+        );
+        let [r, g, b] = key(&drawn, 0);
+        assert!(
+            r > b && g > b,
+            "half a turn from blue is yellow: {:?}",
+            [r, g, b]
+        );
+    }
+
+    /// The loop turns a sound binding into its value, beside the signals'.
+    #[test]
+    fn sound_bindings_become_values_beside_the_signals() {
+        let mut frame = crate::audio::analysis::Frame::SILENT;
+        frame.bass = 0.5;
+        frame.pulse = 1.0;
+        let bindings: Bindings = [
+            ("speed".to_string(), "sound:bass".to_string()),
+            ("flash".to_string(), "sound:beat".to_string()),
+            ("colour".to_string(), "signal:status".to_string()),
+        ]
+        .into();
+        let merged = with_sound(r##"{"colour":"#ff0000"}"##, sound_bound(&bindings, &frame));
+        let json: serde_json::Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(json["speed"]["sound"], 0.5);
+        assert_eq!(json["flash"]["sound"], 1.0);
+        assert_eq!(json["colour"], "#ff0000");
+        assert!(is_source("sound:tone") && is_source("signal:x") && !is_source("sound:pitch"));
     }
 
     #[test]

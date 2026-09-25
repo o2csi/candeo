@@ -175,7 +175,10 @@ function audio(audioJson) {
 // spec: `undefined` when it does not fit, and the configured value then stays.
 // Here and not in Rust, which keeps parameter values untyped on purpose — the
 // specs are only here (§2.3.1).
-function converted(spec, raw) {
+function converted(spec, raw, current) {
+  if (raw !== null && typeof raw === 'object' && typeof raw.sound === 'number') {
+    return fromSound(spec, raw.sound, current)
+  }
   switch (spec?.kind) {
     case 'number': {
       const n = typeof raw === 'string' ? (raw.trim() === '' ? NaN : Number(raw)) : raw
@@ -209,6 +212,48 @@ function textLimit(spec) {
   return Math.min(declared, 256)
 }
 
+// A sound source, 0..1, across what the setting takes (§2.2.1): a number over
+// its whole range, silence at its minimum; a flag on past half; a colour turned
+// around the wheel from the one set, so silence leaves it as it is. A list or a
+// text does not follow the sound.
+function fromSound(spec, value, current) {
+  const v = Math.min(1, Math.max(0, value))
+  switch (spec?.kind) {
+    case 'number':
+      return spec.min + v * (spec.max - spec.min)
+    case 'boolean':
+      return v >= 0.5
+    case 'color':
+      return turned(current ?? spec.default, v * 360)
+    default:
+      return undefined
+  }
+}
+
+// A colour with its hue turned by `degrees`, its saturation and value kept.
+function turned(c, degrees) {
+  const r = c.r / 255
+  const g = c.g / 255
+  const b = c.b / 255
+  const max = Math.max(r, g, b)
+  const d = max - Math.min(r, g, b)
+  if (d === 0) return c
+  let h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
+  h = (((h * 60 + degrees) % 360) + 360) % 360
+  const s = d / max
+  const x = max * s * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = max - max * s
+  const [r1, g1, b1] =
+    h < 60 ? [max * s, x, 0] :
+    h < 120 ? [x, max * s, 0] :
+    h < 180 ? [0, max * s, x] :
+    h < 240 ? [0, x, max * s] :
+    h < 300 ? [x, 0, max * s] :
+              [max * s, 0, x]
+  const byte = (v) => Math.round((v + m) * 255)
+  return { r: byte(r1), g: byte(g1), b: byte(b1) }
+}
+
 // `#rrggbb` or `#rgb`, the `#` optional: what a sender computing a colour writes.
 function hexColor(text) {
   const hex = text.trim().replace(/^#/, '')
@@ -225,7 +270,7 @@ function params(paramsJson, boundJson) {
   const configured = JSON.parse(paramsJson)
   if (!boundJson) return configured
   for (const [name, raw] of Object.entries(JSON.parse(boundJson))) {
-    const value = converted(SPECS[name], raw)
+    const value = converted(SPECS[name], raw, configured[name])
     if (value !== undefined) configured[name] = value
   }
   return configured

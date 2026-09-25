@@ -55,14 +55,6 @@ export default defineEffect({
       step: 1,
       default: 10,
     },
-    gain: {
-      kind: 'number',
-      label: { en: 'Gain', fr: 'Gain' },
-      min: 0.5,
-      max: 3,
-      step: 0.1,
-      default: 1.2,
-    },
   },
   render({ layout, time, audio, frame, params }) {
     if (layout.keys.length === 0) return
@@ -70,7 +62,6 @@ export default defineEffect({
     const loud = params.loud ?? LOUD
     const background = params.background ?? BACKGROUND
     const speed = Number(params.speed ?? 10)
-    const gain = Number(params.gain ?? 1.2)
     const area = bounds(layout)
     const rows = Math.max(...layout.keys.map((key) => key.row)) + 1
 
@@ -86,7 +77,7 @@ export default defineEffect({
       // now, not what played the time it takes to cross half a key.
       const right = center(key).x + (key.w ?? 1) / 2
       const age = (area.x + area.w - right) / speed
-      const level = Math.min(1, (heardAt(time - age)[rows - 1 - key.row] ?? 0) * gain)
+      const level = Math.min(1, heardAt(time - age)[rows - 1 - key.row] ?? 0)
       const color = level < 0.5 ? mix(background, quiet, level * 2) : mix(quiet, loud, level * 2 - 1)
       frame.set(key, color)
     }

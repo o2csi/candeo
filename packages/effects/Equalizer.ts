@@ -58,26 +58,18 @@ export default defineEffect({
     low: { kind: 'color', label: { en: 'Low level', fr: 'Niveau bas' }, default: LOW },
     high: { kind: 'color', label: { en: 'High level', fr: 'Niveau haut' }, default: HIGH },
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },
-    gain: {
-      kind: 'number',
-      label: { en: 'Gain', fr: 'Gain' },
-      min: 0.5,
-      max: 3,
-      step: 0.1,
-      default: 1.2,
-    },
   },
   render({ layout, audio, frame, params }) {
     if (layout.keys.length === 0) return
     const low = params.low ?? LOW
     const high = params.high ?? HIGH
     const background = params.background ?? BACKGROUND
-    const gain = Number(params.gain ?? 1.2)
 
     const area = bounds(layout)
     const rows = Math.max(...layout.keys.map((key) => key.row)) + 1
     const count = audio.bands.length
-    const strength = (value = 0) => Math.min(1, value * gain)
+    // How loud a band reads is set once for everything, in Settings › Sound.
+    const strength = (value = 0) => Math.min(1, value)
 
     if (params.bars === 'rows') {
       // The bands grouped by row, the loudest of each group: a peak reads
