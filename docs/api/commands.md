@@ -304,8 +304,8 @@ drawing measures 22.5 u × 6.5 u.
 
 These rectangles **do not come from the hardware**: it only exposes the 6 × 22
 grid and declares no dimension. They are a hand transcription of the
-full-size ISO key arrangement, written in
-[`crates/candeo-device/src/layout.rs`](../../crates/candeo-device/src/layout.rs).
+full-size ISO key arrangement, written in the device's definition,
+[`crates/candeo-device/devices/razer-deathstalker-v2-pro.json`](../../crates/candeo-device/devices/razer-deathstalker-v2-pro.json).
 A drawing mistake breaks no consistency test: it can only be seen by
 eye, on the simulator.
 

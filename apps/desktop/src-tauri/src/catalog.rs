@@ -11,7 +11,7 @@
 use std::path::Path;
 use std::sync::RwLock;
 
-use candeo_device::{definition, Layout, DEATHSTALKER_V2_PRO};
+use candeo_device::{definition, Layout};
 use serde::Serialize;
 
 /// Whose definition a device is known by.
@@ -69,18 +69,8 @@ pub fn reload(yours: Option<&Path>) -> &'static Catalog {
 }
 
 fn build(folder: Option<&Path>) -> Catalog {
-    let mut layouts: Vec<&'static Layout> = vec![&DEATHSTALKER_V2_PRO];
-    for (name, json) in definition::BUILTIN {
-        match definition::load(json) {
-            Ok(layout) => layouts.push(layout),
-            // The tests replay every built-in definition: this is a build
-            // nobody tested, and the log is where it shows.
-            Err(e) => tracing::error!(
-                definition = name,
-                "built-in device definition not loaded: {e}"
-            ),
-        }
-    }
+    // Read once for the process: only yours are read again.
+    let mut layouts: Vec<&'static Layout> = definition::builtin().to_vec();
 
     let mut yours = Vec::new();
     let mut problems = Vec::new();
@@ -153,7 +143,7 @@ fn files(folder: &Path) -> Vec<(String, Result<String, String>)> {
 mod tests {
     use super::*;
 
-    const ZONES: &str = definition::BUILTIN[1].1;
+    const ZONES: &str = definition::BUILTIN[2].1;
 
     fn folder(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();

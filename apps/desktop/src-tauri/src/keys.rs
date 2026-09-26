@@ -55,7 +55,7 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn every_key_that_sends_something_is_named() {
-        for key in candeo_device::DEATHSTALKER_V2_PRO.keys {
+        for key in candeo_device::definition::builtin()[0].keys {
             let name = label(key.scancode);
             if key.scancode == candeo_device::NO_SCANCODE {
                 assert_eq!(name, None, "index {}", key.index);

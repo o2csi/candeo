@@ -494,7 +494,7 @@ fn probe_usb_descriptor() {
 #[ignore]
 fn probe_inspection_on_open() {
     let api = hidapi::HidApi::new().expect("HID");
-    let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+    let layout = candeo_device::definition::builtin()[0];
     let kb = candeo_device::Keyboard::open(&api, layout).expect("open");
     let i = kb.inspection();
 

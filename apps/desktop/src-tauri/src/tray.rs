@@ -1046,7 +1046,7 @@ mod tests {
 
     fn adopted(serial: &str) -> storage::Settings {
         let mut settings = storage::Settings::default();
-        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout = candeo_device::definition::builtin()[0];
         settings.set_device_state(layout.vid, layout.pid, Some(serial), DeviceState::Adopted);
         settings
     }
@@ -1058,7 +1058,7 @@ mod tests {
     #[test]
     fn a_plugged_but_unopened_device_offers_no_action() {
         let settings = adopted("XY01");
-        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout = candeo_device::definition::builtin()[0];
 
         let device =
             controlled_device(layout, &settings, Some(None), None).expect("still controlled");
@@ -1078,7 +1078,7 @@ mod tests {
     #[test]
     fn an_open_device_offers_its_actions() {
         let settings = adopted("XY01");
-        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout = candeo_device::definition::builtin()[0];
         let open = inspection_with_serial("XY01");
 
         let device =
@@ -1100,7 +1100,7 @@ mod tests {
     #[test]
     fn unplugged_wins_over_a_stale_handle() {
         let settings = adopted("XY01");
-        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout = candeo_device::definition::builtin()[0];
         let stale = inspection_with_serial("XY01");
 
         let device =
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     fn the_open_units_serial_decides_adoption() {
         let mut settings = adopted("XY01");
-        let layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout = candeo_device::definition::builtin()[0];
         settings.set_device_state(layout.vid, layout.pid, Some("XY02"), DeviceState::Ignored);
         let other = inspection_with_serial("XY02");
 

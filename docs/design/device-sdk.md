@@ -329,9 +329,10 @@ anything.
 
 ### The DeathStalker V2 Pro
 
-What the existing layout would become. The data is that of
-[`layout.rs`](../../crates/candeo-device/src/layout.rs), unchanged; everything
-new fits in the last two blocks.
+What the existing layout would become, written when layouts were Rust — they
+are definition files since 2026-09-26 (§7). The data is that of
+[its definition](../../crates/candeo-device/devices/razer-deathstalker-v2-pro.json),
+unchanged; everything new fits in the last two blocks.
 
 ```rust
 pub static DEATHSTALKER_V2_PRO: Layout = Layout {
@@ -486,7 +487,7 @@ looks like a version, and nothing contradicts it. Hence the second field:
 
 ### `origin` is the most useful field in review
 
-`layout.rs` already says, in prose, that the names come from the survey and the
+The survey already says, in prose, that the names come from the survey and the
 geometry from a convention: "the two do not have the same status". Today it is only a comment. Carried as data, it tells a
 reviewer **what they can challenge and what they must take on trust**, and tells
 the interface what it must display next to a device whose drawing nobody here
@@ -682,7 +683,10 @@ The prototype is the zones of the Alienware m18 R1, the simplest family: its
 definition replaced the `AlienwareZones` family on 2026-09-25, giving byte for
 byte what it sent. The keyboard followed on 2026-09-26 — its keys, fifteen to a
 report, its brightness and its firmware effects, again byte for byte — and the
-Razer is next.
+Razer the same day: its rows with a length worked out once they are filled, its
+checksum named, and its inspection on open named too (`"inspect": "razer"`), a
+read that stays Rust. No device is Rust any more; `layout.rs` holds only the
+types a definition fills.
 
 ---
 
@@ -726,8 +730,8 @@ contribution brings at least one. It does not prove the device obeys —
 it proves that **the repository code reproduces what the contributor saw**, which
 is exactly the half that can be held without the hardware.
 
-The rest is verified through internal consistency, and the existing tests in `layout.rs`
-already provide the model — unique indices, bijection between matrix and keys,
+The rest is verified through internal consistency, and the tests every built-in
+definition runs provide the model — unique indices, bijection between matrix and keys,
 disjoint rectangles, counts per row. Generalized to every layout, they
 catch the most likely mistake of a hand transcription: a key shifted
 by one.

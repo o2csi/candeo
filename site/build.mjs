@@ -185,36 +185,31 @@ function render(name) {
 }
 
 /**
- * The keyboard the landing page lights, read from the one place its geometry is
- * written and tested, `crates/candeo-device/src/layout.rs`: a copy here would be
- * a second drawing, and would drift without a sound.
+ * The keyboard the landing page lights, read from its definition — the one
+ * place its geometry is written, and the one the application reads
+ * (`crates/candeo-device/devices/`): a copy here would be a second drawing, and
+ * would drift without a sound.
  */
 function keyboard() {
-  const source = readFileSync(join(root, 'crates/candeo-device/src/layout.rs'), 'utf8')
-  const start = source.indexOf('pub static DEATHSTALKER_V2_PRO')
-  const block = source.slice(start, source.indexOf('pub static', start + 1))
-  // `k(index, scancode, x, y)`, `kw(…, w)` and `kh(…, w, h)`.
-  const n = String.raw`\s*([\d.]+)\s*`
-  const call = new RegExp(
-    String.raw`\bk[wh]?\(\s*(\d+)\s*,\s*\w+\s*,${n},${n}(?:,${n})?(?:,${n})?\)`,
-    'g',
-  )
-  const keys = [...block.matchAll(call)].map(([, index, x, y, w, h]) => ({
-    index: Number(index),
-    // The matrix is 6 × 22, a row after another: what the engine hands an effect.
-    row: Math.floor(Number(index) / 22),
-    col: Number(index) % 22,
-    x: Number(x),
-    y: Number(y),
-    w: Number(w ?? 1),
-    h: Number(h ?? 1),
+  const file = 'crates/candeo-device/devices/razer-deathstalker-v2-pro.json'
+  const d = JSON.parse(readFileSync(join(root, file), 'utf8'))
+  const { rows, cols, items } = d.lights
+  const keys = items.map(({ row, col, rect: [x, y, w, h] }) => ({
+    // A position is a row after another: what the engine hands an effect.
+    index: row * cols + col,
+    row,
+    col,
+    x,
+    y,
+    w,
+    h,
   }))
-  // A key per lit position, which `layout.rs` tests; a count off means the
-  // reading above no longer matches how the file is written.
-  if (start < 0 || keys.length !== 106) {
-    throw new Error(`layout.rs: ${keys.length} keys read for the DeathStalker, 106 expected`)
+  // A key per lit position, which the definition's tests check: a count off
+  // means the file is not the one this page was written against.
+  if (keys.length !== 106) {
+    throw new Error(`${file}: ${keys.length} keys, 106 expected`)
   }
-  return { name: 'Razer DeathStalker V2 Pro', rows: 6, cols: 22, frameLen: 132, keys }
+  return { name: d.name, rows, cols, frameLen: rows * cols, keys }
 }
 
 render('index.html')

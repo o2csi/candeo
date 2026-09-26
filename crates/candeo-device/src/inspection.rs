@@ -489,7 +489,6 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::DEATHSTALKER_V2_PRO;
 
     /// A simulated device that answers as the survey described — except where a
     /// test asks it not to.
@@ -627,7 +626,7 @@ mod tests {
         assert_eq!(i.serial.as_deref(), Ok("XY24ABCDEFG0001"));
         assert_eq!(verdict(&i, SET_BRIGHTNESS), &Verdict::Understood);
         assert_eq!(verdict(&i, SET_EFFECT), &Verdict::Understood);
-        assert!(i.warnings(&DEATHSTALKER_V2_PRO).is_empty());
+        assert!(i.warnings(crate::definition::builtin()[0]).is_empty());
         assert!(!i.refuses(SET_EFFECT));
     }
 
@@ -677,7 +676,7 @@ mod tests {
         let i = inspect(&fake);
 
         assert_eq!(
-            i.warnings(&DEATHSTALKER_V2_PRO),
+            i.warnings(crate::definition::builtin()[0]),
             [Warning::FirmwareDiffers {
                 read: Firmware { major: 1, minor: 6 },
                 surveyed: Firmware { major: 1, minor: 5 },
@@ -697,7 +696,7 @@ mod tests {
         assert!(i.refuses(SET_EFFECT));
         assert!(!i.refuses(SET_BRIGHTNESS));
         assert_eq!(
-            i.warnings(&DEATHSTALKER_V2_PRO),
+            i.warnings(crate::definition::builtin()[0]),
             [Warning::Unsupported {
                 name: "effect",
                 command: SET_EFFECT,
@@ -719,7 +718,7 @@ mod tests {
         ));
         // Understood differently is not unknown: we warn, we do not forbid.
         assert!(!i.refuses(SET_BRIGHTNESS));
-        assert_eq!(i.warnings(&DEATHSTALKER_V2_PRO).len(), 1);
+        assert_eq!(i.warnings(crate::definition::builtin()[0]).len(), 1);
     }
 
     /// `Static` carries a color whose position in the read-back is not established:
@@ -735,7 +734,7 @@ mod tests {
             "the effect was rewritten"
         );
         assert!(
-            i.warnings(&DEATHSTALKER_V2_PRO).is_empty(),
+            i.warnings(crate::definition::builtin()[0]).is_empty(),
             "a limit is not an anomaly"
         );
     }
@@ -780,7 +779,7 @@ mod tests {
         assert!(!sent.contains(&SET_EFFECT), "{sent:?}");
         assert!(!sent.contains(&SET_BRIGHTNESS), "{sent:?}");
         // The unread version is reported, since it can no longer be compared.
-        let warnings = i.warnings(&DEATHSTALKER_V2_PRO);
+        let warnings = i.warnings(crate::definition::builtin()[0]);
         assert!(
             matches!(warnings[..], [Warning::FirmwareNotRead { .. }]),
             "{warnings:?}"

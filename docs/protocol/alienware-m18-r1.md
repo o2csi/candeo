@@ -134,9 +134,9 @@ key by key, until every one answered.
 The device names a key by its **address**. An image names a key by its
 **position** in the seven by twenty grid. The two are not the same number, and
 taking one for the other lights the wrong key: past the first gap, every key
-falls one cell short of where it should be. The map lives in
-`crates/candeo-device/src/layout.rs`, position by position, with a marker where
-the grid carries no key.
+falls one cell short of where it should be. The map lives in the keyboard's
+definition, `crates/candeo-device/devices/alienware-m18-r1.json`, each key at its
+row and column with its address; a cell no key names carries none.
 
 **Backspace is 36, not 34.** Addresses 34 and 35 are acknowledged and drive
 nothing. It is the one address that does not follow its neighbours, and it was

@@ -223,7 +223,7 @@ mod tests {
     use super::*;
 
     fn layout() -> &'static Layout {
-        &candeo_device::DEATHSTALKER_V2_PRO
+        candeo_device::definition::builtin()[0]
     }
 
     fn is_rrggbb(c: &str) -> bool {
