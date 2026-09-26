@@ -929,7 +929,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     );
 
     out.push_str("\nDevices\n");
-    for layout in crate::LAYOUTS {
+    for layout in crate::layouts() {
         let device = DeviceRef::of(layout);
         let plugged_in = api
             .as_ref()

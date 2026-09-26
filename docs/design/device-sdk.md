@@ -633,6 +633,55 @@ instead, every key following an empty cell stayed dark on the hardware — Caps
 Lock, both Shifts, Ctrl, the Windows keys, two arrows and a whole column of the
 keypad. The tests passed; only the keyboard said otherwise.
 
+### A family as data after all (2026-09-25)
+
+The second family taught that a family is a trait. Looking at the three we have
+since, most of what each one does is not code but a description: how long a
+report is and how it leaves (feature or output, a report id or not); the reports
+that open and close a frame; what is sent per light, or per group of lights of
+one colour, with the colour and the address in given places; how many fit in
+one report; how often the device takes a change; and, for the Razer, a checksum
+over a byte range. So a device is **a definition file**, and one generic
+interpreter, written and tested once in Rust, turns it into reports:
+
+```json
+{
+  "name": "Alienware m18 R1 zones",
+  "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001" },
+  "report": { "wire": "output", "length": 33, "prefix": "00" },
+  "frame": {
+    "pace": { "atLeastMs": 100, "skipUnchanged": true },
+    "open": ["03 21 00 01 ff ff"],
+    "each": { "group": "colour", "chunk": 4,
+              "send": ["03 23 01 00 {count} {addresses}", "03 24 00 07 d0 00 fa {r} {g} {b}"] },
+    "close": ["03 21 00 03 00 ff"]
+  },
+  "lights": { "kind": "zones", "items": [
+    { "address": 0, "shape": "archUp", "rect": [2, 7.9, 9, 1.1] }
+  ] }
+}
+```
+
+- **Bytes are written as the capture shows them**, in hexadecimal, and a
+  placeholder in braces stands for what the frame fills in: `{r} {g} {b}`,
+  `{address}`, `{count}` and `{addresses}` for a group. Each new need — a row
+  and its column range for the Razer — adds a placeholder, in code, once.
+- **An integrity function is named, not written**: `"checksum": { "xor": [2, 87],
+  "at": 88 }`. The list is closed and grows by code, each function tested once;
+  every device using it stays data. The same holds for the shapes the simulator
+  draws (`studio.md` §4).
+- **What stays code**: the interpreter, its placeholders and integrity functions,
+  the checks of §6 turned into refusals when a definition loads, and any family
+  that cannot be described yet — kept as a Rust family until it can.
+- **A definition carries its reference frames**: colours in, reports out, in
+  hexadecimal, as §8 asks of a contribution. The tests replay them; for the
+  families that were code, the first definitions must give byte for byte what
+  the code gave.
+
+The prototype is the zones of the Alienware m18 R1, the simplest family: its
+definition replaced the `AlienwareZones` family on 2026-09-25, giving byte for
+byte what it sent; the keyboard and the Razer follow.
+
 ---
 
 ## 8. What cannot be verified without the hardware
@@ -723,26 +772,26 @@ device whose layout comes from elsewhere.
 
 ---
 
-## 9. Loading: compiled in, not a plugin
+## 9. Loading: built in, and yours
 
-A plugin that writes over USB is an attack surface, and [#34] asked to
-decide rather than assume. Yet the reason for deciding on **compiled in** is not
-security first:
+A plugin that writes over USB is an attack surface, and [#34] asked to decide
+rather than assume. The first answer was *compiled in*, because a plugin would
+escape the only verification we have: every check of §8 runs in continuous
+integration, on the repository's content. Definitions as data keep that, and
+add what compiling could not:
 
-**A plugin would escape the only verification we have.** All of §8
-rests on tests run by continuous integration on the repository's
-content: the replayed frame, the matrix consistency, the presence of the
-provenance. A layout loaded at runtime has gone through none of these tests,
-and nobody has reviewed it. All that would remain of the contribution is its
-most costly part — writing to a bus — without any of what makes it acceptable.
+- **Built in**: the definitions in the repository, embedded in the application,
+  reviewed in their pull request and replayed by the tests. The PR stays the
+  loading mechanism for them — review, reference frames, provenance, history.
+  Only the definition of a device that is plugged in is used.
+- **Yours**: definitions in `Documents\candeo\devices`, the way effects have a
+  folder, listed below the built-in ones as effects are. Nobody reviewed them
+  and no test ran on them: the list says so, the checks of §6 still refuse what
+  they refuse, and adoption stays `detected` by default. This is how someone
+  tries their own device before proposing it.
 
-On top of that, the PR **is** the loading mechanism: it carries the review,
-the reference frame, the provenance and the history. That is what made
-OpenRGB grow, and it is no accident.
-
-To be reopened if, and only if, the number of layouts makes compiling the
-catalog unreasonable. That is not a problem we have with one
-device, nor with twenty.
+A definition that fails to load is listed with the reason, like an effect that
+does not compile, and drives nothing.
 
 ---
 
@@ -783,9 +832,10 @@ Described, not written: the implementation is the body of [#34].
   `Lights::Zones` (#193): one device holding both is still untried.
 - **Intercepting undeclared reads** (§4) is a lead, not a
   decision. Its real cost in QuickJS has not been measured.
-- ~~**Can a protocol family be described as data?**~~ — the second protocol
-  answered no (§7, *What the second family taught*): a family is a trait, one
-  file per protocol, and a device of a known family stays data.
+- **Can a protocol family be described as data?** — the second protocol
+  answered no (§7, *What the second family taught*); the third made the question
+  worth asking again, and §7, *A family as data after all*, answers yes for
+  what we have. The prototype on the zones says whether it holds.
 - **Two units of the same model remain indistinguishable** when the USB
   descriptor carries no serial number ([#35]). The SDK changes nothing there, but a
   catalog of layouts makes the case more frequent.

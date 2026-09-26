@@ -7,10 +7,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use candeo_device::{
-    Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, ALIENWARE_M18_R1_ZONES,
-    DEATHSTALKER_V2_PRO,
-};
+use candeo_device::{Inspection, Keyboard, Layout, Warning, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
 use candeo_protocol::Rgb;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -42,16 +39,27 @@ mod taskbar;
 mod tray;
 mod update;
 
-/// Known layouts. Only one for now.
+/// Known layouts: the ones written in Rust, then the built-in definitions
+/// (`docs/design/device-sdk.md` §9), read once.
 ///
 /// Visible in the crate: the [`journal`] diagnostic lists the same devices as
 /// [`list_devices`], and copying them over there would make a second list that
-/// would diverge at the first added layout.
-pub(crate) const LAYOUTS: &[&Layout] = &[
-    &DEATHSTALKER_V2_PRO,
-    &ALIENWARE_M18_R1,
-    &ALIENWARE_M18_R1_ZONES,
-];
+/// would diverge at the first added layout. A definition that does not load is
+/// left out and said in the log: the tests replay every built-in one, so this is
+/// a build nobody tested.
+pub(crate) fn layouts() -> &'static [&'static Layout] {
+    static ALL: std::sync::OnceLock<Vec<&'static Layout>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        let mut all: Vec<&'static Layout> = vec![&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
+        for (name, json) in candeo_device::definition::BUILTIN {
+            match candeo_device::definition::load(json) {
+                Ok(layout) => all.push(layout),
+                Err(e) => tracing::error!(definition = name, "device definition not loaded: {e}"),
+            }
+        }
+        all
+    })
+}
 
 // ---------------------------------------------------------------- exposed types
 
@@ -418,7 +426,7 @@ impl AppState {
 /// Serves the engine and the simulator: writing an effect must not require
 /// owning the keyboard.
 pub(crate) fn default_layout() -> &'static Layout {
-    LAYOUTS[0]
+    layouts()[0]
 }
 
 /// Errors go up to the front end as a code, which it translates: see
@@ -430,7 +438,7 @@ pub(crate) fn hid() -> CmdResult<hidapi::HidApi> {
 }
 
 fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
-    LAYOUTS
+    layouts()
         .iter()
         .copied()
         .find(|l| DeviceRef::of(l) == device)
@@ -659,7 +667,7 @@ fn apply_adoptions(
         }
     };
 
-    let layouts: Vec<&'static Layout> = LAYOUTS
+    let layouts: Vec<&'static Layout> = layouts()
         .iter()
         .copied()
         .filter(|l| !already_open.contains(&DeviceRef::of(l)))
@@ -761,7 +769,7 @@ pub(crate) fn reconcile_devices(app: &AppHandle) -> bool {
     };
     let open = state.open_devices();
     let mut changed = false;
-    for layout in LAYOUTS {
+    for layout in layouts() {
         let device = DeviceRef::of(layout);
         if open.contains(&device) && plugged(&api, layout).is_none() {
             state.set_open(device, None);
@@ -877,7 +885,7 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
     // `ignore_device` the reverse, and the two blocked each other.
     let failures = state.failures.lock().unwrap().clone();
 
-    Ok(LAYOUTS
+    Ok(layouts()
         .iter()
         .map(|l| {
             let device = DeviceRef::of(l);

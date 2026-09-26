@@ -1,21 +1,15 @@
 //! What speaking to a **family** of devices takes.
 //!
-//! A protocol is not data: its framing, its report ids and its checksums are
-//! rules, and no table of parameters guesses them. What can be data is
-//! everything else — identity, interface, matrix, geometry — and that is where
-//! the line is drawn here.
-//!
-//! - **Another device of a known family**: a [`Layout`] and nothing else.
-//! - **A family nobody has surveyed yet**: one implementation of [`Lighting`],
-//!   in a file of its own, and a `Layout` naming it.
+//! Most of a family is a description — how a report is framed, what is sent
+//! per light, how often — and a device described that way is a definition file,
+//! read by [`crate::definition`]. What is here are the families not described
+//! yet, each one implementation of [`Lighting`] in its own block
+//! (`docs/design/device-sdk.md` §7).
 //!
 //! So `Keyboard` knows how to send bytes and check a refusal, and knows nothing
 //! about who it is talking to (#34).
 
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
-use candeo_protocol::{alienware, alienware_elc, CommandId, Effect, Report, Rgb};
+use candeo_protocol::{alienware, CommandId, Effect, Report, Rgb};
 
 use crate::layout::{Layout, EMPTY};
 
@@ -51,19 +45,6 @@ impl Outgoing {
         Self {
             bytes,
             wire: Wire::Feature,
-            command: None,
-        }
-    }
-
-    /// A report for a device with no report id of its own: the API still wants a
-    /// byte in front, and a zero is what the maker's software sends.
-    fn output(bytes: &[u8]) -> Self {
-        let mut buffer = Vec::with_capacity(bytes.len() + 1);
-        buffer.push(0);
-        buffer.extend_from_slice(bytes);
-        Self {
-            bytes: buffer,
-            wire: Wire::Output,
             command: None,
         }
     }
@@ -286,100 +267,3 @@ pub const ALIENWARE_EFFECT: &str = "hardware:m18-";
 /// is how this keyboard goes dark. Read off the keyboard on 18/09/2026, where
 /// every kind carrying no colour showed nothing.
 const ALIENWARE_STEADY: u8 = 0x01;
-
-/// Alienware: the zones around a keyboard, addressed by id.
-///
-/// Its own family, not a variant of [`AlienwareKeys`]: another device, another
-/// report shape, another way out of the machine — and a change is a numbered
-/// transaction rather than a frame.
-pub struct AlienwareZones {
-    /// The last image sent and when, so that an unchanged one sends nothing and
-    /// a changing one goes out at a pace the device survives.
-    ///
-    /// **This device takes changes, not a stream.** An engine pushing thirty
-    /// images a second puts some three hundred reports a second on a bus where
-    /// the maker's software sends seven, and the writes then start failing:
-    /// measured on 18/09/2026, `HidD_SetOutputReport` refusing until the runtime
-    /// gave up on the device. Four lights do not need more than [`PACE`].
-    last: Mutex<(Vec<Rgb>, Option<Instant>)>,
-}
-
-/// The shortest gap between two transactions: ten a second, still more than the
-/// maker's software sends, and slow enough that every write goes through.
-const PACE: Duration = Duration::from_millis(100);
-
-impl AlienwareZones {
-    /// `const`, so that the family can be a `static` a layout points at —
-    /// which is why there is no `Default` here.
-    pub const fn new() -> Self {
-        Self {
-            last: Mutex::new((Vec::new(), None)),
-        }
-    }
-}
-
-impl Default for AlienwareZones {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// The instance layouts name: a family holding a counter cannot be a unit
-/// struct, and one counter per device would say nothing more.
-pub static ALIENWARE_ZONES: AlienwareZones = AlienwareZones::new();
-
-impl Lighting for AlienwareZones {
-    fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing> {
-        {
-            let (sent, when) = &mut *self.last.lock().expect("no panic holds this lock");
-            let too_soon = when.is_some_and(|at| at.elapsed() < PACE);
-            if sent == frame || too_soon {
-                return Vec::new();
-            }
-            sent.clear();
-            sent.extend_from_slice(frame);
-            *when = Some(Instant::now());
-        }
-
-        // The live preview: it lights what it carries and stores nothing, so
-        // the machine shows its own profiles again when Candeo is not there.
-        let mut out = vec![Outgoing::output(&alienware_elc::open())];
-
-        // Zones sharing a colour are named together, as the maker's software
-        // does for the two halves of the ring: one selection, one colour.
-        let mut groups: Vec<(Rgb, Vec<u8>)> = Vec::new();
-        for (&address, &colour) in layout.matrix.iter().zip(frame) {
-            if address == EMPTY {
-                continue;
-            }
-            match groups.iter_mut().find(|(seen, _)| *seen == colour) {
-                Some((_, zones)) => zones.push(address as u8),
-                None => groups.push((colour, vec![address as u8])),
-            }
-        }
-        for (colour, zones) in groups {
-            for chunk in zones.chunks(alienware_elc::ZONES_PER_SELECT) {
-                out.push(Outgoing::output(&alienware_elc::select(chunk)));
-                out.push(Outgoing::output(&alienware_elc::colour(colour)));
-            }
-        }
-
-        out.push(Outgoing::output(&alienware_elc::show()));
-        out
-    }
-
-    // No brightness: nothing in the survey dims these zones, and the level of a
-    // colour is the colour itself.
-
-    fn firmware_effect(&self, _id: &str, _colours: &[Rgb]) -> Option<Outgoing> {
-        None
-    }
-
-    fn inspect(
-        &self,
-        _device: &hidapi::HidDevice,
-        accept: &mut dyn FnMut(Option<&str>) -> bool,
-    ) -> Option<crate::Inspection> {
-        accept(None).then(crate::Inspection::unread)
-    }
-}
