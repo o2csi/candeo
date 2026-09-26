@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Candeo — lighting control, by talking to the device</title>
+    <title>Candeo — your keyboard's lights, your way</title>
     <meta
       name="description"
-      content="Candeo lights the devices on your desk by talking to them over USB: no vendor runtime, no service, no account. Effects are written in TypeScript and keep running with the window closed."
+      content="Light your keyboard your way: twenty-three effects, lights that follow your music, rules and signals from your other tools — without the maker's software, an account or anything sent anywhere. Free and open source."
     />
     <link rel="icon" href="assets/icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -24,8 +24,8 @@
       <img src="assets/icon.png" alt="" width="96" height="96" />
       <div>
         <h1>Candeo</h1>
-        <p class="tagline">Lighting control, by talking to the device.</p>
-        <p class="latin"><em>candeo</em>, Latin — “I shine, I glow”. The root of <em>candela</em>.</p>
+        <p class="tagline">Your keyboard's lights, your way.</p>
+        <p class="latin"><em>candeo</em>, Latin — “I shine, I glow”.</p>
       </div>
     </header>
 
@@ -34,88 +34,48 @@
         <figure class="live" hidden>
           <canvas width="2550" height="950" aria-hidden="true"></canvas>
           <figcaption>
-            <a href="#example">The example below</a>, running in this page with the engine's own
-            helpers, on the layout Candeo draws for the DeathStalker V2 Pro.
+            A real Candeo effect, running in this page — <a href="#example">its ten lines</a> are
+            further down.
           </figcaption>
         </figure>
 
         <p class="lead">
-          No vendor runtime, no background service, no account. Candeo writes to the device over the
-          HID interface the system already exposes, and the effects you write run inside the
-          application — so they keep running with the window closed.
+          One small app instead of the maker's lighting software. Pick an effect, make the lights
+          follow your music, or let them tell you when something happens. No account, no extra
+          services to install, nothing sent anywhere.
         </p>
+
+        <div class="cta">
+          <a class="download" href="https://apps.microsoft.com/detail/9MXFM8QT1X7P">Get it from the Microsoft Store</a>
+          <a href="install.html">Other ways to install →</a>
+        </div>
+        <p class="note">Free and open source. Windows today, Linux on its way.</p>
 
         <figure>
           <img
             src="assets/gallery.png"
-            alt="The Candeo gallery: the devices on the left, the effects in the middle marked by what they react to, and the effect applied drawn on a keyboard with its settings, each switching between a value, a signal and the sound."
+            alt="The Candeo gallery: the devices on the left, the effects in the middle marked by what they react to, and the effect applied drawn on a keyboard with its settings."
             width="1272"
             height="1356"
           />
-          <figcaption>
-            The gallery. The preview draws the frames the engine sends to the keyboard — the same
-            ones, not an imitation — and a mark beside an effect says what it reacts to: the sound,
-            your typing, a signal.
-          </figcaption>
+          <figcaption>Pick an effect, tune it while you watch, apply it.</figcaption>
         </figure>
-
       </section>
 
       <section>
-        <h2>Devices</h2>
-        <p>
-          Candeo is built for <strong>lit devices that speak HID over USB</strong> — keyboards,
-          mice, mousepads, headsets. A device declares what it is and where its lights sit, and an
-          effect is written against that, not against a model: an effect written for a mousepad's
-          grid runs on a keyboard, and one written for a keyboard runs on whatever comes next.
-        </p>
-
-        <p>
-          Candeo drives a device the way its own software would — the full matrix, its firmware
-          effects, its brightness — from a protocol read off the hardware and checked write by
-          write. <a href="devices.html">See the devices →</a>
-        </p>
-      </section>
-
-      <section>
-        <h2>Install</h2>
-        <div class="ways">
-          <div class="way">
-            <h3>Microsoft Store</h3>
-            <p>Signed by Microsoft, and updated by the Store.</p>
-            <a class="download" href="https://apps.microsoft.com/detail/9MXFM8QT1X7P">Get it from the Store</a>
-            <p class="note">It makes no network request of its own: the Store does the updating.</p>
-          </div>
-          <div class="way">
-            <h3>Windows</h3>
-            <p>Installs for your account, no administrator rights.</p>
-            <a class="download" href="{{setupUrl}}">Download {{version}}</a>
-            <p class="note">
-              Not signed yet: SmartScreen warns about an unknown publisher. <em>More info</em>, then
-              <em>Run anyway</em>.
-            </p>
-          </div>
-          <div class="way">
-            <h3>winget</h3>
-            <p>Once the manifest is accepted.</p>
-            <div class="command">winget install candeo</div>
-            <p class="note">The full identifier is <code>O2CSI.Candeo</code>.</p>
-          </div>
-          <div class="way">
-            <h3>Linux</h3>
-            <p>
-              <code>.deb</code> and <code>.rpm</code>, each carrying the udev rule that gives you
-              access to the device.
-            </p>
-            <a class="download" href="{{releaseUrl}}">All downloads</a>
-          </div>
-        </div>
-        <p class="note">Every release carries a <code>SHA256SUMS</code> file. On Linux and macOS:</p>
-        <div class="command">sha256sum -c SHA256SUMS --ignore-missing</div>
-        <p class="note">
-          On Windows, against the line for your file in <code>SHA256SUMS</code>:
-        </p>
-        <div class="command">Get-FileHash .\candeo_*_x64-setup.exe -Algorithm SHA256</div>
+        <h2>Up and running in a minute</h2>
+        <ol class="steps">
+          <li>
+            <span><strong>Install Candeo</strong> from the Microsoft Store.</span>
+          </li>
+          <li>
+            <span><strong>Open Devices</strong> and click <em>Control</em> next to your keyboard.</span>
+          </li>
+          <li>
+            <span><strong>Pick an effect</strong> and <em>Apply</em> it. It keeps running when you close
+            the window.</span>
+          </li>
+        </ol>
       </section>
 
       <section>
@@ -138,11 +98,11 @@
           </div>
           <div class="way" style="--tint: linear-gradient(90deg, #2a2833 0 18px, #7cc7ff 18px 54px, #2a2833 54px 72px, #7cc7ff 72px 126px, #2a2833 126px)">
             <h3>Time and words</h3>
-            <p>Clock, and Scrolling text for any words, typed or sent by another program</p>
+            <p>Clock, and Scrolling text for any words you like</p>
           </div>
           <div class="way" style="--tint: linear-gradient(90deg, #22c55e 0 34%, #f2a33c 34% 67%, #ef4444 67%)">
             <h3>Your other tools</h3>
-            <p>Status row: a key per signal received, green, amber or red</p>
+            <p>Status row: a key per thing you watch, green, amber or red</p>
           </div>
           <div class="way" style="--tint: linear-gradient(90deg, #ff2d95, #8b5cf6, #22d3ee, #8b5cf6, #ff2d95)">
             <h3>Your music</h3>
@@ -150,19 +110,61 @@
           </div>
         </div>
         <p>
-          Each is tuned while you watch it, and every setting can follow a signal or the music. The
-          effects your keyboard's firmware runs are there too.
+          Tune each one while you watch it. Your keyboard's own built-in effects are there too, under
+          their usual names.
         </p>
       </section>
 
       <section>
-        <h2>An effect is a file you can read</h2>
+        <h2>Lights that dance to your music</h2>
         <p>
-          Effects are TypeScript, compiled and run by the application on the Rust side. They receive
-          the device's layout and the time, and return colours — the effect below runs on any
-          keyboard, whatever its size. Yours live in
-          <code>Documents\candeo\effects</code>: ordinary files, editable here or in the editor you
-          already use.
+          An equalizer, fireworks on the beat, an aurora swaying at the song's tempo — and any effect
+          can follow the sound: faster when it gets loud, redder with the bass. Candeo listens to
+          what your speakers play, never your microphone, and records nothing.
+          <a href="sound.html">How sound works →</a>
+        </p>
+      </section>
+
+      <section>
+        <h2>Lights that tell you things</h2>
+        <div class="ways">
+          <div class="way">
+            <h3>Rules</h3>
+            <p>
+              The time on the hour, the keyboard dark at night: a rule takes over for a while, then
+              gives your effect back.
+            </p>
+            <a href="automations.html">How rules work →</a>
+          </div>
+          <div class="way">
+            <h3>Signals</h3>
+            <p>
+              A build that failed, the doorbell, a call starting: a script or Home Assistant tells
+              Candeo, and your keyboard shows it.
+            </p>
+            <a href="signals.html">How signals work →</a>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Your devices</h2>
+        <p>
+          Candeo lights the <strong>Razer DeathStalker V2 Pro</strong> and the
+          <strong>Alienware m18 R1</strong> — its keyboard, key by key, and the lights around it —
+          with their brightness and their own built-in effects.
+          <a href="devices.html">See the devices →</a>
+        </p>
+        <p>
+          Yours is not there yet? A device is a file you can write, and try at once.
+          <a href="devices-guide.html">Describe your device →</a>
+        </p>
+      </section>
+
+      <section>
+        <h2>Make it yours</h2>
+        <p>
+          An effect is a short file you can read. This one is the keyboard at the top of the page:
         </p>
         <pre id="example" data-file="Rainbow.ts" data-run="rainbow"><code>import { bounds, center, defineEffect, hsv } from '@candeo/effects-api'
 
@@ -176,135 +178,22 @@ export default defineEffect({
     }
   },
 })</code></pre>
-        <p class="note">
-          <a href="effects.html">Write your own →</a> — your first effect step by step, what an
-          effect receives, its settings, and recipes: rings, typing, words, sound, signals.
-        </p>
-        <figure>
-          <img
-            src="assets/editor.png"
-            alt="The Candeo editor: the effect's code on the left, and the simulator drawing the frames on the right."
-            width="1920"
-            height="1080"
-          />
-          <figcaption>
-            The editor, with the simulator drawing what the keyboard is being sent.
-          </figcaption>
-        </figure>
-      </section>
-
-      <section>
-        <h2>Rules that take over for a while</h2>
         <p>
-          The time on the hour over your usual effect, the keyboard dark at night: a rule interrupts
-          the effect on a device, then gives it back. It reads as a sentence — <em>every hour, show
-          Clock, for 10 seconds</em> — or as a cron expression when a sentence is not enough.
-          <a href="automations.html">See how rules work →</a>
+          Write yours in Candeo, next to a preview of your keyboard, and apply it when it looks
+          right. Devices, signals and settings are just as open.
+          <a href="sdk.html">Build on Candeo →</a>
         </p>
-      </section>
-
-      <section>
-        <h2>Your other tools can say what happened</h2>
-        <p>
-          A build that failed, the doorbell, a call starting: a script or Home Assistant sends a
-          named value to a local API, and your rules decide what it lights — <em>when</em>
-          <code>build</code> <em>is</em> <code>failed</code>, <em>show a red gradient, while it
-          holds</em>. Or a setting of the effect already running follows it: a colour, a speed,
-          straight from the value sent. The sender never names a device or an effect. Off until you
-          turn it on, and every request carries a token.
-        </p>
-        <div class="command">curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"build":"failed"}' http://127.0.0.1:7317/signals</div>
-        <p class="note">
-          <a href="signals.html">See how signals work →</a> — turning them on, PowerShell and Home
-          Assistant, and how to name them.
-        </p>
-      </section>
-
-      <section>
-        <h2>Lights that dance to your music</h2>
-        <p>
-          Six effects react to what you play — an equalizer, a waterfall of the music going by,
-          flashes, ripples and fireworks on the beat, an aurora swaying at the song's tempo. And any
-          setting of any effect can follow the sound: a speed with the volume, a colour with the
-          bass. Candeo hears what goes to your speakers, never the microphone, and turns it into a
-          few numbers on your computer; the sound is never recorded.
-          <a href="sound.html">See how sound works →</a>
-        </p>
-        <figure>
-          <img
-            src="assets/sound.png"
-            alt="Settings, Sound: a gain and a beat sensitivity above a live meter of the volume, the beat, the bass, the mids, the highs and the tone, each bar going from green to amber to red."
-            width="880"
-            height="305"
-          />
-          <figcaption>
-            Settings › Sound: how Candeo hears, once for every effect, beside what it hears now.
-          </figcaption>
-        </figure>
-      </section>
-
-      <section>
-        <h2>How it is built</h2>
-        <ul>
-          <li>
-            <strong>The protocol is documented</strong>, with the capture method and the firmware
-            version behind each fact —
-            <a href="https://github.com/o2csi/candeo/tree/main/docs/protocol">docs/protocol</a>.
-          </li>
-          <li>
-            <strong>Decisions are written before the code</strong>, and kept when they turn out
-            wrong —
-            <a href="https://github.com/o2csi/candeo/tree/main/docs/design">docs/design</a>.
-          </li>
-          <li>
-            <strong>Report construction is tested without hardware</strong>: the crate that builds
-            the bytes has no system dependency.
-          </li>
-          <li>
-            <strong>One engine runs the effects</strong>, in a thread that outlives the window, so
-            closing it changes nothing.
-          </li>
-        </ul>
-      </section>
-
-      <section>
-        <h2>What comes next</h2>
-        <p>
-          Each of these is an issue with the thinking already written down, not a wish:
-        </p>
-        <ul>
-          <li>
-            <a href="https://github.com/o2csi/candeo/issues/34">More devices, contributed</a> — what
-            a protocol contribution has to carry to be reviewable by someone without the hardware.
-          </li>
-          <li>
-            <a href="https://github.com/o2csi/candeo/issues/183">Automations on Linux</a> — the
-            <em>nobody at the computer</em> trigger there, then the sound playing.
-          </li>
-          <li>
-            <a href="https://github.com/o2csi/candeo/issues/138">winget</a> — installing and updating
-            in one command.
-          </li>
-        </ul>
       </section>
 
       <section>
         <h2>What it sends</h2>
         <p>
-          Nothing. No account, no telemetry, no identifier. The one request it can make is asking
-          GitHub whether a newer version exists — a setting, off in the Microsoft Store version,
-          where the Store does the updating. The full text is in the
+          Nothing. No account, no telemetry, no identifier — read the
           <a href="privacy.html">privacy policy</a>.
         </p>
       </section>
     </main>
 
-    <footer>
-      <a href="https://github.com/o2csi/candeo">Source</a>
-      <a href="privacy.html">Privacy</a>
-      <a href="https://github.com/o2csi/candeo/issues">Issues</a>
-      <span class="spacer"></span>
-      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
-    </footer>
+{{footer}}
   </body>
 </html>
