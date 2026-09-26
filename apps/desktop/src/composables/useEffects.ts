@@ -23,6 +23,8 @@ export interface HardwareEffect {
   summary: string
   /** How many colours it paints with — none for one with its own palette. */
   colours: number
+  /** The pattern the gallery draws as its legend, as its definition says. */
+  looks: string | null
 }
 
 /**
@@ -100,6 +102,7 @@ export function named(id: string, colours = 0, own?: FirmwareEffectInfo): Hardwa
       colours,
       name: t('effects.hardwareEffects.off.name'),
       summary: t('effects.hardwareEffects.off.summary'),
+      looks: 'off',
     }
   }
   const declared = own ?? known.value.get(id)
@@ -108,6 +111,7 @@ export function named(id: string, colours = 0, own?: FirmwareEffectInfo): Hardwa
     colours,
     name: localized(declared?.name ?? undefined) || id,
     summary: localized(declared?.summary ?? undefined),
+    looks: declared?.looks ?? null,
   }
 }
 

@@ -677,6 +677,13 @@ interpreter, written and tested once in Rust, turns it into reports:
   catalogs only name *Off*, which every device offers. A contributor adding a
   kind names it where they describe it, and the interface translates it
   without a line of code; a kind nobody named shows its id.
+- **What a firmware effect looks like is a word from a closed list**: `looks`,
+  one of `steady`, `pulse`, `breathing`, `morph`, `wave`, `scanner`,
+  `spectrum`. The gallery draws that pattern as a legend of the effect, never
+  as a preview: the firmware draws it and shows nothing back. The list grows by
+  code, one drawing each, used by every device; an effect without one is drawn
+  dark. Its `id` stays what the settings, the rules and the applied effect name
+  it by, so changing an id orphans them, as renaming an effect's file does.
 - **Every field is documented in a schema**, `devices/device-definition.schema.json`,
   which each definition names in `$schema`: an editor completes and checks a file
   against it, and a file loads only if it follows it, so the editor and the

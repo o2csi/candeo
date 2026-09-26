@@ -199,7 +199,11 @@
                 "$ref": "#/$defs/text",
                 "description": "What the gallery calls it. Without one, it shows its id."
               },
-              "summary": { "$ref": "#/$defs/text", "description": "One sentence on what it shows." }
+              "summary": { "$ref": "#/$defs/text", "description": "One sentence on what it shows." },
+              "looks": {
+                "enum": ["steady", "pulse", "breathing", "morph", "wave", "scanner", "spectrum"],
+                "description": "The pattern the gallery draws as a legend of it — never a preview: the firmware draws it and shows nothing back. `steady` one colour; `pulse` that colour throbbing; `breathing` colours following one another through black; `morph` the same without going dark; `wave` hues crossing the keys; `scanner` a band sweeping across and back; `spectrum` the whole surface cycling through hues. Without it, the keyboard is drawn dark."
+              }
             }
           }
         }

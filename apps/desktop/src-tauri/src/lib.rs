@@ -225,6 +225,8 @@ pub struct FirmwareEffectInfo {
     /// As its definition names it, for the window to put in its language.
     pub name: Option<candeo_device::Text>,
     pub summary: Option<candeo_device::Text>,
+    /// The pattern its legend is drawn with, `pulse`.
+    pub looks: Option<&'static str>,
 }
 
 impl From<&candeo_device::FirmwareEffect> for FirmwareEffectInfo {
@@ -234,6 +236,7 @@ impl From<&candeo_device::FirmwareEffect> for FirmwareEffectInfo {
             colours: e.colours,
             name: e.name.clone(),
             summary: e.summary.clone(),
+            looks: e.looks,
         }
     }
 }

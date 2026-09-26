@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../api/candeo', () => ({
   firmwareEffects: vi.fn(async () => [
-    { id: 'hardware:m18-08', colours: 0, name: { en: 'Breathing', fr: 'Respiration' }, summary: null },
+    {
+      id: 'hardware:m18-08',
+      colours: 0,
+      name: { en: 'Breathing', fr: 'Respiration' },
+      summary: null,
+      looks: 'breathing',
+    },
   ]),
 }))
 
@@ -11,7 +17,13 @@ import { named, OFF, refreshFirmwareEffects } from './useEffects'
 describe('a firmware effect is named by its definition', () => {
   it('in the interface language, from what the layout declares', () => {
     const own = { id: 'hardware:x', colours: 1, name: 'Glow', summary: { en: 'Warm.', fr: 'Chaud.' } }
-    expect(named('hardware:x', 1, own)).toEqual({ id: 'hardware:x', colours: 1, name: 'Glow', summary: 'Warm.' })
+    expect(named('hardware:x', 1, { ...own, looks: 'pulse' })).toEqual({
+      id: 'hardware:x',
+      colours: 1,
+      name: 'Glow',
+      summary: 'Warm.',
+      looks: 'pulse',
+    })
   })
 
   it('outside the gallery, from every definition Candeo knows', async () => {

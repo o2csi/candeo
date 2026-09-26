@@ -100,7 +100,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
-import { illustrates } from '../keyboard/illustration'
+import { isLook } from '../keyboard/illustration'
 import {
   colourBytes,
   hardwareEffectsFor,
@@ -642,14 +642,16 @@ const { frame, restartPreview } = useSimulatorFeed({
   // What it *is* drawn as, which is a different promise: a legend of what the
   // effect was seen doing, not the device's frames. The note below says so.
   illustrated: () => {
-    const c = selectedEffect.value
-    return c?.hardware && illustrates(c.id) ? c.id : null
+    const looks = selectedEffect.value?.hardware?.looks
+    return isLook(looks) ? looks : null
   },
   // The drawing paints with what the effect was given, so that it says what the
   // keyboard will show rather than a colour of its own.
   illustratedColours: () => {
     const bytes = colourBytes(paramValues.value)
-    return bytes.length >= 3 ? [[bytes[0], bytes[1], bytes[2]] as Rgb] : []
+    const colours: Rgb[] = []
+    for (let i = 0; i + 3 <= bytes.length; i += 3) colours.push([bytes[i], bytes[i + 1], bytes[i + 2]])
+    return colours
   },
   params: () => paramValues.value,
   bindings: () => paramBindings.value,
@@ -672,7 +674,9 @@ const previewNote = computed(() => {
   if (c?.hardware) {
     // Two different promises, and the sentence must not confuse them: a drawing
     // of what the effect does, or nothing at all.
-    return illustrates(c.id) ? t('effects.preview.illustration') : t('effects.preview.hardware')
+    return isLook(c.hardware.looks)
+      ? t('effects.preview.illustration')
+      : t('effects.preview.hardware')
   }
 
   // Under an interruption, what the keyboard shows is the rule's effect.

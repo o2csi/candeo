@@ -34,6 +34,7 @@
       {
         "id": "hardware:spectrumCycle",
         "kind": "03",
+        "looks": "spectrum",
         "name": "Spectrum Cycle",
         "summary": {
           "en": "The whole keyboard changes hue together, endlessly.",
@@ -43,6 +44,7 @@
       {
         "id": "hardware:wave",
         "kind": "04",
+        "looks": "wave",
         "send": "00 9f 00 00 00 06 0f 02 00 00 04 02 28 00",
         "name": "Wave",
         "summary": {

@@ -200,6 +200,8 @@ export interface FirmwareEffectInfo {
    */
   name: Text | null
   summary: Text | null
+  /** The pattern its legend is drawn with (`keyboard/illustration.ts`), `null` for none. */
+  looks: string | null
 }
 
 export type Effect =
