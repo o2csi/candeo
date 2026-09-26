@@ -84,6 +84,9 @@ struct ReportSpec {
 #[serde(deny_unknown_fields)]
 struct FrameSpec {
     pace: Option<PaceSpec>,
+    /// Sent once when a host effect starts, to stop what the firmware animates.
+    #[serde(default, rename = "takeOver")]
+    take_over: Vec<String>,
     #[serde(default)]
     open: Vec<String>,
     each: EachSpec,
@@ -291,6 +294,7 @@ pub struct Template {
     close: Vec<Vec<Token>>,
     brightness: Option<Vec<Vec<Token>>>,
     firmware: Option<Firmware>,
+    take_over: Vec<Vec<Token>>,
     pace: Option<(Duration, bool)>,
     /// The last image sent and when, for `pace`.
     last: Mutex<(Vec<Rgb>, Option<Instant>)>,
@@ -402,6 +406,13 @@ impl Lighting for Template {
 
         out.extend(self.close.iter().map(|t| self.render(t, NOTHING)));
         out
+    }
+
+    fn take_over(&self) -> Vec<Outgoing> {
+        self.take_over
+            .iter()
+            .map(|t| self.render(t, NOTHING))
+            .collect()
     }
 
     fn brightness(&self, level: u8) -> Option<Vec<Outgoing>> {
@@ -521,6 +532,7 @@ fn family(d: &Definition) -> Result<Template, String> {
         send,
         light,
         close: fixed(&d.frame.close, "closing a frame")?,
+        take_over: fixed(&d.frame.take_over, "taking the lights over")?,
         brightness,
         firmware,
         pace: d
@@ -533,6 +545,7 @@ fn family(d: &Definition) -> Result<Template, String> {
     let reports = t
         .open
         .iter()
+        .chain(&t.take_over)
         .chain(&t.send)
         .chain(&t.close)
         .chain(t.brightness.iter().flatten())
@@ -869,6 +882,23 @@ mod tests {
             3
         );
         assert_eq!(l.lights, Lights::Keys);
+    }
+
+    /// Starting a host effect takes the keyboard back from an animating
+    /// firmware, the way *Off* does — without it, the animation redraws over
+    /// every frame.
+    #[test]
+    fn a_host_effect_takes_the_laptop_keyboard_back_from_its_firmware() {
+        let l = load(KEYBOARD).unwrap();
+        let off = l.lighting.firmware_effect(OFF, &[]).unwrap();
+        let taken: Vec<Vec<u8>> = l
+            .lighting
+            .take_over()
+            .into_iter()
+            .map(|o| o.bytes)
+            .collect();
+        assert_eq!(taken, vec![off.bytes]);
+        assert!(load(ZONES).unwrap().lighting.take_over().is_empty());
     }
 
     /// *Off* is a kind of this firmware, not a black frame: once it animates,

@@ -48,6 +48,14 @@ pub trait Lighting: Sync {
     /// addresses keys one by one leaves them out itself.
     fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing>;
 
+    /// The reports taking the lights back from the firmware, sent once when a
+    /// host effect starts on the device: a firmware animation otherwise goes on
+    /// redrawing over every frame. None where a frame already does it — the
+    /// Razer's ends by switching to its custom mode.
+    fn take_over(&self) -> Vec<Outgoing> {
+        Vec::new()
+    }
+
     /// The reports setting overall brightness.
     ///
     /// A list, because a family may need more than one: the m18 R1 takes its

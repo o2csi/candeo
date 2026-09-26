@@ -5,11 +5,13 @@
     "An address is what the device calls a key, counting from one; a position is where it sits in the grid. Backspace is 36, not 34: two addresses in between drive nothing.",
     "Brightness takes effect only after a frame has been opened and closed (2026-09-18).",
     "Off is kind 01, a steady colour, given black: once the firmware animates, a black frame is overwritten within the second.",
+    "Taking over sends that same Off when a host effect starts: an animating firmware redraws over every frame otherwise (2026-09-26).",
     "Sixteen kinds answer; these seven show something, watched one by one on 2026-09-18. Three take a colour."
   ],
   "match": { "vid": "0d62", "pid": "aab0", "usagePage": "ff89", "usage": "00cc" },
   "report": { "wire": "feature", "length": 64 },
   "frame": {
+    "takeOver": ["cc 80 01 05 00 00 01 01 01 01 00 00 00 00 00 00 05"],
     "open": ["cc 94 00 00"],
     "each": { "chunk": 15, "send": ["cc 8c 02 00 {lights}"], "light": "{address} {r} {g} {b}" },
     "close": ["cc 93 00 00"]

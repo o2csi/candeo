@@ -199,6 +199,15 @@ impl Keyboard {
     /// `frame` must cover the **whole** matrix, including positions without a
     /// physical LED. Sending less leaves a Razer's last rows frozen on their
     /// previous value, and says nothing about the cells a per-key device skips.
+    /// Takes the lights back from the firmware before a host effect's first
+    /// frame: see [`Lighting::take_over`].
+    pub fn take_over(&self) -> Result<(), Error> {
+        for report in self.layout.lighting.take_over() {
+            self.send(&report)?;
+        }
+        Ok(())
+    }
+
     pub fn present(&self, frame: &[Rgb]) -> Result<(), Error> {
         let expected = self.layout.led_count();
         assert_eq!(

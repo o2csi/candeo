@@ -425,6 +425,10 @@ pub(crate) trait DeviceOut: Send {
     /// reconnection: the loop could close the keyboard that was just reopened.
     fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>>;
 
+    /// Takes the lights back from the firmware before a host effect's first
+    /// frame. Nothing to do without a device.
+    fn take_over(&self) {}
+
     /// Turns the backlight off, when an effect stopped on its own: its last frame,
     /// frozen, would look like an effect still running (#48). Nothing to do
     /// without a device.
@@ -451,6 +455,13 @@ impl DeviceOut for Handle {
             *guard = None;
         }
         Some(result)
+    }
+
+    fn take_over(&self) {
+        let guard = self.lock().unwrap();
+        if let Some(Err(e)) = guard.as_ref().map(Keyboard::take_over) {
+            tracing::warn!("lights not taken back from the firmware: {e}");
+        }
     }
 
     fn turn_off(&self) {
@@ -1136,6 +1147,10 @@ fn render_loop(
     // The preview borrows the device's brightness with its layout: it shows
     // what applying the effect there would give (§2.2.2).
     let (Target::Device(device) | Target::Preview(device)) = target;
+
+    // A firmware that animates goes on redrawing over every frame until it is
+    // told to stop: the Alienware keyboard needed *Off* in between otherwise.
+    out.take_over();
 
     let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
     let mut deadline = Instant::now();
@@ -2283,6 +2298,8 @@ mod tests {
         closed: AtomicBool,
         /// Set when the loop turned the backlight off.
         turned_off: AtomicBool,
+        /// How many times the loop took the lights back.
+        taken_over: AtomicU32,
         /// The last frame written.
         last: Mutex<Vec<Rgb>>,
     }
@@ -2309,6 +2326,10 @@ mod tests {
 
         fn turn_off(&self) {
             self.turned_off.store(true, Ordering::Relaxed);
+        }
+
+        fn take_over(&self) {
+            self.taken_over.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -2414,6 +2435,20 @@ mod tests {
         wait_for("the brightness did not come back", || {
             brightest(&next) == 255
         });
+        engine.stop(FIRST);
+    }
+
+    /// A host effect starting on a device takes its lights back from the
+    /// firmware once, before its first frame, whichever effect ran before.
+    #[test]
+    fn a_host_effect_takes_the_lights_back_once() {
+        let engine = Engine::default();
+        let output = Arc::new(Output::default());
+        start(&engine, FIRST, "applied", Arc::clone(&output));
+        wait_for("no frame was written", || {
+            output.written.load(Ordering::Relaxed) >= 3
+        });
+        assert_eq!(output.taken_over.load(Ordering::Relaxed), 1);
         engine.stop(FIRST);
     }
 
