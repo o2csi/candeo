@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://o2csi.github.io/candeo/device-definition.schema.json",
+  "title": "Candeo device definition",
+  "description": "A device Candeo can light, described as data: how to find it, how its reports are framed, what is sent per light, and where each light sits. Bytes are written as a capture shows them, in hexadecimal; what the frame fills in is a placeholder in braces. Guide: https://o2csi.github.io/candeo/devices-guide.html",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "match", "report", "frame", "lights"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "This schema, for an editor's completion and checks."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The device's name, as the list of devices shows it: maker and model."
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "What a reviewer should know, and where the survey says it at length. Candeo does not read them."
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vid", "pid"],
+      "description": "How the device is found among the system's HID devices. Name either the interface or the collection that carries the lighting: opening the wrong one gives a handle on which every write is lost.",
+      "properties": {
+        "vid": { "$ref": "#/$defs/hex16", "description": "Vendor id, four hexadecimal digits: `1532`." },
+        "pid": { "$ref": "#/$defs/hex16", "description": "Product id, four hexadecimal digits: `0292`." },
+        "interface": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "The interface of a composite device that carries the lighting: `3` on the DeathStalker."
+        },
+        "usagePage": { "$ref": "#/$defs/hex16", "description": "The collection's usage page, when several collections share one interface: `ff00`." },
+        "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`." }
+      },
+      "oneOf": [
+        { "required": ["interface"], "not": { "anyOf": [{ "required": ["usagePage"] }, { "required": ["usage"] }] } },
+        { "required": ["usagePage", "usage"], "not": { "required": ["interface"] } }
+      ]
+    },
+    "surveyed": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "The firmware version the survey was made against, `1.5`. When the inspection reads another, the device's row says so: the first lead when a device stops obeying."
+    },
+    "inspect": {
+      "enum": ["razer"],
+      "description": "What is asked of the device when it opens, by the name of a read written in Rust. `razer`: the firmware version, the serial, which commands the device knows, and the effect its firmware runs. Absent: nothing is asked."
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wire", "length"],
+      "description": "The shape every report of this device shares.",
+      "properties": {
+        "wire": {
+          "enum": ["feature", "output"],
+          "description": "How a report leaves: `feature` (`HidD_SetFeature`) or `output` (`HidD_SetOutputReport`). A device may act on one and silently ignore the same bytes sent the other way."
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The report's length in bytes, after `prefix`. Every report is padded with zeros to it; a report that could grow past it is refused when the file loads."
+        },
+        "prefix": {
+          "$ref": "#/$defs/bytes",
+          "description": "Bytes the HID API wants in front of every report and that are not part of it — usually the report id, `00` for a device without one. Offsets elsewhere in this file count from the first byte after it."
+        },
+        "checksum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["function", "from", "to", "at"],
+          "description": "An integrity byte, named rather than written: `function` computed over the report's bytes `from` to `to`, both included, and written at `at`. Offsets count from the report's first byte, after `prefix`. The Razer's: `{ \"function\": \"xor\", \"from\": 2, \"to\": 87, \"at\": 88 }` — byte 88 is the XOR of bytes 2 to 87.",
+          "properties": {
+            "function": {
+              "enum": ["xor", "sum"],
+              "description": "`xor`: every byte XORed together. `sum`: every byte added, modulo 256. A closed list, each function written and tested once in Candeo; a protocol needing another asks for it to be added."
+            },
+            "from": { "type": "integer", "minimum": 0, "description": "The first byte covered." },
+            "to": { "type": "integer", "minimum": 0, "description": "The last byte covered, included." },
+            "at": { "type": "integer", "minimum": 0, "description": "Where the result is written." }
+          }
+        },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "id"],
+          "description": "Where a report carries the command it is, for a device that can say it does not know one: the inspection then refuses to send it. Offsets after `prefix`. The Razer's: class at 6, command at 7.",
+          "properties": {
+            "class": { "type": "integer", "minimum": 0, "description": "Offset of the command's class." },
+            "id": { "type": "integer", "minimum": 0, "description": "Offset of the command itself." }
+          }
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["each"],
+      "description": "The reports carrying one image of every light, sent up to thirty times a second: `open`, then `each` for the lights, then `close`.",
+      "properties": {
+        "pace": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["atLeastMs"],
+          "description": "For a device that takes changes rather than a stream.",
+          "properties": {
+            "atLeastMs": { "type": "integer", "minimum": 0, "description": "The shortest gap between two images sent, in milliseconds." },
+            "skipUnchanged": { "type": "boolean", "description": "Send nothing when the image did not change." }
+          }
+        },
+        "takeOver": {
+          "$ref": "#/$defs/fixedReports",
+          "description": "Reports sent once when one of Candeo's effects starts on the device, to stop what its firmware animates — otherwise the firmware may keep drawing over every image."
+        },
+        "open": { "$ref": "#/$defs/fixedReports", "description": "Reports opening an image." },
+        "each": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["send"],
+          "description": "What is sent for the lights. By default one light per report, in the grid's order; `group` and `chunk` put several in one report, `by: row` sends a row of the grid per report.",
+          "properties": {
+            "by": {
+              "enum": ["row"],
+              "description": "`row`: one report per row of the grid, every cell of it lit or not — a device that takes the whole grid keeps a cell left out at its last colour. Fills `{row}`, `{start}` and `{end}`."
+            },
+            "group": {
+              "enum": ["colour"],
+              "description": "`colour`: lights sharing a colour go together, as a device that selects lights then colours them wants. Fills `{count}` and `{addresses}`."
+            },
+            "chunk": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many lights one report carries at most."
+            },
+            "send": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/report" },
+              "description": "The reports sent per light, group or row. Placeholders: `{r} {g} {b}`, `{address}`, `{count}`, `{addresses}`, `{lights}`, `{row} {start} {end}`, `{length:N}`."
+            },
+            "light": {
+              "$ref": "#/$defs/report",
+              "description": "One light's entry, repeated where `{lights}` stands for each light of the report: `{address} {r} {g} {b}` on a device that names its keys, `{r} {g} {b}` in a row."
+            }
+          }
+        },
+        "close": { "$ref": "#/$defs/fixedReports", "description": "Reports closing an image; often what applies it." }
+      }
+    },
+    "brightness": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/report" },
+      "description": "The reports setting overall brightness, `{level}` from `00` (dark) to `ff`. Absent: the device offers no brightness slider."
+    },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["send", "effects"],
+      "description": "The effects the device's firmware runs by itself, offered in the gallery for this device only.",
+      "properties": {
+        "send": {
+          "$ref": "#/$defs/report",
+          "description": "The report selecting an effect: `{kind}`, and `{r} {g} {b}` and `{r2} {g2} {b2}` for its colours — the second is the first when one is given."
+        },
+        "off": {
+          "$ref": "#/$defs/hex8",
+          "description": "The kind *Off* is, when the firmware has one that shows nothing. Absent: *Off* is a black image."
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^hardware:",
+                "description": "The id the gallery gives it: `hardware:wave`."
+              },
+              "kind": { "$ref": "#/$defs/hex8", "description": "What `{kind}` is for it." },
+              "colours": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2,
+                "description": "How many colours it paints with: the gallery asks for exactly as many."
+              },
+              "send": {
+                "$ref": "#/$defs/report",
+                "description": "Its own report, when it carries more than a kind: the Razer's wave, with its direction and speed."
+              },
+              "name": { "type": "string", "description": "What it shows, for whoever reads the file." }
+            }
+          }
+        }
+      }
+    },
+    "lights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "items"],
+      "description": "Where the lights are: the positions an effect paints, the addresses the device gives them, and the rectangles the simulator draws and effects measure with.",
+      "properties": {
+        "kind": {
+          "enum": ["keys", "zones"],
+          "description": "`keys` can be pressed, so effects reading key presses are offered; `zones` — a ring, a logo, a strip — cannot."
+        },
+        "rows": { "type": "integer", "minimum": 1, "maximum": 255, "description": "The grid's rows, with `cols`: every item then gives its `row` and `col`." },
+        "cols": { "type": "integer", "minimum": 1, "maximum": 255, "description": "The grid's columns. Without `rows` and `cols`, the items make one row in their order." },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["address", "rect"],
+            "properties": {
+              "row": { "type": "integer", "minimum": 0, "description": "Its row in the grid." },
+              "col": { "type": "integer", "minimum": 0, "description": "Its column in the grid." },
+              "address": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255,
+                "description": "What the device calls this light — not always its position: the Alienware keyboard counts from one."
+              },
+              "scancode": {
+                "$ref": "#/$defs/hex16",
+                "description": "What the key sends, PS/2 set 1 as Windows reports it, `e0` in front of an extended key: `1c` Enter, `e01d` right Ctrl. It is how a key press finds its light. Absent for a key that sends nothing."
+              },
+              "shape": {
+                "enum": ["rect", "disc", "archUp", "archDown"],
+                "description": "How the simulator draws it inside `rect`: the rectangle (a key, the default), a disc, or the upper or lower half of a ring."
+              },
+              "rect": {
+                "type": "array",
+                "items": { "type": "number", "minimum": 0 },
+                "minItems": 4,
+                "maxItems": 4,
+                "description": "`[x, y, width, height]` in key units, 1 being a letter key's width, from the top left. What effects measure distances with."
+              },
+              "name": { "type": "string", "description": "What it is, for whoever reads the file." }
+            }
+          }
+        }
+      }
+    },
+    "outline": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rect"],
+        "properties": {
+          "rect": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0 },
+            "minItems": 4,
+            "maxItems": 4,
+            "description": "`[x, y, width, height]`, in the lights' units."
+          },
+          "r": { "type": "number", "minimum": 0, "description": "Corner radius." }
+        }
+      },
+      "description": "Parts that light nothing — a lid, a base, ports — drawn faintly under the lights. A keyboard needs none."
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["colours", "reports"],
+        "properties": {
+          "colours": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[0-9a-fA-F]{6}$" },
+            "description": "Colours per light, `rrggbb`, in the order `items` lists them; the lights past the last one given are black."
+          },
+          "reports": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/bytes" },
+            "description": "The reports that image must give, without `prefix` and without the zeros padding them."
+          }
+        }
+      },
+      "description": "Reference frames: colours in, reports out, as a capture of the device showed them. The tests replay them byte for byte — what makes a definition reviewable by someone without the device."
+    }
+  },
+  "$defs": {
+    "hex8": { "type": "string", "pattern": "^[0-9a-fA-F]{2}$" },
+    "hex16": { "type": "string", "pattern": "^[0-9a-fA-F]{1,4}$" },
+    "bytes": {
+      "type": "string",
+      "pattern": "^\\s*([0-9a-fA-F]{2}\\s*)*$",
+      "description": "Bytes in hexadecimal, separated by spaces: `03 21 00 01 ff ff`."
+    },
+    "report": {
+      "type": "string",
+      "pattern": "^\\s*(([0-9a-fA-F]{2}|\\{(r|g|b|r2|g2|b2|address|count|addresses|lights|level|kind|row|start|end|length:[0-9]+)\\})\\s*)*$",
+      "description": "A report: bytes in hexadecimal separated by spaces, and placeholders the frame fills in — `{r} {g} {b}` a colour, `{r2} {g2} {b2}` an effect's second colour, `{address}` a light's address, `{count}` how many lights the report carries, `{addresses}` their addresses, `{lights}` their entries as `each.light` writes one, `{row} {start} {end}` a row and its first and last column, `{level}` the brightness, `{kind}` a firmware effect's kind, and `{length:N}` how many bytes the report holds after offset N, worked out once it is filled."
+    },
+    "fixedReports": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/bytes" }
+    }
+  }
+}
