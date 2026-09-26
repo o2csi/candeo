@@ -86,8 +86,10 @@ export interface DeviceInfo {
   origin: 'builtIn' | 'yours'
   /** The file of yours it is known by, for *Open*; `null` for a built-in one. */
   file: string | null
-  /** Whether a file of yours replaces a built-in definition of it. */
-  replacesBuiltIn: boolean
+  /** Every definition of it, to choose from: the built-in one first. */
+  definitions: readonly { file: string; origin: 'builtIn' | 'yours' }[]
+  /** The file of yours chosen for it when another drives it: it does not load. */
+  unloadedChoice: string | null
   /** What its lights are, and how many. */
   lights: 'keys' | 'zones'
   lightCount: number

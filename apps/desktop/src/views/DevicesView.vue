@@ -9,6 +9,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
+  chooseDeviceDefinition,
   openDevicesDir,
   reloadDeviceDefinitions,
   type DefinitionProblem,
@@ -17,7 +18,13 @@ import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
-import { ids, known, pluggedIn, type OriginFilter } from '../composables/devicesPage'
+import {
+  definitionChoice,
+  ids,
+  known,
+  pluggedIn,
+  type OriginFilter,
+} from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
@@ -73,6 +80,26 @@ async function attempt(action: () => Promise<unknown>): Promise<void> {
 
 const router = useRouter()
 
+/** What went wrong choosing a device's definition, on its card. */
+const choiceError = reactive<Record<string, string>>({})
+
+/** The device opens again on the definition chosen: the list is read again after. */
+async function choose(d: DeviceInfo, value: string): Promise<void> {
+  delete choiceError[ids(d)]
+  await chooseDeviceDefinition({ vid: d.vid, pid: d.pid }, value || null).catch((e: unknown) => {
+    choiceError[ids(d)] = message(e)
+  })
+  await refresh()
+}
+
+/** The definition in use when the file chosen does not load. */
+function unloaded(d: DeviceInfo): string {
+  const file = d.unloadedChoice ?? ''
+  return d.origin === 'builtIn'
+    ? t('devices.unloadedChoice', { file })
+    : t('devices.unloadedChoiceOther', { file, used: d.file ?? '' })
+}
+
 /** A definition opens in the editor: read only when built in, where *Copy to yours* is. */
 function edit(origin: DeviceInfo['origin'], file: string): void {
   void router.push({ name: 'definition', params: { origin, file } })
@@ -112,9 +139,34 @@ onMounted(search)
             </span>
             <span class="sub">
               <span class="mono">{{ ids(d) }}</span> · {{ count(d) }}
-              <template v-if="d.replacesBuiltIn"> · {{ t('devices.replaces') }}</template>
             </span>
           </div>
+
+          <!--
+            Which definition drives it, when there is a choice: the built-in one,
+            or a file of yours for the same ids. None takes over by being in
+            the folder (`docs/design/device-sdk.md` §9).
+          -->
+          <label v-if="definitionChoice(d) !== null" class="choice">
+            <span class="sr-only">{{ t('devices.definition') }}</span>
+            <select
+              :value="definitionChoice(d)"
+              :disabled="busy"
+              :title="t('devices.definition')"
+              @change="choose(d, ($event.target as HTMLSelectElement).value)"
+            >
+              <option
+                v-for="o in d.definitions"
+                :key="`${o.origin}:${o.file}`"
+                :value="o.origin === 'builtIn' ? '' : o.file"
+              >
+                {{ o.origin === 'builtIn' ? t('devices.groups.builtIn') : o.file }}
+              </option>
+              <option v-if="d.unloadedChoice" :value="d.unloadedChoice" disabled>
+                {{ d.unloadedChoice }}
+              </option>
+            </select>
+          </label>
 
           <!--
             The decision, not the connection: every card here is plugged in.
@@ -178,6 +230,11 @@ onMounted(search)
 
         <!-- The error belongs to the device that produced it, on its card. -->
         <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
+        <FailureNote v-if="choiceError[ids(d)]" class="err" @close="delete choiceError[ids(d)]">
+          {{ choiceError[ids(d)] }}
+        </FailureNote>
+        <!-- Said where the choice is: the reason is with your definitions. -->
+        <p v-if="d.unloadedChoice" class="warn" role="status">{{ unloaded(d) }}</p>
         <!--
           A warning, not an error: nothing is blocked. On the card rather than
           behind *Details*: a version different from the survey's is the first
@@ -359,6 +416,17 @@ onMounted(search)
   flex-direction: column;
   gap: 2px;
   padding-left: calc(8px + var(--gap-3));
+}
+
+.choice select {
+  max-width: 220px;
+  padding: 4px var(--gap-2);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .more {

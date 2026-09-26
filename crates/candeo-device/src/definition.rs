@@ -649,14 +649,14 @@ impl Lighting for Template {
 
 // ---------------------------------------------------------------- loading
 
-/// The built-in definition of a device, by its file name and text: what
-/// *Copy to yours* starts from.
-pub fn builtin_file(vid: u16, pid: u16) -> Option<(&'static str, &'static str)> {
+/// The device a built-in definition describes, by its file name: what *Copy to
+/// yours* chooses the copy for.
+pub fn builtin_layout(file: &str) -> Option<&'static Layout> {
     builtin()
         .iter()
         .zip(BUILTIN)
-        .find(|(l, _)| (l.vid, l.pid) == (vid, pid))
-        .map(|(_, file)| *file)
+        .find(|(_, (name, _))| *name == file)
+        .map(|(layout, _)| *layout)
 }
 
 /// A built-in definition's text, by its file name: what the editor shows.
@@ -1076,8 +1076,9 @@ mod tests {
     fn a_built_in_definition_is_found_by_its_file_name() {
         assert_eq!(builtin_text(BUILTIN[1].0), Some(KEYBOARD));
         assert_eq!(builtin_text("unknown.json"), None);
-        let (file, text) = builtin_file(0x1532, 0x0292).unwrap();
-        assert_eq!((file, text), BUILTIN[0]);
+        let razer = builtin_layout(BUILTIN[0].0).unwrap();
+        assert_eq!((razer.vid, razer.pid), (0x1532, 0x0292));
+        assert!(builtin_layout("unknown.json").is_none());
     }
 
     /// §8: every built-in definition loads, and gives the reports its

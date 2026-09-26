@@ -17,6 +17,17 @@ export function pluggedIn(devices: readonly DeviceInfo[]): DeviceInfo[] {
   return devices.filter((d) => d.present).sort((a, b) => rank(a) - rank(b) || byName(a, b))
 }
 
+/**
+ * What the definition choice shows: the value of the definition driving the
+ * device, or of the file chosen that does not load — the built-in one is `''`.
+ * `null` when there is nothing to choose.
+ */
+export function definitionChoice(d: DeviceInfo): string | null {
+  if (d.unloadedChoice) return d.unloadedChoice
+  if (d.definitions.length < 2) return null
+  return d.origin === 'builtIn' ? '' : (d.file ?? '')
+}
+
 /** `vid:pid` as the page writes it, four hexadecimal digits each. */
 export function ids(d: Pick<DeviceInfo, 'vid' | 'pid'>): string {
   const hex = (n: number) => n.toString(16).padStart(4, '0')

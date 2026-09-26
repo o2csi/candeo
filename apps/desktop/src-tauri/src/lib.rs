@@ -130,12 +130,14 @@ pub struct DeviceInfo {
     /// byte confirms that a command exists, never that its arguments are right.
     /// None of these warnings blocks anything. In the interface language.
     pub warnings: Vec<String>,
-    /// Whose definition it is known by: built in, or a file of yours.
+    /// Whose definition drives it: built in, or a file of yours.
     pub origin: catalog::Origin,
-    /// The file it is defined by, built in or yours, for *Open*.
+    /// That definition's file, for *Open*.
     pub file: Option<String>,
-    /// Whether that file replaces a built-in definition of the same device.
-    pub replaces_built_in: bool,
+    /// Every definition of it, to choose from: the built-in one first.
+    pub definitions: Vec<DefinitionInfo>,
+    /// The file of yours chosen for it when another drives it: it does not load.
+    pub unloaded_choice: Option<String>,
     /// What its lights are, `keys` or `zones`, and how many.
     pub lights: &'static str,
     pub light_count: usize,
@@ -908,6 +910,14 @@ fn warning_text(language: language::Language, warning: &Warning) -> String {
 
 // ---------------------------------------------------------------- commands
 
+/// A definition a device can be driven by.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionInfo {
+    pub file: String,
+    pub origin: catalog::Origin,
+}
+
 /// Lists the known layouts: plugged in or not, and above all **in which state**.
 #[tauri::command]
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
@@ -919,8 +929,12 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
     // real deadlock: this command took the keyboard then the failures,
     // `ignore_device` the reverse, and the two blocked each other.
     let failures = state.failures.lock().unwrap().clone();
+    // One reading throughout: a layout is found again in the catalog it came
+    // from.
+    let catalog = catalog::current();
 
-    Ok(layouts()
+    Ok(catalog
+        .layouts
         .iter()
         .map(|l| {
             let device = DeviceRef::of(l);
@@ -934,15 +948,16 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 name: l.name.to_string(),
                 vid: l.vid,
                 pid: l.pid,
-                origin: catalog::current().origin(l),
-                file: catalog::current()
-                    .file(l)
-                    .or_else(|| {
-                        candeo_device::definition::builtin_file(l.vid, l.pid).map(|(f, _)| f)
+                origin: catalog.origin(l),
+                file: catalog.definition(l).map(|d| d.file.clone()),
+                definitions: catalog
+                    .candidates(l.vid, l.pid)
+                    .map(|d| DefinitionInfo {
+                        file: d.file.clone(),
+                        origin: d.origin,
                     })
-                    .map(str::to_owned),
-                replaces_built_in: catalog::current().file(l).is_some()
-                    && candeo_device::definition::builtin_file(l.vid, l.pid).is_some(),
+                    .collect(),
+                unloaded_choice: catalog.unloaded_choice(l).map(str::to_owned),
                 lights: match l.lights {
                     candeo_device::Lights::Keys => "keys",
                     candeo_device::Lights::Zones => "zones",
@@ -1421,7 +1436,7 @@ pub fn run() {
             // And what each device's brightness follows, before any loop reads it.
             // Your device definitions, before anything opens a device.
             if let Ok(store) = storage::store(app.handle()) {
-                catalog::reload(Some(&store.user_devices_path()));
+                store.reload_catalog();
             }
             if let Ok(settings) = storage::store(app.handle()).and_then(|s| s.read_settings()) {
                 state.engine.sound().tune(settings.sound);
@@ -1568,6 +1583,7 @@ pub fn run() {
             storage::open_devices_dir,
             storage::reload_device_definitions,
             storage::copy_device_definition,
+            storage::choose_device_definition,
             storage::read_device_definition,
             storage::device_definition_problems,
             storage::save_device_definition,

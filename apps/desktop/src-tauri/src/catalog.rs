@@ -1,13 +1,14 @@
-//! The devices Candeo knows (`docs/design/device-sdk.md` §9): the layouts
-//! written in Rust, the built-in definitions, then yours, read from
-//! `Documents/candeo/devices`.
+//! The devices Candeo knows (`docs/design/device-sdk.md` §9): the built-in
+//! definitions and yours, read from `Documents/candeo/devices`, and for each
+//! device the one chosen.
 //!
-//! One list, rebuilt whole when the folder is read again, and never changed in
-//! place: a device opened on a layout keeps it, and the next opening takes the
-//! new one. Each version is kept for the process's life, since every part of
-//! the application holds layouts as `&'static`; a reading is a few hundred
-//! bytes.
+//! One list, rebuilt whole when the folder is read again or a choice changes,
+//! and never changed in place: a device opened on a layout keeps it, and the
+//! next opening takes the new one. Each version is kept for the process's life,
+//! since every part of the application holds layouts as `&'static`; a reading
+//! is a few hundred bytes.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -18,8 +19,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Origin {
-    /// Written in Rust or shipped as a definition: reviewed, and replayed by
-    /// the tests.
+    /// Shipped as a definition: reviewed, and replayed by the tests.
     BuiltIn,
     /// A file of yours: nobody reviewed it.
     Yours,
@@ -33,30 +33,55 @@ pub struct Problem {
     pub reason: String,
 }
 
+/// A definition that loads, and where it comes from.
+#[derive(Clone)]
+pub struct Definition {
+    pub file: String,
+    pub origin: Origin,
+    pub layout: &'static Layout,
+}
+
+/// The file of yours chosen per device, by `(vid, pid)`; a device absent from
+/// it uses the default.
+pub type Choices = BTreeMap<(u16, u16), String>;
+
 pub struct Catalog {
-    /// Built-in first, in their order, then yours; a file of yours defining a
-    /// device already known takes its place.
+    /// Every definition that loads: the built-in ones in their order, then
+    /// yours by file name.
+    definitions: Vec<Definition>,
+    /// One per device, the definition chosen: what is listed and opened. The
+    /// built-in devices first, then those only yours define.
     pub layouts: Vec<&'static Layout>,
-    /// Your files, by the device each defines.
-    yours: Vec<((u16, u16), String)>,
+    choices: Choices,
     pub problems: Vec<Problem>,
 }
 
 impl Catalog {
-    pub fn origin(&self, layout: &Layout) -> Origin {
-        if self.file(layout).is_some() {
-            Origin::Yours
-        } else {
-            Origin::BuiltIn
-        }
+    /// The definition this layout comes from.
+    pub fn definition(&self, layout: &Layout) -> Option<&Definition> {
+        self.definitions
+            .iter()
+            .find(|d| std::ptr::eq(d.layout, layout))
     }
 
-    /// The file of yours defining this device, if one does.
-    pub fn file(&self, layout: &Layout) -> Option<&str> {
-        self.yours
+    pub fn origin(&self, layout: &Layout) -> Origin {
+        self.definition(layout)
+            .map_or(Origin::BuiltIn, |d| d.origin)
+    }
+
+    /// Every definition of this device, to choose from: the built-in one first.
+    pub fn candidates(&self, vid: u16, pid: u16) -> impl Iterator<Item = &Definition> {
+        self.definitions
             .iter()
-            .find(|(id, _)| *id == (layout.vid, layout.pid))
-            .map(|(_, file)| file.as_str())
+            .filter(move |d| (d.layout.vid, d.layout.pid) == (vid, pid))
+    }
+
+    /// The file chosen for this device when another drives it: it does not
+    /// load, or no longer defines this device.
+    pub fn unloaded_choice(&self, layout: &Layout) -> Option<&str> {
+        let chosen = self.choices.get(&(layout.vid, layout.pid))?;
+        let used = self.definition(layout)?;
+        (used.origin != Origin::Yours || used.file != *chosen).then_some(chosen.as_str())
     }
 }
 
@@ -67,60 +92,95 @@ pub fn current() -> &'static Catalog {
     if let Some(catalog) = *CURRENT.read().unwrap() {
         return catalog;
     }
-    reload(None)
+    reload(None, Choices::new())
 }
 
-/// Reads the folder again, `None` for the built-in devices alone.
-pub fn reload(yours: Option<&Path>) -> &'static Catalog {
-    let catalog: &'static Catalog = Box::leak(Box::new(build(yours)));
+fn install(catalog: Catalog) -> &'static Catalog {
+    let catalog: &'static Catalog = Box::leak(Box::new(catalog));
     *CURRENT.write().unwrap() = Some(catalog);
     catalog
 }
 
-fn build(folder: Option<&Path>) -> Catalog {
-    // Read once for the process: only yours are read again.
-    let mut layouts: Vec<&'static Layout> = definition::builtin().to_vec();
+/// Reads the folder again, `None` for the built-in devices alone.
+pub fn reload(yours: Option<&Path>, choices: Choices) -> &'static Catalog {
+    install(build(yours, choices))
+}
 
-    let mut yours = Vec::new();
+/// The same definitions with other choices: nothing is read again.
+pub fn choose(choices: Choices) -> &'static Catalog {
+    let now = current();
+    install(Catalog {
+        definitions: now.definitions.clone(),
+        layouts: pick(&now.definitions, &choices),
+        choices,
+        problems: now.problems.clone(),
+    })
+}
+
+fn build(folder: Option<&Path>, choices: Choices) -> Catalog {
+    // Read once for the process: only yours are read again.
+    let mut definitions: Vec<Definition> = definition::builtin()
+        .iter()
+        .zip(definition::BUILTIN)
+        .map(|(&layout, &(file, _))| Definition {
+            file: file.to_owned(),
+            origin: Origin::BuiltIn,
+            layout,
+        })
+        .collect();
+
     let mut problems = Vec::new();
     for (file, text) in folder.map(files).unwrap_or_default() {
-        let loaded = text.and_then(|json| definition::load(&json));
-        let layout = match loaded {
-            Ok(layout) => layout,
-            Err(reason) => {
-                problems.push(Problem { file, reason });
-                continue;
-            }
-        };
-        let id = (layout.vid, layout.pid);
-        if yours.iter().any(|(known, _)| *known == id) {
-            problems.push(Problem {
+        match text.and_then(|json| definition::load(&json)) {
+            Ok(layout) => definitions.push(Definition {
                 file,
-                reason: format!(
-                    "another of your files already defines {:04x}:{:04x}",
-                    layout.vid, layout.pid
-                ),
-            });
-            continue;
+                origin: Origin::Yours,
+                layout,
+            }),
+            Err(reason) => problems.push(Problem { file, reason }),
         }
-        match layouts.iter().position(|l| (l.vid, l.pid) == id) {
-            Some(i) => layouts[i] = layout,
-            None => layouts.push(layout),
-        }
-        yours.push((id, file));
     }
-    if !yours.is_empty() || !problems.is_empty() {
+    let yours = definitions.len() - definition::BUILTIN.len();
+    if yours > 0 || !problems.is_empty() {
         tracing::info!(
-            loaded = yours.len(),
+            loaded = yours,
             refused = problems.len(),
             "your device definitions read"
         );
     }
     Catalog {
-        layouts,
-        yours,
+        layouts: pick(&definitions, &choices),
+        definitions,
+        choices,
         problems,
     }
+}
+
+/// One definition per device: the file chosen if it loads, else the built-in
+/// one, else your first file by name. None takes over by being in the folder.
+fn pick(definitions: &[Definition], choices: &Choices) -> Vec<&'static Layout> {
+    let mut devices: Vec<(u16, u16)> = Vec::new();
+    for d in definitions {
+        let id = (d.layout.vid, d.layout.pid);
+        if !devices.contains(&id) {
+            devices.push(id);
+        }
+    }
+    devices
+        .into_iter()
+        .filter_map(|id| {
+            let of = || {
+                definitions
+                    .iter()
+                    .filter(move |d| (d.layout.vid, d.layout.pid) == id)
+            };
+            let chosen = choices.get(&id);
+            of().find(|d| d.origin == Origin::Yours && Some(&d.file) == chosen)
+                .or_else(|| of().find(|d| d.origin == Origin::BuiltIn))
+                .or_else(|| of().next())
+                .map(|d| d.layout)
+        })
+        .collect()
 }
 
 /// The folder's `.json` files, by name, each read or why not. A folder that
@@ -153,6 +213,7 @@ mod tests {
     use super::*;
 
     const ZONES: &str = definition::BUILTIN[2].1;
+    const ZONES_ID: (u16, u16) = (0x187c, 0x0551);
 
     fn folder(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -162,9 +223,18 @@ mod tests {
         dir
     }
 
+    fn zones(c: &Catalog) -> &Definition {
+        let layout = c
+            .layouts
+            .iter()
+            .find(|l| (l.vid, l.pid) == ZONES_ID)
+            .unwrap();
+        c.definition(layout).unwrap()
+    }
+
     #[test]
     fn without_a_folder_the_built_in_devices_are_known() {
-        let c = build(None);
+        let c = build(None, Choices::new());
         assert_eq!(c.layouts.len(), 3);
         assert!(c.layouts.iter().all(|l| c.origin(l) == Origin::BuiltIn));
         assert!(c.problems.is_empty());
@@ -176,7 +246,7 @@ mod tests {
             .replace("\"0551\"", "\"0999\"")
             .replace("m18 R1 zones", "test zones");
         let dir = folder(&[("test.json", &other), ("notes.txt", "not a definition")]);
-        let c = build(Some(dir.path()));
+        let c = build(Some(dir.path()), Choices::new());
         let added = c.layouts.last().unwrap();
         assert_eq!((added.name, added.pid), ("Alienware test zones", 0x0999));
         assert_eq!(c.origin(added), Origin::Yours);
@@ -184,27 +254,50 @@ mod tests {
     }
 
     #[test]
-    fn a_file_of_yours_replaces_the_built_in_definition_of_its_device() {
-        let dir = folder(&[("zones.json", ZONES)]);
-        let c = build(Some(dir.path()));
+    fn a_file_of_yours_drives_a_built_in_device_only_once_chosen() {
+        let dir = folder(&[("a.json", ZONES), ("b.json", ZONES)]);
+
+        let c = build(Some(dir.path()), Choices::new());
         assert_eq!(c.layouts.len(), 3);
-        assert_eq!(c.origin(c.layouts[2]), Origin::Yours);
-        assert_eq!(c.origin(c.layouts[0]), Origin::BuiltIn);
+        assert_eq!(zones(&c).origin, Origin::BuiltIn);
+        let files: Vec<&str> = c
+            .candidates(ZONES_ID.0, ZONES_ID.1)
+            .map(|d| d.file.as_str())
+            .collect();
+        assert_eq!(files, ["alienware-m18-r1-zones.json", "a.json", "b.json"]);
+
+        let c = build(
+            Some(dir.path()),
+            Choices::from([(ZONES_ID, "b.json".into())]),
+        );
+        assert_eq!(
+            (zones(&c).origin, zones(&c).file.as_str()),
+            (Origin::Yours, "b.json")
+        );
+        assert_eq!(c.unloaded_choice(zones(&c).layout), None);
+        assert_eq!(c.layouts.len(), 3);
     }
 
     #[test]
-    fn a_file_that_drives_nothing_says_why() {
+    fn a_chosen_file_that_does_not_load_leaves_the_built_in_one() {
         let broken = ZONES.replace("{count}", "{counts}");
-        let dir = folder(&[("a.json", ZONES), ("b.json", ZONES), ("c.json", &broken)]);
-        let c = build(Some(dir.path()));
-        assert_eq!(
-            c.problems
-                .iter()
-                .map(|p| p.file.as_str())
-                .collect::<Vec<_>>(),
-            ["b.json", "c.json"]
+        let dir = folder(&[("mine.json", &broken)]);
+        let c = build(
+            Some(dir.path()),
+            Choices::from([(ZONES_ID, "mine.json".into())]),
         );
-        assert!(c.problems[0].reason.contains("already defines 187c:0551"));
-        assert!(c.problems[1].reason.contains("{counts}"));
+        assert_eq!(zones(&c).origin, Origin::BuiltIn);
+        assert_eq!(c.unloaded_choice(zones(&c).layout), Some("mine.json"));
+        assert_eq!(c.problems.len(), 1);
+        assert!(c.problems[0].reason.contains("{counts}"));
+    }
+
+    #[test]
+    fn a_device_nobody_built_in_uses_your_first_file_by_name() {
+        let other = ZONES.replace("\"0551\"", "\"0999\"");
+        let dir = folder(&[("b.json", &other), ("a.json", &other)]);
+        let c = build(Some(dir.path()), Choices::new());
+        let added = c.layouts.last().unwrap();
+        assert_eq!(c.definition(added).unwrap().file, "a.json");
     }
 }
