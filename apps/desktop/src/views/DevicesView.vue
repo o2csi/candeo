@@ -24,6 +24,7 @@ import {
   known,
   pluggedIn,
   type OriginFilter,
+  yourFiles,
 } from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
@@ -55,18 +56,18 @@ const plugged = computed(() => pluggedIn(devices.value))
 const text = ref('')
 const origin = ref<OriginFilter>('all')
 const listed = computed(() => known(devices.value, text.value, origin.value))
-const yours = computed(() => devices.value.filter((d) => d.origin === 'yours'))
 
 /** Which cards show their technical details. */
 const opened = reactive<Record<string, boolean>>({})
 
 /** Your files that drive nothing, and why. */
 const problems = ref<DefinitionProblem[]>([])
+const files = computed(() => yourFiles(devices.value, problems.value))
 /** What went wrong with a file or the folder, said once, under the list. */
 const fileError = ref<string | null>(null)
 
-/** Searching reads your definitions again first: a file just saved is a device to look for. */
-async function search(): Promise<void> {
+/** Reads your definitions again first: a file just saved may define a device to look for. */
+async function reread(): Promise<void> {
   problems.value = await reloadDeviceDefinitions().catch(() => problems.value)
   await refresh()
 }
@@ -109,15 +110,15 @@ function count(d: DeviceInfo): string {
   return t(`devices.count.${d.lights}`, { n: d.lightCount }, d.lightCount)
 }
 
-onMounted(search)
+onMounted(reread)
 </script>
 
 <template>
   <section class="page">
     <header class="head">
       <h1>{{ t('devices.title') }}</h1>
-      <button class="ghost" :disabled="busy" :title="t('devices.searchTitle')" @click="search">
-        {{ t('devices.search') }}
+      <button class="ghost" :disabled="busy" :title="t('devices.refreshTitle')" @click="reread">
+        {{ t('devices.refresh') }}
       </button>
     </header>
 
@@ -303,25 +304,31 @@ onMounted(search)
 
     <!-- ------------------------------------------------ yours -->
     <!--
-      What the folder holds, loaded or not. A file that drives nothing is listed
-      with why, like an effect that does not compile, and the warning is said
-      once, above what it is about.
+      What the folder holds, loaded or not, chosen or not. A file that drives
+      nothing is listed with why, like an effect that does not compile, and the
+      warning is said once, above what it is about.
     -->
     <div class="bar">
       <h2 class="group">{{ t('devices.yoursTitle') }}</h2>
       <button class="ghost small" @click="attempt(openDevicesDir)">{{ t('devices.openFolder') }}</button>
     </div>
-    <p v-if="yours.length" class="warn" role="status">{{ t('devices.yoursNote') }}</p>
-    <ul v-if="problems.length" class="cards">
-      <li v-for="p in problems" :key="p.file" class="card problem">
+    <p v-if="files.length" class="warn" role="status">{{ t('devices.yoursNote') }}</p>
+    <ul v-if="files.length" class="cards">
+      <li v-for="f in files" :key="f.file" class="card" :class="{ problem: f.reason }">
         <div class="main">
-          <span class="mono id">{{ p.file }}</span>
-          <button class="ghost small" @click="edit('yours', p.file)">{{ t('devices.open') }}</button>
+          <div class="id">
+            <span class="mono">{{ f.file }}</span>
+            <span v-if="f.device" class="sub">
+              {{ f.device.name }} · <span class="mono">{{ ids(f.device) }}</span>
+            </span>
+            <span v-else class="mono reason">{{ f.reason }}</span>
+          </div>
+          <span v-if="f.inUse" class="tag adopted">{{ t('devices.inUse') }}</span>
+          <button class="ghost small" @click="edit('yours', f.file)">{{ t('devices.open') }}</button>
         </div>
-        <span class="mono reason">{{ p.reason }}</span>
       </li>
     </ul>
-    <p v-if="!yours.length && !problems.length" class="note">{{ t('devices.yoursNone') }}</p>
+    <p v-else class="note">{{ t('devices.yoursNone') }}</p>
     <FailureNote v-if="fileError" class="err" @close="fileError = null">{{ fileError }}</FailureNote>
   </section>
 </template>

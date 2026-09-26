@@ -302,8 +302,8 @@
   },
   "devices": {
     "title": "Devices",
-    "search": "Search",
-    "searchTitle": "Look for devices and read your definitions again",
+    "refresh": "Refresh",
+    "refreshTitle": "Look for devices and read your definitions again",
     "status": {
       "controlled": "controlled",
       "notOpen": "not open",
@@ -373,7 +373,8 @@
     "yoursTitle": "Your definitions",
     "definition": "Definition",
     "unloadedChoice": "“{file}” does not load: the built-in definition is used instead.",
-    "unloadedChoiceOther": "“{file}” does not load: “{used}” is used instead."
+    "unloadedChoiceOther": "“{file}” does not load: “{used}” is used instead.",
+    "inUse": "in use"
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",

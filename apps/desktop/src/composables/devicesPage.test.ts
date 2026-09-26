@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DeviceInfo } from '../api/types'
-import { definitionChoice, ids, known, pluggedIn } from './devicesPage'
+import { definitionChoice, ids, known, pluggedIn, yourFiles } from './devicesPage'
 
 function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
   return {
@@ -49,6 +49,24 @@ describe('devices page', () => {
     expect(
       definitionChoice(device('Broken', { definitions: [builtIn], unloadedChoice: 'mine.json' })),
     ).toBe('mine.json')
+  })
+
+  it('lists every file of yours, the chosen one in use, the broken one with why', () => {
+    const zones = device('Zones', {
+      definitions: [
+        { file: 'zones.json', origin: 'builtIn' },
+        { file: 'b.json', origin: 'yours' },
+        { file: 'a.json', origin: 'yours' },
+      ],
+      origin: 'yours',
+      file: 'a.json',
+    })
+    const files = yourFiles([zones, device('Razer')], [{ file: 'c.json', reason: 'broken' }])
+    expect(files.map((f) => [f.file, f.inUse, f.reason ?? f.device?.name])).toEqual([
+      ['a.json', true, 'Zones'],
+      ['b.json', false, 'Zones'],
+      ['c.json', false, 'broken'],
+    ])
   })
 
   it('writes ids as four hexadecimal digits each', () => {

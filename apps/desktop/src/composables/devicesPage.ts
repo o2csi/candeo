@@ -1,6 +1,7 @@
 // What the Devices page shows, in which order (`docs/design/device-sdk.md` §9).
 // Pure, so which device goes where is tested without a DOM.
 
+import type { DefinitionProblem } from '../api/candeo'
 import type { DeviceInfo } from '../api/types'
 
 /** Which definitions the list of known devices shows. */
@@ -26,6 +27,31 @@ export function definitionChoice(d: DeviceInfo): string | null {
   if (d.unloadedChoice) return d.unloadedChoice
   if (d.definitions.length < 2) return null
   return d.origin === 'builtIn' ? '' : (d.file ?? '')
+}
+
+/** A file of yours, as *Your definitions* lists it. */
+export interface YourFile {
+  file: string
+  /** The device it defines, when it loads. */
+  device?: DeviceInfo
+  /** Whether it drives that device: the one chosen on its card. */
+  inUse: boolean
+  /** Why it drives nothing, when it does not load. */
+  reason?: string
+}
+
+/** Every file of your folder, loaded or not, by name: chosen or not, each is yours to open. */
+export function yourFiles(
+  devices: readonly DeviceInfo[],
+  problems: readonly DefinitionProblem[],
+): YourFile[] {
+  const loaded = devices.flatMap((d) =>
+    d.definitions
+      .filter((o) => o.origin === 'yours')
+      .map((o) => ({ file: o.file, device: d, inUse: d.origin === 'yours' && d.file === o.file })),
+  )
+  const broken = problems.map((p) => ({ file: p.file, inUse: false, reason: p.reason }))
+  return [...loaded, ...broken].sort((a, b) => a.file.localeCompare(b.file))
 }
 
 /** `vid:pid` as the page writes it, four hexadecimal digits each. */
