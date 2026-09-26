@@ -21,6 +21,7 @@ function device(pid: number, part: Partial<DeviceInfo> = {}): DeviceInfo {
     surveyedFirmware: 'v1.5',
     firmware: null,
     warnings: [],
+    origin: 'builtIn',
     ...part,
   }
 }

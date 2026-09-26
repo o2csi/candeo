@@ -79,6 +79,11 @@ export interface DeviceInfo {
    * Already in the interface language: Rust renders them when listing.
    */
   warnings: readonly string[]
+  /**
+   * Whose definition it is known by: built in — reviewed, and replayed by the
+   * tests — or a file of yours (`docs/design/device-sdk.md` §9).
+   */
+  origin: 'builtIn' | 'yours'
 }
 
 /**

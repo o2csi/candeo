@@ -303,6 +303,26 @@ export function openEffectsDir(): Promise<void> {
   return invoke('open_effects_dir')
 }
 
+/** A file of yours that drives nothing, and why: in English, for its author. */
+export interface DefinitionProblem {
+  file: string
+  reason: string
+}
+
+/** Opens the folder of your device definitions, created if needed. */
+export function openDevicesDir(): Promise<void> {
+  return invoke('open_devices_dir')
+}
+
+/**
+ * Reads the folder of your device definitions again; the files that drive
+ * nothing come back with their reason. A device already open keeps the
+ * definition it opened with until it opens again.
+ */
+export function reloadDeviceDefinitions(): Promise<DefinitionProblem[]> {
+  return invoke('reload_device_definitions')
+}
+
 /**
  * Forgets the settings kept for an effect the folder no longer holds: its
  * parameters on every device, and where it was applied.
