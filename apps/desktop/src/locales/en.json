@@ -466,6 +466,20 @@
       "test": "Send a test signal",
       "send": "Send"
     },
+    "games": {
+      "title": "Games",
+      "detail": "What happens in the game — your health, the bomb — arrives as signals: cs2.health, cs2.bomb.",
+      "state": {
+        "notFound": "not found on this computer",
+        "disconnected": "not connected",
+        "connected": "connected",
+        "outdated": "to connect again"
+      },
+      "connect": "Connect",
+      "reconnect": "Connect again",
+      "disconnect": "Disconnect",
+      "restart": "{game} reads it when it starts: restart it if it is running."
+    },
     "version": {
       "title": "Candeo {version}",
       "check": "Check for new versions",

@@ -33,6 +33,7 @@ import {
 } from '../api/candeo'
 import { error, message } from '../api/journal'
 import FailureNote from '../components/FailureNote.vue'
+import GamesSettings from '../components/GamesSettings.vue'
 import SignalsSettings from '../components/SignalsSettings.vue'
 import SoundSettings from '../components/SoundSettings.vue'
 import { useDevice } from '../composables/useDevice'
@@ -272,6 +273,8 @@ const problem = ref<string | null>(null)
  * block reads it all again by starting afresh.
  */
 const resets = ref(0)
+/** Connecting a game may turn reception on: the signals block reads it again. */
+const gamesChanged = ref(0)
 
 /**
  * Resets `settings.json`. Rust stops the loops, turns the backlight off and
@@ -371,7 +374,9 @@ onMounted(() => {
       </template>
     </section>
 
-    <SignalsSettings :key="resets" />
+    <SignalsSettings :key="`${resets}-${gamesChanged}`" />
+
+    <GamesSettings :key="resets" @changed="gamesChanged++" />
 
     <SoundSettings :key="resets" />
 

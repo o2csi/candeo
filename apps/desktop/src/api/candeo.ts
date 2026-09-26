@@ -1230,6 +1230,30 @@ export function eraseSignal(name: string): Promise<void> {
 }
 
 /**
+ * A game whose state Candeo can receive (`docs/design/game-state-integration.md`):
+ * `notFound` when Steam does not have it here, `outdated` when its file names
+ * another port or token, or reception is off.
+ */
+export interface GameView {
+  id: string
+  name: string
+  state: 'notFound' | 'disconnected' | 'connected' | 'outdated'
+}
+
+export function listGames(): Promise<GameView[]> {
+  return invoke('list_games')
+}
+
+/** Writes the game's file, and turns reception on if it was off. */
+export function connectGame(game: string): Promise<GameView[]> {
+  return invoke('connect_game', { game })
+}
+
+export function disconnectGame(game: string): Promise<GameView[]> {
+  return invoke('disconnect_game', { game })
+}
+
+/**
  * Emitted by Rust when the signals held change, expiry included.
  *
  * Written here and as `CHANGED` in `src-tauri/src/signals/mod.rs`; nothing links

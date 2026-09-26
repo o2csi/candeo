@@ -466,6 +466,20 @@
       "test": "Envoyer un signal de test",
       "send": "Envoyer"
     },
+    "games": {
+      "title": "Jeux",
+      "detail": "Ce qui se passe dans le jeu — votre vie, la bombe — arrive en signaux : cs2.health, cs2.bomb.",
+      "state": {
+        "notFound": "introuvable sur cet ordinateur",
+        "disconnected": "non connecté",
+        "connected": "connecté",
+        "outdated": "à reconnecter"
+      },
+      "connect": "Connecter",
+      "reconnect": "Reconnecter",
+      "disconnect": "Déconnecter",
+      "restart": "{game} le lit au démarrage : relancez-le s’il est ouvert."
+    },
     "version": {
       "title": "Candeo {version}",
       "check": "Vérifier les nouvelles versions",
