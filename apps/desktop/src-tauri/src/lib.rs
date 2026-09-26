@@ -132,6 +132,13 @@ pub struct DeviceInfo {
     pub warnings: Vec<String>,
     /// Whose definition it is known by: built in, or a file of yours.
     pub origin: catalog::Origin,
+    /// The file it is defined by, built in or yours, for *Open*.
+    pub file: Option<String>,
+    /// Whether that file replaces a built-in definition of the same device.
+    pub replaces_built_in: bool,
+    /// What its lights are, `keys` or `zones`, and how many.
+    pub lights: &'static str,
+    pub light_count: usize,
 }
 
 /// A key, as the simulator must draw it.
@@ -782,6 +789,43 @@ pub(crate) fn reconcile_devices(app: &AppHandle) -> bool {
     adoptions.retry
 }
 
+/// Opens a device again on the definition it now has, if it is open: a saved
+/// definition shows on the keyboard at once, not at the next plug-in. What ran
+/// there starts again, since an effect is started for one layout.
+pub(crate) fn reopen(app: &AppHandle, device: DeviceRef) {
+    let state = app.state::<AppState>();
+    if !state.open_devices().contains(&device) {
+        return;
+    }
+    let running = |state: &AppState| {
+        state
+            .engine
+            .device_status()
+            .into_iter()
+            .find(|s| s.device == device && s.status.running)
+            .and_then(|s| s.status.effect_id)
+    };
+    let was_running = running(&state);
+    // Stopping waits for the loop to end: nothing writes on the old handle
+    // once it is closed.
+    state.engine.stop(device);
+    state.set_open(device, None);
+    tracing::info!(device = %device, "definition saved, device opens again");
+    reconcile_devices(app);
+
+    // Resuming follows the setting; what ran a moment ago comes back
+    // regardless, as the device would not have stopped without the save. Not a
+    // rule's effect: starting it here would store it as the one applied, and
+    // the rule gives the device back when it ends anyway.
+    let open = state.open_devices().contains(&device);
+    let free = !automations::interrupts(app, device);
+    if let Some(effect) = was_running.filter(|_| open && free && running(&state).is_none()) {
+        if let Err(e) = runtime::start_saved(app, device, &effect) {
+            tracing::warn!(device = %device, effect, "effect not started again: {e}");
+        }
+    }
+}
+
 /// Puts back on the keyboard the brightness stored for it.
 ///
 /// **A stored level that is not reapplied on plug-in is useless**: it is the
@@ -891,6 +935,19 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 vid: l.vid,
                 pid: l.pid,
                 origin: catalog::current().origin(l),
+                file: catalog::current()
+                    .file(l)
+                    .or_else(|| {
+                        candeo_device::definition::builtin_file(l.vid, l.pid).map(|(f, _)| f)
+                    })
+                    .map(str::to_owned),
+                replaces_built_in: catalog::current().file(l).is_some()
+                    && candeo_device::definition::builtin_file(l.vid, l.pid).is_some(),
+                lights: match l.lights {
+                    candeo_device::Lights::Keys => "keys",
+                    candeo_device::Lights::Zones => "zones",
+                },
+                light_count: l.lit_count(),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
@@ -1510,6 +1567,10 @@ pub fn run() {
             storage::open_effects_dir,
             storage::open_devices_dir,
             storage::reload_device_definitions,
+            storage::copy_device_definition,
+            storage::read_device_definition,
+            storage::device_definition_problems,
+            storage::save_device_definition,
             storage::forget_effect_settings,
             storage::get_settings,
             storage::set_settings,

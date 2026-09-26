@@ -10,12 +10,14 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { effectModel, monaco, setupMonaco } from '../editor/monaco'
+import { definitionModel, effectModel, monaco, setupMonaco } from '../editor/monaco'
 
 const props = defineProps<{
   modelValue: string
   /** While an installed effect is loading, an empty text is not edited. */
   disabled?: boolean
+  /** An effect, by default, or a device definition. */
+  language?: 'typescript' | 'json'
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
@@ -27,7 +29,8 @@ let model: monaco.editor.ITextModel | null = null
 
 onMounted(() => {
   setupMonaco()
-  model = effectModel(props.modelValue)
+  model =
+    props.language === 'json' ? definitionModel(props.modelValue) : effectModel(props.modelValue)
 
   editor = monaco.editor.create(host.value as HTMLElement, {
     model,

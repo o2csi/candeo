@@ -84,6 +84,13 @@ export interface DeviceInfo {
    * tests — or a file of yours (`docs/design/device-sdk.md` §9).
    */
   origin: 'builtIn' | 'yours'
+  /** The file of yours it is known by, for *Open*; `null` for a built-in one. */
+  file: string | null
+  /** Whether a file of yours replaces a built-in definition of it. */
+  replacesBuiltIn: boolean
+  /** What its lights are, and how many. */
+  lights: 'keys' | 'zones'
+  lightCount: number
 }
 
 /**

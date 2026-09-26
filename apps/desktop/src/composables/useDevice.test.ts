@@ -22,6 +22,10 @@ function device(pid: number, part: Partial<DeviceInfo> = {}): DeviceInfo {
     firmware: null,
     warnings: [],
     origin: 'builtIn',
+    file: null,
+    replacesBuiltIn: false,
+    lights: 'keys',
+    lightCount: 1,
     ...part,
   }
 }

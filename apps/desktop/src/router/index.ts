@@ -42,5 +42,12 @@ export const router = createRouter({
       component: () => import('../views/EditorView.vue'),
       meta: { full: true },
     },
+    {
+      // A device definition, built in (read only) or yours.
+      path: '/definition/:origin/:file',
+      name: 'definition',
+      component: () => import('../views/DefinitionView.vue'),
+      meta: { full: true },
+    },
   ],
 })

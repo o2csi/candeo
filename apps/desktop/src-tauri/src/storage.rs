@@ -2517,6 +2517,92 @@ pub fn open_devices_dir(app: AppHandle) -> CmdResult<()> {
         .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&dir))))
 }
 
+/// Copies a built-in device's definition into your folder, where it replaces
+/// the built-in one from the next reading on: the start of a corrected
+/// drawing, or of a neighbouring model. An existing file of that name is not
+/// overwritten — it is yours already.
+#[tauri::command]
+pub fn copy_device_definition(app: AppHandle, file: String) -> CmdResult<String> {
+    let json = candeo_device::definition::builtin_text(&file)
+        .ok_or_else(|| Failure::unexpected(format!("no built-in definition {file:?}")))?;
+    let store = store(&app)?;
+    let path = store.user_devices_dir()?.join(&file);
+    if path.exists() {
+        return Err(Failure::new("definitionExists").with("file", &file));
+    }
+    fs::write(&path, json).map_err(|e| {
+        Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(&path)))
+    })?;
+    crate::catalog::reload(Some(&store.user_devices_path()));
+    Ok(file)
+}
+
+/// Your files that drive nothing, as last read, without reading them again.
+#[tauri::command]
+pub fn device_definition_problems() -> Vec<crate::catalog::Problem> {
+    crate::catalog::current().problems.clone()
+}
+
+/// Checks that `file` names a definition in your folder and nothing else: the
+/// window only sends back names it was given, so any other is a bug.
+fn definition_file(file: &str) -> CmdResult<()> {
+    let json = Path::new(file)
+        .extension()
+        .is_some_and(|x| x.eq_ignore_ascii_case("json"));
+    if validate_name(file).is_err() || !json {
+        return Err(Failure::unexpected(format!(
+            "not a definition file name: {file:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// A device definition's text, built in or yours, for the editor.
+#[tauri::command]
+pub fn read_device_definition(
+    app: AppHandle,
+    origin: crate::catalog::Origin,
+    file: String,
+) -> CmdResult<String> {
+    if origin == crate::catalog::Origin::BuiltIn {
+        return candeo_device::definition::builtin_text(&file)
+            .map(str::to_owned)
+            .ok_or_else(|| Failure::unexpected(format!("no built-in definition {file:?}")));
+    }
+    definition_file(&file)?;
+    let path = store(&app)?.user_devices_path().join(&file);
+    fs::read_to_string(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => Failure::new("definitionNotFound").with("file", &file),
+        _ => Failure::unexpected(format!("cannot read {}: {e}", crate::paths::shown(&path))),
+    })
+}
+
+/// Saves a file of yours and reads the folder again. Comes back with why the
+/// file drives nothing, or `None` once it does; the device it defines, if
+/// open, opens again on it, so that a change shows as soon as it is saved.
+#[tauri::command]
+pub fn save_device_definition(
+    app: AppHandle,
+    file: String,
+    text: String,
+) -> CmdResult<Option<String>> {
+    definition_file(&file)?;
+    let store = store(&app)?;
+    write_atomically(&store.user_devices_dir()?.join(&file), &text)?;
+    let catalog = crate::catalog::reload(Some(&store.user_devices_path()));
+    if let Some(problem) = catalog.problems.iter().find(|p| p.file == file) {
+        return Ok(Some(problem.reason.clone()));
+    }
+    let defined = catalog
+        .layouts
+        .iter()
+        .find(|l| catalog.file(l) == Some(file.as_str()));
+    if let Some(layout) = defined {
+        crate::reopen(&app, DeviceRef::of(layout));
+    }
+    Ok(None)
+}
+
 /// Reads the folder of your device definitions again, and says which files
 /// drive nothing and why. A device already open keeps the definition it was
 /// opened with until it opens again.
@@ -2724,6 +2810,24 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    /// The editor names a file of yours, never a path: anything else is refused
+    /// before touching the disk.
+    #[test]
+    fn a_definition_is_named_by_a_json_file_name_only() {
+        assert!(definition_file("razer-deathstalker-v2-pro.json").is_ok());
+        assert!(definition_file("Mine.JSON").is_ok());
+        for refused in [
+            "../settings.json",
+            "a/b.json",
+            r"a\b.json",
+            "notes.txt",
+            "",
+            ".json.",
+        ] {
+            assert!(definition_file(refused).is_err(), "{refused}");
+        }
+    }
 
     /// Separate directories, as on Linux: a test that merged them would let a
     /// data / documents / configuration / cache mix-up slip through.

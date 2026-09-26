@@ -309,6 +309,32 @@ export interface DefinitionProblem {
   reason: string
 }
 
+/**
+ * Copies a built-in device's definition into your folder, where it replaces the
+ * built-in one; the file's name comes back. One already there is not overwritten.
+ */
+export function copyDeviceDefinition(file: string): Promise<string> {
+  return invoke('copy_device_definition', { file })
+}
+
+/** A device definition's text, built in or yours. */
+export function readDeviceDefinition(origin: 'builtIn' | 'yours', file: string): Promise<string> {
+  return invoke('read_device_definition', { origin, file })
+}
+
+/**
+ * Saves a file of yours; comes back with why it drives nothing, or `null` once
+ * it does. The device it defines, if open, opens again on it.
+ */
+export function saveDeviceDefinition(file: string, text: string): Promise<string | null> {
+  return invoke('save_device_definition', { file, text })
+}
+
+/** Your files that drive nothing, as last read. */
+export function deviceDefinitionProblems(): Promise<DefinitionProblem[]> {
+  return invoke('device_definition_problems')
+}
+
 /** Opens the folder of your device definitions, created if needed. */
 export function openDevicesDir(): Promise<void> {
   return invoke('open_devices_dir')
