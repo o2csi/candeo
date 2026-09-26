@@ -673,8 +673,10 @@ interpreter, written and tested once in Rust, turns it into reports:
   every device using it stays data.
 - **Every field is documented in a schema**, `devices/device-definition.schema.json`,
   which each definition names in `$schema`: an editor completes and checks a file
-  against it, and the tests check that the built-in definitions follow it. The same holds for the shapes the simulator
-  draws (`studio.md` §4).
+  against it, and a file loads only if it follows it, so the editor and the
+  application never disagree about one. The tests check that the built-in
+  definitions follow it. The same holds for the shapes the simulator draws
+  (`studio.md` §4).
 - **What stays code**: the interpreter, its placeholders and integrity functions,
   the checks of §6 turned into refusals when a definition loads, and any family
   that cannot be described yet — kept as a Rust family until it can.
