@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — describe a device</title>
+    <meta
+      name="description"
+      content="Teach Candeo a new device with a JSON file: how to find it, the bytes it expects, where its lights sit and the effects its firmware runs. Written and checked in the app, tried at once, and contributed when it is right."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+{{nav}}
+      <h1>Describe a device</h1>
+      <p class="lead">
+        Candeo learns a device from a JSON file: how to find it, the bytes it expects, where its
+        lights sit, and the effects its own firmware runs. No code and no rebuild — save the file,
+        choose it on the device's card, and the device obeys it.
+      </p>
+
+      <section>
+        <h2>Start from one that works</h2>
+        <ol>
+          <li>
+            In <strong>Devices</strong>, under <em>Every device Candeo knows</em>, <em>Open</em> the
+            device closest to yours. A built-in definition opens read only.
+          </li>
+          <li>
+            Click <strong>Copy to yours</strong>. The copy lands in
+            <code>Documents\candeo\devices</code>, opens in its place, and becomes the one the
+            device uses.
+          </li>
+          <li>
+            Edit it. The editor checks every field as you type and shows what each one means on
+            hover; <kbd>Ctrl</kbd>+<kbd>S</kbd> puts it in shape and saves it.
+          </li>
+          <li>
+            Saved, it takes effect at once: the device opens again on it, and the effect it was
+            showing starts again.
+          </li>
+        </ol>
+        <p>
+          For a device Candeo does not know, change <code>match</code> to its ids: the file then
+          adds a device rather than replacing one. Several files may describe the same device —
+          a variant each — and the card's <em>Definition</em> list says which one drives it. The
+          built-in one is the default, and a file never takes over by being in the folder.
+        </p>
+        <p>
+          A file that does not load is listed under <em>Your definitions</em> with the reason, the
+          same one the editor underlines, and the device keeps the definition it had.
+        </p>
+      </section>
+
+      <section>
+        <h2>A whole definition</h2>
+        <p>
+          The lights around the Alienware m18 R1's keyboard, as Candeo ships them: three zones, a
+          report to select lights, another to colour them, and two images checked byte for byte.
+        </p>
+        <pre data-lang="json" data-file="alienware-m18-r1-zones.json"><code>{{zonesDefinition}}</code></pre>
+        <p>The sections below take its parts in turn, and the fields the other devices add.</p>
+      </section>
+
+      <section>
+        <h2>Finding the device: <code>match</code></h2>
+        <p>
+          A device is found by its vendor and product ids, four hexadecimal digits each. A device
+          with lights usually exposes several HID entries — keys, media keys, lighting — and only
+          one of them takes the lighting reports, so the definition names which:
+        </p>
+        <ul>
+          <li>
+            <code>interface</code>, the number of the interface carrying it: <code>3</code> on the
+            DeathStalker V2 Pro;
+          </li>
+          <li>
+            or <code>usagePage</code> and <code>usage</code>, when several collections share one
+            interface: <code>ff00</code> and <code>0001</code> for the m18's zones.
+          </li>
+        </ul>
+        <p>
+          On Windows, the device's <em>Hardware Ids</em> in Device Manager read like
+          <code>HID\VID_1532&amp;PID_0292&amp;MI_03</code>: vendor, product, interface. The wrong
+          entry opens fine and silently drops every write, which is why it is named rather than
+          guessed.
+        </p>
+      </section>
+
+      <section>
+        <h2>The shape of a report: <code>report</code></h2>
+        <ul>
+          <li>
+            <code>wire</code> — <code>feature</code> or <code>output</code>, how reports leave. A
+            device may act on one and ignore the same bytes sent the other way.
+          </li>
+          <li>
+            <code>length</code> — every report's length in bytes. Reports are padded with zeros to
+            it, and one that could grow past it is refused when the file loads.
+          </li>
+          <li>
+            <code>prefix</code> — bytes the HID API wants in front of every report without being
+            part of it, usually the report id: <code>00</code> for a device without one. Offsets in
+            the file count after it.
+          </li>
+          <li>
+            <code>checksum</code> — an integrity byte, named rather than written:
+            <code>{ "function": "xor", "from": 2, "to": 87, "at": 88 }</code> puts at byte 88 the
+            XOR of bytes 2 to 87. <code>xor</code> and <code>sum</code> (modulo 256) exist; a
+            protocol needing another asks for it, and it is added once for every device.
+          </li>
+          <li>
+            <code>command</code> — where a report carries its command, as
+            <code>{ "class": 6, "id": 7 }</code> on the Razer: with it, a command the device says it
+            does not know is never sent.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>An image of every light: <code>frame</code></h2>
+        <p>
+          Up to thirty times a second, Candeo sends an image: the <code>open</code> reports, then
+          <code>each</code> for the lights, then the <code>close</code> reports — often what makes
+          the device show it. Reports are written as a capture shows them, bytes in hexadecimal,
+          and placeholders in braces that the image fills in.
+        </p>
+        <p>By default, <code>each.send</code> goes out once per light. Two ways to send fewer:</p>
+        <ul>
+          <li>
+            <code>"group": "colour"</code>, with a <code>chunk</code> size, puts lights sharing a
+            colour in one report, as a device that selects lights then colours them wants — the
+            m18's zones above.
+          </li>
+          <li>
+            <code>"by": "row"</code> sends one report per row of the grid, each light written by
+            <code>each.light</code> where <code>{lights}</code> stands — the DeathStalker, with
+            <code>"light": "{r} {g} {b}"</code>.
+          </li>
+        </ul>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Placeholder</th>
+                <th>What it is</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>{r} {g} {b}</code></td><td>A colour, one byte each.</td></tr>
+              <tr><td><code>{address}</code></td><td>A light's address, as the device calls it.</td></tr>
+              <tr><td><code>{count}</code> <code>{addresses}</code></td><td>How many lights the report carries, and their addresses.</td></tr>
+              <tr><td><code>{lights}</code></td><td>Their entries, each written as <code>each.light</code> says.</td></tr>
+              <tr><td><code>{row} {start} {end}</code></td><td>A row, and its first and last column.</td></tr>
+              <tr><td><code>{length:N}</code></td><td>How many bytes the report holds after offset N, once filled.</td></tr>
+              <tr><td><code>{level}</code></td><td>The brightness, in <code>brightness</code>.</td></tr>
+              <tr><td><code>{kind}</code> <code>{r2} {g2} {b2}</code></td><td>A firmware effect's kind, and its second colour.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Two more fields, for devices with habits:</p>
+        <ul>
+          <li>
+            <code>pace</code> — for a device that takes changes rather than a stream:
+            <code>atLeastMs</code> between two images, and <code>skipUnchanged</code> to send
+            nothing when nothing changed.
+          </li>
+          <li>
+            <code>takeOver</code> — reports sent once when one of Candeo's effects starts, to stop an
+            animation the firmware would otherwise keep drawing over every image.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Where the lights are: <code>lights</code></h2>
+        <p>
+          <code>kind</code> says what they are: <code>keys</code>, which can be pressed, or
+          <code>zones</code> — a ring, a logo, a strip — which cannot, so effects reacting to typing
+          are not offered there. Each item then gives:
+        </p>
+        <ul>
+          <li>
+            <code>address</code> — what the device calls the light. Not always its position: the
+            m18's keyboard counts from one.
+          </li>
+          <li>
+            <code>rect</code> — <code>[x, y, width, height]</code> in key units, a letter key being
+            1 wide, from the top left. The simulator draws it there, and effects measure distances
+            with it, so an effect written for one device looks right on another.
+          </li>
+          <li>
+            <code>row</code> and <code>col</code> — its cell, when the definition gives a grid with
+            <code>rows</code> and <code>cols</code>. Without one, the items make a single row.
+          </li>
+          <li>
+            <code>scancode</code> — what the key sends, as Windows reports it: <code>1c</code> Enter,
+            <code>e01d</code> right Ctrl. It is how a key press finds its light.
+          </li>
+          <li>
+            <code>shape</code> — <code>disc</code>, <code>archUp</code> or <code>archDown</code> to
+            draw something other than a key; and <code>name</code>, for whoever reads the file.
+          </li>
+        </ul>
+        <p>
+          <code>outline</code> draws, faintly, the parts that light nothing — a lid, a base, ports —
+          so zones sit where they are on the device. A keyboard needs none.
+        </p>
+      </section>
+
+      <section>
+        <h2>Brightness and the firmware's own effects</h2>
+        <p>
+          <code>brightness</code> lists the reports setting the overall level, <code>{level}</code>
+          from <code>00</code> to <code>ff</code>. Without it, the device has no brightness slider.
+        </p>
+        <p>
+          <code>firmware</code> offers the effects the device runs by itself, in the gallery beside
+          Candeo's: they cost the computer nothing, and keep going when Candeo is closed.
+          <code>send</code> is the report selecting one, with <code>{kind}</code> and its colours;
+          <code>off</code> the kind that shows nothing, when there is one. Each effect then says:
+        </p>
+        <ul>
+          <li>
+            <code>id</code> — how Candeo knows it, <code>hardware:</code> first. Settings, rules and
+            the effect applied name it by this: keep it when you copy a definition, and your settings
+            follow.
+          </li>
+          <li><code>kind</code>, and <code>colours</code> — how many it asks for, none to two.</li>
+          <li><code>send</code> — its own report, when it carries more than a kind.</li>
+          <li>
+            <code>name</code> and <code>summary</code> — what the gallery calls it and says of it,
+            in one language or several:
+          </li>
+        </ul>
+        <pre data-lang="json"><code>{
+  "id": "hardware:m18-08",
+  "kind": "08",
+  "looks": "breathing",
+  "name": { "en": "Breathing", "fr": "Respiration" },
+  "summary": {
+    "en": "Colours follow one another, fading through black in between.",
+    "fr": "Les couleurs se succèdent, en passant par le noir entre chacune."
+  }
+}</code></pre>
+        <p>
+          A plain string is the same in every language, and English is shown where the interface's
+          language is missing. <code>looks</code> picks the drawing the gallery shows as a legend of
+          the effect — <code>steady</code>, <code>pulse</code>, <code>breathing</code>,
+          <code>morph</code>, <code>wave</code>, <code>scanner</code> or <code>spectrum</code>.
+          It is a legend, not a preview: the firmware draws the effect and shows nothing back.
+        </p>
+      </section>
+
+      <section>
+        <h2>Proving it: <code>examples</code></h2>
+        <p>
+          A reference frame is an image and the reports it must give: colours in, bytes out, as a
+          capture of the device showed them. Candeo's tests replay those of every built-in
+          definition byte for byte — which is what lets someone without the device review one, and
+          what keeps it right as Candeo changes. In a file of yours they document; in a
+          contribution they are required.
+        </p>
+        <p>
+          <code>surveyed</code> records the firmware version the survey was made against, and
+          <code>notes</code> what a reviewer should know. Candeo reads neither to drive the device;
+          when a device reports another firmware version, its card says so.
+        </p>
+      </section>
+
+      <section>
+        <h2>Finding the bytes</h2>
+        <p>
+          The bytes come from watching the maker's own software: a USB capture — Wireshark with
+          USBPcap on Windows — while it changes a colour, then another, then the brightness. What
+          changes between two captures is the colour; what stays is the frame around it. Two
+          worked surveys, with the method and every fact dated, are in
+          <a href="{{repository}}/tree/main/docs/protocol">docs/protocol</a>.
+        </p>
+        <p>Then try it on the device, carefully:</p>
+        <ul>
+          <li>
+            <strong>A status that says “accepted” proves little.</strong> On the Razer protocol it
+            validates the command, never its arguments. Read a setting back to know it was taken.
+          </li>
+          <li>
+            <strong>Send only what you saw the maker's software send.</strong> Commands reading the
+            device's information are for reading; a command switching the device to its
+            software-driven mode makes the firmware stop handling some keys.
+          </li>
+          <li>
+            <strong>Keep the keyboard in view</strong> the first time a definition drives it.
+          </li>
+        </ul>
+      </section>
+
+      <section id="built-in">
+        <h2>Making it built in</h2>
+        <p>
+          A definition that works for you can ship with Candeo, for everyone with that device. A
+          pull request adds the file to
+          <a href="{{repository}}/tree/main/crates/candeo-device/devices">crates/candeo-device/devices</a>
+          with its reference frames, and the survey behind it to <code>docs/protocol</code>: the
+          firmware version, how each fact was established, and when. The tests replay the frames,
+          and the schema checks the rest.
+          <a href="{{repository}}/issues/34">#34</a> is where what a contribution carries is being
+          settled.
+        </p>
+      </section>
+
+      <section>
+        <h2>Reference</h2>
+        <ul>
+          <li>
+            <a href="device-definition.schema.json">The schema</a> — every field and what it accepts.
+            Name it in <code>$schema</code> and any editor reading JSON schemas checks your file:
+            <code>"$schema": "https://o2csi.github.io/candeo/device-definition.schema.json"</code>.
+          </li>
+          <li>
+            <a href="{{repository}}/tree/main/crates/candeo-device/devices">The built-in
+            definitions</a> — the DeathStalker V2 Pro and the m18 R1's keyboard and zones.
+          </li>
+          <li>
+            <a href="{{repository}}/blob/main/docs/design/device-sdk.md">docs/design/device-sdk.md</a>
+            — why definitions are built this way.
+          </li>
+        </ul>
+      </section>
+    </main>
+
+{{footer}}
+  </body>
+</html>
