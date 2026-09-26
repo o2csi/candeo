@@ -317,6 +317,14 @@ export function copyDeviceDefinition(file: string): Promise<string> {
   return invoke('copy_device_definition', { file })
 }
 
+/**
+ * Chooses which definition drives a device: a file of yours, or `null` for the
+ * default. An open device opens again on it.
+ */
+export function chooseDeviceDefinition(device: DeviceRef, file: string | null): Promise<void> {
+  return invoke('choose_device_definition', { device, file })
+}
+
 /** A device definition's text, built in or yours. */
 export function readDeviceDefinition(origin: 'builtIn' | 'yours', file: string): Promise<string> {
   return invoke('read_device_definition', { origin, file })

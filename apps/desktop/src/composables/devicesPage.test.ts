@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DeviceInfo } from '../api/types'
-import { ids, known, pluggedIn } from './devicesPage'
+import { definitionChoice, ids, known, pluggedIn, yourFiles } from './devicesPage'
 
 function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
   return {
@@ -17,7 +17,8 @@ function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
     warnings: [],
     origin: 'builtIn',
     file: null,
-    replacesBuiltIn: false,
+    definitions: [],
+    unloadedChoice: null,
     lights: 'keys',
     lightCount: 106,
     ...part,
@@ -33,6 +34,39 @@ describe('devices page', () => {
       device('Gamma', { present: true, state: 'adopted' }),
     ]
     expect(pluggedIn(list).map((d) => d.name)).toEqual(['Gamma', 'Beta', 'Zeta'])
+  })
+
+  it('offers a choice only between several definitions, or a broken one chosen', () => {
+    const builtIn = { file: 'zones.json', origin: 'builtIn' as const }
+    const mine = { file: 'mine.json', origin: 'yours' as const }
+    expect(definitionChoice(device('Alone', { definitions: [builtIn] }))).toBeNull()
+    expect(definitionChoice(device('Default', { definitions: [builtIn, mine] }))).toBe('')
+    expect(
+      definitionChoice(
+        device('Mine', { definitions: [builtIn, mine], origin: 'yours', file: 'mine.json' }),
+      ),
+    ).toBe('mine.json')
+    expect(
+      definitionChoice(device('Broken', { definitions: [builtIn], unloadedChoice: 'mine.json' })),
+    ).toBe('mine.json')
+  })
+
+  it('lists every file of yours, the chosen one in use, the broken one with why', () => {
+    const zones = device('Zones', {
+      definitions: [
+        { file: 'zones.json', origin: 'builtIn' },
+        { file: 'b.json', origin: 'yours' },
+        { file: 'a.json', origin: 'yours' },
+      ],
+      origin: 'yours',
+      file: 'a.json',
+    })
+    const files = yourFiles([zones, device('Razer')], [{ file: 'c.json', reason: 'broken' }])
+    expect(files.map((f) => [f.file, f.inUse, f.reason ?? f.device?.name])).toEqual([
+      ['a.json', true, 'Zones'],
+      ['b.json', false, 'Zones'],
+      ['c.json', false, 'broken'],
+    ])
   })
 
   it('writes ids as four hexadecimal digits each', () => {

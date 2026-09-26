@@ -345,6 +345,17 @@ pub struct ActiveEffectRecord {
     pub effect: String,
 }
 
+/// The definition of yours chosen for a device model (`docs/design/device-sdk.md`
+/// §9). Per model, as [`ActiveEffectRecord`]: one definition drives a model.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DefinitionChoice {
+    pub vid: u16,
+    pub pid: u16,
+    /// A file of yours, by name.
+    pub file: String,
+}
+
 /// An effect's parameters, kept for **one** device.
 ///
 /// # Why device and effect together
@@ -504,6 +515,10 @@ pub struct Settings {
     /// of a device never encountered. The file therefore does not grow by one
     /// entry for each device plugged in once.
     pub devices: Vec<DeviceRecord>,
+    /// The definition chosen per device model, when it is not the default.
+    /// Absent from the file until someone chooses one of theirs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub definitions: Vec<DefinitionChoice>,
     /// The effect **applied** on each device. See [`ActiveEffectRecord`].
     ///
     /// Same economy as the rest: no entry until something has been applied, and
@@ -575,6 +590,7 @@ impl Default for Settings {
             version: SETTINGS_VERSION,
             preferences: Preferences::default(),
             devices: Vec::new(),
+            definitions: Vec::new(),
             active_effects: Vec::new(),
             effect_params: Vec::new(),
             shipped_effects: BTreeMap::new(),
@@ -587,6 +603,27 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The files chosen, as the catalog reads them.
+    pub fn definition_choices(&self) -> crate::catalog::Choices {
+        self.definitions
+            .iter()
+            .map(|c| ((c.vid, c.pid), c.file.clone()))
+            .collect()
+    }
+
+    /// Chooses a file of yours for a device model; `None` goes back to the
+    /// default, and the entry with it.
+    pub fn choose_definition(&mut self, vid: u16, pid: u16, file: Option<&str>) {
+        self.definitions.retain(|c| (c.vid, c.pid) != (vid, pid));
+        if let Some(file) = file {
+            self.definitions.push(DefinitionChoice {
+                vid,
+                pid,
+                file: file.to_owned(),
+            });
+        }
+    }
+
     /// The rules of the file, each with its own verdict — why the field stays raw
     /// JSON is said on it; see [`crate::automations::resolver::parse`].
     pub fn rules(&self) -> Vec<Result<crate::automations::resolver::Rule, String>> {
@@ -1630,6 +1667,16 @@ impl Store {
             .join("devices")
     }
 
+    /// Reads your device definitions again, with the choices the settings
+    /// keep. Unreadable settings choose nothing: the defaults drive.
+    pub fn reload_catalog(&self) -> &'static crate::catalog::Catalog {
+        let choices = self
+            .read_settings()
+            .map(|s| s.definition_choices())
+            .unwrap_or_default();
+        crate::catalog::reload(Some(&self.user_devices_path()), choices)
+    }
+
     /// The same folder, created if it does not exist yet: opening it is how a
     /// first definition gets added.
     pub fn user_devices_dir(&self) -> CmdResult<PathBuf> {
@@ -2533,8 +2580,37 @@ pub fn copy_device_definition(app: AppHandle, file: String) -> CmdResult<String>
     fs::write(&path, json).map_err(|e| {
         Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(&path)))
     })?;
-    crate::catalog::reload(Some(&store.user_devices_path()));
+    // Made to be changed: the copy drives its device from now on. Its text is
+    // the built-in one, so an open device has nothing to open again for.
+    if let Some(layout) = candeo_device::definition::builtin_layout(&file) {
+        let mut settings = store.read_settings()?;
+        settings.choose_definition(layout.vid, layout.pid, Some(&file));
+        store.write_settings(&settings)?;
+    }
+    store.reload_catalog();
     Ok(file)
+}
+
+/// Chooses which definition drives a device, `None` for the default, and
+/// opens it again on it if it is open.
+#[tauri::command]
+pub fn choose_device_definition(
+    app: AppHandle,
+    device: DeviceRef,
+    file: Option<String>,
+) -> CmdResult<()> {
+    if let Some(file) = &file {
+        definition_file(file)?;
+    }
+    let store = store(&app)?;
+    let mut settings = store.read_settings()?;
+    settings.choose_definition(device.vid, device.pid, file.as_deref());
+    store.write_settings(&settings)?;
+    crate::catalog::choose(settings.definition_choices());
+    crate::reopen(&app, device);
+    // Another definition may name the device otherwise.
+    crate::tray::refresh(&app);
+    Ok(())
 }
 
 /// Your files that drive nothing, as last read, without reading them again.
@@ -2589,15 +2665,18 @@ pub fn save_device_definition(
     definition_file(&file)?;
     let store = store(&app)?;
     write_atomically(&store.user_devices_dir()?.join(&file), &text)?;
-    let catalog = crate::catalog::reload(Some(&store.user_devices_path()));
+    let catalog = store.reload_catalog();
     if let Some(problem) = catalog.problems.iter().find(|p| p.file == file) {
         return Ok(Some(problem.reason.clone()));
     }
-    let defined = catalog
-        .layouts
-        .iter()
-        .find(|l| catalog.file(l) == Some(file.as_str()));
-    if let Some(layout) = defined {
+    // Only the device this file drives: saving a variant nobody chose changes
+    // nothing on the keyboard.
+    let drives = catalog.layouts.iter().find(|l| {
+        catalog
+            .definition(l)
+            .is_some_and(|d| d.origin == crate::catalog::Origin::Yours && d.file == file)
+    });
+    if let Some(layout) = drives {
         crate::reopen(&app, DeviceRef::of(layout));
     }
     Ok(None)
@@ -2609,9 +2688,7 @@ pub fn save_device_definition(
 #[tauri::command]
 pub fn reload_device_definitions(app: AppHandle) -> CmdResult<Vec<crate::catalog::Problem>> {
     let store = store(&app)?;
-    Ok(crate::catalog::reload(Some(&store.user_devices_path()))
-        .problems
-        .clone())
+    Ok(store.reload_catalog().problems.clone())
 }
 
 #[tauri::command]
@@ -4167,6 +4244,22 @@ mod tests {
         }
     }
 
+    /// The default keeps no entry: the file says only what someone chose.
+    #[test]
+    fn choosing_the_default_definition_removes_the_choice() {
+        let mut settings = Settings::default();
+        settings.choose_definition(0x187c, 0x0551, Some("a.json"));
+        settings.choose_definition(0x187c, 0x0551, Some("b.json"));
+        assert_eq!(
+            settings.definition_choices(),
+            crate::catalog::Choices::from([((0x187c, 0x0551), "b.json".to_owned())])
+        );
+        settings.choose_definition(0x187c, 0x0551, None);
+        assert!(settings.definitions.is_empty());
+        let json = serde_json::to_value(&settings).unwrap();
+        assert!(json.get("definitions").is_none());
+    }
+
     #[test]
     fn settings_round_trip() {
         let (tmp, store) = temp_store();
@@ -4188,6 +4281,11 @@ mod tests {
                 state: DeviceState::Adopted,
                 brightness: Some(128),
                 dimming: None,
+            }],
+            definitions: vec![DefinitionChoice {
+                vid: 0x1532,
+                pid: 0x0292,
+                file: "mine.json".into(),
             }],
             active_effects: vec![ActiveEffectRecord {
                 vid: 0x1532,

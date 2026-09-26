@@ -803,11 +803,25 @@ add what compiling could not:
 A definition that fails to load is listed with the reason, like an effect that
 does not compile, and drives nothing.
 
-Both open in the application's editor, checked against the schema as they are
-typed. A built-in one is read only: *Copy to yours* puts it in the folder,
-where it replaces the built-in one. Saving one of yours reads the folder again
-and opens its device again on it, so that a change shows on the keyboard at
-once; a file that no longer loads leaves the built-in definition in place.
+**Which one drives a device is a choice**, made on its card in *Devices*: the
+built-in definition, or one of your files for the same `vid:pid`. Several files
+may define a device, a variant each; none takes over by being in the folder.
+
+- The built-in definition is the default. A device nobody built in uses your
+  first file by name.
+- The choice is kept in `settings.json` per model, as the applied effect is:
+  the engine drives a model, not a unit. Choosing the default removes it.
+- Changing it opens the device again on the definition chosen, and what ran
+  there starts again.
+- A chosen file that no longer loads leaves the default in place, and the card
+  says so in one line. The reason is listed with your definitions and shown in
+  the editor.
+
+Both kinds open in the application's editor, checked against the schema as they
+are typed. A built-in one is read only: *Copy to yours* puts it in the folder
+and chooses the copy, since a copy is made to be changed. Saving one of yours
+reads the folder again; when it is the one chosen, its device opens again on it,
+so that a change shows on the keyboard at once.
 
 ---
 

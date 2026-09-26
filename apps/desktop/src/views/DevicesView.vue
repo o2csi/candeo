@@ -9,6 +9,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
+  chooseDeviceDefinition,
   openDevicesDir,
   reloadDeviceDefinitions,
   type DefinitionProblem,
@@ -17,7 +18,14 @@ import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
-import { ids, known, pluggedIn, type OriginFilter } from '../composables/devicesPage'
+import {
+  definitionChoice,
+  ids,
+  known,
+  pluggedIn,
+  type OriginFilter,
+  yourFiles,
+} from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
@@ -48,18 +56,18 @@ const plugged = computed(() => pluggedIn(devices.value))
 const text = ref('')
 const origin = ref<OriginFilter>('all')
 const listed = computed(() => known(devices.value, text.value, origin.value))
-const yours = computed(() => devices.value.filter((d) => d.origin === 'yours'))
 
 /** Which cards show their technical details. */
 const opened = reactive<Record<string, boolean>>({})
 
 /** Your files that drive nothing, and why. */
 const problems = ref<DefinitionProblem[]>([])
+const files = computed(() => yourFiles(devices.value, problems.value))
 /** What went wrong with a file or the folder, said once, under the list. */
 const fileError = ref<string | null>(null)
 
-/** Searching reads your definitions again first: a file just saved is a device to look for. */
-async function search(): Promise<void> {
+/** Reads your definitions again first: a file just saved may define a device to look for. */
+async function reread(): Promise<void> {
   problems.value = await reloadDeviceDefinitions().catch(() => problems.value)
   await refresh()
 }
@@ -73,6 +81,26 @@ async function attempt(action: () => Promise<unknown>): Promise<void> {
 
 const router = useRouter()
 
+/** What went wrong choosing a device's definition, on its card. */
+const choiceError = reactive<Record<string, string>>({})
+
+/** The device opens again on the definition chosen: the list is read again after. */
+async function choose(d: DeviceInfo, value: string): Promise<void> {
+  delete choiceError[ids(d)]
+  await chooseDeviceDefinition({ vid: d.vid, pid: d.pid }, value || null).catch((e: unknown) => {
+    choiceError[ids(d)] = message(e)
+  })
+  await refresh()
+}
+
+/** The definition in use when the file chosen does not load. */
+function unloaded(d: DeviceInfo): string {
+  const file = d.unloadedChoice ?? ''
+  return d.origin === 'builtIn'
+    ? t('devices.unloadedChoice', { file })
+    : t('devices.unloadedChoiceOther', { file, used: d.file ?? '' })
+}
+
 /** A definition opens in the editor: read only when built in, where *Copy to yours* is. */
 function edit(origin: DeviceInfo['origin'], file: string): void {
   void router.push({ name: 'definition', params: { origin, file } })
@@ -82,15 +110,15 @@ function count(d: DeviceInfo): string {
   return t(`devices.count.${d.lights}`, { n: d.lightCount }, d.lightCount)
 }
 
-onMounted(search)
+onMounted(reread)
 </script>
 
 <template>
   <section class="page">
     <header class="head">
       <h1>{{ t('devices.title') }}</h1>
-      <button class="ghost" :disabled="busy" :title="t('devices.searchTitle')" @click="search">
-        {{ t('devices.search') }}
+      <button class="ghost" :disabled="busy" :title="t('devices.refreshTitle')" @click="reread">
+        {{ t('devices.refresh') }}
       </button>
     </header>
 
@@ -112,9 +140,34 @@ onMounted(search)
             </span>
             <span class="sub">
               <span class="mono">{{ ids(d) }}</span> · {{ count(d) }}
-              <template v-if="d.replacesBuiltIn"> · {{ t('devices.replaces') }}</template>
             </span>
           </div>
+
+          <!--
+            Which definition drives it, when there is a choice: the built-in one,
+            or a file of yours for the same ids. None takes over by being in
+            the folder (`docs/design/device-sdk.md` §9).
+          -->
+          <label v-if="definitionChoice(d) !== null" class="choice">
+            <span class="sr-only">{{ t('devices.definition') }}</span>
+            <select
+              :value="definitionChoice(d)"
+              :disabled="busy"
+              :title="t('devices.definition')"
+              @change="choose(d, ($event.target as HTMLSelectElement).value)"
+            >
+              <option
+                v-for="o in d.definitions"
+                :key="`${o.origin}:${o.file}`"
+                :value="o.origin === 'builtIn' ? '' : o.file"
+              >
+                {{ o.origin === 'builtIn' ? t('devices.groups.builtIn') : o.file }}
+              </option>
+              <option v-if="d.unloadedChoice" :value="d.unloadedChoice" disabled>
+                {{ d.unloadedChoice }}
+              </option>
+            </select>
+          </label>
 
           <!--
             The decision, not the connection: every card here is plugged in.
@@ -178,6 +231,11 @@ onMounted(search)
 
         <!-- The error belongs to the device that produced it, on its card. -->
         <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
+        <FailureNote v-if="choiceError[ids(d)]" class="err" @close="delete choiceError[ids(d)]">
+          {{ choiceError[ids(d)] }}
+        </FailureNote>
+        <!-- Said where the choice is: the reason is with your definitions. -->
+        <p v-if="d.unloadedChoice" class="warn" role="status">{{ unloaded(d) }}</p>
         <!--
           A warning, not an error: nothing is blocked. On the card rather than
           behind *Details*: a version different from the survey's is the first
@@ -246,25 +304,31 @@ onMounted(search)
 
     <!-- ------------------------------------------------ yours -->
     <!--
-      What the folder holds, loaded or not. A file that drives nothing is listed
-      with why, like an effect that does not compile, and the warning is said
-      once, above what it is about.
+      What the folder holds, loaded or not, chosen or not. A file that drives
+      nothing is listed with why, like an effect that does not compile, and the
+      warning is said once, above what it is about.
     -->
     <div class="bar">
       <h2 class="group">{{ t('devices.yoursTitle') }}</h2>
       <button class="ghost small" @click="attempt(openDevicesDir)">{{ t('devices.openFolder') }}</button>
     </div>
-    <p v-if="yours.length" class="warn" role="status">{{ t('devices.yoursNote') }}</p>
-    <ul v-if="problems.length" class="cards">
-      <li v-for="p in problems" :key="p.file" class="card problem">
+    <p v-if="files.length" class="warn" role="status">{{ t('devices.yoursNote') }}</p>
+    <ul v-if="files.length" class="cards">
+      <li v-for="f in files" :key="f.file" class="card" :class="{ problem: f.reason }">
         <div class="main">
-          <span class="mono id">{{ p.file }}</span>
-          <button class="ghost small" @click="edit('yours', p.file)">{{ t('devices.open') }}</button>
+          <div class="id">
+            <span class="mono">{{ f.file }}</span>
+            <span v-if="f.device" class="sub">
+              {{ f.device.name }} · <span class="mono">{{ ids(f.device) }}</span>
+            </span>
+            <span v-else class="mono reason">{{ f.reason }}</span>
+          </div>
+          <span v-if="f.inUse" class="tag adopted">{{ t('devices.inUse') }}</span>
+          <button class="ghost small" @click="edit('yours', f.file)">{{ t('devices.open') }}</button>
         </div>
-        <span class="mono reason">{{ p.reason }}</span>
       </li>
     </ul>
-    <p v-if="!yours.length && !problems.length" class="note">{{ t('devices.yoursNone') }}</p>
+    <p v-else class="note">{{ t('devices.yoursNone') }}</p>
     <FailureNote v-if="fileError" class="err" @close="fileError = null">{{ fileError }}</FailureNote>
   </section>
 </template>
@@ -359,6 +423,17 @@ onMounted(search)
   flex-direction: column;
   gap: 2px;
   padding-left: calc(8px + var(--gap-3));
+}
+
+.choice select {
+  max-width: 220px;
+  padding: 4px var(--gap-2);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
 }
 
 .more {

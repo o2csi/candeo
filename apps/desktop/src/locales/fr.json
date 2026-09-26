@@ -302,8 +302,8 @@
   },
   "devices": {
     "title": "Périphériques",
-    "search": "Rechercher",
-    "searchTitle": "Chercher les appareils et relire vos définitions",
+    "refresh": "Actualiser",
+    "refreshTitle": "Chercher les appareils et relire vos définitions",
     "status": {
       "controlled": "piloté",
       "notOpen": "non ouvert",
@@ -367,11 +367,14 @@
       "zones": "{n} zone | {n} zones"
     },
     "copy": "Copier chez vous",
-    "copyTitle": "Copier sa définition dans votre dossier, où elle remplace celle intégrée",
+    "copyTitle": "Copier cette définition dans votre dossier, et utiliser la copie",
     "open": "Ouvrir",
     "details": "Détails",
-    "replaces": "votre copie remplace celle intégrée",
-    "yoursTitle": "Vos définitions"
+    "yoursTitle": "Vos définitions",
+    "definition": "Définition",
+    "unloadedChoice": "« {file} » ne se charge pas : la définition intégrée est utilisée à la place.",
+    "unloadedChoiceOther": "« {file} » ne se charge pas : « {used} » est utilisé à la place.",
+    "inUse": "utilisée"
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",

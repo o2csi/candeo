@@ -302,8 +302,8 @@
   },
   "devices": {
     "title": "Devices",
-    "search": "Search",
-    "searchTitle": "Look for devices and read your definitions again",
+    "refresh": "Refresh",
+    "refreshTitle": "Look for devices and read your definitions again",
     "status": {
       "controlled": "controlled",
       "notOpen": "not open",
@@ -367,11 +367,14 @@
       "zones": "{n} zone | {n} zones"
     },
     "copy": "Copy to yours",
-    "copyTitle": "Copy its definition into your folder, where it replaces the built-in one",
+    "copyTitle": "Copy this definition into your folder, and use the copy",
     "open": "Open",
     "details": "Details",
-    "replaces": "your copy replaces the built-in one",
-    "yoursTitle": "Your definitions"
+    "yoursTitle": "Your definitions",
+    "definition": "Definition",
+    "unloadedChoice": "“{file}” does not load: the built-in definition is used instead.",
+    "unloadedChoiceOther": "“{file}” does not load: “{used}” is used instead.",
+    "inUse": "in use"
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
