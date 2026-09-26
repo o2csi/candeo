@@ -649,7 +649,9 @@ const { frame, restartPreview } = useSimulatorFeed({
   // keyboard will show rather than a colour of its own.
   illustratedColours: () => {
     const bytes = colourBytes(paramValues.value)
-    return bytes.length >= 3 ? [[bytes[0], bytes[1], bytes[2]] as Rgb] : []
+    const colours: Rgb[] = []
+    for (let i = 0; i + 3 <= bytes.length; i += 3) colours.push([bytes[i], bytes[i + 1], bytes[i + 2]])
+    return colours
   },
   params: () => paramValues.value,
   bindings: () => paramBindings.value,

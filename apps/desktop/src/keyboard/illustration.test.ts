@@ -44,6 +44,16 @@ describe('illustrating a firmware effect', () => {
     expect(morph.some(dark)).toBe(false)
   })
 
+  it('breathes each colour out of black and back, changing colour in the dark', () => {
+    const at = (seconds: number) => illustrate('breathing', seconds, COLS, LEN, [])[0]
+    expect(at(0)).toEqual([0, 0, 0])
+    expect(at(1)).toEqual([255, 0, 0])
+    expect(at(2)).toEqual([0, 0, 0])
+    expect(at(3)).toEqual([0, 0, 255])
+    const green: Rgb = [0, 255, 0]
+    expect(illustrate('breathing', 3, COLS, LEN, [green])[0]).toEqual(green)
+  })
+
   it('moves a lit band along the keys, for the scanner', () => {
     const start = frame('scanner', 0)
     const later = frame('scanner', 0.75)

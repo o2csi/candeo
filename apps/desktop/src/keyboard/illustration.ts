@@ -110,8 +110,10 @@ export function illustrate(
    */
   colours: readonly Rgb[] = [],
 ): Rgb[] {
+  // An effect given one colour shows that one only; one painting its own
+  // palette gets two, to show colours following one another.
   const one = colours[0] ?? ONE
-  const two = colours[1] ?? TWO
+  const two = colours[1] ?? colours[0] ?? TWO
 
   const cell = (position: number): Rgb => {
     const column = cols > 0 ? position % cols : 0
@@ -132,12 +134,13 @@ export function illustrate(
       case 'wave':
         return hue(across * 300 - seconds * 180)
 
-      // Two colours following one another, black in between.
+      // Colours following one another, black in between: each rises out of
+      // black and sinks back into it before the next, so the colour changes in
+      // the dark, never at full brightness.
       case 'breathing': {
         const phase = (seconds / 2) % 2
-        const fading = phase % 1
         const colour = phase < 1 ? one : two
-        return dim(colour, fading < 0.5 ? 1 - fading * 2 : (fading - 0.5) * 2)
+        return dim(colour, Math.sin(Math.PI * (phase % 1)) ** 2)
       }
 
       // The same, never going dark.
