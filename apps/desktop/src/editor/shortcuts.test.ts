@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { commentKey, keysOf, SHORTCUTS } from './shortcuts'
+import { commentKey, keysOf, SHORTCUTS, taught } from './shortcuts'
 
 const comment = SHORTCUTS.find((s) => s.action === 'comment')!
 const find = SHORTCUTS.find((s) => s.action === 'find')!
@@ -16,6 +16,15 @@ describe('the shortcuts as this keyboard prints them', () => {
     expect(commentKey(AZERTY)).toBe(':')
     expect(commentKey(QWERTZ)).toBe('#')
     expect(commentKey(null)).toBe('/')
+  })
+
+  it('prefers what the comment key was seen typing', () => {
+    expect(commentKey(null, ':')).toBe(':')
+    expect(commentKey(US, ':')).toBe(':')
+    const press = { keyCode: 191, key: ':', shiftKey: false, altKey: false }
+    expect(taught(press)).toBe(':')
+    expect(taught({ ...press, shiftKey: true, key: '/' })).toBeNull()
+    expect(taught({ ...press, keyCode: 190 })).toBeNull()
   })
 
   it('leaves the letters as they are', () => {

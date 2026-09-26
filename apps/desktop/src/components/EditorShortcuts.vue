@@ -1,3 +1,8 @@
+<script lang="ts">
+/** Said once per window: every editor opened would say it again otherwise. */
+let toldLayout = false
+</script>
+
 <script setup lang="ts">
 /**
  * The editor's shortcuts, behind a button in its header and F1: there when
@@ -6,13 +11,27 @@
 
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { keysOf, readLayout, SHORTCUTS, type LayoutMap } from '../editor/shortcuts'
+import { info } from '../api/journal'
+import { keysOf, readLayout, SHORTCUTS, taught, type LayoutMap } from '../editor/shortcuts'
 import { t } from '../i18n'
+
+/** Where what the comment key typed is kept, from one session to the next. */
+const LEARNED = 'candeo:comment-key'
+
+function remembered(): string | null {
+  try {
+    return localStorage.getItem(LEARNED)
+  } catch {
+    return null
+  }
+}
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
 /** The keyboard's layout, for the one label it changes. */
 const layout = ref<LayoutMap | null>(null)
+/** What the comment key was last seen typing. */
+const learned = ref<string | null>(remembered())
 
 /** A click anywhere else closes it, as a menu does. */
 function outside(e: MouseEvent): void {
@@ -22,8 +41,19 @@ function outside(e: MouseEvent): void {
 /**
  * F1 from anywhere on the screen, the code included: Monaco leaves it alone,
  * since its command palette is not loaded. Escape closes it from there too.
+ * Listened to before Monaco, which keeps the keys it binds, so that every key
+ * typed can teach what the comment key prints.
  */
 function key(e: KeyboardEvent): void {
+  const character = taught(e)
+  if (character && character !== learned.value) {
+    learned.value = character
+    try {
+      localStorage.setItem(LEARNED, character)
+    } catch {
+      // Learned again next time.
+    }
+  }
   if (e.key === 'F1') {
     e.preventDefault()
     open.value = !open.value
@@ -38,12 +68,16 @@ watch(open, (now) => {
 })
 
 onMounted(async () => {
-  window.addEventListener('keydown', key)
-  layout.value = await readLayout()
+  window.addEventListener('keydown', key, true)
+  layout.value = await readLayout().catch((e: unknown) => {
+    if (!toldLayout) info('editor', `keyboard layout not read, the comment key is learned by typing: ${e}`)
+    toldLayout = true
+    return null
+  })
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', key)
+  window.removeEventListener('keydown', key, true)
   window.removeEventListener('mousedown', outside)
 })
 </script>
@@ -63,7 +97,7 @@ onBeforeUnmount(() => {
       <table>
         <tbody>
           <tr v-for="s in SHORTCUTS" :key="s.action">
-            <td><kbd>{{ keysOf(s, layout) }}</kbd></td>
+            <td><kbd>{{ keysOf(s, layout, learned) }}</kbd></td>
             <td>{{ t(`editor.shortcuts.${s.action}`) }}</td>
           </tr>
         </tbody>
