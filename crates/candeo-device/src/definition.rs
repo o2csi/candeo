@@ -1125,6 +1125,7 @@ mod tests {
             "Breathing",
             "English where a language is missing"
         );
+        assert_eq!(breathing.looks, Some("breathing"), "carried for the legend");
         let morph = l
             .firmware_effects
             .iter()
