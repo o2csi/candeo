@@ -803,6 +803,12 @@ add what compiling could not:
 A definition that fails to load is listed with the reason, like an effect that
 does not compile, and drives nothing.
 
+Both open in the application's editor, checked against the schema as they are
+typed. A built-in one is read only: *Copy to yours* puts it in the folder,
+where it replaces the built-in one. Saving one of yours reads the folder again
+and opens its device again on it, so that a change shows on the keyboard at
+once; a file that no longer loads leaves the built-in definition in place.
+
 ---
 
 ## 10. What this changes in the existing code
