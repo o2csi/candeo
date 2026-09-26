@@ -35,6 +35,8 @@
  */
 
 import * as monaco from 'monaco-editor/editor/editor.api.js'
+// *Format Document* and its Shift+Alt+F: the API alone registers neither.
+import 'monaco-editor/editor/contrib/format/browser/formatActions.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker.js?worker'
@@ -54,6 +56,7 @@ import {
 
 import effectsApiSource from '@candeo/effects-api/src/index.ts?raw'
 import definitionSchema from '../../../../crates/candeo-device/devices/device-definition.schema.json'
+import { formatJson } from './jsonFormat'
 
 /** Where the language service finds `@candeo/effects-api`. */
 const API_PATH = 'node_modules/@candeo/effects-api/index.ts'
@@ -220,6 +223,19 @@ export function definitionModel(text: string): monaco.editor.ITextModel {
  * its `$id`, which is also what a definition's `$schema` names.
  */
 function setupDefinitions(): void {
+  // Put in shape our way (`jsonFormat.ts`), not one value per line.
+  jsonDefaults.setModeConfiguration({
+    ...jsonDefaults.modeConfiguration,
+    documentFormattingEdits: false,
+    documentRangeFormattingEdits: false,
+  })
+  monaco.languages.registerDocumentFormattingEditProvider('json', {
+    provideDocumentFormattingEdits(model) {
+      const text = formatJson(model.getValue())
+      if (text === null || text === model.getValue()) return []
+      return [{ range: model.getFullModelRange(), text }]
+    },
+  })
   jsonDefaults.setDiagnosticsOptions({
     validate: true,
     allowComments: false,

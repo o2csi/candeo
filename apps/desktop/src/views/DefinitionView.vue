@@ -144,7 +144,13 @@ const copy = () =>
         <button class="link" @click="discard">{{ t('editor.discard') }}</button>
       </p>
 
-      <CodeEditor v-model="text" language="json" :disabled="loading || builtIn" class="code" />
+      <CodeEditor
+        v-model="text"
+        language="json"
+        :disabled="loading || builtIn"
+        class="code"
+        @save="busy || !unsaved || save()"
+      />
 
       <FailureNote v-if="problem" class="failure" @close="problem = null">{{ problem }}</FailureNote>
       <FailureNote v-else-if="reason" class="failure" :closable="false">
