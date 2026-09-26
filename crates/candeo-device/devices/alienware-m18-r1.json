@@ -26,6 +26,7 @@
       {
         "id": "hardware:m18-01",
         "kind": "01",
+        "looks": "steady",
         "colours": 1,
         "name": { "en": "Colour", "fr": "Couleur" },
         "summary": {
@@ -36,6 +37,7 @@
       {
         "id": "hardware:m18-02",
         "kind": "02",
+        "looks": "pulse",
         "colours": 1,
         "name": { "en": "Pulse", "fr": "Pulsation" },
         "summary": { "en": "That colour throbs, on and off, endlessly.", "fr": "Cette couleur bat, sans fin." }
@@ -43,6 +45,7 @@
       {
         "id": "hardware:m18-03",
         "kind": "03",
+        "looks": "wave",
         "colours": 0,
         "name": { "en": "Rainbow Wave", "fr": "Onde arc-en-ciel" },
         "summary": {
@@ -53,6 +56,7 @@
       {
         "id": "hardware:m18-08",
         "kind": "08",
+        "looks": "breathing",
         "colours": 0,
         "name": { "en": "Breathing", "fr": "Respiration" },
         "summary": {
@@ -63,6 +67,7 @@
       {
         "id": "hardware:m18-09",
         "kind": "09",
+        "looks": "morph",
         "colours": 0,
         "name": "Morph",
         "summary": {
@@ -73,6 +78,7 @@
       {
         "id": "hardware:m18-0a",
         "kind": "0a",
+        "looks": "scanner",
         "colours": 1,
         "name": "Scanner",
         "summary": {
@@ -83,6 +89,7 @@
       {
         "id": "hardware:m18-0e",
         "kind": "0e",
+        "looks": "spectrum",
         "colours": 0,
         "name": { "en": "Spectrum", "fr": "Spectre" },
         "summary": {

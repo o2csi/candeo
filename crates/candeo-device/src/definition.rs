@@ -207,6 +207,8 @@ struct EffectSpec {
     name: Option<Text>,
     #[serde(default)]
     summary: Option<Text>,
+    #[serde(default)]
+    looks: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -969,6 +971,10 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
             colours: e.colours,
             name: e.name.clone(),
             summary: e.summary.clone(),
+            looks: e
+                .looks
+                .as_ref()
+                .map(|l| &*Box::leak(l.clone().into_boxed_str())),
         })
         .collect();
     let outline: Vec<Outline> = d

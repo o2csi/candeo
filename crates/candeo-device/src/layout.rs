@@ -142,6 +142,9 @@ pub struct FirmwareEffect {
     /// knows a firmware's kinds (`device-sdk.md` §7).
     pub name: Option<Text>,
     pub summary: Option<Text>,
+    /// The pattern the gallery draws as its legend, from the schema's list:
+    /// the window knows the drawings, Rust only carries the word.
+    pub looks: Option<&'static str>,
 }
 
 /// Which HID entry of a device carries the lighting.

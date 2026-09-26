@@ -14,6 +14,13 @@
  * describes moves. It is written from what the effects were seen doing on the
  * hardware, and a device that shows something else is right and this is wrong.
  *
+ * # By pattern, not by effect
+ *
+ * A definition says what each of its effects looks like, a word from
+ * {@link LOOKS} (`device-sdk.md` §7); the drawing is chosen by that word and
+ * knows no id. A pattern missing is added here, once, for every device; the
+ * schema's list and this one are checked against each other.
+ *
  * Pure on purpose: one function of a time, testable without a window, and no
  * engine context for a drawing nobody sends anywhere.
  */
@@ -63,33 +70,37 @@ function between(from: Rgb, to: Rgb, at: number): Rgb {
   ]
 }
 
-/** The ids this module draws — every other one has nothing to say. */
-export const ILLUSTRATED = [
-  'hardware:off',
-  'hardware:spectrumCycle',
-  'hardware:wave',
-  'hardware:m18-01',
-  'hardware:m18-02',
-  'hardware:m18-03',
-  'hardware:m18-08',
-  'hardware:m18-09',
-  'hardware:m18-0a',
-  'hardware:m18-0e',
+/**
+ * The patterns this module draws: the schema's `looks`, and `off`, which is
+ * *Off*'s — a keyboard that is off.
+ */
+export const LOOKS = [
+  'off',
+  'steady',
+  'pulse',
+  'breathing',
+  'morph',
+  'wave',
+  'scanner',
+  'spectrum',
 ] as const
 
-export function illustrates(id: string): boolean {
-  return (ILLUSTRATED as readonly string[]).includes(id)
+export type Look = (typeof LOOKS)[number]
+
+/** Whether there is a drawing for this word: an effect without one is drawn dark, and says so. */
+export function isLook(looks: string | null | undefined): looks is Look {
+  return (LOOKS as readonly (string | null | undefined)[]).includes(looks)
 }
 
 /**
- * One frame of the illustration of `id`, at `seconds` since it started, for a
+ * One frame of the pattern `looks`, at `seconds` since it started, for a
  * matrix of `cols` columns and `frameLen` cells.
  *
  * Cells outside the drawing — the gaps of a matrix — are black, as they are in
  * any frame: the simulator only draws the ones carrying a key.
  */
 export function illustrate(
-  id: string,
+  looks: string,
   seconds: number,
   cols: number,
   frameLen: number,
@@ -106,24 +117,23 @@ export function illustrate(
     const column = cols > 0 ? position % cols : 0
     const across = cols > 1 ? column / (cols - 1) : 0
 
-    switch (id) {
+    switch (looks) {
       // One colour, held.
-      case 'hardware:m18-01':
+      case 'steady':
         return one
 
       // The same colour, throbbing: full, dark, full.
-      case 'hardware:m18-02':
+      case 'pulse':
         return dim(one, (1 + Math.cos(seconds * Math.PI)) / 2)
 
-      // A rainbow crossing the keys, and the Razer's wave beside it. Five sixths
-      // of the wheel, not the whole of it: a full turn puts the same red at both
-      // ends, and the seam reads as a mistake.
-      case 'hardware:m18-03':
-      case 'hardware:wave':
+      // Hues crossing the keys. Five sixths of the wheel, not the whole of it: a
+      // full turn puts the same red at both ends, and the seam reads as a
+      // mistake.
+      case 'wave':
         return hue(across * 300 - seconds * 180)
 
       // Two colours following one another, black in between.
-      case 'hardware:m18-08': {
+      case 'breathing': {
         const phase = (seconds / 2) % 2
         const fading = phase % 1
         const colour = phase < 1 ? one : two
@@ -131,22 +141,21 @@ export function illustrate(
       }
 
       // The same, never going dark.
-      case 'hardware:m18-09': {
+      case 'morph': {
         const phase = (seconds / 2) % 2
         return phase < 1 ? between(one, two, phase) : between(two, one, phase - 1)
       }
 
       // A lit band sweeping across the keys and back.
-      case 'hardware:m18-0a': {
-        // Starts at the left edge, as the keyboard's own does.
+      case 'scanner': {
+        // Starts at the left edge, as the Alienware keyboard's own does.
         const sweep = 1 - Math.abs(((seconds / 1.5) % 2) - 1)
         const distance = Math.abs(across - sweep)
         return dim(one, Math.max(0, 1 - distance * 4))
       }
 
-      // Hues cycling over the whole surface, and the Razer's spectrum beside it.
-      case 'hardware:m18-0e':
-      case 'hardware:spectrumCycle':
+      // Hues cycling over the whole surface.
+      case 'spectrum':
         return hue(seconds * 120)
 
       // Off is a keyboard that is off.
