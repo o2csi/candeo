@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.14.0](https://github.com/o2csi/candeo/compare/v0.13.0...v0.14.0) (2026-09-26)
+
+
+### Features
+
+* choose which definition drives a device on its card ([4e16e26](https://github.com/o2csi/candeo/commit/4e16e2627381a4cc5c483904f6b5da01fbe811c4))
+* describe the Alienware m18 R1 keyboard as a definition ([36f24ce](https://github.com/o2csi/candeo/commit/36f24ce1a18dd520259e50ee28fd0cad8d367317))
+* describe the Razer DeathStalker V2 Pro as a definition ([29c4ce9](https://github.com/o2csi/candeo/commit/29c4ce988fcc5a7e84e96c08da1bef6963dc1c5a))
+* document device definitions in a schema editors read ([f555677](https://github.com/o2csi/candeo/commit/f555677b19f059032236bd38e5f81dd42e218d9b))
+* draw a firmware effect's legend from the pattern it declares ([2c46b2c](https://github.com/o2csi/candeo/commit/2c46b2c61d57769107bdc77f49eb096adb3630c3))
+* draw discs, arches and a device outline in the simulator ([b9a39c8](https://github.com/o2csi/candeo/commit/b9a39c85590d282bf2b170a11255ff129b9c8aab))
+* edit device definitions in the app, checked against the schema ([288e538](https://github.com/o2csi/candeo/commit/288e5382acefe559846a9b41f60afabf5d2f673f))
+* find, comment and move lines in the editors, and list shortcuts ([18f5518](https://github.com/o2csi/candeo/commit/18f551812d3bbb2ddb83fafab7222dab08f9aed9))
+* give lights a shape and devices an outline, zones seen from behind ([984873e](https://github.com/o2csi/candeo/commit/984873e9dda1662f47003f677f7a47f00a886a86))
+* list every definition of yours and call the page action Refresh ([355af46](https://github.com/o2csi/candeo/commit/355af46ed6ed3b53f5bae2130c3c2732214242d6))
+* load a device definition only if the schema accepts it ([83495ab](https://github.com/o2csi/candeo/commit/83495abb24a7111b45f766056ce37bfc745fe745))
+* name firmware effects in their device definition ([242f6ce](https://github.com/o2csi/candeo/commit/242f6ce2357063f8ce56db9e122be7ee6ae24033))
+* name the comment key after the keyboard, and open shortcuts with F1 ([56392ae](https://github.com/o2csi/candeo/commit/56392ae282b5cc25591ffcc88726aa97554557ec))
+* read devices from definition files through one interpreter ([0fc2b95](https://github.com/o2csi/candeo/commit/0fc2b95d78ce000b4bb88390136b23e7ce5fe02a))
+* read your device definitions from a folder, listed below built-in ([33ccbf2](https://github.com/o2csi/candeo/commit/33ccbf2b3bd74d718537582425ded22cbe259900))
+* save with Ctrl+S in the editors, put in shape first ([49a9273](https://github.com/o2csi/candeo/commit/49a9273f9685ac864b74d2ec3ad3cbd368fbe718))
+* show plugged-in devices first and copy a definition to yours ([c70009b](https://github.com/o2csi/candeo/commit/c70009b0477f6e10df95091c5764262e7e0ee5e3))
+
+
+### Bug Fixes
+
+* breathe each colour out of black and back in the legend ([bdf8bc1](https://github.com/o2csi/candeo/commit/bdf8bc1475033f6a0af4869128d5f529b8ffdbc9))
+* learn the comment key by typing where the layout is not readable ([01f9f06](https://github.com/o2csi/candeo/commit/01f9f061a56fb34671a5ad209bd6059a209172d4))
+* light the Alienware zones through the maker's live preview ([dc0a331](https://github.com/o2csi/candeo/commit/dc0a33165712b09c3f9f56f566079d12c6ec9f0b))
+* take the Alienware keyboard back from its firmware animation ([9d73fdb](https://github.com/o2csi/candeo/commit/9d73fdb48308c997ea8fcc70e9c37c277a4889b9))
+
+
+### Refactoring
+
+* choose Status row's colour with statements ([3228251](https://github.com/o2csi/candeo/commit/3228251b74f8ba10566c963e25e633efec499869))
+* drive the Alienware zones from their definition file ([549277d](https://github.com/o2csi/candeo/commit/549277d8bbabd646837afa44098aa6f2c6465f06))
+* drop the Rust Alienware keyboard family for its definition ([437d219](https://github.com/o2csi/candeo/commit/437d2191c15d92152da1f4d14e8873b873981d99))
+* drop the Rust Razer layout and family for its definition ([34bbc25](https://github.com/o2csi/candeo/commit/34bbc2584261640882a764fad25da4ad72ce8fc7))
+* spell a definition's checksum and command out, add sum ([24d091d](https://github.com/o2csi/candeo/commit/24d091d9671e33b2826c594a4abfeedb2dce675d))
+
+
+### Documentation
+
+* choose which definition drives a device ([3398d69](https://github.com/o2csi/candeo/commit/3398d69fb4862d3965ade554edd3349284a84774))
+* correct the Alienware zones survey with the 2026-09-25 capture ([862d678](https://github.com/o2csi/candeo/commit/862d67871b1492a555e6214c03a9a18b0f1ac2ea))
+* design devices as definition files, built in and yours ([ebd21c8](https://github.com/o2csi/candeo/commit/ebd21c858111c08cc25d0223475354acaa793f90))
+* design drawing a device as it is seen, with shapes and an outline ([fc8cc5a](https://github.com/o2csi/candeo/commit/fc8cc5a446bf5dffbfc7248b103c99b879754f54))
+* name firmware effects in their device definition ([2f68518](https://github.com/o2csi/candeo/commit/2f685180e3d438def8ed45a35d9220b8743e0add))
+* note the power button holds still under the live preview ([fcb0f72](https://github.com/o2csi/candeo/commit/fcb0f72920c025ff183a0cfd9b455f86a95f02c8))
+* say definitions are edited in the app and reopen their device ([918c238](https://github.com/o2csi/candeo/commit/918c23894e55fcf342c6c036d8c74d00b7571735))
+* say what a firmware effect looks like in its definition ([9f6c25b](https://github.com/o2csi/candeo/commit/9f6c25babf62c62f3614900f2eb91a3f6e98eaa8))
+
 ## [0.13.0](https://github.com/o2csi/candeo/compare/v0.12.0...v0.13.0) (2026-09-25)
 
 

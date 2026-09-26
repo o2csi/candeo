@@ -432,7 +432,7 @@ dependencies = [
 
 [[package]]
 name = "candeo-desktop"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "candeo-device",
  "candeo-protocol",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "candeo-device"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "candeo-protocol",
  "hidapi",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "candeo-protocol"
-version = "0.13.0"
+version = "0.14.0"
 
 [[package]]
 name = "cargo-platform"
