@@ -45,9 +45,11 @@ when one disagrees with the tag.
 ## Things to know
 
 - **The release pull request runs no CI.** release-please opens it with
-  `GITHUB_TOKEN`, and GitHub starts no workflow for it. It only changes versions
-  and the changelog; the release build compiles and packages everything, and CI
-  runs on `main` after the merge.
+  `GITHUB_TOKEN`. It only changes versions and the changelog; the release build
+  compiles and packages everything, and CI runs on `main` after the merge. Since
+  June 2026 GitHub creates CI runs for it anyway, held for approval. Nobody
+  approves them, and some end as failures without a job, which read as a broken
+  release: `release-please.yml` deletes them after each update.
 - **Repository setting:** *Settings → Actions → General → Allow GitHub Actions to
   create and approve pull requests* must be on, or release-please cannot open its
   pull request.

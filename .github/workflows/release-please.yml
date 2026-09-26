@@ -23,6 +23,8 @@ jobs:
       pull-requests: write
       # The `autorelease: pending` label is created and set through the issues API.
       issues: write
+      # To delete the CI runs GitHub holds on the release pull request, below.
+      actions: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -32,6 +34,35 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Since June 2026, a pull request the bot opens or updates with
+      # GITHUB_TOKEN gets CI runs held for approval. Nobody approves them: the
+      # release pull request runs no CI, main does after the merge
+      # (docs/releasing.md). Sixty-five piled up in Actions in two weeks, and
+      # some ended as failures without a job, which read as a broken release.
+      #
+      # Deleted here, the one this update creates included: it appears a moment
+      # after the push, hence the wait. A failure that ran a job is kept — that
+      # one was approved, and failed for real.
+      - name: Delete the CI runs held on the release pull request
+        # Housekeeping: the release job needs this one, and must not wait on it.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: release-please--branches--main--components--candeo
+        run: |
+          sleep 20
+          runs="repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=$BRANCH&event=pull_request&per_page=100"
+          gh api "$runs" --jq '.workflow_runs[]
+            | select(.conclusion == "action_required" or .conclusion == "failure")
+            | "\(.id) \(.conclusion)"' |
+          while read -r id conclusion; do
+            if [ "$conclusion" = failure ] &&
+              [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" --jq .total_count)" != 0 ]; then
+              continue
+            fi
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$id" || echo "run $id not deleted"
+          done
 
   release:
     needs: release-please
