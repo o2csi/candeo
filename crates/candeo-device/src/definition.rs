@@ -12,7 +12,7 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use candeo_protocol::Rgb;
+use candeo_protocol::{CommandId, Effect, Firmware, Rgb};
 use serde::Deserialize;
 
 use crate::layout::{
@@ -22,6 +22,10 @@ use crate::lighting::{Lighting, Outgoing, Wire};
 
 /// The built-in definitions, by file name, as the repository holds them.
 pub const BUILTIN: &[(&str, &str)] = &[
+    (
+        "razer-deathstalker-v2-pro.json",
+        include_str!("../devices/razer-deathstalker-v2-pro.json"),
+    ),
     (
         "alienware-m18-r1.json",
         include_str!("../devices/alienware-m18-r1.json"),
@@ -50,6 +54,13 @@ struct Definition {
     brightness: Option<Vec<String>>,
     #[serde(default)]
     firmware: Option<FirmwareSpec>,
+    /// The firmware version the survey was made against, `1.5`.
+    #[serde(default)]
+    surveyed: Option<String>,
+    /// What is asked of the device on open, by the name of a read written in
+    /// Rust: `razer`. None asks nothing.
+    #[serde(default)]
+    inspect: Option<String>,
     lights: LightsSpec,
     #[serde(default)]
     outline: Vec<PartSpec>,
@@ -78,6 +89,24 @@ struct ReportSpec {
     length: usize,
     #[serde(default)]
     prefix: String,
+    /// An integrity byte, named rather than written.
+    #[serde(default)]
+    checksum: Option<ChecksumSpec>,
+    /// Where a report says which command it carries, class then command: what
+    /// lets the inspection refuse one the device said it does not know.
+    #[serde(default)]
+    command: Option<[usize; 2]>,
+}
+
+/// The closed list of integrity functions (§7 of the design): each is tested
+/// here once, and every device using it stays data.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChecksumSpec {
+    /// The XOR of the bytes from one offset to another, both included.
+    xor: [usize; 2],
+    /// Where it goes.
+    at: usize,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +134,8 @@ struct PaceSpec {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EachSpec {
+    /// `row`: one report per row of the grid, every cell of it, lit or not.
+    by: Option<String>,
     group: Option<String>,
     chunk: Option<usize>,
     send: Vec<String>,
@@ -129,6 +160,9 @@ struct EffectSpec {
     kind: String,
     #[serde(default)]
     colours: u8,
+    /// This effect's own report, where it carries more than a kind.
+    #[serde(default)]
+    send: Option<String>,
     /// What it shows, for whoever reads the file: not used.
     #[serde(default)]
     #[allow(dead_code)]
@@ -200,6 +234,13 @@ enum Token {
     Lights,
     Level,
     Kind,
+    /// The row a report carries, and the first and last of its columns.
+    Row,
+    Start,
+    End,
+    /// How many bytes the report holds after this offset: a length the
+    /// device reads, worked out once the report is filled.
+    Length(usize),
 }
 
 fn tokens(text: &str) -> Result<Vec<Token>, String> {
@@ -217,6 +258,13 @@ fn tokens(text: &str) -> Result<Vec<Token>, String> {
             "{lights}" => Ok(Token::Lights),
             "{level}" => Ok(Token::Level),
             "{kind}" => Ok(Token::Kind),
+            "{row}" => Ok(Token::Row),
+            "{start}" => Ok(Token::Start),
+            "{end}" => Ok(Token::End),
+            _ if word.starts_with("{length:") && word.ends_with('}') => word[8..word.len() - 1]
+                .parse()
+                .map(Token::Length)
+                .map_err(|_| format!("“{word}”: a length counts from a decimal offset")),
             _ if word.len() == 2 => u8::from_str_radix(word, 16)
                 .map(Token::Byte)
                 .map_err(|_| format!("“{word}” is neither a byte nor a placeholder")),
@@ -229,7 +277,7 @@ fn tokens(text: &str) -> Result<Vec<Token>, String> {
 fn template(text: &str, allowed: &[Token], place: &str) -> Result<Vec<Token>, String> {
     let t = tokens(text)?;
     if t.iter()
-        .any(|t| !matches!(t, Token::Byte(_)) && !allowed.contains(t))
+        .any(|t| !matches!(t, Token::Byte(_) | Token::Length(_)) && !allowed.contains(t))
     {
         return Err(format!(
             "“{text}” holds a placeholder {place} does not fill"
@@ -266,6 +314,8 @@ struct Fill<'a> {
     lights: &'a [(u8, Rgb)],
     level: u8,
     kind: u8,
+    row: u8,
+    start: u8,
 }
 
 const NOTHING: Fill<'static> = Fill {
@@ -274,11 +324,27 @@ const NOTHING: Fill<'static> = Fill {
     lights: &[],
     level: 0,
     kind: 0,
+    row: 0,
+    start: 0,
 };
 
-/// A firmware's effects: the report, *Off*'s kind, and each effect's id and
-/// kind.
-type Firmware = (Vec<Token>, Option<u8>, Vec<(String, u8)>);
+/// A firmware's effects: the report, *Off*'s kind, and each effect's id, kind
+/// and report of its own if it has one.
+type FirmwareEffects = (
+    Vec<Token>,
+    Option<u8>,
+    Vec<(String, u8, Option<Vec<Token>>)>,
+);
+
+/// A read written in Rust, named by a definition.
+#[derive(Clone, Copy, PartialEq)]
+enum Inspect {
+    Nothing,
+    /// The Razer protocol's: version, serial, and the commands the device
+    /// knows (`docs/protocol/deathstalker-v2-pro.md` §8), and the effect its
+    /// firmware runs.
+    Razer,
+}
 
 /// The family of every described device: it turns a frame into the reports its
 /// definition describes.
@@ -292,8 +358,12 @@ pub struct Template {
     send: Vec<Vec<Token>>,
     light: Vec<Token>,
     close: Vec<Vec<Token>>,
+    by_row: bool,
+    checksum: Option<(usize, usize, usize)>,
+    command: Option<(usize, usize)>,
     brightness: Option<Vec<Vec<Token>>>,
-    firmware: Option<Firmware>,
+    firmware: Option<FirmwareEffects>,
+    inspect: Inspect,
     take_over: Vec<Vec<Token>>,
     pace: Option<(Duration, bool)>,
     /// The last image sent and when, for `pace`.
@@ -301,7 +371,13 @@ pub struct Template {
 }
 
 impl Template {
-    fn put(&self, bytes: &mut Vec<u8>, tokens: &[Token], fill: Fill) {
+    fn put(
+        &self,
+        bytes: &mut Vec<u8>,
+        tokens: &[Token],
+        fill: Fill,
+        lengths: &mut Vec<(usize, usize)>,
+    ) {
         for token in tokens {
             match token {
                 Token::Byte(b) => bytes.push(*b),
@@ -321,25 +397,64 @@ impl Template {
                             lights: std::slice::from_ref(light),
                             ..fill
                         };
-                        self.put(bytes, &self.light, one);
+                        self.put(bytes, &self.light, one, lengths);
                     }
                 }
                 Token::Level => bytes.push(fill.level),
                 Token::Kind => bytes.push(fill.kind),
+                Token::Row => bytes.push(fill.row),
+                Token::Start => bytes.push(fill.start),
+                Token::End => bytes.push(fill.start + (fill.lights.len() as u8).saturating_sub(1)),
+                Token::Length(from) => {
+                    lengths.push((bytes.len(), *from));
+                    bytes.push(0);
+                }
             }
         }
     }
 
     fn render(&self, tokens: &[Token], fill: Fill) -> Outgoing {
+        let p = self.prefix.len();
         let mut bytes = self.prefix.clone();
-        self.put(&mut bytes, tokens, fill);
+        let mut lengths = Vec::new();
+        self.put(&mut bytes, tokens, fill, &mut lengths);
+        let filled = bytes.len() - p;
+        for (at, from) in lengths {
+            bytes[at] = filled.saturating_sub(from) as u8;
+        }
         // Checked at load: the longest a report can grow still fits.
-        bytes.resize(self.prefix.len() + self.length, 0);
+        bytes.resize(p + self.length, 0);
+        if let Some((from, to, at)) = self.checksum {
+            bytes[p + at] = bytes[p + from..=p + to].iter().fold(0, |x, b| x ^ b);
+        }
         Outgoing {
+            command: self.command.map(|(class, command)| CommandId {
+                class: bytes[p + class],
+                command: bytes[p + command],
+            }),
             bytes,
             wire: self.wire,
-            command: None,
         }
+    }
+
+    /// The effect the firmware runs, back to the id the gallery offers: one it
+    /// does not offer — a colour it cannot pass back, or the host's own
+    /// frames — reads as none.
+    fn effect_id(&self, effect: Effect) -> Option<String> {
+        let (_, off, effects) = self.firmware.as_ref()?;
+        let kind = match effect {
+            Effect::Off => 0x00,
+            Effect::SpectrumCycle => 0x03,
+            Effect::Wave { .. } => 0x04,
+            Effect::Custom => return None,
+        };
+        if Some(kind) == *off {
+            return Some(OFF.to_owned());
+        }
+        effects
+            .iter()
+            .find(|(_, k, _)| *k == kind)
+            .map(|(id, _, _)| id.clone())
     }
 
     /// The most bytes one template can grow to, a whole chunk of lights in it.
@@ -369,6 +484,23 @@ impl Lighting for Template {
         }
 
         let mut out: Vec<Outgoing> = self.open.iter().map(|t| self.render(t, NOTHING)).collect();
+
+        // A row at a time, every cell of it: the device takes the whole grid,
+        // and a cell left out would keep its last colour.
+        if self.by_row {
+            let cols = usize::from(layout.cols);
+            for (row, cells) in frame.chunks(cols).enumerate() {
+                let lights: Vec<(u8, Rgb)> = cells.iter().map(|c| (0, *c)).collect();
+                let fill = Fill {
+                    lights: &lights,
+                    row: row as u8,
+                    ..NOTHING
+                };
+                out.extend(self.send.iter().map(|t| self.render(t, fill)));
+            }
+            out.extend(self.close.iter().map(|t| self.render(t, NOTHING)));
+            return out;
+        }
 
         // Positions with no address are left out rather than sent black: the
         // device would take one for another light.
@@ -422,12 +554,27 @@ impl Lighting for Template {
             .map(|reports| reports.iter().map(|t| self.render(t, fill)).collect())
     }
 
+    fn row(&self, row: u8, col_start: u8, colours: &[Rgb]) -> Option<Outgoing> {
+        if !self.by_row || colours.is_empty() {
+            return None;
+        }
+        let lights: Vec<(u8, Rgb)> = colours.iter().map(|c| (0, *c)).collect();
+        let fill = Fill {
+            lights: &lights,
+            row,
+            start: col_start,
+            ..NOTHING
+        };
+        self.send.first().map(|t| self.render(t, fill))
+    }
+
     fn firmware_effect(&self, id: &str, colours: &[Rgb]) -> Option<Outgoing> {
-        let (send, off, effects) = self.firmware.as_ref()?;
-        let kind = if id == OFF {
-            (*off)?
+        let (common, off, effects) = self.firmware.as_ref()?;
+        let (kind, send) = if id == OFF {
+            ((*off)?, common)
         } else {
-            effects.iter().find(|(known, _)| known == id)?.1
+            let (_, kind, own) = effects.iter().find(|(known, _, _)| known == id)?;
+            (*kind, own.as_ref().unwrap_or(common))
         };
         // A kind that paints what it is given, given nothing, shows nothing:
         // which is exactly what *Off* is where the firmware has no dark kind.
@@ -441,13 +588,23 @@ impl Lighting for Template {
         Some(self.render(send, fill))
     }
 
-    // Nothing is asked of the device on open: a definition carries no read yet.
+    fn current_effect(&self, device: &hidapi::HidDevice) -> Result<Option<String>, String> {
+        if self.inspect != Inspect::Razer {
+            return Ok(None);
+        }
+        Ok(crate::inspection::read_effect(device)?.and_then(|e| self.effect_id(e)))
+    }
+
     fn inspect(
         &self,
-        _device: &hidapi::HidDevice,
+        device: &hidapi::HidDevice,
         accept: &mut dyn FnMut(Option<&str>) -> bool,
     ) -> Option<crate::Inspection> {
-        accept(None).then(crate::Inspection::unread)
+        match self.inspect {
+            Inspect::Razer => crate::inspection::inspect_if(device, accept),
+            // Nothing is asked of a device whose definition names no read.
+            Inspect::Nothing => accept(None).then(crate::Inspection::unread),
+        }
     }
 }
 
@@ -463,7 +620,7 @@ pub fn load(json: &str) -> Result<&'static Layout, String> {
     Ok(Box::leak(Box::new(layout)))
 }
 
-fn family(d: &Definition) -> Result<Template, String> {
+fn family(d: &Definition, cols: usize) -> Result<Template, String> {
     use Token::*;
     let wire = match d.report.wire.as_str() {
         "output" => Wire::Output,
@@ -475,7 +632,20 @@ fn family(d: &Definition) -> Result<Template, String> {
         Some("colour") => true,
         Some(other) => return Err(format!("group “{other}”: only “colour” is known")),
     };
-    let chunk = d.frame.each.chunk.unwrap_or(1);
+    let by_row = match d.frame.each.by.as_deref() {
+        None => false,
+        Some("row") => true,
+        Some(other) => return Err(format!("by “{other}”: only “row” is known")),
+    };
+    if by_row && (per_colour || d.frame.each.chunk.is_some()) {
+        return Err("a report per row takes neither a group nor a chunk".into());
+    }
+    // A row's report carries the whole row.
+    let chunk = if by_row {
+        cols
+    } else {
+        d.frame.each.chunk.unwrap_or(1)
+    };
     if chunk == 0 {
         return Err("chunk 0: a report carries at least one light".into());
     }
@@ -483,10 +653,22 @@ fn family(d: &Definition) -> Result<Template, String> {
         list.iter().map(|t| template(t, &[], place)).collect()
     };
     let light = match &d.frame.each.light {
-        Some(text) => template(text, &[Address, R, G, B], "a light's entry")?,
+        Some(text) => template(
+            text,
+            if by_row {
+                &[R, G, B]
+            } else {
+                &[Address, R, G, B]
+            },
+            "a light's entry",
+        )?,
         None => Vec::new(),
     };
-    let mut in_send = vec![R, G, B, Address, Count, Addresses];
+    let mut in_send = if by_row {
+        vec![Row, Start, End, Count]
+    } else {
+        vec![R, G, B, Address, Count, Addresses]
+    };
     if !light.is_empty() {
         in_send.push(Lights);
     }
@@ -503,16 +685,45 @@ fn family(d: &Definition) -> Result<Template, String> {
     if chunk > 1 && !per_colour && (light.is_empty() || one_colour) {
         return Err("a report of several lights takes their colours through {lights}, or groups them by colour".into());
     }
+    let in_effect = [Kind, R, G, B, R2, G2, B2];
     let firmware = match &d.firmware {
         None => None,
         Some(f) => Some((
-            template(&f.send, &[Kind, R, G, B, R2, G2, B2], "a firmware effect")?,
+            template(&f.send, &in_effect, "a firmware effect")?,
             f.off.as_deref().map(|k| hex_u8(k, "kind")).transpose()?,
             f.effects
                 .iter()
-                .map(|e| Ok((e.id.clone(), hex_u8(&e.kind, "kind")?)))
+                .map(|e| {
+                    let own = e
+                        .send
+                        .as_deref()
+                        .map(|t| template(t, &in_effect, "a firmware effect"))
+                        .transpose()?;
+                    Ok((e.id.clone(), hex_u8(&e.kind, "kind")?, own))
+                })
                 .collect::<Result<Vec<_>, String>>()?,
         )),
+    };
+    let inspect = match d.inspect.as_deref() {
+        None => Inspect::Nothing,
+        Some("razer") => Inspect::Razer,
+        Some(other) => return Err(format!("inspect “{other}”: only “razer” is known")),
+    };
+    let length = d.report.length;
+    let checksum = match &d.report.checksum {
+        None => None,
+        Some(c) => {
+            let [from, to] = c.xor;
+            if from > to || to >= length || c.at >= length {
+                return Err("the checksum reads or writes past the report".into());
+            }
+            Some((from, to, c.at))
+        }
+    };
+    let command = match d.report.command {
+        None => None,
+        Some([class, command]) if class < length && command < length => Some((class, command)),
+        Some(_) => return Err("the command sits past the report".into()),
     };
     let brightness = match &d.brightness {
         None => None,
@@ -533,6 +744,10 @@ fn family(d: &Definition) -> Result<Template, String> {
         light,
         close: fixed(&d.frame.close, "closing a frame")?,
         take_over: fixed(&d.frame.take_over, "taking the lights over")?,
+        by_row,
+        checksum,
+        command,
+        inspect,
         brightness,
         firmware,
         pace: d
@@ -549,7 +764,12 @@ fn family(d: &Definition) -> Result<Template, String> {
         .chain(&t.send)
         .chain(&t.close)
         .chain(t.brightness.iter().flatten())
-        .chain(t.firmware.iter().map(|f| &f.0));
+        .chain(t.firmware.iter().map(|f| &f.0))
+        .chain(
+            t.firmware
+                .iter()
+                .flat_map(|f| f.2.iter().filter_map(|e| e.2.as_ref())),
+        );
     for report in reports {
         if t.widest(report) > t.length {
             return Err(format!("a report grows past its {} bytes", t.length));
@@ -562,7 +782,6 @@ fn family(d: &Definition) -> Result<Template, String> {
 /// the frame — how a reference frame's colours, given per item, are placed.
 fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
     let d: Definition = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let template = family(&d)?;
 
     let lights = match d.lights.kind.as_str() {
         "zones" => Lights::Zones,
@@ -578,6 +797,17 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
             u8::try_from(d.lights.items.len()).map_err(|_| "more than 255 lights in one row")?,
         ),
         _ => return Err("lights take both rows and cols, or neither".into()),
+    };
+    let template = family(&d, usize::from(cols))?;
+    let surveyed_firmware = match d.surveyed.as_deref() {
+        None => None,
+        Some(text) => {
+            let (major, minor) = text
+                .split_once('.')
+                .and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)))
+                .ok_or_else(|| format!("surveyed “{text}” is not major.minor"))?;
+            Some(Firmware { major, minor })
+        }
     };
     let mut matrix = vec![EMPTY; usize::from(rows) * usize::from(cols)];
     let mut keys = Vec::with_capacity(d.lights.items.len());
@@ -666,7 +896,7 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         pid: hex_u16(&d.matching.pid, "pid")?,
         port,
         lighting: Box::leak(Box::new(template)),
-        surveyed_firmware: None,
+        surveyed_firmware,
         firmware_effects: Box::leak(firmware_effects.into_boxed_slice()),
         lights,
         rows,
@@ -696,7 +926,7 @@ pub fn replay(json: &str) -> Result<(), String> {
             frame[usize::from(*position)] = colour(text)?;
         }
         // A fresh family per example: pacing belongs to a device, not a test.
-        let fresh = family(&d)?;
+        let fresh = family(&d, usize::from(layout.cols))?;
         let sent: Vec<Vec<u8>> = fresh
             .frame(&layout, &frame)
             .into_iter()
@@ -746,8 +976,122 @@ fn shown(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    const ZONES: &str = BUILTIN[1].1;
-    const KEYBOARD: &str = BUILTIN[0].1;
+    const RAZER: &str = BUILTIN[0].1;
+    const KEYBOARD: &str = BUILTIN[1].1;
+    const ZONES: &str = BUILTIN[2].1;
+
+    /// The Razer's definition is, byte for byte, what its Rust family and layout
+    /// gave: the keys where they were, and the same reports — checksum and
+    /// command included — for a frame, a segment of a row, a level and each
+    /// firmware effect.
+    #[test]
+    fn the_razer_definition_gives_what_the_razer_family_gave() {
+        let (ours, _, _) = parse(RAZER).unwrap();
+        let theirs = &crate::DEATHSTALKER_V2_PRO;
+        assert_eq!(
+            (ours.name, ours.vid, ours.pid),
+            (theirs.name, theirs.vid, theirs.pid)
+        );
+        assert_eq!(ours.port, theirs.port);
+        assert_eq!(ours.surveyed_firmware, theirs.surveyed_firmware);
+        assert_eq!(
+            (ours.rows, ours.cols, ours.lights),
+            (theirs.rows, theirs.cols, theirs.lights)
+        );
+        assert_eq!(ours.matrix, theirs.matrix);
+        let keys = |l: &Layout| {
+            let mut keys: Vec<_> = l
+                .keys
+                .iter()
+                .map(|k| (k.index, k.scancode, k.x, k.y, k.w, k.h, k.shape))
+                .collect();
+            keys.sort_by_key(|k| k.0);
+            keys
+        };
+        assert_eq!(keys(&ours), keys(theirs));
+        let effect = |e: &FirmwareEffect| (e.id, e.colours);
+        assert_eq!(
+            ours.firmware_effects.iter().map(effect).collect::<Vec<_>>(),
+            theirs
+                .firmware_effects
+                .iter()
+                .map(effect)
+                .collect::<Vec<_>>()
+        );
+
+        let sent = |reports: Vec<Outgoing>| -> Vec<(Vec<u8>, bool, Option<CommandId>)> {
+            reports
+                .into_iter()
+                .map(|o| (o.bytes, o.wire == Wire::Feature, o.command))
+                .collect()
+        };
+        let frame: Vec<Rgb> = (0..theirs.led_count())
+            .map(|i| Rgb::new(i as u8, (i * 7) as u8, 255 - i as u8))
+            .collect();
+        assert_eq!(
+            sent(ours.lighting.frame(&ours, &frame)),
+            sent(theirs.lighting.frame(theirs, &frame))
+        );
+        for (row, start, len) in [(0u8, 0u8, 22usize), (3, 5, 4), (5, 21, 1)] {
+            let colours = &frame[..len];
+            assert_eq!(
+                ours.lighting
+                    .row(row, start, colours)
+                    .map(|o| sent(vec![o])),
+                theirs
+                    .lighting
+                    .row(row, start, colours)
+                    .map(|o| sent(vec![o])),
+                "row {row} from {start}, {len} colours"
+            );
+        }
+        for level in [0, 0x40, 0xff] {
+            assert_eq!(
+                ours.lighting.brightness(level).map(sent),
+                theirs.lighting.brightness(level).map(sent)
+            );
+        }
+        for id in theirs
+            .firmware_effects
+            .iter()
+            .map(|e| e.id)
+            .chain([OFF, "hardware:m18-01"])
+        {
+            assert_eq!(
+                ours.lighting
+                    .firmware_effect(id, &[])
+                    .map(|o| sent(vec![o])),
+                theirs
+                    .lighting
+                    .firmware_effect(id, &[])
+                    .map(|o| sent(vec![o])),
+                "{id}"
+            );
+        }
+        assert!(
+            ours.lighting.take_over().is_empty(),
+            "each frame ends in custom mode"
+        );
+    }
+
+    /// What the Razer firmware says it runs reads back as the id the gallery
+    /// offers, as the Rust family read it: the host's own frames as none.
+    #[test]
+    fn the_razer_effect_read_back_is_the_gallery_s_id() {
+        let d: Definition = serde_json::from_str(RAZER).unwrap();
+        let t = family(&d, 22).unwrap();
+        let wave = Effect::Wave {
+            direction: 0x02,
+            speed: 0x28,
+        };
+        assert_eq!(t.effect_id(Effect::Off).as_deref(), Some(OFF));
+        assert_eq!(
+            t.effect_id(Effect::SpectrumCycle).as_deref(),
+            Some("hardware:spectrumCycle")
+        );
+        assert_eq!(t.effect_id(wave).as_deref(), Some("hardware:wave"));
+        assert_eq!(t.effect_id(Effect::Custom), None);
+    }
 
     /// §8: every built-in definition loads, and gives the reports its
     /// contributor saw.
@@ -826,14 +1170,24 @@ mod tests {
                     assert!(apart, "{name}: {} and {} overlap", a.index, b.index);
                 }
             }
-            let mut codes = std::collections::BTreeMap::<u16, usize>::new();
-            for key in l.keys.iter().filter(|k| k.scancode != NO_SCANCODE) {
-                *codes.entry(key.scancode).or_default() += 1;
+            // A scancode names one key; the ISO Enter is one key with two LEDs,
+            // its arms touching, and both send `0x1C`.
+            for a in l.keys.iter().filter(|k| k.scancode != NO_SCANCODE) {
+                for b in l
+                    .keys
+                    .iter()
+                    .filter(|b| b.index > a.index && b.scancode == a.scancode)
+                {
+                    let touch = (a.y + a.h == b.y || b.y + b.h == a.y)
+                        && a.x < b.x + b.w
+                        && b.x < a.x + a.w;
+                    assert!(
+                        touch,
+                        "{name}: {} and {} share a scancode",
+                        a.index, b.index
+                    );
+                }
             }
-            assert!(
-                codes.values().all(|n| *n == 1),
-                "{name}: a scancode names two keys"
-            );
         }
     }
 
