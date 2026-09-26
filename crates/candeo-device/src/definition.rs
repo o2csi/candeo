@@ -686,11 +686,39 @@ pub fn builtin() -> &'static [&'static Layout] {
 /// A definition read, checked and turned into a layout, or why not, in a
 /// sentence for whoever wrote it.
 ///
+/// Checked against the schema first: a file loads only if the schema its
+/// editor shows accepts it, so the two never disagree about a file — serde alone
+/// took `"command": [6, 7]` for `{ "class": 6, "id": 7 }`, which the schema
+/// refuses. The interpreter's own checks stay behind it.
+///
 /// The layout lives as long as the process: devices are listed once, and every
 /// part of the application holds them as `&'static`.
 pub fn load(json: &str) -> Result<&'static Layout, String> {
+    follows_schema(json)?;
     let (layout, _, _) = parse(json)?;
     Ok(Box::leak(Box::new(layout)))
+}
+
+/// The schema editors read, `devices/device-definition.schema.json`.
+pub const SCHEMA: &str = include_str!("../devices/device-definition.schema.json");
+
+/// The first thing the schema refuses in a file, where then what, as an editor
+/// underlines it.
+fn follows_schema(json: &str) -> Result<(), String> {
+    static VALIDATOR: std::sync::OnceLock<jsonschema::Validator> = std::sync::OnceLock::new();
+    let validator = VALIDATOR.get_or_init(|| {
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA).expect("the schema is JSON");
+        jsonschema::validator_for(&schema).expect("the schema is a schema")
+    });
+    let file: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let refused = validator.iter_errors(&file).next().map(|e| {
+        if e.instance_path.as_str().is_empty() {
+            e.to_string()
+        } else {
+            format!("{}: {e}", e.instance_path)
+        }
+    });
+    refused.map_or(Ok(()), Err)
 }
 
 fn family(d: &Definition, cols: usize) -> Result<Template, String> {
@@ -1278,10 +1306,26 @@ mod tests {
         json.replacen(from, to, 1)
     }
 
+    /// What serde alone would take, the schema refuses, and the load with it:
+    /// the editor and the application agree about a file.
+    #[test]
+    fn a_definition_loads_only_if_the_schema_accepts_it() {
+        let named = "\"command\": { \"class\": 6, \"id\": 7 }";
+        assert!(RAZER.contains(named));
+        let positional = RAZER.replacen(named, "\"command\": [6, 7]", 1);
+        let e = load(&positional).err().expect("refused");
+        assert!(e.starts_with("/report/command: "), "{e}");
+        assert!(parse(&positional).is_ok(), "serde alone takes it");
+
+        let e = load(&with("\"name\"", "\"nom\"")).err().expect("refused");
+        assert!(!e.starts_with(':'), "no path for the root: {e}");
+    }
+
+    /// The interpreter's own checks, behind the schema's.
     #[test]
     fn a_definition_says_what_is_wrong_with_it() {
         let refused = |json: String, says: &str| {
-            let e = load(&json).err().expect("refused");
+            let e = parse(&json).err().expect("refused");
             assert!(e.contains(says), "{e}");
         };
         refused(
@@ -1313,9 +1357,7 @@ mod tests {
     /// refuses for a placeholder it does not know, the schema refuses too.
     #[test]
     fn built_in_definitions_follow_the_schema() {
-        let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../devices/device-definition.schema.json"))
-                .expect("the schema is JSON");
+        let schema: serde_json::Value = serde_json::from_str(SCHEMA).expect("the schema is JSON");
         let validator = jsonschema::validator_for(&schema).expect("the schema is a schema");
         for (name, json) in BUILTIN {
             let file: serde_json::Value = serde_json::from_str(json).unwrap();
