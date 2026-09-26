@@ -195,7 +195,11 @@
                 "$ref": "#/$defs/report",
                 "description": "Its own report, when it carries more than a kind: the Razer's wave, with its direction and speed."
               },
-              "name": { "type": "string", "description": "What it shows, for whoever reads the file." }
+              "name": {
+                "$ref": "#/$defs/text",
+                "description": "What the gallery calls it. Without one, it shows its id."
+              },
+              "summary": { "$ref": "#/$defs/text", "description": "One sentence on what it shows." }
             }
           }
         }
@@ -292,6 +296,18 @@
     }
   },
   "$defs": {
+    "text": {
+      "description": "Text for people: a string, the same in every language, or one per language — `{ \"en\": \"Breathing\", \"fr\": \"Respiration\" }` — English being the one shown where the interface's language is missing.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-z]{2}$" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      ]
+    },
     "hex8": { "type": "string", "pattern": "^[0-9a-fA-F]{2}$" },
     "hex16": { "type": "string", "pattern": "^[0-9a-fA-F]{1,4}$" },
     "bytes": {

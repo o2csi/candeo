@@ -16,7 +16,7 @@ use candeo_protocol::{CommandId, Effect, Firmware, Rgb};
 use serde::Deserialize;
 
 use crate::layout::{
-    FirmwareEffect, Key, Layout, Lights, Outline, Port, Shape, EMPTY, NO_SCANCODE,
+    FirmwareEffect, Key, Layout, Lights, Outline, Port, Shape, Text, EMPTY, NO_SCANCODE,
 };
 use crate::lighting::{Lighting, Outgoing, Wire};
 
@@ -202,10 +202,11 @@ struct EffectSpec {
     /// This effect's own report, where it carries more than a kind.
     #[serde(default)]
     send: Option<String>,
-    /// What it shows, for whoever reads the file: not used.
+    /// What the gallery calls it, and says it shows.
     #[serde(default)]
-    #[allow(dead_code)]
-    name: Option<String>,
+    name: Option<Text>,
+    #[serde(default)]
+    summary: Option<Text>,
 }
 
 #[derive(Deserialize)]
@@ -966,6 +967,8 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         .map(|e| FirmwareEffect {
             id: Box::leak(e.id.clone().into_boxed_str()),
             colours: e.colours,
+            name: e.name.clone(),
+            summary: e.summary.clone(),
         })
         .collect();
     let outline: Vec<Outline> = d
@@ -1097,6 +1100,30 @@ mod tests {
         );
         assert_eq!(t.effect_id(wave).as_deref(), Some("hardware:wave"));
         assert_eq!(t.effect_id(Effect::Custom), None);
+    }
+
+    /// A firmware effect carries its name and summary from its definition, in
+    /// every language it gives, English where one is missing.
+    #[test]
+    fn a_firmware_effect_is_named_by_its_definition() {
+        let l = load(KEYBOARD).unwrap();
+        let breathing = l
+            .firmware_effects
+            .iter()
+            .find(|e| e.id == "hardware:m18-08")
+            .unwrap();
+        let name = breathing.name.as_ref().unwrap();
+        assert_eq!(name.get("fr"), "Respiration");
+        assert_eq!(
+            name.get("de"),
+            "Breathing",
+            "English where a language is missing"
+        );
+        let morph = l
+            .firmware_effects
+            .iter()
+            .find(|e| e.id == "hardware:m18-09");
+        assert_eq!(morph.unwrap().name, Some(Text::One("Morph".into())));
     }
 
     /// What *Copy to yours* and the editor start from: the text shipped.

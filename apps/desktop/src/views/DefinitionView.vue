@@ -19,6 +19,7 @@ import { message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import EditorShortcuts from '../components/EditorShortcuts.vue'
 import FailureNote from '../components/FailureNote.vue'
+import { refreshFirmwareEffects } from '../composables/useEffects'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
 import { t } from '../i18n'
 
@@ -102,6 +103,7 @@ const save = () =>
   act(async () => {
     const value = text.value
     reason.value = await saveDeviceDefinition(file.value, value)
+    void refreshFirmwareEffects()
     saved.value = value
     window.clearTimeout(pending)
     clearDraft(draftId.value)

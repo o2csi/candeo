@@ -222,6 +222,34 @@ pub struct LayoutInfo {
 pub struct FirmwareEffectInfo {
     pub id: String,
     pub colours: u8,
+    /// As its definition names it, for the window to put in its language.
+    pub name: Option<candeo_device::Text>,
+    pub summary: Option<candeo_device::Text>,
+}
+
+impl From<&candeo_device::FirmwareEffect> for FirmwareEffectInfo {
+    fn from(e: &candeo_device::FirmwareEffect) -> Self {
+        Self {
+            id: e.id.to_owned(),
+            colours: e.colours,
+            name: e.name.clone(),
+            summary: e.summary.clone(),
+        }
+    }
+}
+
+/// Every firmware effect Candeo knows, whatever is plugged in: what names one a
+/// rule shows on a device that is not the current one. The first definition to
+/// declare an id names it.
+#[tauri::command]
+fn firmware_effects() -> Vec<FirmwareEffectInfo> {
+    let mut seen = HashSet::new();
+    layouts()
+        .iter()
+        .flat_map(|l| l.firmware_effects)
+        .filter(|e| seen.insert(e.id))
+        .map(FirmwareEffectInfo::from)
+        .collect()
 }
 
 /// The one effect every device offers, whatever its firmware runs: a device that
@@ -295,10 +323,7 @@ impl From<&'static Layout> for LayoutInfo {
             firmware_effects: l
                 .firmware_effects
                 .iter()
-                .map(|e| FirmwareEffectInfo {
-                    id: e.id.to_owned(),
-                    colours: e.colours,
-                })
+                .map(FirmwareEffectInfo::from)
                 .collect(),
             lights: match l.lights {
                 candeo_device::Lights::Keys => "keys",
@@ -1583,6 +1608,7 @@ pub fn run() {
             storage::open_devices_dir,
             storage::reload_device_definitions,
             storage::copy_device_definition,
+            firmware_effects,
             storage::choose_device_definition,
             storage::read_device_definition,
             storage::device_definition_problems,

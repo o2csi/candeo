@@ -1,3 +1,5 @@
+import type { Text } from '@candeo/effects-api'
+
 /**
  * TypeScript mirror of the types serialized by the Tauri layer.
  *
@@ -192,6 +194,12 @@ export interface LayoutInfo {
 export interface FirmwareEffectInfo {
   id: string
   colours: number
+  /**
+   * What its definition calls it and says it shows: a string, the same in every
+   * language, or one per language. `null` where it says nothing.
+   */
+  name: Text | null
+  summary: Text | null
 }
 
 export type Effect =

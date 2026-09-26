@@ -617,18 +617,21 @@ fn device_submenu(
 /// How an effect a rule shows is named to a person: the library's name, or the
 /// firmware effect's, in the interface language.
 fn effect_label(id: &str, library: &[EffectEntry], language: Language) -> String {
-    let key = match id {
-        "hardware:off" => "effects.hardwareEffects.off.name",
-        "hardware:spectrumCycle" => "effects.hardwareEffects.spectrumCycle.name",
-        "hardware:wave" => "effects.hardwareEffects.wave.name",
-        _ => {
-            return library
-                .iter()
-                .find(|e| e.id == id)
-                .map_or_else(|| id.to_owned(), |e| e.manifest.name.clone())
-        }
-    };
-    i18n::text(language, key)
+    if id == crate::OFF {
+        return i18n::text(language, "effects.hardwareEffects.off.name");
+    }
+    // A firmware effect is named by its definition (`device-sdk.md` §7).
+    let firmware = crate::layouts()
+        .iter()
+        .flat_map(|l| l.firmware_effects)
+        .find(|e| e.id == id);
+    if let Some(name) = firmware.and_then(|e| e.name.as_ref()) {
+        return name.get(language.code()).to_owned();
+    }
+    library
+        .iter()
+        .find(|e| e.id == id)
+        .map_or_else(|| id.to_owned(), |e| e.manifest.name.clone())
 }
 
 fn item(app: &AppHandle, action: &Action, text: &str, enabled: bool) -> Built<MenuItem<Wry>> {

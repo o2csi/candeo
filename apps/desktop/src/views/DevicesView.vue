@@ -27,6 +27,7 @@ import {
   yourFiles,
 } from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
+import { refreshFirmwareEffects } from '../composables/useEffects'
 import { t } from '../i18n'
 
 /**
@@ -69,7 +70,7 @@ const fileError = ref<string | null>(null)
 /** Reads your definitions again first: a file just saved may define a device to look for. */
 async function reread(): Promise<void> {
   problems.value = await reloadDeviceDefinitions().catch(() => problems.value)
-  await refresh()
+  await Promise.all([refresh(), refreshFirmwareEffects()])
 }
 
 async function attempt(action: () => Promise<unknown>): Promise<void> {

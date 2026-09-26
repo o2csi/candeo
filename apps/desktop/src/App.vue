@@ -12,6 +12,7 @@ import { useTheme } from './composables/useTheme'
 import { useUpdateCheck } from './composables/useUpdateCheck'
 import type { ThemeSetting } from './api/candeo'
 import { refreshLibrary } from './editor/library'
+import { refreshFirmwareEffects } from './composables/useEffects'
 import { t } from './i18n'
 
 const route = useRoute()
@@ -57,6 +58,8 @@ onMounted(() => {
   refreshLibrary().catch((e: unknown) =>
     warn('App', `library not compiled: ${message(e, 'en')}`, e),
   )
+  // What names a firmware effect a rule shows, on whichever device.
+  void refreshFirmwareEffects()
 
   // The state can change **without the window**: the notification area icon
   // starts, stops and turns off without it. And the window now outlives it

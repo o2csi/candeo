@@ -8,11 +8,12 @@
 import { readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
-import { message } from '../api/journal'
+import { message, warn } from '../api/journal'
 import type { ParamSpec } from '@candeo/effects-api'
 
-import type { DeviceRef } from '../api/types'
+import type { DeviceRef, FirmwareEffectInfo } from '../api/types'
 import { t } from '../i18n'
+import { localized } from '../i18n/text'
 
 export interface HardwareEffect {
   id: string
@@ -69,38 +70,30 @@ export function colourBytes(values: Record<string, unknown>): number[] {
   })
 }
 
-/** What an Alienware keyboard's own effects are called, before their number. */
-const ALIENWARE = 'hardware:m18-'
+/**
+ * Every firmware effect Candeo knows, by id: what names one outside the
+ * gallery — a rule's, a signal reader's — whatever device is current. Read at
+ * startup and again when the definitions are; {@link named} shows the id until
+ * then.
+ */
+const known = ref(new Map<string, FirmwareEffectInfo>())
+
+export async function refreshFirmwareEffects(): Promise<void> {
+  try {
+    known.value = new Map((await api.firmwareEffects()).map((e) => [e.id, e]))
+  } catch (e) {
+    warn('effects', `firmware effect names not read: ${message(e, 'en')}`, e)
+  }
+}
 
 /**
- * What each of that keyboard's kinds shows, watched one by one on the hardware.
- * The protocol says nothing about it: the numbers answer, the names were read
- * off the keyboard.
- *
- * **The words are the maker's own**, as its software lists them — *Couleur*,
- * *Respiration*, *Spectre*, *Onde arc-en-ciel*, *Scanner* — so that someone
- * coming from it finds what they know. The two it does not offer, `02` and `09`,
- * keep the names of the lighting API they belong to.
+ * A firmware effect's name and summary come from its device's definition
+ * (`device-sdk.md` §7), in the interface's language: one family's modes are not
+ * another's, and whoever describes a kind names it. Only *Off*, which every
+ * device offers, is the application's. A kind nobody named shows its id rather
+ * than an invented name.
  */
-const ALIENWARE_NAMES = {
-  '01': 'colour',
-  '02': 'pulse',
-  '03': 'rainbowWave',
-  '08': 'breathing',
-  '09': 'morph',
-  '0a': 'scanner',
-  '0e': 'spectrum',
-} as const
-
-/**
- * A firmware effect's name comes from its id, not from a catalogue written here.
- *
- * **One family's modes are not another's.** The layout says which ids a device
- * runs; this only puts words on them. The Alienware keyboard's sixteen kinds are
- * named after their number until someone says what each one shows — which takes
- * eyes on a keyboard, not code.
- */
-export function named(id: string, colours = 0): HardwareEffect {
+export function named(id: string, colours = 0, own?: FirmwareEffectInfo): HardwareEffect {
   if (id === OFF) {
     return {
       id,
@@ -109,29 +102,13 @@ export function named(id: string, colours = 0): HardwareEffect {
       summary: t('effects.hardwareEffects.off.summary'),
     }
   }
-  if (id === 'hardware:spectrumCycle' || id === 'hardware:wave') {
-    const key = id === 'hardware:wave' ? 'wave' : 'spectrumCycle'
-    return {
-      id,
-      colours,
-      name: t(`effects.hardwareEffects.${key}.name`),
-      summary: t(`effects.hardwareEffects.${key}.summary`),
-    }
+  const declared = own ?? known.value.get(id)
+  return {
+    id,
+    colours,
+    name: localized(declared?.name ?? undefined) || id,
+    summary: localized(declared?.summary ?? undefined),
   }
-  const kind = id.slice(ALIENWARE.length) as keyof typeof ALIENWARE_NAMES
-  const alienware = ALIENWARE_NAMES[kind]
-  if (id.startsWith(ALIENWARE) && alienware) {
-    return {
-      id,
-      colours,
-      name: t(`effects.hardwareEffects.${alienware}.name`),
-      summary: t(`effects.hardwareEffects.${alienware}.summary`),
-    }
-  }
-  // An id nobody named: shown as it is rather than invented. The gallery only
-  // offers what a layout lists, so this is the sign of a layout gone ahead of
-  // the words for it.
-  return { id, colours, name: id, summary: '' }
 }
 
 /**
@@ -141,10 +118,10 @@ export function named(id: string, colours = 0): HardwareEffect {
  * unknown device runs would be inventing it.
  */
 export function hardwareEffectsFor(
-  layout: { firmwareEffects?: { id: string; colours: number }[] } | null | undefined,
+  layout: { firmwareEffects?: FirmwareEffectInfo[] } | null | undefined,
 ): readonly HardwareEffect[] {
   const offered = layout?.firmwareEffects ?? []
-  return [...offered.map((e) => named(e.id, e.colours)), named(OFF)]
+  return [...offered.map((e) => named(e.id, e.colours, e)), named(OFF)]
 }
 
 /**

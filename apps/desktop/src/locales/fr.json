@@ -118,42 +118,6 @@
     "hardwareEffects": {
       "pickColour": "Couleur",
       "pickColour2": "Seconde couleur",
-      "colour": {
-        "name": "Couleur",
-        "summary": "Une couleur, tenue — celle que vous choisissez ci-dessous."
-      },
-      "pulse": {
-        "name": "Pulsation",
-        "summary": "Cette couleur bat, sans fin."
-      },
-      "breathing": {
-        "name": "Respiration",
-        "summary": "Les couleurs se succèdent, en passant par le noir entre chacune."
-      },
-      "morph": {
-        "name": "Morph",
-        "summary": "Les couleurs se succèdent sans jamais s'éteindre."
-      },
-      "scanner": {
-        "name": "Scanner",
-        "summary": "Une bande lumineuse traverse les touches et revient."
-      },
-      "rainbowWave": {
-        "name": "Onde arc-en-ciel",
-        "summary": "Un arc-en-ciel traverse le clavier de part en part."
-      },
-      "spectrum": {
-        "name": "Spectre",
-        "summary": "Tout le clavier défile dans les teintes, sans fin."
-      },
-      "spectrumCycle": {
-        "name": "Spectrum Cycle",
-        "summary": "Tout le clavier change de teinte ensemble, sans fin."
-      },
-      "wave": {
-        "name": "Wave",
-        "summary": "Un dégradé traverse le clavier de part en part."
-      },
       "off": {
         "name": "Éteint",
         "summary": "Rétroéclairage coupé, sans débrancher quoi que ce soit."

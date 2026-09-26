@@ -118,42 +118,6 @@
     "hardwareEffects": {
       "pickColour": "Colour",
       "pickColour2": "Second colour",
-      "colour": {
-        "name": "Colour",
-        "summary": "One colour, held — the one chosen below."
-      },
-      "pulse": {
-        "name": "Pulse",
-        "summary": "That colour throbs, on and off, endlessly."
-      },
-      "breathing": {
-        "name": "Breathing",
-        "summary": "Colours follow one another, fading through black in between."
-      },
-      "morph": {
-        "name": "Morph",
-        "summary": "Colours follow one another without ever going dark."
-      },
-      "scanner": {
-        "name": "Scanner",
-        "summary": "A lit band sweeps across the keys and back."
-      },
-      "rainbowWave": {
-        "name": "Rainbow Wave",
-        "summary": "A rainbow crosses the keyboard from side to side."
-      },
-      "spectrum": {
-        "name": "Spectrum",
-        "summary": "The whole keyboard cycles through hues, endlessly."
-      },
-      "spectrumCycle": {
-        "name": "Spectrum Cycle",
-        "summary": "The whole keyboard changes hue together, endlessly."
-      },
-      "wave": {
-        "name": "Wave",
-        "summary": "A gradient crosses the keyboard from side to side."
-      },
       "off": {
         "name": "Off",
         "summary": "Backlight off, without unplugging anything."

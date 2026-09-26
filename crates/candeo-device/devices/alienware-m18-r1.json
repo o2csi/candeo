@@ -7,7 +7,8 @@
     "Brightness takes effect only after a frame has been opened and closed (2026-09-18).",
     "Off is kind 01, a steady colour, given black: once the firmware animates, a black frame is overwritten within the second.",
     "Taking over sends that same Off when a host effect starts: an animating firmware redraws over every frame otherwise (2026-09-26).",
-    "Sixteen kinds answer; these seven show something, watched one by one on 2026-09-18. Three take a colour."
+    "Sixteen kinds answer; these seven show something, watched one by one on 2026-09-18. Three take a colour.",
+    "The firmware effects are named as the maker’s software lists them, so that someone coming from it finds what they know; 02 and 09, which it does not offer, keep the names of the lighting API they belong to."
   ],
   "match": { "vid": "0d62", "pid": "aab0", "usagePage": "ff89", "usage": "00cc" },
   "report": { "wire": "feature", "length": 64 },
@@ -22,13 +23,73 @@
     "send": "cc 80 {kind} 05 00 00 01 01 01 01 {r} {g} {b} {r2} {g2} {b2} 05",
     "off": "01",
     "effects": [
-      { "id": "hardware:m18-01", "kind": "01", "colours": 1, "name": "a steady colour" },
-      { "id": "hardware:m18-02", "kind": "02", "colours": 1, "name": "that colour, throbbing" },
-      { "id": "hardware:m18-03", "kind": "03", "colours": 0, "name": "a rainbow crossing the keys" },
-      { "id": "hardware:m18-08", "kind": "08", "colours": 0, "name": "colours following one another through black" },
-      { "id": "hardware:m18-09", "kind": "09", "colours": 0, "name": "the same without going dark" },
-      { "id": "hardware:m18-0a", "kind": "0a", "colours": 1, "name": "a lit band sweeping across and back" },
-      { "id": "hardware:m18-0e", "kind": "0e", "colours": 0, "name": "hues cycling, faster" }
+      {
+        "id": "hardware:m18-01",
+        "kind": "01",
+        "colours": 1,
+        "name": { "en": "Colour", "fr": "Couleur" },
+        "summary": {
+          "en": "One colour, held — the one chosen below.",
+          "fr": "Une couleur, tenue — celle que vous choisissez ci-dessous."
+        }
+      },
+      {
+        "id": "hardware:m18-02",
+        "kind": "02",
+        "colours": 1,
+        "name": { "en": "Pulse", "fr": "Pulsation" },
+        "summary": { "en": "That colour throbs, on and off, endlessly.", "fr": "Cette couleur bat, sans fin." }
+      },
+      {
+        "id": "hardware:m18-03",
+        "kind": "03",
+        "colours": 0,
+        "name": { "en": "Rainbow Wave", "fr": "Onde arc-en-ciel" },
+        "summary": {
+          "en": "A rainbow crosses the keyboard from side to side.",
+          "fr": "Un arc-en-ciel traverse le clavier de part en part."
+        }
+      },
+      {
+        "id": "hardware:m18-08",
+        "kind": "08",
+        "colours": 0,
+        "name": { "en": "Breathing", "fr": "Respiration" },
+        "summary": {
+          "en": "Colours follow one another, fading through black in between.",
+          "fr": "Les couleurs se succèdent, en passant par le noir entre chacune."
+        }
+      },
+      {
+        "id": "hardware:m18-09",
+        "kind": "09",
+        "colours": 0,
+        "name": "Morph",
+        "summary": {
+          "en": "Colours follow one another without ever going dark.",
+          "fr": "Les couleurs se succèdent sans jamais s'éteindre."
+        }
+      },
+      {
+        "id": "hardware:m18-0a",
+        "kind": "0a",
+        "colours": 1,
+        "name": "Scanner",
+        "summary": {
+          "en": "A lit band sweeps across the keys and back.",
+          "fr": "Une bande lumineuse traverse les touches et revient."
+        }
+      },
+      {
+        "id": "hardware:m18-0e",
+        "kind": "0e",
+        "colours": 0,
+        "name": { "en": "Spectrum", "fr": "Spectre" },
+        "summary": {
+          "en": "The whole keyboard cycles through hues, endlessly.",
+          "fr": "Tout le clavier défile dans les teintes, sans fin."
+        }
+      }
     ]
   },
   "lights": {

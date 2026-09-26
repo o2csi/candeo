@@ -103,6 +103,29 @@ pub enum Lights {
     Zones,
 }
 
+/// Text a definition's author writes for people: the same in every language, or
+/// one per language, as an effect's description (`effects-library.md` §2).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Text {
+    One(String),
+    Many(std::collections::BTreeMap<String, String>),
+}
+
+impl Text {
+    /// In `language`, else English, else the first language given.
+    pub fn get(&self, language: &str) -> &str {
+        match self {
+            Text::One(text) => text,
+            Text::Many(texts) => texts
+                .get(language)
+                .or_else(|| texts.get("en"))
+                .or_else(|| texts.values().next())
+                .map_or("", String::as_str),
+        }
+    }
+}
+
 /// An effect a firmware runs, as a layout declares it.
 ///
 /// **How many colours it takes is part of the effect, not of the device.** A
@@ -115,6 +138,10 @@ pub struct FirmwareEffect {
     pub id: &'static str,
     /// How many colours it paints with: none, one, or two.
     pub colours: u8,
+    /// What it is called and what it shows, as its definition says: nobody else
+    /// knows a firmware's kinds (`device-sdk.md` §7).
+    pub name: Option<Text>,
+    pub summary: Option<Text>,
 }
 
 /// Which HID entry of a device carries the lighting.
