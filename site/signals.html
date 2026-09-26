@@ -234,6 +234,54 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
         </p>
       </section>
 
+      <section id="computer-load">
+        <h2>Recipe: your computer's load on the keys</h2>
+        <p>
+          A few lines send the processor's load and the memory in use, as percentages, every
+          couple of seconds. PowerShell, left running in a window or started with your session:
+        </p>
+        <pre data-lang="powershell" data-file="Send-Load.ps1"># The processor's load and the memory in use, 0 to 100, as pc.cpu and pc.ram.
+$headers = @{ Authorization = "Bearer $env:CANDEO_TOKEN" }
+while ($true) {
+  $cpu = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average
+  $os = Get-CimInstance Win32_OperatingSystem
+  $ram = 100 * (1 - $os.FreePhysicalMemory / $os.TotalVisibleMemorySize)
+  $body = @{ 'pc.cpu' = [int]$cpu; 'pc.ram' = [int]$ram } | ConvertTo-Json -Compress
+  # Ten seconds of life: when the script stops, the keys go back to what they were.
+  Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=10" `
+    -Headers $headers -ContentType "application/json" -Body $body | Out-Null
+  Start-Sleep -Seconds 2
+}</pre>
+        <p>The same on Linux:</p>
+        <pre data-lang="bash">while true; do
+  cpu=$(vmstat 1 2 | awk 'END {print 100 - $15}')
+  ram=$(free | awk '/^Mem:/ {printf "%d", 100 * $3 / $2}')
+  curl -s -H "Authorization: Bearer $CANDEO_TOKEN" -H "Content-Type: application/json" \
+    -d "{\"pc.cpu\":$cpu,\"pc.ram\":$ram}" "http://127.0.0.1:7317/signals?ttl=10" > /dev/null
+  sleep 1
+done</pre>
+        <p>Then choose what shows it:</p>
+        <ul>
+          <li>
+            <strong>Status row</strong> with the prefix <code>pc.</code>: a key per value, green when
+            idle, red when full.
+          </li>
+          <li>
+            <strong>Any setting</strong> following <code>pc.cpu</code>: a wave that speeds up when the
+            computer works, kept within the setting's range.
+          </li>
+          <li>
+            <strong>The brightness</strong> following it, under the device's slider: the keyboard
+            brighter as the load climbs.
+          </li>
+        </ul>
+        <p>
+          Temperatures and the graphics card are not in Windows' standard counters. A monitoring
+          tool that serves its readings locally — LibreHardwareMonitor's web server, for one — can
+          be read by the same loop and its numbers sent the same way.
+        </p>
+      </section>
+
       <section>
         <h2>Home Assistant</h2>
         <p>
