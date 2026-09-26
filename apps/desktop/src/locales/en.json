@@ -216,7 +216,19 @@
     "noKeyboard": "No keyboard connected: drawn from the default layout.",
     "nameRequired": "Name the effect before saving it",
     "compileErrors": "{n} error in the effect — line {line}: {message} | {n} errors in the effect — line {line}: {message}",
-    "savedButBroken": "The effect is saved, but it does not load"
+    "savedButBroken": "The effect is saved, but it does not load",
+    "saveTitle": "Put in shape and save (Ctrl+S)",
+    "shortcuts": {
+      "title": "Keyboard shortcuts",
+      "save": "Put in shape and save",
+      "format": "Put in shape",
+      "complete": "Complete",
+      "find": "Find",
+      "replace": "Replace",
+      "comment": "Comment or uncomment the line",
+      "moveLine": "Move the line up or down",
+      "nextOccurrence": "Select the next occurrence too"
+    }
   },
   "definition": {
     "title": "Device definition",

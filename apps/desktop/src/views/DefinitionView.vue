@@ -17,6 +17,7 @@ import {
 } from '../api/candeo'
 import { message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
+import EditorShortcuts from '../components/EditorShortcuts.vue'
 import FailureNote from '../components/FailureNote.vue'
 import { clearDraft, readDraft, writeDraft } from '../editor/draft'
 import { t } from '../i18n'
@@ -124,6 +125,7 @@ const copy = () =>
       <span class="file">{{ file }}</span>
       <p v-if="builtIn" class="what">{{ t('editor.builtinReadOnly') }}</p>
       <span class="spacer" />
+      <EditorShortcuts />
       <button
         v-if="builtIn"
         class="solid"
@@ -133,7 +135,13 @@ const copy = () =>
       >
         {{ busy ? t('editor.wait') : t('devices.copy') }}
       </button>
-      <button v-else class="solid" :disabled="busy || loading || !unsaved" @click="save">
+      <button
+        v-else
+        class="solid"
+        :disabled="busy || loading || !unsaved"
+        :title="t('editor.saveTitle')"
+        @click="save"
+      >
         {{ busy ? t('editor.wait') : t('editor.save') }}
       </button>
     </header>

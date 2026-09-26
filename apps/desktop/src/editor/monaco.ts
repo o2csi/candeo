@@ -35,8 +35,19 @@
  */
 
 import * as monaco from 'monaco-editor/editor/editor.api.js'
-// *Format Document* and its Shift+Alt+F: the API alone registers neither.
+// What an editor is expected to do, which the API alone does not register:
+// *Format Document* and its Shift+Alt+F, find and replace, line comments and
+// moves, several cursors, folding, matching brackets and occurrences.
+// `editor.main.js` would load them with every language and feature there is.
+// `editor/shortcuts.ts` lists the bindings worth showing.
 import 'monaco-editor/editor/contrib/format/browser/formatActions.js'
+import 'monaco-editor/editor/contrib/find/browser/findController.js'
+import 'monaco-editor/editor/contrib/comment/browser/comment.js'
+import 'monaco-editor/editor/contrib/linesOperations/browser/linesOperations.js'
+import 'monaco-editor/editor/contrib/multicursor/browser/multicursor.js'
+import 'monaco-editor/editor/contrib/folding/browser/folding.js'
+import 'monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js'
+import 'monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker.js?worker'

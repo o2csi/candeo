@@ -216,7 +216,19 @@
     "noKeyboard": "Aucun clavier connecté : dessin d'après le gabarit par défaut.",
     "nameRequired": "Donnez un nom à l'effet avant de l'enregistrer",
     "compileErrors": "{n} erreur dans l'effet — ligne {line} : {message} | {n} erreurs dans l'effet — ligne {line} : {message}",
-    "savedButBroken": "L'effet est enregistré, mais il ne se charge pas"
+    "savedButBroken": "L'effet est enregistré, mais il ne se charge pas",
+    "saveTitle": "Mettre en forme et enregistrer (Ctrl+S)",
+    "shortcuts": {
+      "title": "Raccourcis clavier",
+      "save": "Mettre en forme et enregistrer",
+      "format": "Mettre en forme",
+      "complete": "Compléter",
+      "find": "Rechercher",
+      "replace": "Remplacer",
+      "comment": "Commenter ou décommenter la ligne",
+      "moveLine": "Déplacer la ligne vers le haut ou le bas",
+      "nextOccurrence": "Sélectionner aussi l’occurrence suivante"
+    }
   },
   "definition": {
     "title": "Définition d’appareil",
