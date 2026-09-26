@@ -43,6 +43,16 @@ pub enum Language {
     Fr,
 }
 
+impl Language {
+    /// As a text's languages are keyed: `en`, `fr`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Language::En => "en",
+            Language::Fr => "fr",
+        }
+    }
+}
+
 /// The system's display language, English when it is neither of ours.
 ///
 /// The display language and not the regional format: someone reading Windows in

@@ -31,8 +31,25 @@
     "send": "00 9f 00 00 00 06 0f 02 00 00 {kind} 00 00 00",
     "off": "00",
     "effects": [
-      { "id": "hardware:spectrumCycle", "kind": "03", "name": "hues cycling over the whole keyboard" },
-      { "id": "hardware:wave", "kind": "04", "send": "00 9f 00 00 00 06 0f 02 00 00 04 02 28 00", "name": "a wave, in the one direction and speed captured" }
+      {
+        "id": "hardware:spectrumCycle",
+        "kind": "03",
+        "name": "Spectrum Cycle",
+        "summary": {
+          "en": "The whole keyboard changes hue together, endlessly.",
+          "fr": "Tout le clavier change de teinte ensemble, sans fin."
+        }
+      },
+      {
+        "id": "hardware:wave",
+        "kind": "04",
+        "send": "00 9f 00 00 00 06 0f 02 00 00 04 02 28 00",
+        "name": "Wave",
+        "summary": {
+          "en": "A gradient crosses the keyboard from side to side.",
+          "fr": "Un dégradé traverse le clavier de part en part."
+        }
+      }
     ]
   },
   "lights": {

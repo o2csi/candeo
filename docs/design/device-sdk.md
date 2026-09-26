@@ -671,6 +671,12 @@ interpreter, written and tested once in Rust, turns it into reports:
   "xor", "from": 2, "to": 87, "at": 88 }` — byte 88 is the XOR of bytes 2 to 87.
   The list is closed (`xor`, `sum`) and grows by code, each function tested once;
   every device using it stays data.
+- **A firmware effect is named by its definition**: `name` and `summary`, each a
+  string — the same in every language — or a map of languages, English first,
+  as an effect's description is (`effects-library.md` §2). The application's
+  catalogs only name *Off*, which every device offers. A contributor adding a
+  kind names it where they describe it, and the interface translates it
+  without a line of code; a kind nobody named shows its id.
 - **Every field is documented in a schema**, `devices/device-definition.schema.json`,
   which each definition names in `$schema`: an editor completes and checks a file
   against it, and a file loads only if it follows it, so the editor and the

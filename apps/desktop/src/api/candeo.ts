@@ -10,7 +10,15 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
-import type { DeviceInfo, DeviceRef, DeviceState, Failure, LayoutInfo, Rgb } from './types'
+import type {
+  DeviceInfo,
+  DeviceRef,
+  DeviceState,
+  Failure,
+  FirmwareEffectInfo,
+  LayoutInfo,
+  Rgb,
+} from './types'
 
 /** Lists the known layouts, plugged in or not, with the state of each. */
 export function listDevices(): Promise<DeviceInfo[]> {
@@ -122,6 +130,14 @@ export function setDimming(device: DeviceRef, dimming: Dimming | null): Promise<
 /** Remembers what a device's brightness follows, `null` forgetting it. */
 export function rememberDimming(device: DeviceRef, dimming: Dimming | null): Promise<void> {
   return invoke('remember_dimming', { device, dimming })
+}
+
+/**
+ * Every firmware effect Candeo knows, whatever is plugged in, as their
+ * definitions name them.
+ */
+export function firmwareEffects(): Promise<FirmwareEffectInfo[]> {
+  return invoke('firmware_effects')
 }
 
 /**
