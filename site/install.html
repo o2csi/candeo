@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — install</title>
+    <meta
+      name="description"
+      content="Every way to install Candeo: the Microsoft Store, the Windows installers, winget and Linux packages, how to check a download, and where your settings and effects live."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+{{nav}}
+      <h1>Install</h1>
+      <p class="lead">
+        The Microsoft Store is the simplest way: one click, signed, and kept up to date for you.
+        The other ways are here for whoever needs them.
+      </p>
+
+      <section>
+        <h2>Choose how</h2>
+        <div class="ways">
+          <div class="way">
+            <h3>Microsoft Store</h3>
+            <p>Signed by Microsoft, and updated by the Store.</p>
+            <a class="download" href="https://apps.microsoft.com/detail/9MXFM8QT1X7P">Get it from the Store</a>
+          </div>
+          <div class="way">
+            <h3>Windows installer</h3>
+            <p>Installs for your account, no administrator rights.</p>
+            <a class="download" href="{{setupUrl}}">Download {{version}}</a>
+          </div>
+          <div class="way">
+            <h3>winget</h3>
+            <p>Once the manifest is accepted.</p>
+            <div class="command">winget install candeo</div>
+          </div>
+          <div class="way">
+            <h3>Linux</h3>
+            <p><code>.deb</code> and <code>.rpm</code> packages, x86_64.</p>
+            <a class="download" href="{{releaseUrl}}">All downloads</a>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Windows</h2>
+        <p>
+          Every release carries two installers for 64-bit Windows, beside the Store version:
+        </p>
+        <ul>
+          <li>
+            <code>candeo_&lt;version&gt;_x64-setup.exe</code> installs for your account, without
+            administrator rights. This is the one to pick outside the Store.
+          </li>
+          <li>
+            <code>candeo_&lt;version&gt;_x64_en-US.msi</code> installs for every account of the
+            computer, and asks for administrator rights.
+          </li>
+        </ul>
+        <p>
+          These are not signed yet, so SmartScreen warns about an unknown publisher: click
+          <em>More info</em>, then <em>Run anyway</em>. The Store version is signed by Microsoft
+          and shows no warning.
+        </p>
+        <p>
+          With winget, once its manifest is accepted, the identifier is <code>O2CSI.Candeo</code>:
+        </p>
+        <div class="command">winget install O2CSI.Candeo</div>
+      </section>
+
+      <section>
+        <h2>Linux</h2>
+        <p>
+          Candeo runs on Linux, and support for real devices there is still being finished
+          (<a href="{{repository}}/issues/230">#230</a>). Both packages install the udev rule that
+          lets your account talk to the device: plug it in again afterwards.
+        </p>
+        <div class="command">sudo apt install ./candeo_&lt;version&gt;_amd64.deb</div>
+        <div class="command">sudo dnf install ./candeo-&lt;version&gt;-1.x86_64.rpm</div>
+        <p class="note">
+          The system packages Candeo needs, and the rule itself, are described in
+          <a href="{{repository}}/blob/main/docs/linux.md">docs/linux.md</a>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Check a download</h2>
+        <p>
+          Every release carries a <code>SHA256SUMS</code> file listing the fingerprint of each
+          download. In the folder holding both, on Linux:
+        </p>
+        <div class="command">sha256sum -c SHA256SUMS --ignore-missing</div>
+        <p>On Windows, compare with the line for your file in <code>SHA256SUMS</code>:</p>
+        <div class="command" data-lang="powershell">Get-FileHash .\candeo_*_x64-setup.exe -Algorithm SHA256</div>
+      </section>
+
+      <section>
+        <h2>Updates</h2>
+        <p>
+          The Store updates Candeo by itself. Outside the Store, Candeo can tell you when a newer
+          version is published — the one request it makes, which you can turn off in
+          <em>Settings</em>. Installing a new version over the old one keeps your settings and your
+          effects.
+        </p>
+      </section>
+
+      <section>
+        <h2>Where your things are</h2>
+        <ul>
+          <li>
+            <strong>Your effects</strong> — <code>Documents\candeo\effects</code>, one
+            <code>.ts</code> file each.
+          </li>
+          <li>
+            <strong>Your device definitions</strong> — <code>Documents\candeo\devices</code>, one
+            <code>.json</code> file each.
+          </li>
+          <li>
+            <strong>Your settings</strong> — kept by the app in your profile: what you control, the
+            effect applied, rules, brightness.
+          </li>
+        </ul>
+        <p>
+          Uninstalling Candeo leaves the <code>Documents\candeo</code> folder where it is: your
+          files are yours.
+        </p>
+      </section>
+    </main>
+
+{{footer}}
+  </body>
+</html>

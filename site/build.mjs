@@ -14,12 +14,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
 import powershell from 'highlight.js/lib/languages/powershell'
 import typescript from 'highlight.js/lib/languages/typescript'
 import yaml from 'highlight.js/lib/languages/yaml'
 import { marked } from 'marked'
 
 hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('json', json)
 hljs.registerLanguage('powershell', powershell)
 hljs.registerLanguage('typescript', typescript)
 hljs.registerLanguage('yaml', yaml)
@@ -108,6 +110,59 @@ const repo = repository()
 const version = await latest(repo)
 const releases = `${repo}/releases`
 
+/** Text as a page holds it, so that `<`, `>` and `&` stay text. */
+const escaped = (text) =>
+  text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+
+/**
+ * The documentation's pages, in the order the bar lists them: what someone using
+ * Candeo reads, then what someone building on it reads.
+ */
+const PAGES = [
+  ['install.html', 'Install'],
+  ['devices.html', 'Devices'],
+  ['automations.html', 'Rules'],
+  ['signals.html', 'Signals'],
+  ['sound.html', 'Sound'],
+  ['sdk.html', 'Build on Candeo'],
+  ['effects.html', 'Write an effect'],
+  ['devices-guide.html', 'Describe a device'],
+]
+
+/** The bar at the top of every page but the landing one, the page itself marked. */
+function nav(name) {
+  const links = PAGES.map(
+    ([page, title]) =>
+      `        <a href="${page}"${page === name ? ' aria-current="page"' : ''}>${title}</a>`,
+  ).join('\n')
+  return `      <nav class="docs" aria-label="Candeo">
+        <a class="home" href="./">← Candeo</a>
+${links}
+      </nav>`
+}
+
+/** One footer for every page. */
+const footer = `    <footer>
+      <a href="./">Candeo</a>
+      <a href="install.html">Install</a>
+      <a href="sdk.html">Build on Candeo</a>
+      <a href="${repo}">Source</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="${repo}/issues">Issues</a>
+      <span class="spacer"></span>
+      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
+    </footer>`
+
+/**
+ * The definition the guide walks through, read from the file Candeo ships: a
+ * copy in the page would drift from the one the tests replay.
+ */
+const zonesDefinition = escaped(
+  readFileSync(join(root, 'crates/candeo-device/devices/alienware-m18-r1-zones.json'), 'utf8')
+    .replaceAll('\r\n', '\n')
+    .trimEnd(),
+)
+
 const values = {
   version: version ?? 'the latest version',
   releaseUrl: version ? `${releases}/tag/v${version}` : releases,
@@ -116,6 +171,8 @@ const values = {
     : `${releases}/latest`,
   repository: repo,
   devices: table(repo),
+  footer,
+  zonesDefinition,
 }
 
 rmSync(out, { recursive: true, force: true })
@@ -175,11 +232,12 @@ function highlighted(page, name) {
 
 /** One page, with what it asks for filled in. */
 function render(name) {
+  const own = { ...values, nav: nav(name) }
   const page = readFileSync(join(here, name), 'utf8').replaceAll(/\{\{(\w+)\}\}/g, (_, key) => {
-    if (!(key in values)) {
+    if (!(key in own)) {
       throw new Error(`${name} asks for an unknown {{${key}}}`)
     }
-    return values[key]
+    return own[key]
   })
   writeFileSync(join(out, name), highlighted(page, name))
 }
@@ -218,6 +276,9 @@ render('automations.html')
 render('signals.html')
 render('sound.html')
 render('effects.html')
+render('install.html')
+render('sdk.html')
+render('devices-guide.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))
@@ -241,9 +302,11 @@ writeFileSync(
   </head>
   <body>
     <main class="policy">
-      <a class="back" href="./">← Candeo</a>
+${nav('privacy.html')}
 ${policy}
     </main>
+
+${footer}
   </body>
 </html>
 `,

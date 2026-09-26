@@ -206,6 +206,67 @@ li::marker {
   color: var(--accent);
 }
 
+/* ---------------------------------------------------------------- getting started */
+
+/* What to do next, where the eye lands after the promise. */
+.cta {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.cta .download {
+  font-size: 16px;
+  padding: 10px 18px;
+}
+
+/* Three steps, numbered as the eye reads them. */
+.steps {
+  counter-reset: step;
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.steps li {
+  counter-increment: step;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 0;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+
+.steps li::before {
+  content: counter(step);
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+kbd {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--raised);
+}
+
 /* ---------------------------------------------------------------- install */
 
 .ways {
@@ -223,6 +284,11 @@ li::marker {
 
 .way h3 {
   margin-top: 0;
+}
+
+/* A sentence after the cards belongs to them, not glued to them. */
+.ways + p {
+  margin-top: 16px;
 }
 
 /* A row of keys lit the way the effects in the card light them. */
@@ -496,6 +562,38 @@ pre {
 .subpage .lead {
   color: var(--muted);
   margin-bottom: 8px;
+}
+
+/* ---------------------------------------------------------------- the pages' bar */
+
+/* Every page but the landing one: where it sits among the others, one click from each. */
+nav.docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: baseline;
+  margin-bottom: 28px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+nav.docs a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+nav.docs a:hover {
+  color: var(--text);
+}
+
+nav.docs a[aria-current="page"] {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+nav.docs .home {
+  margin-right: 8px;
 }
 
 /* ---------------------------------------------------------------- footer */

@@ -20,7 +20,7 @@
   </head>
   <body>
     <main class="subpage">
-      <a class="back" href="./">← Candeo</a>
+{{nav}}
       <h1>Signals</h1>
       <p class="lead">
         Other programs tell Candeo what happened — a build that failed, the doorbell, a call
@@ -61,7 +61,7 @@
       </section>
 
       <section>
-        <h2>Sending one</h2>
+        <h2 id="sending">Sending one</h2>
         <p>PowerShell, at the end of a build script:</p>
         <pre data-lang="powershell">$headers = @{ Authorization = "Bearer $env:CANDEO_TOKEN" }
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
@@ -284,13 +284,6 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:7317/signals?ttl=0" `
       </section>
     </main>
 
-    <footer>
-      <a href="./">Candeo</a>
-      <a href="{{repository}}">Source</a>
-      <a href="privacy.html">Privacy</a>
-      <a href="{{repository}}/issues">Issues</a>
-      <span class="spacer"></span>
-      <span>GPL-3.0-only · <a href="https://www.o2csi.com">O2CSI</a></span>
-    </footer>
+{{footer}}
   </body>
 </html>

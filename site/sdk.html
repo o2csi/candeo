@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — build on Candeo</title>
+    <meta
+      name="description"
+      content="Candeo is made of files you can read and write: effects in TypeScript, devices as JSON definitions, signals from your own tools. Where they live, how the editor checks them, the references, and how Candeo itself is built."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+{{nav}}
+      <h1>Build on Candeo</h1>
+      <p class="lead">
+        Everything Candeo lights with is a file you can open: an effect is a short TypeScript
+        file, a device is a JSON description, and your other tools talk to it over a local API.
+        Write your own, try it at once, and share it if you like.
+      </p>
+
+      <section>
+        <h2>Three ways in</h2>
+        <div class="ways">
+          <div class="way">
+            <h3>Write an effect</h3>
+            <p>
+              A function that, thirty times a second, gets the keyboard and the time and paints
+              every key. Settings people can change, the sound, your typing, signals.
+            </p>
+            <a href="effects.html">Write an effect →</a>
+          </div>
+          <div class="way">
+            <h3>Describe a device</h3>
+            <p>
+              How to find it, the bytes it expects, where its lights sit and the effects its
+              firmware runs — as data, no code and no rebuild.
+            </p>
+            <a href="devices-guide.html">Describe a device →</a>
+          </div>
+          <div class="way">
+            <h3>Send signals</h3>
+            <p>
+              A named value from a script, a build or Home Assistant, which rules and settings
+              follow. Off until you turn it on, and every request carries a token.
+            </p>
+            <a href="signals.html">Send signals →</a>
+          </div>
+        </div>
+        <p class="note">
+          Effects can also follow the music: <a href="sound.html">what Candeo hears</a>, and how a
+          setting follows it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Your files, in your folder</h2>
+        <p>
+          What you write lives in your <code>Documents</code>, where you can back it up, version it
+          or share it:
+        </p>
+        <ul>
+          <li><code>Documents\candeo\effects</code> — one <code>.ts</code> file per effect;</li>
+          <li><code>Documents\candeo\devices</code> — one <code>.json</code> file per device definition.</li>
+        </ul>
+        <p>
+          The ones Candeo ships are listed beside yours and open read only. <em>Duplicate</em> an
+          effect, or <em>Copy to yours</em> a device definition, to start from one that works.
+          A file dropped in the folder shows up after <em>Refresh</em>.
+        </p>
+      </section>
+
+      <section>
+        <h2>The editor</h2>
+        <p>
+          Candeo opens both kinds of file in its own editor — the one behind Visual Studio Code —
+          and checks them as you type: an effect against the effects API, with completion and the
+          types of everything it receives; a device definition against its schema, with the
+          documentation of each field on hover.
+        </p>
+        <ul>
+          <li><kbd>Ctrl</kbd>+<kbd>S</kbd> puts the text in shape and saves it;</li>
+          <li><kbd>F1</kbd>, or the ⌨ button, lists the other shortcuts;</li>
+          <li>
+            an effect plays in the simulator as soon as it is saved; a device definition takes
+            effect on the device at once, when it is the one the device uses.
+          </li>
+        </ul>
+        <p>Prefer your own editor? Edit the files there, then <em>Refresh</em>.</p>
+      </section>
+
+      <section>
+        <h2>References</h2>
+        <ul>
+          <li>
+            <a href="{{repository}}/blob/main/packages/effects-api/src/index.ts">The effects API</a>
+            — every type and helper an effect can use, as the editor knows them.
+          </li>
+          <li>
+            <a href="device-definition.schema.json">The device definition schema</a> — every field
+            of a definition, and what it accepts. Name it in <code>$schema</code> and any editor
+            that reads JSON schemas checks your file.
+          </li>
+          <li>
+            <a href="signals.html#sending">The signals API</a> — the one local endpoint, its token and
+            what it accepts.
+          </li>
+          <li>
+            <a href="{{repository}}/tree/main/packages/effects">The shipped effects</a> and
+            <a href="{{repository}}/tree/main/crates/candeo-device/devices">the built-in device
+            definitions</a> — written against the same API and schema as yours.
+          </li>
+        </ul>
+      </section>
+
+      <section id="how-candeo-is-built">
+        <h2>How Candeo is built</h2>
+        <ul>
+          <li>
+            <strong>The protocols are documented</strong>, with how each fact was established and
+            the firmware version behind it —
+            <a href="{{repository}}/tree/main/docs/protocol">docs/protocol</a>.
+          </li>
+          <li>
+            <strong>Decisions are written before the code</strong>, and kept when they turn out
+            wrong — <a href="{{repository}}/tree/main/docs/design">docs/design</a>.
+          </li>
+          <li>
+            <strong>A device is data, read by one interpreter</strong>, and every built-in
+            definition replays reference frames captured on the device: the tests check the bytes
+            without the hardware.
+          </li>
+          <li>
+            <strong>One engine runs the effects</strong>, in Rust, in a thread that outlives the
+            window: closing it changes nothing on the keyboard.
+          </li>
+        </ul>
+        <p>
+          The protocols were established by observing the hardware: USB captures, then writes and
+          reads checked one by one. Facts about a protocol are not subject to copyright, and
+          surveying them for interoperability is provided for by Article L.122-6-1 IV of the French
+          Intellectual Property Code, transposing Directive 2009/24/EC, Article 6.
+        </p>
+      </section>
+
+      <section>
+        <h2>Contribute</h2>
+        <p>
+          Candeo is a Tauri application — Rust underneath, Vue and TypeScript for the window —
+          under the GPL, version 3 only. To run it from source, with stable Rust, Node 22 or later
+          and pnpm 10 or later:
+        </p>
+        <div class="command">pnpm install &amp;&amp; pnpm tauri dev</div>
+        <p>
+          <a href="{{repository}}/blob/main/AGENTS.md">AGENTS.md</a> holds the rules for changing
+          the repository and the checks CI runs. A device of yours can become a built-in one: see
+          <a href="devices-guide.html#built-in">making it built in</a>.
+        </p>
+        <h3>What comes next</h3>
+        <ul>
+          <li>
+            <a href="{{repository}}/issues/241">The computer as a source</a> — CPU, memory and
+            network for effects and settings, then temperatures and the GPU
+            (<a href="{{repository}}/issues/242">#242</a>).
+          </li>
+          <li>
+            <a href="{{repository}}/issues/34">More devices, contributed</a> — what a protocol
+            contribution carries to be reviewable by someone without the hardware.
+          </li>
+          <li>
+            <a href="{{repository}}/issues/230">Linux with a real device</a>, then the
+            <em>nobody at the computer</em> trigger there (<a href="{{repository}}/issues/183">#183</a>).
+          </li>
+          <li><a href="{{repository}}/issues/138">winget</a> — installing and updating in one command.</li>
+        </ul>
+      </section>
+    </main>
+
+{{footer}}
+  </body>
+</html>
