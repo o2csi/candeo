@@ -2228,7 +2228,7 @@ mod tests {
     "#;
 
     fn layout() -> &'static Layout {
-        &candeo_device::DEATHSTALKER_V2_PRO
+        candeo_device::definition::builtin()[0]
     }
 
     /// `unwrap_err` would require `(Runtime, Context)` to be `Debug`, which
@@ -3757,7 +3757,8 @@ mod tests {
     //
     // Two pairs of keys from the **real** layout, chosen so that each one tells
     // the two spaces apart. Nothing is simulated here: the geometry comes from
-    // `layout.rs`, and that is what makes the check possible without a keyboard.
+    // the DeathStalker's definition, and that is what makes the check possible
+    // without a keyboard.
 
     /// The color of an LED in a rendered frame.
     fn color_at(frame: &[u8], index: usize) -> &[u8] {

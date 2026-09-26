@@ -1583,6 +1583,28 @@ mod tests {
         assert!(en.contains("“effect”"), "{en}");
     }
 
+    /// A family that sends nothing: the two layouts below are only ever
+    /// identified, never written to.
+    struct Unused;
+
+    impl candeo_device::Lighting for Unused {
+        fn frame(&self, _: &Layout, _: &[Rgb]) -> Vec<candeo_device::Outgoing> {
+            Vec::new()
+        }
+
+        fn firmware_effect(&self, _: &str, _: &[Rgb]) -> Option<candeo_device::Outgoing> {
+            None
+        }
+
+        fn inspect(
+            &self,
+            _: &hidapi::HidDevice,
+            accept: &mut dyn FnMut(Option<&str>) -> bool,
+        ) -> Option<Inspection> {
+            accept(None).then(Inspection::unread)
+        }
+    }
+
     /// Two made-up layouts: the only real layout is unique, and the invariant
     /// to check — one device drags down no other — only makes sense from two
     /// onwards. They only serve to be identified, hence the minimal matrix.
@@ -1591,7 +1613,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x1111,
         port: candeo_device::Port::Interface(3),
-        lighting: &candeo_device::lighting::RazerRows,
+        lighting: &Unused,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
         lights: candeo_device::Lights::Keys,
@@ -1606,7 +1628,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x2222,
         port: candeo_device::Port::Interface(3),
-        lighting: &candeo_device::lighting::RazerRows,
+        lighting: &Unused,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
         lights: candeo_device::Lights::Keys,

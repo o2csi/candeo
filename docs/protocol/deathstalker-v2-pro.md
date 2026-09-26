@@ -321,7 +321,8 @@ The realistic drawing used by the interface is written by hand from the standard
 full-size ISO layout — see `docs/design/studio.md`.
 
 The index-by-index expansion of the table above, and the rectangle of each key,
-live in `crates/candeo-device/src/layout.rs`. **The two do not have the same status**:
+live in the keyboard's definition, `crates/candeo-device/devices/razer-deathstalker-v2-pro.json`.
+**The two do not have the same status**:
 the names are a survey, the geometry a convention. Only the former can be verified
 against the device.
 
@@ -402,7 +403,7 @@ Surveyed on 12/09/2026 on our unit, firmware v1.5.
 | `0x83` | `01 25` | **unknown** | unknown to OpenRazer as well |
 | `0x84` | `00 00` | **device mode** — `0x00` normal, `0x03` driver | see below |
 | `0x85` | `01 00` | **polling rate** — `01`=1000 Hz, `02`=500, `08`=125 | |
-| `0x86` | `04 80` | **locale layout** — `04` = `fr_FR` | verified: our `layout.rs` is indeed AZERTY |
+| `0x86` | `04 80` | **locale layout** — `04` = `fr_FR` | verified: our definition is indeed AZERTY |
 | `0x87` | `01 05` | **unknown** | unknown to OpenRazer, "variable return values" |
 | `0x80`, `0x88`–`0x8f` | — | `0x05` not supported | |
 

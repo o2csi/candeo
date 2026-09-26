@@ -610,6 +610,22 @@ impl Lighting for Template {
 
 // ---------------------------------------------------------------- loading
 
+/// The built-in definitions, read once, in [`BUILTIN`]'s order: the DeathStalker
+/// first, the layout used when no device is connected.
+///
+/// A built-in definition that does not load is a build nobody tested — the
+/// tests replay every one — so it stops here rather than leaving a device
+/// silently unknown.
+pub fn builtin() -> &'static [&'static Layout] {
+    static ALL: std::sync::OnceLock<Vec<&'static Layout>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        BUILTIN
+            .iter()
+            .map(|(name, json)| load(json).unwrap_or_else(|e| panic!("{name}: {e}")))
+            .collect()
+    })
+}
+
 /// A definition read, checked and turned into a layout, or why not, in a
 /// sentence for whoever wrote it.
 ///
@@ -980,100 +996,6 @@ mod tests {
     const KEYBOARD: &str = BUILTIN[1].1;
     const ZONES: &str = BUILTIN[2].1;
 
-    /// The Razer's definition is, byte for byte, what its Rust family and layout
-    /// gave: the keys where they were, and the same reports — checksum and
-    /// command included — for a frame, a segment of a row, a level and each
-    /// firmware effect.
-    #[test]
-    fn the_razer_definition_gives_what_the_razer_family_gave() {
-        let (ours, _, _) = parse(RAZER).unwrap();
-        let theirs = &crate::DEATHSTALKER_V2_PRO;
-        assert_eq!(
-            (ours.name, ours.vid, ours.pid),
-            (theirs.name, theirs.vid, theirs.pid)
-        );
-        assert_eq!(ours.port, theirs.port);
-        assert_eq!(ours.surveyed_firmware, theirs.surveyed_firmware);
-        assert_eq!(
-            (ours.rows, ours.cols, ours.lights),
-            (theirs.rows, theirs.cols, theirs.lights)
-        );
-        assert_eq!(ours.matrix, theirs.matrix);
-        let keys = |l: &Layout| {
-            let mut keys: Vec<_> = l
-                .keys
-                .iter()
-                .map(|k| (k.index, k.scancode, k.x, k.y, k.w, k.h, k.shape))
-                .collect();
-            keys.sort_by_key(|k| k.0);
-            keys
-        };
-        assert_eq!(keys(&ours), keys(theirs));
-        let effect = |e: &FirmwareEffect| (e.id, e.colours);
-        assert_eq!(
-            ours.firmware_effects.iter().map(effect).collect::<Vec<_>>(),
-            theirs
-                .firmware_effects
-                .iter()
-                .map(effect)
-                .collect::<Vec<_>>()
-        );
-
-        let sent = |reports: Vec<Outgoing>| -> Vec<(Vec<u8>, bool, Option<CommandId>)> {
-            reports
-                .into_iter()
-                .map(|o| (o.bytes, o.wire == Wire::Feature, o.command))
-                .collect()
-        };
-        let frame: Vec<Rgb> = (0..theirs.led_count())
-            .map(|i| Rgb::new(i as u8, (i * 7) as u8, 255 - i as u8))
-            .collect();
-        assert_eq!(
-            sent(ours.lighting.frame(&ours, &frame)),
-            sent(theirs.lighting.frame(theirs, &frame))
-        );
-        for (row, start, len) in [(0u8, 0u8, 22usize), (3, 5, 4), (5, 21, 1)] {
-            let colours = &frame[..len];
-            assert_eq!(
-                ours.lighting
-                    .row(row, start, colours)
-                    .map(|o| sent(vec![o])),
-                theirs
-                    .lighting
-                    .row(row, start, colours)
-                    .map(|o| sent(vec![o])),
-                "row {row} from {start}, {len} colours"
-            );
-        }
-        for level in [0, 0x40, 0xff] {
-            assert_eq!(
-                ours.lighting.brightness(level).map(sent),
-                theirs.lighting.brightness(level).map(sent)
-            );
-        }
-        for id in theirs
-            .firmware_effects
-            .iter()
-            .map(|e| e.id)
-            .chain([OFF, "hardware:m18-01"])
-        {
-            assert_eq!(
-                ours.lighting
-                    .firmware_effect(id, &[])
-                    .map(|o| sent(vec![o])),
-                theirs
-                    .lighting
-                    .firmware_effect(id, &[])
-                    .map(|o| sent(vec![o])),
-                "{id}"
-            );
-        }
-        assert!(
-            ours.lighting.take_over().is_empty(),
-            "each frame ends in custom mode"
-        );
-    }
-
     /// What the Razer firmware says it runs reads back as the id the gallery
     /// offers, as the Rust family read it: the host's own frames as none.
     #[test]
@@ -1324,5 +1246,109 @@ mod tests {
     fn a_reference_frame_that_disagrees_is_named() {
         let e = replay(&with("\"03 21 00 03 00 ff\"\n", "\"03 21 00 03 00 fe\"\n")).unwrap_err();
         assert!(e.starts_with("reference frame 1"), "{e}");
+    }
+}
+
+/// The DeathStalker's survey, checked on its definition
+/// (`docs/protocol/deathstalker-v2-pro.md`).
+#[cfg(test)]
+mod deathstalker {
+    use super::*;
+
+    fn deathstalker() -> &'static Layout {
+        builtin()[0]
+    }
+
+    #[test]
+    fn only_the_lighting_interface_is_kept() {
+        let l = deathstalker();
+        let kept: Vec<i32> = [-1, 0, 1, 2, 3]
+            .into_iter()
+            .filter(|&i| l.is_lighting_interface(0x1532, 0x0292, i, 0x0001, 0x0006))
+            .collect();
+        assert_eq!(kept, vec![3]);
+        assert!(
+            !l.is_lighting_interface(0x1532, 0x0290, 3, 0x0001, 0x0006),
+            "other product"
+        );
+    }
+
+    #[test]
+    fn matrix_dimensions_are_consistent() {
+        let l = deathstalker();
+        assert_eq!(l.matrix.len(), l.led_count());
+        assert_eq!(l.led_count(), 132);
+    }
+
+    #[test]
+    fn counts_match_device_report() {
+        assert_eq!(deathstalker().led_count(), 132, "frame size");
+        assert_eq!(deathstalker().lit_count(), 106, "lit keys");
+    }
+
+    #[test]
+    fn known_positions_resolve() {
+        let l = deathstalker();
+        assert_eq!(l.at(0, 0), Some(0));
+        assert_eq!(l.at(0, 1), None, "gap after Escape");
+        assert_eq!(l.at(1, 0), Some(22));
+        assert_eq!(l.at(5, 0), Some(110));
+    }
+
+    #[test]
+    fn rows_have_expected_key_counts() {
+        let l = deathstalker();
+        let expected = [16, 21, 21, 17, 18, 13];
+        assert_eq!(expected.iter().sum::<usize>(), 106);
+
+        for (row, &n) in expected.iter().enumerate() {
+            let lit = (0..l.cols)
+                .filter(|&c| l.at(row as u8, c).is_some())
+                .count();
+            assert_eq!(lit, n, "row {row}");
+        }
+    }
+
+    #[test]
+    fn iso_enter_tiles_the_l_shape() {
+        let l = deathstalker();
+        let upper = l.key(57).expect("Enter, row 2");
+        let lower = l.key(79).expect("Enter, row 3");
+
+        assert_eq!(upper.scancode, 0x1C);
+        assert_eq!(lower.scancode, 0x1C);
+        assert_eq!(l.at(2, 13), Some(57));
+        assert_eq!(l.at(3, 13), Some(79));
+
+        // Both arms rest on the same right edge — that of the main block, at 15 u —
+        // and touch without overlapping.
+        assert_eq!(upper.x + upper.w, 15.0);
+        assert_eq!(lower.x + lower.w, 15.0);
+        assert_eq!(upper.y + upper.h, lower.y);
+        assert!(
+            lower.x > upper.x,
+            "the notch of the L is left of the lower arm"
+        );
+    }
+
+    #[test]
+    fn space_bar_is_wide_but_single() {
+        let l = deathstalker();
+        assert_eq!(l.at(5, 6), Some(116));
+
+        let space = l.key(116).expect("space bar");
+        assert_eq!(space.scancode, 0x39);
+        assert_eq!(space.w, 6.25);
+        assert_eq!(l.keys.iter().filter(|k| k.scancode == 0x39).count(), 1);
+    }
+
+    #[test]
+    fn drawing_fits_a_full_size_iso() {
+        let keys = deathstalker().keys;
+        let width = keys.iter().fold(0.0f32, |m, k| m.max(k.x + k.w));
+        let height = keys.iter().fold(0.0f32, |m, k| m.max(k.y + k.h));
+        assert_eq!(width, 22.5, "total width, numeric keypad included");
+        assert_eq!(height, 6.5, "total height, function row included");
+        assert!(keys.iter().all(|k| k.x >= 0.0 && k.y >= 0.0));
     }
 }

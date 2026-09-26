@@ -69,18 +69,8 @@ pub fn reload(yours: Option<&Path>) -> &'static Catalog {
 }
 
 fn build(folder: Option<&Path>) -> Catalog {
-    let mut layouts: Vec<&'static Layout> = Vec::new();
-    for (name, json) in definition::BUILTIN {
-        match definition::load(json) {
-            Ok(layout) => layouts.push(layout),
-            // The tests replay every built-in definition: this is a build
-            // nobody tested, and the log is where it shows.
-            Err(e) => tracing::error!(
-                definition = name,
-                "built-in device definition not loaded: {e}"
-            ),
-        }
-    }
+    // Read once for the process: only yours are read again.
+    let mut layouts: Vec<&'static Layout> = definition::builtin().to_vec();
 
     let mut yours = Vec::new();
     let mut problems = Vec::new();

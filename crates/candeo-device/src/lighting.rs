@@ -1,15 +1,15 @@
 //! What speaking to a **family** of devices takes.
 //!
-//! Most of a family is a description — how a report is framed, what is sent
-//! per light, how often — and a device described that way is a definition file,
-//! read by [`crate::definition`]. What is here are the families not described
-//! yet, each one implementation of [`Lighting`] in its own block
+//! A family is a description — how a report is framed, what is sent per light,
+//! how often — and a device described that way is a definition file, read by
+//! [`crate::definition`], whose one interpreter implements [`Lighting`]. A
+//! protocol no description can hold yet would be another implementation here
 //! (`docs/design/device-sdk.md` §7).
 //!
 //! So `Keyboard` knows how to send bytes and check a refusal, and knows nothing
 //! about who it is talking to (#34).
 
-use candeo_protocol::{CommandId, Effect, Report, Rgb};
+use candeo_protocol::{CommandId, Rgb};
 
 use crate::layout::Layout;
 
@@ -106,81 +106,4 @@ pub trait Lighting: Sync {
         device: &hidapi::HidDevice,
         accept: &mut dyn FnMut(Option<&str>) -> bool,
     ) -> Option<crate::Inspection>;
-}
-
-/// Razer: the matrix row by row, then the custom effect.
-pub struct RazerRows;
-
-impl Lighting for RazerRows {
-    fn frame(&self, layout: &Layout, frame: &[Rgb]) -> Vec<Outgoing> {
-        let cols = layout.cols as usize;
-        let mut out: Vec<Outgoing> = (0..layout.rows)
-            .map(|row| {
-                let start = row as usize * cols;
-                report(Report::write_row(row, 0, &frame[start..start + cols]))
-            })
-            .collect();
-        // Not a validation: this is what switches the device to host control.
-        out.push(report(Report::set_effect(Effect::Custom)));
-        out
-    }
-
-    fn brightness(&self, level: u8) -> Option<Vec<Outgoing>> {
-        Some(vec![report(Report::set_brightness(level))])
-    }
-
-    fn row(&self, row: u8, col_start: u8, colours: &[Rgb]) -> Option<Outgoing> {
-        Some(report(Report::write_row(row, col_start, colours)))
-    }
-
-    /// Only what the survey established on this firmware: `Static` and
-    /// `Breathing` take a colour the gallery has nowhere to ask for, and
-    /// `Reactive` and `Starlight` are refused by the device
-    /// (`docs/protocol/deathstalker-v2-pro.md` §8).
-    ///
-    /// The wave's two values are the only ones ever captured; their real range
-    /// is an open question of the survey, so offering a setting would be
-    /// inventing a scale.
-    fn firmware_effect(&self, id: &str, _colours: &[Rgb]) -> Option<Outgoing> {
-        let effect = match id {
-            "hardware:off" => Effect::Off,
-            "hardware:spectrumCycle" => Effect::SpectrumCycle,
-            "hardware:wave" => Effect::Wave {
-                direction: 0x02,
-                speed: 0x28,
-            },
-            _ => return None,
-        };
-        Some(report(Report::set_effect(effect)))
-    }
-
-    fn current_effect(&self, device: &hidapi::HidDevice) -> Result<Option<String>, String> {
-        Ok(crate::inspection::read_effect(device)?.and_then(|effect| {
-            let id = match effect {
-                Effect::Off => "hardware:off",
-                Effect::SpectrumCycle => "hardware:spectrumCycle",
-                Effect::Wave { .. } => "hardware:wave",
-                // Static and Breathing carry a colour the gallery cannot pass
-                // back, and Custom is the host's own frames.
-                _ => return None,
-            };
-            Some(id.to_owned())
-        }))
-    }
-
-    fn inspect(
-        &self,
-        device: &hidapi::HidDevice,
-        accept: &mut dyn FnMut(Option<&str>) -> bool,
-    ) -> Option<crate::Inspection> {
-        crate::inspection::inspect_if(device, accept)
-    }
-}
-
-fn report(report: Report) -> Outgoing {
-    Outgoing {
-        command: Some(report.id()),
-        bytes: report.to_feature_buffer().to_vec(),
-        wire: Wire::Feature,
-    }
 }

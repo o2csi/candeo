@@ -585,7 +585,7 @@ mod tests {
 
     #[test]
     fn presses_become_positions_on_the_effect_clock() {
-        let layout: &'static Layout = &candeo_device::DEATHSTALKER_V2_PRO;
+        let layout: &'static Layout = candeo_device::definition::builtin()[0];
         let positions = positions(layout);
         let now = Instant::now();
         let presses = [
