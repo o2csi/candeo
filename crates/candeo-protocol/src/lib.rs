@@ -18,7 +18,6 @@
 /// and it is the only way to re-establish it the day a device answers
 /// differently. Cutting them to save a few characters of visibility would cost
 /// that ability, and the connection would not be spotted again.
-pub mod alienware;
 pub mod alienware_elc;
 
 pub const REPORT_LEN: usize = 90;

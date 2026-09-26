@@ -11,7 +11,7 @@
 use std::path::Path;
 use std::sync::RwLock;
 
-use candeo_device::{definition, Layout, ALIENWARE_M18_R1, DEATHSTALKER_V2_PRO};
+use candeo_device::{definition, Layout, DEATHSTALKER_V2_PRO};
 use serde::Serialize;
 
 /// Whose definition a device is known by.
@@ -69,7 +69,7 @@ pub fn reload(yours: Option<&Path>) -> &'static Catalog {
 }
 
 fn build(folder: Option<&Path>) -> Catalog {
-    let mut layouts: Vec<&'static Layout> = vec![&DEATHSTALKER_V2_PRO, &ALIENWARE_M18_R1];
+    let mut layouts: Vec<&'static Layout> = vec![&DEATHSTALKER_V2_PRO];
     for (name, json) in definition::BUILTIN {
         match definition::load(json) {
             Ok(layout) => layouts.push(layout),
@@ -153,7 +153,7 @@ fn files(folder: &Path) -> Vec<(String, Result<String, String>)> {
 mod tests {
     use super::*;
 
-    const ZONES: &str = definition::BUILTIN[0].1;
+    const ZONES: &str = definition::BUILTIN[1].1;
 
     fn folder(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
