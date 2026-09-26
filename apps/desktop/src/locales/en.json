@@ -218,6 +218,10 @@
     "compileErrors": "{n} error in the effect — line {line}: {message} | {n} errors in the effect — line {line}: {message}",
     "savedButBroken": "The effect is saved, but it does not load"
   },
+  "definition": {
+    "title": "Device definition",
+    "drivesNothing": "This file drives nothing: {reason}"
+  },
   "tray": {
     "noDevice": "No device controlled",
     "devicesUnavailable": "Devices unavailable",
@@ -388,6 +392,7 @@
     "bindingInvalid": "The setting “{param}” cannot read “{source}”: choose a signal by its name.",
     "dimmingInvalid": "The brightness cannot follow “{source}”: choose a signal by its name, or a sound.",
     "definitionExists": "Your folder already holds “{file}”: open it to change it.",
+    "definitionNotFound": "“{file}” is no longer in your folder.",
     "effectExists": "An effect named “{name}” already exists.",
     "builtinNotSaved": "“{name}” is a built-in effect: duplicate it to change it.",
     "builtinNotRenamed": "“{name}” is a built-in effect: duplicate it to rename it.",

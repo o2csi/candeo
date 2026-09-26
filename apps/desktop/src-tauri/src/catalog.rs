@@ -12,10 +12,10 @@ use std::path::Path;
 use std::sync::RwLock;
 
 use candeo_device::{definition, Layout};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Whose definition a device is known by.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Origin {
     /// Written in Rust or shipped as a definition: reviewed, and replayed by

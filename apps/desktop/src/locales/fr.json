@@ -218,6 +218,10 @@
     "compileErrors": "{n} erreur dans l'effet — ligne {line} : {message} | {n} erreurs dans l'effet — ligne {line} : {message}",
     "savedButBroken": "L'effet est enregistré, mais il ne se charge pas"
   },
+  "definition": {
+    "title": "Définition d’appareil",
+    "drivesNothing": "Ce fichier ne pilote rien : {reason}"
+  },
   "tray": {
     "noDevice": "Aucun appareil piloté",
     "devicesUnavailable": "Appareils indisponibles",
@@ -388,6 +392,7 @@
     "bindingInvalid": "Le paramètre « {param} » ne peut pas lire « {source} » : choisissez un signal par son nom.",
     "dimmingInvalid": "La luminosité ne peut pas suivre « {source} » : choisissez un signal par son nom, ou un son.",
     "definitionExists": "Votre dossier contient déjà « {file} » : ouvrez-le pour le modifier.",
+    "definitionNotFound": "« {file} » n’est plus dans votre dossier.",
     "effectExists": "Un effet nommé « {name} » existe déjà.",
     "builtinNotSaved": "« {name} » est un effet intégré : dupliquez-le pour le modifier.",
     "builtinNotRenamed": "« {name} » est un effet intégré : dupliquez-le pour le renommer.",

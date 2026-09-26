@@ -6,10 +6,9 @@
  */
 
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import {
-  copyDeviceDefinition,
-  openDeviceDefinition,
   openDevicesDir,
   reloadDeviceDefinitions,
   type DefinitionProblem,
@@ -72,10 +71,11 @@ async function attempt(action: () => Promise<unknown>): Promise<void> {
   })
 }
 
-/** The copy replaces the built-in definition at once: the list reads it again. */
-async function copy(d: DeviceInfo): Promise<void> {
-  await attempt(() => copyDeviceDefinition({ vid: d.vid, pid: d.pid }))
-  await search()
+const router = useRouter()
+
+/** A definition opens in the editor: read only when built in, where *Copy to yours* is. */
+function edit(origin: DeviceInfo['origin'], file: string): void {
+  void router.push({ name: 'definition', params: { origin, file } })
 }
 
 function count(d: DeviceInfo): string {
@@ -235,15 +235,8 @@ onMounted(search)
             {{ d.present ? t('devices.plugged') : t('devices.unplugged') }}
           </td>
           <td class="act">
-            <button
-              v-if="d.origin === 'yours'"
-              class="ghost small"
-              @click="attempt(() => openDeviceDefinition({ vid: d.vid, pid: d.pid }))"
-            >
+            <button v-if="d.file" class="ghost small" @click="edit(d.origin, d.file)">
               {{ t('devices.open') }}
-            </button>
-            <button v-else class="ghost small" :title="t('devices.copyTitle')" @click="copy(d)">
-              {{ t('devices.copy') }}
             </button>
           </td>
         </tr>
@@ -264,7 +257,10 @@ onMounted(search)
     <p v-if="yours.length" class="warn" role="status">{{ t('devices.yoursNote') }}</p>
     <ul v-if="problems.length" class="cards">
       <li v-for="p in problems" :key="p.file" class="card problem">
-        <span class="mono">{{ p.file }}</span>
+        <div class="main">
+          <span class="mono id">{{ p.file }}</span>
+          <button class="ghost small" @click="edit('yours', p.file)">{{ t('devices.open') }}</button>
+        </div>
         <span class="mono reason">{{ p.reason }}</span>
       </li>
     </ul>

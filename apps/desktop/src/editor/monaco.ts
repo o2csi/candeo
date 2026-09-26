@@ -1,5 +1,12 @@
 /**
- * Setting Monaco up: workers, theme, TypeScript language service.
+ * Setting Monaco up: workers, theme, TypeScript language service, and JSON for
+ * device definitions.
+ *
+ * ## Device definitions
+ *
+ * Checked against `device-definition.schema.json`, read from the device crate
+ * at build time like the effects API: completion, hover text and inline errors
+ * come from the schema a definition's author reads, not from a copy of it.
  *
  * ## Why Monaco
  *
@@ -30,6 +37,9 @@
 import * as monaco from 'monaco-editor/editor/editor.api.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker'
+import JsonWorker from 'monaco-editor/language/json/json.worker.js?worker'
+// Registers "json" with its language service.
+import { jsonDefaults } from 'monaco-editor/languages/features/json/register.js'
 // Registers the "typescript" language identifier and its highlighting. Without
 // it, `languages.onLanguage('typescript')` is never triggered and the language
 // service does not start.
@@ -43,6 +53,7 @@ import {
 } from 'monaco-editor/languages/features/typescript/register.js'
 
 import effectsApiSource from '@candeo/effects-api/src/index.ts?raw'
+import definitionSchema from '../../../../crates/candeo-device/devices/device-definition.schema.json'
 
 /** Where the language service finds `@candeo/effects-api`. */
 const API_PATH = 'node_modules/@candeo/effects-api/index.ts'
@@ -51,11 +62,15 @@ const API_URI = `file:///${API_PATH}`
 /** The file being edited, as the language service sees it. */
 export const EFFECT_URI = monaco.Uri.parse('file:///effect.ts')
 
+/** The device definition being edited: the schema applies to this name. */
+const DEFINITION_URI = monaco.Uri.parse('file:///device.json')
+
 const THEME = 'candeo'
 
 self.MonacoEnvironment = {
   getWorker(_id, label) {
-    return label === 'typescript' || label === 'javascript' ? new TsWorker() : new EditorWorker()
+    if (label === 'typescript' || label === 'javascript') return new TsWorker()
+    return label === 'json' ? new JsonWorker() : new EditorWorker()
   },
 }
 
@@ -129,6 +144,7 @@ let started = false
 export function setupMonaco(): void {
   if (started) return
   started = true
+  setupDefinitions()
 
   typescriptDefaults.setCompilerOptions({
     target: ScriptTarget.ES2020,
@@ -187,6 +203,30 @@ export function effectModel(source: string): monaco.editor.ITextModel {
     return existing
   }
   return monaco.editor.createModel(source, 'typescript', EFFECT_URI)
+}
+
+/** The model of the device definition being edited: one, reused, as for effects. */
+export function definitionModel(text: string): monaco.editor.ITextModel {
+  const existing = monaco.editor.getModel(DEFINITION_URI)
+  if (existing) {
+    if (existing.getValue() !== text) existing.setValue(text)
+    return existing
+  }
+  return monaco.editor.createModel(text, 'json', DEFINITION_URI)
+}
+
+/**
+ * The schema for definitions. Nothing is fetched: the one given here answers for
+ * its `$id`, which is also what a definition's `$schema` names.
+ */
+function setupDefinitions(): void {
+  jsonDefaults.setDiagnosticsOptions({
+    validate: true,
+    allowComments: false,
+    enableSchemaRequest: false,
+    schemaValidation: 'error',
+    schemas: [{ uri: definitionSchema.$id, fileMatch: ['device.json'], schema: definitionSchema }],
+  })
 }
 
 /** An error from the language service, reduced to what the interface shows. */

@@ -659,6 +659,14 @@ pub fn builtin_file(vid: u16, pid: u16) -> Option<(&'static str, &'static str)> 
         .map(|(_, file)| *file)
 }
 
+/// A built-in definition's text, by its file name: what the editor shows.
+pub fn builtin_text(file: &str) -> Option<&'static str> {
+    BUILTIN
+        .iter()
+        .find(|(name, _)| *name == file)
+        .map(|(_, json)| *json)
+}
+
 /// The built-in definitions, read once, in [`BUILTIN`]'s order: the DeathStalker
 /// first, the layout used when no device is connected.
 ///
@@ -1061,6 +1069,15 @@ mod tests {
         );
         assert_eq!(t.effect_id(wave).as_deref(), Some("hardware:wave"));
         assert_eq!(t.effect_id(Effect::Custom), None);
+    }
+
+    /// What *Copy to yours* and the editor start from: the text shipped.
+    #[test]
+    fn a_built_in_definition_is_found_by_its_file_name() {
+        assert_eq!(builtin_text(BUILTIN[1].0), Some(KEYBOARD));
+        assert_eq!(builtin_text("unknown.json"), None);
+        let (file, text) = builtin_file(0x1532, 0x0292).unwrap();
+        assert_eq!((file, text), BUILTIN[0]);
     }
 
     /// §8: every built-in definition loads, and gives the reports its
