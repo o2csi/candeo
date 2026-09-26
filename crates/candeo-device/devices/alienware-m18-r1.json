@@ -1,4 +1,5 @@
 {
+  "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
   "name": "Alienware m18 R1",
   "notes": [
     "Survey: docs/protocol/alienware-m18-r1.md, section 1.",

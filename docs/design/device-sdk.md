@@ -667,9 +667,13 @@ interpreter, written and tested once in Rust, turns it into reports:
   placeholder in braces stands for what the frame fills in: `{r} {g} {b}`,
   `{address}`, `{count}` and `{addresses}` for a group. Each new need — a row
   and its column range for the Razer — adds a placeholder, in code, once.
-- **An integrity function is named, not written**: `"checksum": { "xor": [2, 87],
-  "at": 88 }`. The list is closed and grows by code, each function tested once;
-  every device using it stays data. The same holds for the shapes the simulator
+- **An integrity function is named, not written**: `"checksum": { "function":
+  "xor", "from": 2, "to": 87, "at": 88 }` — byte 88 is the XOR of bytes 2 to 87.
+  The list is closed (`xor`, `sum`) and grows by code, each function tested once;
+  every device using it stays data.
+- **Every field is documented in a schema**, `devices/device-definition.schema.json`,
+  which each definition names in `$schema`: an editor completes and checks a file
+  against it, and the tests check that the built-in definitions follow it. The same holds for the shapes the simulator
   draws (`studio.md` §4).
 - **What stays code**: the interpreter, its placeholders and integrity functions,
   the checks of §6 turned into refusals when a definition loads, and any family

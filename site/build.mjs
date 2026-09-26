@@ -266,6 +266,13 @@ for (const [name, text] of runnable) {
   }
 }
 
+// The schema device definitions name in `$schema`, served where they look for
+// it: an editor completes and checks a definition against it.
+cpSync(
+  join(root, 'crates/candeo-device/devices/device-definition.schema.json'),
+  join(out, 'device-definition.schema.json'),
+)
+
 cpSync(join(here, 'style.css'), join(out, 'style.css'))
 cpSync(join(here, 'copy.js'), join(out, 'copy.js'))
 cpSync(join(here, 'live.js'), join(out, 'live.js'))

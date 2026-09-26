@@ -45,6 +45,10 @@ const OFF: &str = "hardware:off";
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Definition {
+    /// Where an editor finds the schema describing this file; not used here.
+    #[serde(default, rename = "$schema")]
+    #[allow(dead_code)]
+    schema: Option<String>,
     name: String,
     #[serde(rename = "match")]
     matching: Match,
@@ -92,21 +96,56 @@ struct ReportSpec {
     /// An integrity byte, named rather than written.
     #[serde(default)]
     checksum: Option<ChecksumSpec>,
-    /// Where a report says which command it carries, class then command: what
-    /// lets the inspection refuse one the device said it does not know.
+    /// Where a report says which command it carries: what lets the inspection
+    /// refuse one the device said it does not know.
     #[serde(default)]
-    command: Option<[usize; 2]>,
+    command: Option<CommandSpec>,
 }
 
-/// The closed list of integrity functions (§7 of the design): each is tested
-/// here once, and every device using it stays data.
+/// `function` over the report's bytes `from` to `to`, both included, written at
+/// `at` — offsets counted from the report's first byte, after `prefix`.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ChecksumSpec {
-    /// The XOR of the bytes from one offset to another, both included.
-    xor: [usize; 2],
-    /// Where it goes.
+    function: String,
+    from: usize,
+    to: usize,
     at: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandSpec {
+    class: usize,
+    id: usize,
+}
+
+/// The integrity functions a definition can name: a closed list, each written
+/// and tested here once, and reused by every device that needs it
+/// (`docs/design/device-sdk.md` §7). A protocol needing another adds it here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Integrity {
+    /// Every byte XORed together: the Razer's.
+    Xor,
+    /// Every byte added, modulo 256.
+    Sum,
+}
+
+impl Integrity {
+    fn named(name: &str) -> Result<Self, String> {
+        match name {
+            "xor" => Ok(Integrity::Xor),
+            "sum" => Ok(Integrity::Sum),
+            other => Err(format!("checksum “{other}”: “xor” or “sum”")),
+        }
+    }
+
+    fn over(self, bytes: &[u8]) -> u8 {
+        match self {
+            Integrity::Xor => bytes.iter().fold(0, |acc, b| acc ^ b),
+            Integrity::Sum => bytes.iter().fold(0u8, |acc, b| acc.wrapping_add(*b)),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -359,7 +398,7 @@ pub struct Template {
     light: Vec<Token>,
     close: Vec<Vec<Token>>,
     by_row: bool,
-    checksum: Option<(usize, usize, usize)>,
+    checksum: Option<(Integrity, usize, usize, usize)>,
     command: Option<(usize, usize)>,
     brightness: Option<Vec<Vec<Token>>>,
     firmware: Option<FirmwareEffects>,
@@ -424,8 +463,8 @@ impl Template {
         }
         // Checked at load: the longest a report can grow still fits.
         bytes.resize(p + self.length, 0);
-        if let Some((from, to, at)) = self.checksum {
-            bytes[p + at] = bytes[p + from..=p + to].iter().fold(0, |x, b| x ^ b);
+        if let Some((function, from, to, at)) = self.checksum {
+            bytes[p + at] = function.over(&bytes[p + from..=p + to]);
         }
         Outgoing {
             command: self.command.map(|(class, command)| CommandId {
@@ -729,16 +768,15 @@ fn family(d: &Definition, cols: usize) -> Result<Template, String> {
     let checksum = match &d.report.checksum {
         None => None,
         Some(c) => {
-            let [from, to] = c.xor;
-            if from > to || to >= length || c.at >= length {
+            if c.from > c.to || c.to >= length || c.at >= length {
                 return Err("the checksum reads or writes past the report".into());
             }
-            Some((from, to, c.at))
+            Some((Integrity::named(&c.function)?, c.from, c.to, c.at))
         }
     };
-    let command = match d.report.command {
+    let command = match &d.report.command {
         None => None,
-        Some([class, command]) if class < length && command < length => Some((class, command)),
+        Some(c) if c.class < length && c.id < length => Some((c.class, c.id)),
         Some(_) => return Err("the command sits past the report".into()),
     };
     let brightness = match &d.brightness {
@@ -1240,6 +1278,37 @@ mod tests {
             with("\"group\": \"colour\",", ""),
             "through {lights}, or groups them by colour",
         );
+    }
+
+    /// The schema editors read, `devices/device-definition.schema.json`, and the
+    /// built-in definitions agree: each one validates, and a file this loader
+    /// refuses for a placeholder it does not know, the schema refuses too.
+    #[test]
+    fn built_in_definitions_follow_the_schema() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../devices/device-definition.schema.json"))
+                .expect("the schema is JSON");
+        let validator = jsonschema::validator_for(&schema).expect("the schema is a schema");
+        for (name, json) in BUILTIN {
+            let file: serde_json::Value = serde_json::from_str(json).unwrap();
+            let errors: Vec<String> = validator
+                .iter_errors(&file)
+                .map(|e| format!("{} at {}", e, e.instance_path))
+                .collect();
+            assert!(errors.is_empty(), "{name}: {errors:#?}");
+        }
+        let broken: serde_json::Value = serde_json::from_str(&with("{count}", "{counts}")).unwrap();
+        assert!(!validator.is_valid(&broken), "an unknown placeholder");
+    }
+
+    /// Each integrity function, on bytes whose answer is worked out by hand.
+    #[test]
+    fn the_integrity_functions_compute_what_they_name() {
+        let bytes = [0x0f, 0x03, 0xff, 0x10];
+        assert_eq!(Integrity::Xor.over(&bytes), 0x0f ^ 0x03 ^ 0xff ^ 0x10);
+        assert_eq!(Integrity::Sum.over(&bytes), 0x21, "0x121, modulo 256");
+        assert_eq!(Integrity::Xor.over(&[]), 0);
+        assert!(Integrity::named("crc8").is_err());
     }
 
     #[test]
