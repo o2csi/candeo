@@ -366,6 +366,7 @@
     "ruleInvalid": "The rule “{name}” cannot be saved: {error}.",
     "ruleNotFound": "No rule is named “{name}”.",
     "signalsPortInvalid": "Port {port} cannot be used: choose one from 1024 to 65535.",
+    "gameNotFound": "Steam does not have {game} on this computer.",
     "signalNameInvalid": "“{name}” cannot name a signal: use letters, digits, or _ - . :",
     "signalValueTooLong": "The value of “{name}” is too long: {max} characters at most.",
     "signalsFull": "{max} signals are already held: erase one, or wait for one to expire.",

@@ -1,4 +1,6 @@
-//! The signals API: `POST /signals` and `GET /signals`, behind a token (§2.3).
+//! The signals API: `POST /signals` and `GET /signals`, behind a token (§2.3),
+//! and `POST /gsi/<game>`, where a game posts its state
+//! (`docs/design/game-state-integration.md`).
 //!
 //! [`handle`] decides every answer and is pure — a request's parts in, a status
 //! and a body out — so authentication, routes and bounds are unit tests. The
@@ -11,6 +13,7 @@ use std::thread::JoinHandle;
 
 use serde_json::{json, Value};
 
+use super::gsi;
 use super::store::{parse_ttl, Store};
 
 /// A body larger than this is refused unread: 64 signals of 64-character names
@@ -117,10 +120,72 @@ pub fn handle(request: &Request, token: &str, store: &mut Store, now: i64) -> (R
     }
 }
 
-/// Whether the `Authorization` header carries the token, compared in constant
-/// time: how long a refusal takes says nothing of how much of it was right.
+/// Whether a request's path is a game's, which [`game`] answers.
+pub fn for_game(url: &str) -> bool {
+    url.starts_with("/gsi/")
+}
+
+/// The answer to a game posting its state, and whether it changed what is held.
+///
+/// The game cannot set a header: its token comes in the body, from the file's
+/// `auth` block, and only the games' token opens this route — a sender's
+/// `Bearer` one does not, nor does the games' open `/signals`.
+pub fn game(request: &Request, token: &str, store: &mut Store, now: i64) -> (Response, bool) {
+    if request.from_browser {
+        return (
+            Response::error(403, "requests from a web page are refused"),
+            false,
+        );
+    }
+    let path = request
+        .url
+        .split_once('?')
+        .map_or(request.url, |(path, _)| path);
+    let id = path.trim_start_matches("/gsi/").trim_end_matches('/');
+    let Some(game) = gsi::Game::from_id(id) else {
+        return (Response::error(404, format!("no game “{id}”")), false);
+    };
+    if request.method != "POST" {
+        return (Response::error(405, "use POST"), false);
+    }
+    let body: Value = match serde_json::from_slice(request.body) {
+        Ok(body) => body,
+        Err(_) => return (Response::error(400, "the body is not JSON"), false),
+    };
+    if !same(gsi::token(&body), token) {
+        return (Response::error(401, "missing or wrong auth.token"), false);
+    }
+    let signals = gsi::translate(game, &body);
+    if signals.is_empty() {
+        return (
+            Response {
+                status: 200,
+                body: json!({}),
+            },
+            false,
+        );
+    }
+    match store.apply(&Value::Object(signals), Some(gsi::TTL_SECONDS), now) {
+        Ok(_) => (
+            Response {
+                status: 200,
+                body: json!({}),
+            },
+            true,
+        ),
+        Err(refusal) => (Response::error(400, refusal), false),
+    }
+}
+
+/// Whether the `Authorization` header carries the token.
 fn authorized(header: Option<&str>, token: &str) -> bool {
-    let Some(sent) = header.and_then(|h| h.strip_prefix("Bearer ")) else {
+    same(header.and_then(|h| h.strip_prefix("Bearer ")), token)
+}
+
+/// Whether `sent` is the token, compared in constant time: how long a refusal
+/// takes says nothing of how much of it was right.
+fn same(sent: Option<&str>, token: &str) -> bool {
+    let Some(sent) = sent else {
         return false;
     };
     if token.is_empty() || sent.len() != token.len() {
@@ -239,6 +304,90 @@ mod tests {
             from_browser: false,
             body: body.as_bytes(),
         }
+    }
+
+    /// What Counter-Strike 2 posts, its token in the body.
+    const GAME_STATE: &str = r#"{
+        "provider": { "steamid": "76561190000000001" },
+        "player": { "steamid": "76561190000000001", "state": { "health": 64 } },
+        "auth": { "token": "fedcba9876543210" }
+    }"#;
+
+    #[test]
+    fn a_game_posts_its_state_with_its_own_token() {
+        let mut store = Store::default();
+        let mut sent = request("POST", "/gsi/cs2", GAME_STATE);
+        sent.authorization = None;
+        let (response, changed) = game(&sent, "fedcba9876543210", &mut store, NOW);
+        assert_eq!((response.status, changed), (200, true));
+        let held = store.views(NOW);
+        let health = held
+            .iter()
+            .find(|v| v.name == "cs2.health")
+            .expect("cs2.health held");
+        assert_eq!(health.value, super::super::store::Scalar::Number(64.0));
+        assert_eq!(
+            health.expires,
+            Some(NOW + i64::from(gsi::TTL_SECONDS) * 1000)
+        );
+    }
+
+    /// Each route takes its own token and no other.
+    #[test]
+    fn a_route_takes_only_its_own_token() {
+        let mut store = Store::default();
+        let sent = request("POST", "/gsi/cs2", GAME_STATE);
+        assert_eq!(
+            game(&sent, TOKEN, &mut store, NOW).0.status,
+            401,
+            "the sender's token"
+        );
+        let posted = request("POST", "/signals", r#"{"build":"failed"}"#);
+        let mut with_game_token = posted;
+        with_game_token.authorization = Some("Bearer fedcba9876543210");
+        assert_eq!(
+            handle(&with_game_token, TOKEN, &mut store, NOW).0.status,
+            401
+        );
+        assert!(for_game("/gsi/cs2") && !for_game("/signals"));
+    }
+
+    #[test]
+    fn a_game_route_refuses_what_is_not_a_game_post() {
+        let mut store = Store::default();
+        let key = "fedcba9876543210";
+        assert_eq!(
+            game(
+                &request("POST", "/gsi/quake", GAME_STATE),
+                key,
+                &mut store,
+                NOW
+            )
+            .0
+            .status,
+            404
+        );
+        assert_eq!(
+            game(&request("GET", "/gsi/cs2", ""), key, &mut store, NOW)
+                .0
+                .status,
+            405
+        );
+        assert_eq!(
+            game(
+                &request("POST", "/gsi/cs2", "not json"),
+                key,
+                &mut store,
+                NOW
+            )
+            .0
+            .status,
+            400
+        );
+        let mut browser = request("POST", "/gsi/cs2", GAME_STATE);
+        browser.from_browser = true;
+        assert_eq!(game(&browser, key, &mut store, NOW).0.status, 403);
+        assert!(store.views(NOW).is_empty());
     }
 
     #[test]

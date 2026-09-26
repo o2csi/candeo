@@ -4315,6 +4315,7 @@ mod tests {
                 port: 7400,
                 token: "0f".repeat(32),
                 interfaces: vec!["Wi-Fi".into()],
+                game_token: "ab".repeat(32),
             },
             sound: crate::audio::analysis::Tuning {
                 gain: 1.5,
