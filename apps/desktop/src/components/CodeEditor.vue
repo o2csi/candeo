@@ -20,7 +20,11 @@ const props = defineProps<{
   language?: 'typescript' | 'json'
 }>()
 
-const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+  /** Ctrl+S, the text put in shape first. Not while read only. */
+  save: []
+}>()
 
 const host = ref<HTMLElement | null>(null)
 
@@ -59,6 +63,17 @@ onMounted(() => {
   })
 
   model.onDidChangeContent(() => emit('update:modelValue', model?.getValue() ?? ''))
+
+  // What Ctrl+S does in any editor. The text is saved even when putting it in
+  // shape fails: a file that does not parse is still the author's.
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    if (props.disabled) return
+    const save = () => emit('save')
+    void (editor?.getAction('editor.action.formatDocument')?.run() ?? Promise.resolve()).then(
+      save,
+      save,
+    )
+  })
 })
 
 /**

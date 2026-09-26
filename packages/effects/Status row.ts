@@ -101,12 +101,10 @@ export default defineEffect({
         return
       }
       const kind = typeof value === 'boolean' ? (value ? 'good' : 'bad') : kindOf(String(value))
-      const colour =
-        kind === 'good' ? good :
-        kind === 'bad' ? bad :
-        kind === 'busy' ? mix(BLACK, busy, beat) :
-        OTHER
-      frame.set(key, colour)
+      if (kind === 'good') frame.set(key, good)
+      else if (kind === 'bad') frame.set(key, bad)
+      else if (kind === 'busy') frame.set(key, mix(BLACK, busy, beat))
+      else frame.set(key, OTHER)
     })
   },
 })

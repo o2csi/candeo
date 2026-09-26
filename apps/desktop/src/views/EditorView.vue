@@ -611,7 +611,12 @@ onBeforeUnmount(() => {
           <button class="link" @click="discard">{{ t('editor.discard') }}</button>
         </p>
 
-        <CodeEditor v-model="source" :disabled="loading || builtin" class="code" />
+        <CodeEditor
+          v-model="source"
+          :disabled="loading || builtin"
+          class="code"
+          @save="busy || save()"
+        />
 
         <!--
           One place for every failure. What was just attempted comes first: it
