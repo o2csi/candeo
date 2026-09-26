@@ -77,6 +77,7 @@ import {
 import { effectName, userKey } from '../api/effectKey'
 import { error, message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
+import EditorShortcuts from '../components/EditorShortcuts.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
@@ -570,6 +571,8 @@ onBeforeUnmount(() => {
 
       <span class="spacer" />
 
+      <EditorShortcuts />
+
       <!--
         The editor has no devices column: the target device's dot is the only
         place here that shows it dropped. Same component as the gallery's cards.
@@ -595,7 +598,13 @@ onBeforeUnmount(() => {
       <button v-if="builtin" class="solid" :disabled="busy || loading" @click="duplicate">
         {{ busy ? t('editor.wait') : t('editor.duplicate') }}
       </button>
-      <button v-else class="solid" :disabled="busy || loading" @click="save">
+      <button
+        v-else
+        class="solid"
+        :disabled="busy || loading"
+        :title="t('editor.saveTitle')"
+        @click="save"
+      >
         {{ busy ? t('editor.wait') : t('editor.save') }}
       </button>
     </header>
