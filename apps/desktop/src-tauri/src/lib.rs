@@ -132,6 +132,13 @@ pub struct DeviceInfo {
     pub warnings: Vec<String>,
     /// Whose definition it is known by: built in, or a file of yours.
     pub origin: catalog::Origin,
+    /// The file of yours it is known by, for *Open*.
+    pub file: Option<String>,
+    /// Whether that file replaces a built-in definition of the same device.
+    pub replaces_built_in: bool,
+    /// What its lights are, `keys` or `zones`, and how many.
+    pub lights: &'static str,
+    pub light_count: usize,
 }
 
 /// A key, as the simulator must draw it.
@@ -891,6 +898,14 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 vid: l.vid,
                 pid: l.pid,
                 origin: catalog::current().origin(l),
+                file: catalog::current().file(l).map(str::to_owned),
+                replaces_built_in: catalog::current().file(l).is_some()
+                    && candeo_device::definition::builtin_file(l.vid, l.pid).is_some(),
+                lights: match l.lights {
+                    candeo_device::Lights::Keys => "keys",
+                    candeo_device::Lights::Zones => "zones",
+                },
+                light_count: l.lit_count(),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
@@ -1510,6 +1525,8 @@ pub fn run() {
             storage::open_effects_dir,
             storage::open_devices_dir,
             storage::reload_device_definitions,
+            storage::copy_device_definition,
+            storage::open_device_definition,
             storage::forget_effect_settings,
             storage::get_settings,
             storage::set_settings,

@@ -2517,6 +2517,44 @@ pub fn open_devices_dir(app: AppHandle) -> CmdResult<()> {
         .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&dir))))
 }
 
+/// Copies a built-in device's definition into your folder, where it replaces
+/// the built-in one from the next reading on: the start of a corrected
+/// drawing, or of a neighbouring model. An existing file of that name is not
+/// overwritten — it is yours already.
+#[tauri::command]
+pub fn copy_device_definition(app: AppHandle, device: DeviceRef) -> CmdResult<String> {
+    let (file, json) = candeo_device::definition::builtin_file(device.vid, device.pid)
+        .ok_or_else(|| Failure::new("noLayout").with("device", device))?;
+    let store = store(&app)?;
+    let path = store.user_devices_dir()?.join(file);
+    if path.exists() {
+        return Err(Failure::new("definitionExists").with("file", file));
+    }
+    fs::write(&path, json).map_err(|e| {
+        Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(&path)))
+    })?;
+    crate::catalog::reload(Some(&store.user_devices_path()));
+    Ok(file.to_owned())
+}
+
+/// Opens a file of yours defining this device, in whatever edits JSON here.
+#[tauri::command]
+pub fn open_device_definition(app: AppHandle, device: DeviceRef) -> CmdResult<()> {
+    let catalog = crate::catalog::current();
+    let file = catalog
+        .layouts
+        .iter()
+        .find(|l| DeviceRef::of(l) == device)
+        .and_then(|l| catalog.file(l))
+        .ok_or_else(|| Failure::new("noLayout").with("device", device))?;
+    let path = store(&app)?.user_devices_path().join(file);
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|e| {
+            Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&path)))
+        })
+}
+
 /// Reads the folder of your device definitions again, and says which files
 /// drive nothing and why. A device already open keeps the definition it was
 /// opened with until it opens again.

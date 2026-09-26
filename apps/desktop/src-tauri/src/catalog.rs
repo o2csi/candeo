@@ -37,17 +37,26 @@ pub struct Catalog {
     /// Built-in first, in their order, then yours; a file of yours defining a
     /// device already known takes its place.
     pub layouts: Vec<&'static Layout>,
-    yours: Vec<(u16, u16)>,
+    /// Your files, by the device each defines.
+    yours: Vec<((u16, u16), String)>,
     pub problems: Vec<Problem>,
 }
 
 impl Catalog {
     pub fn origin(&self, layout: &Layout) -> Origin {
-        if self.yours.contains(&(layout.vid, layout.pid)) {
+        if self.file(layout).is_some() {
             Origin::Yours
         } else {
             Origin::BuiltIn
         }
+    }
+
+    /// The file of yours defining this device, if one does.
+    pub fn file(&self, layout: &Layout) -> Option<&str> {
+        self.yours
+            .iter()
+            .find(|(id, _)| *id == (layout.vid, layout.pid))
+            .map(|(_, file)| file.as_str())
     }
 }
 
@@ -84,7 +93,7 @@ fn build(folder: Option<&Path>) -> Catalog {
             }
         };
         let id = (layout.vid, layout.pid);
-        if yours.contains(&id) {
+        if yours.iter().any(|(known, _)| *known == id) {
             problems.push(Problem {
                 file,
                 reason: format!(
@@ -98,7 +107,7 @@ fn build(folder: Option<&Path>) -> Catalog {
             Some(i) => layouts[i] = layout,
             None => layouts.push(layout),
         }
-        yours.push(id);
+        yours.push((id, file));
     }
     if !yours.is_empty() || !problems.is_empty() {
         tracing::info!(

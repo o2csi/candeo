@@ -336,12 +336,38 @@
       }
     },
     "groups": {
+      "all": "All",
       "builtIn": "Built-in",
       "yours": "Yours"
     },
     "openFolder": "Open the folder",
     "yoursNone": "No definition of yours.",
-    "yoursNote": "Nobody reviewed your definitions: they send your devices exactly what they say."
+    "yoursNote": "Nobody reviewed your definitions: they send your devices exactly what they say.",
+    "pluggedIn": "Plugged in · {n}",
+    "nothingPlugged": "No device Candeo knows is plugged in.",
+    "known": "Every device Candeo knows · {n}",
+    "filter": "Filter by name or ids",
+    "noMatch": "No device matches.",
+    "columns": {
+      "device": "Device",
+      "kind": "Kind",
+      "origin": "Origin",
+      "here": "Here"
+    },
+    "kinds": {
+      "keys": "keys",
+      "zones": "zones"
+    },
+    "count": {
+      "keys": "{n} key | {n} keys",
+      "zones": "{n} zone | {n} zones"
+    },
+    "copy": "Copy to yours",
+    "copyTitle": "Copy its definition into your folder, where it replaces the built-in one",
+    "open": "Open",
+    "details": "Details",
+    "replaces": "your copy replaces the built-in one",
+    "yoursTitle": "Your definitions"
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
@@ -361,6 +387,7 @@
     "signalsFull": "{max} signals are already held: erase one, or wait for one to expire.",
     "bindingInvalid": "The setting “{param}” cannot read “{source}”: choose a signal by its name.",
     "dimmingInvalid": "The brightness cannot follow “{source}”: choose a signal by its name, or a sound.",
+    "definitionExists": "Your folder already holds “{file}”: open it to change it.",
     "effectExists": "An effect named “{name}” already exists.",
     "builtinNotSaved": "“{name}” is a built-in effect: duplicate it to change it.",
     "builtinNotRenamed": "“{name}” is a built-in effect: duplicate it to rename it.",

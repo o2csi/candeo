@@ -649,6 +649,16 @@ impl Lighting for Template {
 
 // ---------------------------------------------------------------- loading
 
+/// The built-in definition of a device, by its file name and text: what
+/// *Copy to yours* starts from.
+pub fn builtin_file(vid: u16, pid: u16) -> Option<(&'static str, &'static str)> {
+    builtin()
+        .iter()
+        .zip(BUILTIN)
+        .find(|(l, _)| (l.vid, l.pid) == (vid, pid))
+        .map(|(_, file)| *file)
+}
+
 /// The built-in definitions, read once, in [`BUILTIN`]'s order: the DeathStalker
 /// first, the layout used when no device is connected.
 ///

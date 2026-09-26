@@ -336,12 +336,38 @@
       }
     },
     "groups": {
+      "all": "Tous",
       "builtIn": "Intégrés",
       "yours": "À vous"
     },
     "openFolder": "Ouvrir le dossier",
     "yoursNone": "Aucune définition à vous.",
-    "yoursNote": "Personne n'a relu vos définitions : elles envoient à vos appareils exactement ce qu'elles disent."
+    "yoursNote": "Personne n'a relu vos définitions : elles envoient à vos appareils exactement ce qu'elles disent.",
+    "pluggedIn": "Branchés · {n}",
+    "nothingPlugged": "Aucun appareil connu de Candeo n’est branché.",
+    "known": "Tous les appareils connus de Candeo · {n}",
+    "filter": "Filtrer par nom ou identifiants",
+    "noMatch": "Aucun appareil ne correspond.",
+    "columns": {
+      "device": "Appareil",
+      "kind": "Type",
+      "origin": "Origine",
+      "here": "Ici"
+    },
+    "kinds": {
+      "keys": "touches",
+      "zones": "zones"
+    },
+    "count": {
+      "keys": "{n} touche | {n} touches",
+      "zones": "{n} zone | {n} zones"
+    },
+    "copy": "Copier chez vous",
+    "copyTitle": "Copier sa définition dans votre dossier, où elle remplace celle intégrée",
+    "open": "Ouvrir",
+    "details": "Détails",
+    "replaces": "votre copie remplace celle intégrée",
+    "yoursTitle": "Vos définitions"
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",
@@ -361,6 +387,7 @@
     "signalsFull": "{max} signaux sont déjà reçus : effacez-en un, ou attendez qu'un expire.",
     "bindingInvalid": "Le paramètre « {param} » ne peut pas lire « {source} » : choisissez un signal par son nom.",
     "dimmingInvalid": "La luminosité ne peut pas suivre « {source} » : choisissez un signal par son nom, ou un son.",
+    "definitionExists": "Votre dossier contient déjà « {file} » : ouvrez-le pour le modifier.",
     "effectExists": "Un effet nommé « {name} » existe déjà.",
     "builtinNotSaved": "« {name} » est un effet intégré : dupliquez-le pour le modifier.",
     "builtinNotRenamed": "« {name} » est un effet intégré : dupliquez-le pour le renommer.",

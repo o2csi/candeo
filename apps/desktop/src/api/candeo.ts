@@ -309,6 +309,19 @@ export interface DefinitionProblem {
   reason: string
 }
 
+/**
+ * Copies a built-in device's definition into your folder, where it replaces the
+ * built-in one; the file's name comes back. One already there is not overwritten.
+ */
+export function copyDeviceDefinition(device: DeviceRef): Promise<string> {
+  return invoke('copy_device_definition', { device })
+}
+
+/** Opens the file of yours defining this device. */
+export function openDeviceDefinition(device: DeviceRef): Promise<void> {
+  return invoke('open_device_definition', { device })
+}
+
 /** Opens the folder of your device definitions, created if needed. */
 export function openDevicesDir(): Promise<void> {
   return invoke('open_devices_dir')
