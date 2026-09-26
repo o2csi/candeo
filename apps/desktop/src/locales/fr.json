@@ -227,7 +227,8 @@
       "replace": "Remplacer",
       "comment": "Commenter ou décommenter la ligne",
       "moveLine": "Déplacer la ligne vers le haut ou le bas",
-      "nextOccurrence": "Sélectionner aussi l’occurrence suivante"
+      "nextOccurrence": "Sélectionner aussi l’occurrence suivante",
+      "help": "Afficher ces raccourcis"
     }
   },
   "definition": {

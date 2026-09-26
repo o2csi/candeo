@@ -1,35 +1,59 @@
 <script setup lang="ts">
 /**
- * The editor's shortcuts, behind a button in its header: there when someone
- * looks for them, out of the way of the code otherwise.
+ * The editor's shortcuts, behind a button in its header and F1: there when
+ * someone looks for them, out of the way of the code otherwise.
  */
 
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-import { SHORTCUTS } from '../editor/shortcuts'
+import { keysOf, readLayout, SHORTCUTS, type LayoutMap } from '../editor/shortcuts'
 import { t } from '../i18n'
 
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+/** The keyboard's layout, for the one label it changes. */
+const layout = ref<LayoutMap | null>(null)
 
 /** A click anywhere else closes it, as a menu does. */
 function outside(e: MouseEvent): void {
   if (root.value && !root.value.contains(e.target as Node)) open.value = false
 }
 
+/**
+ * F1 from anywhere on the screen, the code included: Monaco leaves it alone,
+ * since its command palette is not loaded. Escape closes it from there too.
+ */
+function key(e: KeyboardEvent): void {
+  if (e.key === 'F1') {
+    e.preventDefault()
+    open.value = !open.value
+  } else if (e.key === 'Escape' && open.value) {
+    open.value = false
+  }
+}
+
 watch(open, (now) => {
   if (now) window.addEventListener('mousedown', outside)
   else window.removeEventListener('mousedown', outside)
 })
-onBeforeUnmount(() => window.removeEventListener('mousedown', outside))
+
+onMounted(async () => {
+  window.addEventListener('keydown', key)
+  layout.value = await readLayout()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', key)
+  window.removeEventListener('mousedown', outside)
+})
 </script>
 
 <template>
-  <div ref="root" class="shortcuts" @keydown.esc="open = false">
+  <div ref="root" class="shortcuts">
     <button
       class="ghost"
       :aria-expanded="open"
-      :title="t('editor.shortcuts.title')"
+      :title="`${t('editor.shortcuts.title')} (F1)`"
       :aria-label="t('editor.shortcuts.title')"
       @click="open = !open"
     >
@@ -39,7 +63,7 @@ onBeforeUnmount(() => window.removeEventListener('mousedown', outside))
       <table>
         <tbody>
           <tr v-for="s in SHORTCUTS" :key="s.action">
-            <td><kbd>{{ s.keys }}</kbd></td>
+            <td><kbd>{{ keysOf(s, layout) }}</kbd></td>
             <td>{{ t(`editor.shortcuts.${s.action}`) }}</td>
           </tr>
         </tbody>
