@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.0](https://github.com/o2csi/candeo/compare/v0.17.0...v0.18.0) (2026-09-27)
+
+
+### Features
+
+* **devices:** a layout says whether its lights form a grid ([8dc4d3f](https://github.com/o2csi/candeo/commit/8dc4d3ff97cc145b819019972dc8549a87981eb7))
+* **effects:** a Dota 2 effect ([4fcd451](https://github.com/o2csi/candeo/commit/4fcd45194cfc2f5e6aff7657b6a43ef952d608a1))
+* **effects:** offer an effect only where it applies ([e6d93af](https://github.com/o2csi/candeo/commit/e6d93afcff2f5c4705edac12b2e3cdf35244482d))
+* **games:** Dota 2 through Valve's game state integration ([d2afe06](https://github.com/o2csi/candeo/commit/d2afe061f7cf93d8cdb5d78edfc17d21ca16bd46))
+
+
+### Bug Fixes
+
+* **automations:** a game's rule stays on while the game is connected ([a9bde37](https://github.com/o2csi/candeo/commit/a9bde375e34de9b5a462e4bf3e8dccc912bb693b))
+
 ## [0.17.0](https://github.com/o2csi/candeo/compare/v0.16.0...v0.17.0) (2026-09-27)
 
 
