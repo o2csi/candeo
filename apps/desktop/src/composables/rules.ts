@@ -226,6 +226,16 @@ export function editable(rule: unknown): rule is Rule {
   )
 }
 
+/**
+ * Whether a rule runs when its time comes. A game's *while playing* is on as
+ * long as the game is connected: its card in Games sets it, and switched off
+ * here it would leave the card showing a lighting that never comes. Rust reads
+ * it the same way (`Rule::switched_on`).
+ */
+export function switchedOn(rule: Rule): boolean {
+  return rule.enabled || rule.game !== undefined
+}
+
 /** A fresh identifier; rules are named by id, never by position. */
 export function newId(): string {
   return crypto.randomUUID()

@@ -14,7 +14,7 @@ import type { DeviceInfo, DeviceRef } from '../api/types'
 import { t } from '../i18n'
 import { localized } from '../i18n/text'
 import { boundSignal } from './bindings'
-import { editable } from './rules'
+import { editable, switchedOn } from './rules'
 import { named } from './useEffects'
 
 /** A device the window lists: enough to name it. */
@@ -85,7 +85,7 @@ export function signalReaders(
 
   for (const rule of settings.rules ?? []) {
     if (!editable(rule)) continue
-    const enabled = rule.enabled === true
+    const enabled = switchedOn(rule)
     // Unnamed, a rule goes by the effect it shows, as the device card calls it.
     const label =
       (typeof rule.name === 'string' ? rule.name.trim() : '') || effectName(rule.show.effect)

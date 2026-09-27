@@ -54,8 +54,8 @@ pub struct Rule {
     #[serde(rename = "for", default)]
     pub lasts: Lasts,
     /// The game whose *while playing* this is, made on its card in the Games
-    /// tab (`docs/design/game-state-integration.md` §4). It changes nothing to
-    /// how the rule runs; the card finds its rule by it.
+    /// tab (`docs/design/game-state-integration.md` §4). The card finds its rule
+    /// by it, and it keeps the rule on: see [`Rule::switched_on`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<String>,
 }
@@ -117,6 +117,14 @@ impl Default for Lasts {
 }
 
 impl Rule {
+    /// Whether it runs when its time comes. A game's *while playing* is on as
+    /// long as the game is connected, whatever `enabled` says: its card in Games
+    /// sets it, and switched off in Automations it would leave the card showing a
+    /// lighting that never comes.
+    pub fn switched_on(&self) -> bool {
+        self.enabled || self.game.is_some()
+    }
+
     /// The rule's expression, parsed; or why it cannot be, in English, for the log
     /// and the interface.
     pub fn cron(&self) -> Result<Cron, String> {
@@ -249,7 +257,7 @@ pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Int
     let scheduled = context
         .rules
         .iter()
-        .filter(|rule| !context.paused && rule.enabled)
+        .filter(|rule| !context.paused && rule.switched_on())
         .filter(usable)
         .filter_map(|rule| match rule.when {
             Trigger::Cron { .. } => {
@@ -735,6 +743,24 @@ mod tests {
         assert!(
             given.first(at(17, 15, 12, 10), &rules, KEYBOARD).is_none(),
             "once"
+        );
+    }
+
+    /// A game's rule switched off before the switch was locked still runs:
+    /// Games shows it as the lighting during a match.
+    #[test]
+    fn a_game_rule_runs_whatever_its_switch_says() {
+        let mut playing = rule("Match", "* * * * *", 59);
+        playing.enabled = false;
+        playing.game = Some("cs2".into());
+        assert!(playing.switched_on());
+        let rules = [playing];
+        assert_eq!(
+            Given::nothing()
+                .first(at(17, 10, 0, 5), &rules, KEYBOARD)
+                .unwrap()
+                .rule,
+            "Match"
         );
     }
 

@@ -102,7 +102,10 @@ Most people using Candeo do not play, and their screens stay as they are:
   - **while playing**: which effect to show on which devices during a match,
     and the device's own effect back after it. It is a rule — *while
     `cs2.phase` is set* — carrying the game it belongs to, and listed in
-    *Automations* like any other so that its priority stays visible there.
+    *Automations* like any other so that its priority stays visible there,
+    with its switch locked on: it runs as long as the game is connected, since
+    switched off there it would leave the card showing a lighting that never
+    comes.
     Connecting a game is wanting its lighting during a match, so **Connect**
     makes it, with the game's effect on the devices Candeo controls, and
     **Disconnect** removes it; the card changes its effect and devices. A game

@@ -226,6 +226,7 @@
     "noDevice": "No controlled device: control one in Devices, then choose it in a rule.",
     "dragHint": "Drag to change the order",
     "enabled": "Rule switched on",
+    "gameRule": "On while the game is connected in Games",
     "on": "on",
     "show": "show",
     "for": "for",
