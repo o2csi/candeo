@@ -1,16 +1,17 @@
 {
   "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
-  "name": "Razer DeathStalker V2 Pro (wireless)",
+  "name": "Razer BlackWidow V3 Pro (wireless)",
   "notes": [
     "Unverified: never tried on the device. Derived on 2026-09-27 from razer-deathstalker-v2-pro.json, verified on firmware v1.5, by derive.mjs.",
-    "What differs: product id 0290, interface 2, transaction byte 9f, a 6×22 matrix (HyperSpeed wireless dongle).",
+    "What differs: product id 025c, interface 3, transaction byte 3f, a 6×22 matrix (HyperSpeed wireless dongle).",
     "From OpenRGB, https://gitlab.com/CalcProgrammer1/OpenRGB, commit 0f8f2dcc (2026-09-25): Controllers/RazerController, for each model's matrix, read by openrgb.mjs, its interface and its transaction byte.",
     "From OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py, for the same facts as seen from Linux.",
+    "OpenRazer sends 9f in the transaction byte: if nothing lights, try it in every report.",
     "Drawn as an ISO board: on an ANSI one, the key left of Z is absent and the backslash lights with Enter. Lights that are not keys are placed by convention.",
     "The inspection is left out until someone confirms the device answers it.",
     "Does it light? Say so: https://github.com/o2csi/candeo/issues/new?template=device-report.yml"
   ],
-  "match": { "vid": "1532", "pid": "0290", "interface": 2 },
+  "match": { "vid": "1532", "pid": "025c", "interface": 3 },
   "report": {
     "wire": "feature",
     "length": 90,
@@ -21,14 +22,14 @@
   "frame": {
     "each": {
       "by": "row",
-      "send": ["00 9f 00 00 00 {length:8} 0f 03 00 00 {row} {start} {end} {lights}"],
+      "send": ["00 3f 00 00 00 {length:8} 0f 03 00 00 {row} {start} {end} {lights}"],
       "light": "{r} {g} {b}"
     },
-    "close": ["00 9f 00 00 00 06 0f 02 00 00 08 00 00 00"]
+    "close": ["00 3f 00 00 00 06 0f 02 00 00 08 00 00 00"]
   },
-  "brightness": ["00 9f 00 00 00 03 0f 04 00 00 {level}"],
+  "brightness": ["00 3f 00 00 00 03 0f 04 00 00 {level}"],
   "firmware": {
-    "send": "00 9f 00 00 00 06 0f 02 00 00 {kind} 00 00 00",
+    "send": "00 3f 00 00 00 06 0f 02 00 00 {kind} 00 00 00",
     "off": "00",
     "effects": [
       {
@@ -45,7 +46,7 @@
         "id": "hardware:wave",
         "kind": "04",
         "looks": "wave",
-        "send": "00 9f 00 00 00 06 0f 02 00 00 04 02 28 00",
+        "send": "00 3f 00 00 00 06 0f 02 00 00 04 02 28 00",
         "name": "Wave",
         "summary": {
           "en": "A gradient crosses the keyboard from side to side.",
@@ -75,6 +76,10 @@
       { "row": 0, "col": 14, "address": 14, "scancode": "e037", "rect": [15.25, 0, 1, 1] },
       { "row": 0, "col": 15, "address": 15, "scancode": "46", "rect": [16.25, 0, 1, 1] },
       { "row": 0, "col": 16, "address": 16, "scancode": "e11d", "rect": [17.25, 0, 1, 1] },
+      { "row": 0, "col": 18, "address": 18, "scancode": "e010", "rect": [18.5, 0, 1, 1] },
+      { "row": 0, "col": 19, "address": 19, "scancode": "e022", "rect": [19.5, 0, 1, 1] },
+      { "row": 0, "col": 20, "address": 20, "scancode": "e019", "rect": [20.5, 0, 1, 1] },
+      { "row": 0, "col": 21, "address": 21, "scancode": "e020", "rect": [21.5, 0, 1, 1] },
       { "row": 1, "col": 0, "address": 22, "scancode": "29", "rect": [0, 1.5, 1, 1] },
       { "row": 1, "col": 1, "address": 23, "scancode": "02", "rect": [1, 1.5, 1, 1] },
       { "row": 1, "col": 2, "address": 24, "scancode": "03", "rect": [2, 1.5, 1, 1] },
@@ -131,6 +136,7 @@
       { "row": 3, "col": 11, "address": 77, "scancode": "28", "rect": [11.75, 3.5, 1, 1] },
       { "row": 3, "col": 12, "address": 78, "scancode": "2b", "rect": [12.75, 3.5, 1, 1] },
       { "row": 3, "col": 13, "address": 79, "scancode": "1c", "rect": [13.75, 3.5, 1.25, 1] },
+      { "row": 3, "col": 14, "address": 80, "name": "Logo", "shape": "disc", "rect": [6.5, 6.75, 0.5, 0.5] },
       { "row": 3, "col": 17, "address": 83, "scancode": "4b", "rect": [18.5, 3.5, 1, 1] },
       { "row": 3, "col": 18, "address": 84, "scancode": "4c", "rect": [19.5, 3.5, 1, 1] },
       { "row": 3, "col": 19, "address": 85, "scancode": "4d", "rect": [20.5, 3.5, 1, 1] },
@@ -171,13 +177,13 @@
     {
       "colours": ["ff0000", "00ff00", "0000ff"],
       "reports": [
-        "00 9f 00 00 00 47 0f 03 00 00 00 00 15 ff 00 00 00 00 00 00 ff 00 00 00 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 a1",
-        "00 9f 00 00 00 47 0f 03 00 00 01 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5f",
-        "00 9f 00 00 00 47 0f 03 00 00 02 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c",
-        "00 9f 00 00 00 47 0f 03 00 00 03 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5d",
-        "00 9f 00 00 00 47 0f 03 00 00 04 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5a",
-        "00 9f 00 00 00 47 0f 03 00 00 05 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5b",
-        "00 9f 00 00 00 06 0f 02 00 00 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03"
+        "00 3f 00 00 00 47 0f 03 00 00 00 00 15 ff 00 00 00 00 00 00 ff 00 00 00 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 a1",
+        "00 3f 00 00 00 47 0f 03 00 00 01 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5f",
+        "00 3f 00 00 00 47 0f 03 00 00 02 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c",
+        "00 3f 00 00 00 47 0f 03 00 00 03 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5d",
+        "00 3f 00 00 00 47 0f 03 00 00 04 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5a",
+        "00 3f 00 00 00 47 0f 03 00 00 05 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5b",
+        "00 3f 00 00 00 06 0f 02 00 00 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03"
       ]
     }
   ]

@@ -1133,25 +1133,36 @@ mod tests {
         assert_eq!(morph.unwrap().name, Some(Text::One("Morph".into())));
     }
 
-    /// The unverified definitions (`device-sdk.md` §9) load, and give the
-    /// frames `derive.mjs` worked out for them byte by byte: the files say what
-    /// their facts say. Whether the devices answer, only they can tell.
+    /// The unverified definitions' files, by name (`device-sdk.md` §9).
+    fn unverified() -> Vec<(String, String)> {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("devices/unverified");
+        let mut files: Vec<_> = std::fs::read_dir(&folder)
+            .expect("the unverified definitions")
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension().is_some_and(|e| e == "json")
+                    && path.file_name().is_some_and(|n| n != "variants.json")
+            })
+            .map(|path| {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read_to_string(&path).unwrap())
+            })
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// The unverified definitions load, and give the frames `derive.mjs`
+    /// worked out for them byte by byte: the files say what their facts say.
+    /// Whether the devices answer, only they can tell.
     #[test]
     fn unverified_definitions_load_and_replay_their_derived_frames() {
-        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("devices/unverified");
-        let mut read = 0;
-        for entry in std::fs::read_dir(&folder).expect("the unverified definitions") {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            if !name.ends_with(".json") || name == "variants.json" {
-                continue;
-            }
-            let json = std::fs::read_to_string(&path).unwrap();
-            load(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
-            replay(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
-            read += 1;
+        let files = unverified();
+        for (name, json) in &files {
+            load(json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            replay(json).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
-        assert!(read >= 4, "{read} unverified definitions");
+        assert!(files.len() >= 19, "{} unverified definitions", files.len());
     }
 
     /// What *Copy to yours* and the editor start from: the text shipped.
@@ -1202,13 +1213,14 @@ mod tests {
         }
     }
 
-    /// What §8 checks of any definition without the device: each lit position
-    /// has one light, drawn inside the picture without overlapping another,
-    /// and a scancode names one key only.
+    /// What §8 checks of any definition without the device, built in or to
+    /// verify: each lit position has one light, drawn inside the picture
+    /// without overlapping another, and a scancode names one key only.
     #[test]
-    fn every_built_in_definition_is_consistent() {
-        for (name, json) in BUILTIN {
-            let l = load(json).unwrap();
+    fn every_definition_is_consistent() {
+        let built_in = BUILTIN.iter().map(|(n, j)| (n.to_string(), j.to_string()));
+        for (name, json) in built_in.chain(unverified()) {
+            let l = load(&json).unwrap();
             let mut seen = std::collections::BTreeSet::new();
             for key in l.keys {
                 assert!(

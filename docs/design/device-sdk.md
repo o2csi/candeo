@@ -840,7 +840,11 @@ which proves the file's shape, not the device's answer. They live in
 definition of the same family and the facts that differ (product id, interface,
 transaction byte, matrix), each with its source and date in its `notes`; the
 site lists them to download into your folder, with an issue form to say whether
-it lights. One confirmed on the device, with frames captured there, joins the
+it lights. The Razer keyboards take their matrix from OpenRGB's tables, read by
+`openrgb.mjs`: laid out the way OpenRGB lays them out, they give the verified
+DeathStalker V2 Pro its surveyed keys. Where OpenRGB and OpenRazer disagree on a
+byte, the file follows OpenRGB, right on that same keyboard, and its notes say
+what OpenRazer sends. One confirmed on the device, with frames captured there, joins the
 built-in ones.
 
 Both kinds open in the application's editor, checked against the schema as they

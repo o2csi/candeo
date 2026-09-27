@@ -1,6 +1,9 @@
 {
   "from": "razer-deathstalker-v2-pro.json",
-  "source": "OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py",
+  "sources": [
+    "OpenRGB, https://gitlab.com/CalcProgrammer1/OpenRGB, commit 0f8f2dcc (2026-09-25): Controllers/RazerController, for each model's matrix, read by openrgb.mjs, its interface and its transaction byte.",
+    "OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py, for the same facts as seen from Linux."
+  ],
   "derived": "2026-09-27",
   "variants": [
     {
@@ -9,26 +12,49 @@
       "pid": "0290",
       "interface": 2,
       "transaction": "9f",
-      "cols": 22,
-      "connection": "HyperSpeed wireless dongle"
+      "connection": "HyperSpeed wireless dongle",
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . . . . .",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd .",
+        "caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+      ]
     },
     {
       "file": "razer-deathstalker-v2.json",
       "name": "Razer DeathStalker V2",
       "pid": "0295",
       "interface": 3,
-      "transaction": "3f",
-      "cols": 22,
-      "connection": "wired"
+      "transaction": "1f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 3f in the transaction byte: if nothing lights, try it in every report."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . . . . .",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal . bksp ins home pgup numlk kpdiv kpmul kpsub",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd .",
+        "caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+      ]
     },
     {
       "file": "razer-deathstalker-v2-pro-tkl.json",
       "name": "Razer DeathStalker V2 Pro TKL",
       "pid": "0298",
       "interface": 3,
-      "transaction": "3f",
-      "cols": 17,
-      "connection": "wired"
+      "transaction": "1f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 3f in the transaction byte: if nothing lights, try it in every report."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 . . .",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn",
+        "caps a s d f g h j k l semicolon quote hash enter . . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right"
+      ]
     },
     {
       "file": "razer-deathstalker-v2-pro-tkl-wireless.json",
@@ -36,8 +62,277 @@
       "pid": "0296",
       "interface": 2,
       "transaction": "9f",
-      "cols": 17,
-      "connection": "HyperSpeed wireless dongle"
+      "connection": "HyperSpeed wireless dongle",
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 . . .",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn",
+        "caps a s d f g h j k l semicolon quote hash enter . . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right"
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v3.json",
+      "name": "Razer BlackWidow V3",
+      "pid": "024e",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends frames with 1f in the transaction byte, the custom effect with 3f: if nothing lights, try that."],
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . . . .",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        ". lctrl lwin lalt . . space . . . ralt logo fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v3-pro.json",
+      "name": "Razer BlackWidow V3 Pro",
+      "pid": "025a",
+      "interface": 2,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends frames with 1f in the transaction byte, the custom effect with 3f: if nothing lights, try that."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . prev play next mute",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd .",
+        "caps a s d f g h j k l semicolon quote hash enter logo . . kp4 kp5 kp6 . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v3-pro-wireless.json",
+      "name": "Razer BlackWidow V3 Pro (wireless)",
+      "pid": "025c",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "HyperSpeed wireless dongle",
+      "notes": ["OpenRazer sends 9f in the transaction byte: if nothing lights, try it in every report."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . prev play next mute",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd .",
+        "caps a s d f g h j k l semicolon quote hash enter logo . . kp4 kp5 kp6 . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v3-tkl.json",
+      "name": "Razer BlackWidow V3 Tenkeyless",
+      "pid": "0a24",
+      "interface": 2,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends frames with 1f in the transaction byte, the custom effect with 3f: if nothing lights, try that."],
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn",
+        ". caps a s d f g h j k l semicolon quote hash enter . . .",
+        ". lshift iso z x c v b n m comma period slash . rshift . up .",
+        ". lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right"
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v4.json",
+      "name": "Razer BlackWidow V4",
+      "pid": "0287",
+      "interface": 3,
+      "transaction": "1f",
+      "connection": "wired",
+      "notes": ["The matrix has 8 rows: the last two, the underglow, are not driven."],
+      "matrix": [
+        ". m6 esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute",
+        ". m5 grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". m4 tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". m3 caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". m2 lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        ". m1 lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v4-pro.json",
+      "name": "Razer BlackWidow V4 Pro",
+      "pid": "028d",
+      "interface": 3,
+      "transaction": "1f",
+      "connection": "wired",
+      "notes": ["The matrix has 8 rows: the last two, the underglow, are not driven."],
+      "matrix": [
+        ". dial esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute",
+        ". m5 grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". m4 tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". m3 caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". m2 lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        ". m1 lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v4-x.json",
+      "name": "Razer BlackWidow V4 X",
+      "pid": "0293",
+      "interface": 2,
+      "transaction": "1f",
+      "connection": "wired",
+      "matrix": [
+        "m6 esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . . . .",
+        "m5 grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        "m4 tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        "m3 caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        "m2 lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        "m1 lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v4-tkl.json",
+      "name": "Razer BlackWidow V4 Tenkeyless HyperSpeed",
+      "pid": "02d7",
+      "interface": 3,
+      "transaction": "1f",
+      "connection": "wired",
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 . f9 f10 f11 f12 prtsc scrlk pause",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp . ins home pgup",
+        "tab q w e r t y u i o p lbracket rbracket enter . del end pgdn",
+        "caps a s d f g h j k l semicolon quote hash enter . . . .",
+        "lshift iso z x c v b n m comma period slash . rshift . . up .",
+        "lctrl lwin lalt . . . . space . . . ralt fn menu rctrl left down right"
+      ]
+    },
+    {
+      "file": "razer-blackwidow-v4-tkl-wireless.json",
+      "name": "Razer BlackWidow V4 Tenkeyless HyperSpeed (wireless)",
+      "pid": "02d5",
+      "interface": 2,
+      "transaction": "9f",
+      "connection": "HyperSpeed wireless dongle",
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 . f9 f10 f11 f12 prtsc scrlk pause",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp . ins home pgup",
+        "tab q w e r t y u i o p lbracket rbracket enter . del end pgdn",
+        "caps a s d f g h j k l semicolon quote hash enter . . . .",
+        "lshift iso z x c v b n m comma period slash . rshift . . up .",
+        "lctrl lwin lalt . . . . space . . . ralt fn menu rctrl left down right"
+      ]
+    },
+    {
+      "file": "razer-cynosa-v2.json",
+      "name": "Razer Cynosa V2",
+      "pid": "025e",
+      "interface": 2,
+      "transaction": "1f",
+      "connection": "wired",
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". lshift iso z x c v b n m comma period slash . rshift volup up voldown kp1 kp2 kp3 kpenter",
+        ". lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-huntsman-v2.json",
+      "name": "Razer Huntsman V2",
+      "pid": "026c",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 1f in the transaction byte: if nothing lights, try it in every report."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute .",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd .",
+        "caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+      ]
+    },
+    {
+      "file": "razer-huntsman-v2-tkl.json",
+      "name": "Razer Huntsman V2 Tenkeyless",
+      "pid": "026b",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 1f in the transaction byte, and gives the matrix 18 columns: if nothing lights, try 1f in every report."],
+      "matrix": [
+        "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause",
+        "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup",
+        "tab q w e r t y u i o p lbracket rbracket enter del end pgdn",
+        "caps a s d f g h j k l semicolon quote hash enter . . .",
+        "lshift iso z x c v b n m comma period slash . rshift . up .",
+        "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right"
+      ]
+    },
+    {
+      "file": "razer-huntsman-v2-analog.json",
+      "name": "Razer Huntsman V2 Analog",
+      "pid": "0266",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": [
+        "OpenRazer sends 1f in the transaction byte: if nothing lights, try it in every report.",
+        "The matrix has more rows: those after the sixth, the underglow, are not driven."
+      ],
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        ". lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot ."
+      ]
+    },
+    {
+      "file": "razer-huntsman-v3-pro.json",
+      "name": "Razer Huntsman V3 Pro",
+      "pid": "02a6",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 1f in the transaction byte: if nothing lights, try it in every report."],
+      "fixes": [
+        {
+          "at": [5, 17],
+          "key": "right",
+          "why": "OpenRGB's table removes the right arrow where it meant to close the gap after it: the numeric keypad lands where its siblings have it, the arrow does not."
+        }
+      ],
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause media . voldial .",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn kp7 kp8 kp9 kpadd",
+        ". caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 .",
+        ". lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter",
+        ". lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down . kp0 kpdot . ."
+      ]
+    },
+    {
+      "file": "razer-huntsman-v3-pro-tkl.json",
+      "name": "Razer Huntsman V3 Pro Tenkeyless",
+      "pid": "02a7",
+      "interface": 3,
+      "transaction": "3f",
+      "connection": "wired",
+      "notes": ["OpenRazer sends 1f in the transaction byte, and gives the matrix 22 columns: if nothing lights, try 1f in every report."],
+      "rects": { "0:15": [15.25, 0, 1, 1], "0:16": [16.25, 0, 1, 1], "0:18": [17.25, 0, 1, 1] },
+      "matrix": [
+        ". esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 gamebar play . voldial",
+        ". grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup .",
+        ". tab q w e r t y u i o p lbracket rbracket enter del end pgdn .",
+        ". caps a s d f g h j k l semicolon quote hash enter . . . .",
+        ". lshift iso z x c v b n m comma period slash . rshift . up . .",
+        ". lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right ."
+      ]
     }
   ]
 }
