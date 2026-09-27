@@ -6,6 +6,9 @@
  *
  * At least one stays chosen: something applying to no device is something
  * switched off, which is said elsewhere.
+ *
+ * Disabled — while a choice is being saved — it keeps its list, open if it
+ * was, its boxes greyed: replacing the list closed it after every box ticked.
  */
 import { computed } from 'vue'
 
@@ -42,16 +45,22 @@ function toggle(device: DeviceInfo): void {
 </script>
 
 <template>
-  <span v-if="disabled" class="chip off" aria-disabled="true">{{ text }}</span>
-  <details v-else class="chip">
-    <summary :aria-label="`${t('devices.chip.label')}: ${text}`">{{ text }}</summary>
+  <details class="chip">
+    <summary
+      :class="{ off: disabled }"
+      :aria-label="`${t('devices.chip.label')}: ${text}`"
+      :aria-disabled="disabled || undefined"
+      @click="disabled && $event.preventDefault()"
+    >
+      {{ text }}
+    </summary>
     <ul class="picker">
       <li v-for="d in devices" :key="ids(d)">
         <label>
           <input
             type="checkbox"
             :checked="picked.some((p) => ids(p) === ids(d))"
-            :disabled="picked.length === 1 && ids(picked[0]) === ids(d)"
+            :disabled="disabled || (picked.length === 1 && ids(picked[0]) === ids(d))"
             @change="toggle(d)"
           />
           {{ d.name }}
@@ -95,6 +104,7 @@ summary:focus-visible {
 .off {
   background: var(--raised-2);
   color: var(--text-faint);
+  cursor: default;
 }
 
 .picker {
