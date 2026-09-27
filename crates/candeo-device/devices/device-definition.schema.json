@@ -59,8 +59,8 @@
       "description": "The shape every report of this device shares.",
       "properties": {
         "wire": {
-          "enum": ["feature", "output"],
-          "description": "How a report leaves: `feature` (`HidD_SetFeature`) or `output` (`HidD_SetOutputReport`). A device may act on one and silently ignore the same bytes sent the other way."
+          "enum": ["feature", "output", "write"],
+          "description": "How a report leaves: `feature` (`HidD_SetFeature`), `output` (`HidD_SetOutputReport`, on the control pipe) or `write` (`hid_write`, on the interrupt pipe where the device has one — how most makers' own software writes). A device may act on one and silently ignore the same bytes sent another way."
         },
         "length": {
           "type": "integer",

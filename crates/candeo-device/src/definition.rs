@@ -729,7 +729,8 @@ fn family(d: &Definition, cols: usize) -> Result<Template, String> {
     let wire = match d.report.wire.as_str() {
         "output" => Wire::Output,
         "feature" => Wire::Feature,
-        other => return Err(format!("wire “{other}”: “output” or “feature”")),
+        "write" => Wire::Write,
+        other => return Err(format!("wire “{other}”: “feature”, “output” or “write”")),
     };
     let per_colour = match d.frame.each.group.as_deref() {
         None => false,
@@ -1367,6 +1368,18 @@ mod tests {
         );
     }
 
+    /// `write` sends every report of the file the way most makers' software
+    /// does, and the file says so once, for all of them.
+    #[test]
+    fn a_definition_can_write_its_reports() {
+        let json = with("\"wire\": \"output\"", "\"wire\": \"write\"");
+        let layout = load(&json).unwrap();
+        let red = vec![Rgb::new(255, 0, 0); layout.led_count()];
+        let reports = layout.lighting.frame(layout, &red);
+        assert!(!reports.is_empty());
+        assert!(reports.iter().all(|r| r.wire == Wire::Write));
+    }
+
     fn with(from: &str, to: &str) -> String {
         let json = ZONES;
         assert!(json.contains(from), "{from}");
@@ -1411,7 +1424,7 @@ mod tests {
         );
         refused(
             with("\"wire\": \"output\"", "\"wire\": \"usb\""),
-            "“output” or “feature”",
+            "“feature”, “output” or “write”",
         );
         refused(
             with("\"group\": \"colour\",", ""),

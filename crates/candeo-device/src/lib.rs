@@ -129,6 +129,9 @@ impl Keyboard {
         match report.wire {
             Wire::Feature => self.device.send_feature_report(&report.bytes)?,
             Wire::Output => self.device.send_output_report(&report.bytes)?,
+            Wire::Write => {
+                self.device.write(&report.bytes)?;
+            }
         }
         Ok(())
     }
