@@ -160,8 +160,9 @@ frames without waiting the device's minimum interval.
    protocol is verified on a sibling — for ASUS ROG/TUF, SteelSeries Apex,
    HyperX Origins and Logitech G815/G915. Their key maps are C++ arrays, per
    model: each family gets its generator, as `openrgb.mjs` is Razer's. Written on 2026-09-27: SteelSeries (`steelseries.mjs`), Logitech
-   (`logitech.mjs`) and the full-size ASUS boards (`asus.mjs`); the compact
-   ASUS boards wait for a way to draw them.
+   (`logitech.mjs`), the full-size ASUS boards (`asus.mjs`) and the HyperX
+   Alloy Origins and Elite 2 (`hyperx.mjs`); the compact boards of every maker
+   wait for a way to draw them.
 3. **HSV and `{start}`** for Keychron's stock firmware.
 4. **Not now:** Corsair, until someone probes what its software mode does to
    the keys; Wooting and Roccat, until a stream exists; the Keychron K3 v2, MSI
