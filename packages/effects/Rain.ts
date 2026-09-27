@@ -23,7 +23,8 @@ export default defineEffect({
     en: 'Drops fall down the keyboard, each column at its own pace',
     fr: 'Des gouttes tombent sur le clavier, chaque colonne à son rythme',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix'],
   params: {
     color: { kind: 'color', label: { en: 'Color', fr: 'Couleur' }, default: DEFAULT_COLOR },
     speed: { kind: 'number', label: { en: 'Rows per second', fr: 'Rangées par seconde' }, min: 1, max: 20, step: 0.5, default: 6 },

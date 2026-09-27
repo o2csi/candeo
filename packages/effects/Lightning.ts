@@ -21,7 +21,8 @@ export default defineEffect({
     en: 'A dark sky, and flashes that strike along the keyboard',
     fr: 'Un ciel sombre, et des éclairs qui frappent le long du clavier',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     sky: { kind: 'color', label: { en: 'Sky', fr: 'Ciel' }, default: DEFAULT_SKY },
     flash: { kind: 'color', label: { en: 'Flash', fr: 'Éclair' }, default: DEFAULT_FLASH },

@@ -180,6 +180,11 @@ export interface LayoutInfo {
    * never offered an effect reading key presses: it would never see one.
    */
   lights: 'keys' | 'zones'
+  /**
+   * What an effect may require that this device has: `matrix` where its lights
+   * form a grid, `geometry` always (`docs/design/device-sdk.md` §3).
+   */
+  capabilities: string[]
   /** What the simulator draws under the lights — a lid, a base, ports. Empty for a keyboard. */
   outline: OutlinePart[]
 }

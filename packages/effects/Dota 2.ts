@@ -21,6 +21,8 @@ export default defineEffect({
     en: 'Your hero in Dota 2 — health, mana, day and night, stuns — once connected in Games',
     fr: 'Votre héros dans Dota 2 — vie, mana, jour et nuit, étourdissements — une fois connecté dans Jeux',
   },
+  kinds: 'all',
+  requires: ['matrix'],
   inputs: ['signals'],
   game: 'dota2',
   params: {

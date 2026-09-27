@@ -38,7 +38,7 @@ export default defineEffect({
     en: 'The whole keyboard flashing on each beat, glowing with the sound in between',
     fr: 'Tout le clavier qui s’illumine à chaque temps fort, et luit avec le son entre deux',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
   inputs: ['audio'],
   params: {
     color: { kind: 'color', label: { en: 'Colour', fr: 'Couleur' }, default: COLOR },

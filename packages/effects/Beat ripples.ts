@@ -33,7 +33,8 @@ export default defineEffect({
     en: 'A ring spreading from the middle of the keyboard on each beat of the sound',
     fr: 'Un anneau qui part du centre du clavier à chaque temps fort du son',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   inputs: ['audio'],
   params: {
     color: { kind: 'color', label: { en: 'Colour', fr: 'Couleur' }, default: COLOR },

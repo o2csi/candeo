@@ -211,6 +211,9 @@ pub struct LayoutInfo {
     /// The gallery reads it to stop offering, to a surface nobody types on, an
     /// effect that reads key presses — it would never see one.
     pub lights: &'static str,
+    /// What an effect may require that this device has: `matrix` where its
+    /// lights form a grid, `geometry` always (`docs/design/device-sdk.md` §3).
+    pub capabilities: Vec<&'static str>,
     /// What the simulator draws under the lights: empty for a keyboard.
     pub outline: Vec<OutlineInfo>,
 }
@@ -331,6 +334,11 @@ impl From<&'static Layout> for LayoutInfo {
             lights: match l.lights {
                 candeo_device::Lights::Keys => "keys",
                 candeo_device::Lights::Zones => "zones",
+            },
+            capabilities: if l.grid {
+                vec!["matrix", "geometry"]
+            } else {
+                vec!["geometry"]
             },
             outline: l
                 .outline
@@ -1728,6 +1736,7 @@ mod tests {
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
         lights: candeo_device::Lights::Keys,
+        grid: true,
         rows: 1,
         cols: 1,
         matrix: &[0],
@@ -1743,6 +1752,7 @@ mod tests {
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
         lights: candeo_device::Lights::Keys,
+        grid: true,
         rows: 1,
         cols: 1,
         matrix: &[0],

@@ -138,6 +138,46 @@ pub struct Manifest {
     /// than among the others (`docs/design/game-state-integration.md` §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<String>,
+    /// Which lights it makes sense on, `keys` or `zones`, or `all`: said by its
+    /// author (`docs/design/device-sdk.md` §2). An effect saying nothing was
+    /// written for keys.
+    #[serde(default = "keys_only")]
+    pub kinds: Vec<String>,
+    /// What it needs of a device to work at all: `matrix`, `geometry` (§3).
+    #[serde(default)]
+    pub requires: Vec<String>,
+}
+
+/// Where an effect saying nothing makes sense: every effect so far was written
+/// for a keyboard.
+fn keys_only() -> Vec<String> {
+    vec!["keys".to_owned()]
+}
+
+/// What an effect may say it needs, and whether a device has it.
+const CAPABILITIES: [&str; 2] = ["matrix", "geometry"];
+
+impl Manifest {
+    /// Whether it is offered for a device of `layout`: its kind of lights one
+    /// the effect makes sense on, what it needs there, and keys to press when
+    /// it reads presses. An effect that would show nothing, or a degenerate
+    /// row, on a device is not offered for it.
+    pub fn applies_to(&self, layout: &candeo_device::Layout) -> bool {
+        let lights = match layout.lights {
+            candeo_device::Lights::Keys => "keys",
+            candeo_device::Lights::Zones => "zones",
+        };
+        let makes_sense = self.kinds.iter().any(|k| k == "all" || k == lights);
+        let has = |capability: &str| match capability {
+            "matrix" => layout.grid,
+            // Every light of a definition has its rectangle.
+            "geometry" => true,
+            _ => false,
+        };
+        makes_sense
+            && self.requires.iter().all(|c| has(c))
+            && (!self.reads_keys || layout.lights == candeo_device::Lights::Keys)
+    }
 }
 
 /// Kind of effect: shipped with the application, or the user's.
@@ -1256,7 +1296,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// - 2: whether it reads signals (#108).
 /// - 3: whether it reads the sound playing (#107).
 /// - 4: the game it is for.
-const CACHE_FORMAT: u32 = 4;
+/// - 5: the lights it makes sense on, and what it requires.
+const CACHE_FORMAT: u32 = 5;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1289,6 +1330,10 @@ struct CacheRecord {
     reads_audio: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     game: Option<String>,
+    #[serde(default = "keys_only")]
+    kinds: Vec<String>,
+    #[serde(default)]
+    requires: Vec<String>,
     #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
@@ -2190,6 +2235,8 @@ fn library_entry(
                 reads_signals: r.reads_signals,
                 reads_audio: r.reads_audio,
                 game: r.game,
+                kinds: r.kinds,
+                requires: r.requires,
             },
         ),
     };
@@ -2218,6 +2265,8 @@ fn library_entry(
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
             game: declared.game,
+            kinds: declared.kinds,
+            requires: declared.requires,
         },
     }
 }
@@ -2245,6 +2294,8 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
             game: declared.game,
+            kinds: declared.kinds,
+            requires: declared.requires,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -2263,6 +2314,8 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_signals: false,
             reads_audio: false,
             game: None,
+            kinds: keys_only(),
+            requires: Vec::new(),
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -2300,6 +2353,8 @@ struct Declared {
     reads_signals: bool,
     reads_audio: bool,
     game: Option<String>,
+    kinds: Vec<String>,
+    requires: Vec<String>,
 }
 
 impl Declared {
@@ -2314,6 +2369,8 @@ impl Declared {
             reads_signals: false,
             reads_audio: false,
             game: None,
+            kinds: keys_only(),
+            requires: Vec::new(),
         }
     }
 }
@@ -2344,6 +2401,39 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
             "effect written for version {api_version} of the effects API; this version of Candeo only knows version {EFFECTS_API_VERSION}"
         ));
     }
+    // Where it makes sense: `keyboard`, its name before lights had kinds, is
+    // read as `keys`.
+    let kinds = match value.get("kinds") {
+        None | Some(serde_json::Value::Null) => keys_only(),
+        Some(serde_json::Value::String(all)) if all == "all" => vec!["all".to_owned()],
+        Some(serde_json::Value::Array(list)) if !list.is_empty() => list
+            .iter()
+            .map(|k| match k.as_str() {
+                Some("keys" | "keyboard") => Ok("keys".to_owned()),
+                Some("zones") => Ok("zones".to_owned()),
+                _ => Err(format!("kinds: {k} is neither 'keys' nor 'zones'")),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(other) => {
+            return Err(format!(
+                "kinds must be 'all' or a list of 'keys' and 'zones', not {other}"
+            ))
+        }
+    };
+    let requires = match value.get("requires") {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(serde_json::Value::Array(list)) => list
+            .iter()
+            .map(|c| match c.as_str() {
+                Some(c) if CAPABILITIES.contains(&c) => Ok(c.to_owned()),
+                _ => Err(format!(
+                    "requires: {c} is not one of {}",
+                    CAPABILITIES.join(", ")
+                )),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(other) => return Err(format!("requires must be a list, not {other}")),
+    };
     let declares = |input: &str| {
         value
             .get("inputs")
@@ -2363,6 +2453,8 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
             .and_then(|g| g.as_str())
             .filter(|g| !g.is_empty())
             .map(str::to_owned),
+        kinds,
+        requires,
     })
 }
 
@@ -5064,6 +5156,64 @@ mod tests {
 
     // ------------------------------------------------- starting values
 
+    /// Where an effect makes sense and what it needs, as its module says:
+    /// absent, it was written for keys; `keyboard` is the older word for them;
+    /// a kind or a capability nobody knows is refused with a sentence.
+    #[test]
+    fn an_effect_says_where_it_makes_sense_and_what_it_needs() {
+        let read = |extra: &str| declared_fields(&format!(r#"{{"params": {{}}{extra}}}"#));
+        let plain = read("").unwrap();
+        assert_eq!(
+            (plain.kinds, plain.requires),
+            (vec!["keys".to_owned()], vec![])
+        );
+        assert_eq!(read(r#", "kinds": ["keyboard"]"#).unwrap().kinds, ["keys"]);
+        assert_eq!(read(r#", "kinds": "all""#).unwrap().kinds, ["all"]);
+        assert_eq!(
+            read(r#", "kinds": ["keys", "zones"], "requires": ["matrix"]"#)
+                .unwrap()
+                .requires,
+            ["matrix"]
+        );
+        assert!(read(r#", "kinds": ["mouse"]"#)
+            .err()
+            .unwrap()
+            .contains("'keys'"));
+        assert!(read(r#", "kinds": []"#).is_err());
+        assert!(read(r#", "requires": ["hue"]"#)
+            .err()
+            .unwrap()
+            .contains("matrix"));
+    }
+
+    /// Offered on a device when its lights are ones the effect makes sense on
+    /// and the device has what it needs: a grid for an effect reading rows,
+    /// keys for one reading presses.
+    #[test]
+    fn an_effect_is_offered_where_it_applies() {
+        let keys = crate::default_layout();
+        let zones = crate::layouts()
+            .iter()
+            .copied()
+            .find(|l| l.lights == candeo_device::Lights::Zones)
+            .expect("the zones around the m18");
+        assert!(keys.grid && !zones.grid);
+        let effect = |kinds: &[&str], requires: &[&str], reads_keys: bool| Manifest {
+            kinds: kinds.iter().map(|k| k.to_string()).collect(),
+            requires: requires.iter().map(|c| c.to_string()).collect(),
+            reads_keys,
+            ..declared_manifest()
+        };
+        let pulse = effect(&["all"], &[], false);
+        let rain = effect(&["all"], &["matrix"], false);
+        let written_for_keys = effect(&["keys"], &[], false);
+        let ripples = effect(&["all"], &["geometry"], true);
+        assert!(pulse.applies_to(keys) && pulse.applies_to(zones));
+        assert!(rain.applies_to(keys) && !rain.applies_to(zones));
+        assert!(written_for_keys.applies_to(keys) && !written_for_keys.applies_to(zones));
+        assert!(ripples.applies_to(keys) && !ripples.applies_to(zones));
+    }
+
     /// A manifest declaring three parameters, one of them without `default`.
     fn declared_manifest() -> Manifest {
         Manifest {
@@ -5083,6 +5233,8 @@ mod tests {
             reads_signals: false,
             reads_audio: false,
             game: None,
+            kinds: keys_only(),
+            requires: Vec::new(),
         }
     }
 

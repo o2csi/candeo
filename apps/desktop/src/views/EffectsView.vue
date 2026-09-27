@@ -100,6 +100,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
+import { applies } from '../composables/applies'
 import { valveGames } from '../composables/games'
 import { isLook } from '../keyboard/illustration'
 import {
@@ -274,6 +275,9 @@ interface Choice {
   readsAudio: boolean
   /** The game it is for: its group is the games', shown only while they are on. */
   game: string | null
+  /** The lights it makes sense on, and what it needs: see `applies`. */
+  kinds: string[]
+  requires: string[]
 }
 
 const library = ref<EffectEntry[]>([])
@@ -301,6 +305,8 @@ function fromEntry(e: EffectEntry): Choice {
     readsSignals: e.readsSignals ?? false,
     readsAudio: e.readsAudio ?? false,
     game: e.game ?? null,
+    kinds: e.kinds ?? ['keys'],
+    requires: e.requires ?? [],
   }
 }
 
@@ -323,18 +329,20 @@ function fromHardware(e: HardwareEffect): Choice {
     readsSignals: false,
     readsAudio: false,
     game: null,
+    // The device's own: it goes where its firmware runs it.
+    kinds: ['all'],
+    requires: [],
   }
 }
 
 /**
- * An effect reading key presses, on a surface nobody types on.
- *
- * It would run without ever seeing one — and so stay dark, with nothing saying
- * why. A device declares what its lights are; while it has said nothing,
+ * An effect that would show nothing, or a degenerate row, on this device: one
+ * reading key presses on a surface nobody types on, one drawn on rows of keys
+ * on a few zones (`docs/design/device-sdk.md` §3). While no device is known,
  * nothing is left out.
  */
 function offered(e: Choice): boolean {
-  return !e.readsKeys || (board.value?.lights ?? 'keys') === 'keys'
+  return board.value === null || applies(e, board.value)
 }
 
 /**

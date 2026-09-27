@@ -52,6 +52,15 @@ hands. That is the reason for the three admission criteria in §3.
 
 ## 2. The kind of device
 
+> **Settled on 2026-09-28 (#288):** the kind an effect names is its lights',
+> `keys` or `zones`, which every definition already says. A taxonomy of objects
+> — keyboard, laptop, mouse — would be a list to keep with nothing reading it:
+> what an effect can do on a device is whether its lights are pressed and sit in
+> rows, or are zones anywhere. What follows is the reasoning that led there,
+> kept for the distinction it draws between making sense and working. Of the six
+> terms of §3, `matrix` and `geometry` are in use; the others wait for an effect
+> depending on them.
+
 The layout carries a **kind** — `keyboard`, `mouse`, `mousepad`, … — and every
 effect **must declare** the kinds it targets. The obligation was settled
 in [#44] §5 and is not reopened here:

@@ -20,7 +20,8 @@ export default defineEffect({
     en: 'A hue wave leaves the top-left corner and crosses the keyboard in diagonals',
     fr: 'Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix'],
   params: {
     speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
     scale: { kind: 'number', label: { en: 'Scale', fr: 'Échelle' }, min: 1, max: 60, default: 18 },

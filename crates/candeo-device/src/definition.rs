@@ -894,6 +894,7 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
     };
     // A grid when the file gives one, every item at its row and column; one row
     // in the items' order otherwise.
+    let grid = d.lights.rows.is_some();
     let (rows, cols) = match (d.lights.rows, d.lights.cols) {
         (Some(rows), Some(cols)) => (rows, cols),
         (None, None) => (
@@ -1018,6 +1019,7 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         surveyed_firmware,
         firmware_effects: Box::leak(firmware_effects.into_boxed_slice()),
         lights,
+        grid,
         rows,
         cols,
         matrix: Box::leak(matrix.into_boxed_slice()),

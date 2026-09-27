@@ -38,6 +38,8 @@ globalThis.__candeo_manifest = JSON.stringify({
   params: effect.params ?? {},
   inputs: Array.isArray(effect.inputs) ? effect.inputs : [],
   game: typeof effect.game === 'string' ? effect.game : null,
+  kinds: effect.kinds ?? null,
+  requires: effect.requires ?? null,
 })
 
 // Read by the render loop once loaded: only an effect that declares keys gets

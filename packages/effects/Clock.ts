@@ -32,7 +32,8 @@ export default defineEffect({
     en: 'The time across the keyboard in lit digits, scrolling or still',
     fr: "L'heure sur le clavier en chiffres lumineux, qui défile ou fixe",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix', 'geometry'],
   inputs: ['clock'],
   params: {
     color: { kind: 'color', label: { en: 'Digits', fr: 'Chiffres' }, default: COLOR },

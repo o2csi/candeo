@@ -51,7 +51,8 @@ export default defineEffect({
     en: 'Any text across the keyboard, scrolling or still, typed here or sent by a signal',
     fr: "N'importe quel texte sur le clavier, qui défile ou fixe, tapé ici ou envoyé par un signal",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix', 'geometry'],
   params: {
     // As long as a signal's value, so a bound message is never cut.
     text: { kind: 'text', label: { en: 'Text', fr: 'Texte' }, maxLength: 256, default: TEXT },

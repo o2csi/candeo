@@ -18,7 +18,8 @@ export default defineEffect({
     en: 'A ring spreads from every key you press and fades as it widens',
     fr: "Un anneau part de chaque touche pressée et s'efface en grandissant",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   inputs: ['keys'],
   params: {
     color: { kind: 'color', label: { en: 'Ring', fr: 'Anneau' }, default: RING },

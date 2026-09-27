@@ -19,7 +19,8 @@ export default defineEffect({
     en: 'A lit row moves down the keyboard, leaving a trail',
     fr: 'Une rangée éclairée descend le clavier en laissant une traînée',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix'],
   params: {
     color: { kind: 'color', label: { en: 'Color', fr: 'Couleur' }, default: DEFAULT_COLOR },
     speed: { kind: 'number', label: { en: 'Rows per second', fr: 'Rangées par seconde' }, min: 0.5, max: 12, step: 0.5, default: 3 },

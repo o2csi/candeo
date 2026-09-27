@@ -210,6 +210,10 @@ pub struct Layout {
     /// What its lights are — see [`Lights`]. The gallery reads it to stop
     /// offering, to a surface nobody types on, an effect that reads key presses.
     pub lights: Lights,
+    /// Its positions form a grid, where a row and a column mean something:
+    /// what an effect reading `row` and `col` needs (§3 of the design). One row
+    /// of zones in their order is not one.
+    pub grid: bool,
     pub rows: u8,
     pub cols: u8,
     /// **The address the device gives each position**, row by row; `u16::MAX`

@@ -229,6 +229,13 @@ export interface EffectManifest {
   readsAudio?: boolean
   /** The game it is for, `cs2`: the gallery keeps it apart. */
   game?: string
+  /**
+   * The lights it makes sense on: `keys`, `zones`, or `all`. An effect saying
+   * nothing was written for keys (`docs/design/device-sdk.md` §2).
+   */
+  kinds?: string[]
+  /** What it needs of a device to work: `matrix`, `geometry` (§3). */
+  requires?: string[]
 }
 
 /**

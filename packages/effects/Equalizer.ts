@@ -27,7 +27,8 @@ export default defineEffect({
     en: 'The sound playing as bars, by frequency',
     fr: 'Le son joué en barres, par fréquence',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix', 'geometry'],
   inputs: ['audio'],
   params: {
     bars: {

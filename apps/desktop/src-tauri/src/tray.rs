@@ -555,9 +555,12 @@ fn device_submenu(
     }
     // Only what can start: a file not compiled yet, or that does not load, would
     // be a menu item whose click fails with a message the tray cannot show.
+    // And only what applies to this device: a zone does not show an effect
+    // drawn on rows of keys (`docs/design/device-sdk.md` §3).
     let ready: Vec<&EffectEntry> = library
         .iter()
         .filter(|e| e.state == EffectState::Ready)
+        .filter(|e| e.manifest.applies_to(controlled.layout))
         .collect();
     // Grouped like the gallery, under a heading when both groups have effects:
     // a built-in and one of the user's may share a name.
