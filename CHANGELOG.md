@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.16.0](https://github.com/o2csi/candeo/compare/v0.15.0...v0.16.0) (2026-09-27)
+
+
+### Features
+
+* **devices:** fifteen unverified Razer keyboard definitions ([66e8977](https://github.com/o2csi/candeo/commit/66e8977feaa01db728e40a05eeed5e0071d570bc))
+* **devices:** link to the website's list of devices ([8d8fac9](https://github.com/o2csi/candeo/commit/8d8fac99c484fd3ab9c9f48862f3959d153b9c2a))
+* **games:** connecting a game makes its while-playing rule ([c0f095d](https://github.com/o2csi/candeo/commit/c0f095d0ec81f6ceb3b4a2d6beabe623d443e759))
+
+
+### Bug Fixes
+
+* **devices-chip:** keep the list open while a choice is saved ([d10ac1a](https://github.com/o2csi/candeo/commit/d10ac1a0e0ca3e8323b05a9867cdccbedf56413e))
+
+
+### Documentation
+
+* point to the Razer keyboards waiting to be tried ([43299fd](https://github.com/o2csi/candeo/commit/43299fdecc6adabd6b4e83512f74a03f29d39eee))
+* the DeathStalker does not check the transaction byte ([1163b61](https://github.com/o2csi/candeo/commit/1163b614d6b08272a262d99fc641764589257a4f))
+
 ## [0.15.0](https://github.com/o2csi/candeo/compare/v0.14.0...v0.15.0) (2026-09-27)
 
 
