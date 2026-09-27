@@ -1,0 +1,2 @@
+en: Dota 2 in Games: your hero's health and mana on the keyboard, the day and the night, stuns, and red while you wait to respawn. It needs -gamestateintegration in its launch options, which its card says.
+fr: Dota 2 dans Jeux : la vie et le mana de votre héros sur le clavier, le jour et la nuit, les étourdissements, et du rouge en attendant de réapparaître. Il faut -gamestateintegration dans ses options de lancement, ce que sa carte rappelle.

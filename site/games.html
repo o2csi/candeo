@@ -6,7 +6,7 @@
     <title>Candeo — games</title>
     <meta
       name="description"
-      content="Your health, your ammo, a flashbang, the bomb: Counter-Strike 2 shows on your keyboard through Valve's own game state integration. Connected in one click, safe with anti-cheat, and nothing leaves your computer."
+      content="Your health, your ammo, a flashbang, the bomb, your hero's mana: Counter-Strike 2 and Dota 2 show on your keyboard through Valve's own game state integration. Connected in one click, safe with anti-cheat, and nothing leaves your computer."
     />
     <link rel="icon" href="assets/icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -23,9 +23,10 @@
 {{nav}}
       <h1>Games</h1>
       <p class="lead">
-        Your health on the number row, your clip on the function keys, the keyboard white when a
-        flashbang goes off and red while the bomb ticks. Counter-Strike 2 tells Candeo what happens
-        in your game, and your keyboard shows it.
+        Your health on the number row, your clip or your mana on the function keys, the keyboard
+        white when a flashbang goes off, red while the bomb ticks or while your hero waits to
+        respawn. Counter-Strike 2 and Dota 2 tell Candeo what happens in your game, and your
+        keyboard shows it.
       </p>
 
       <section>
@@ -69,6 +70,22 @@
       </section>
 
       <section>
+        <h2>Dota 2</h2>
+        <p>
+          Connected the same way, in <strong>Games</strong>, with one step more: Dota 2 reads the
+          connection only when started with <code>-gamestateintegration</code>. In Steam, open Dota
+          2's <em>Properties</em> and add it to its <em>Launch options</em>, then start the game.
+        </p>
+        <ul>
+          <li><strong>Your hero's health</strong> fills the number row, from green to red.</li>
+          <li><strong>Mana</strong> fills the function row, in blue.</li>
+          <li><strong>The day and the night</strong> tint what is left, warm or blue.</li>
+          <li><strong>A stun</strong> makes the keyboard flicker yellow; <strong>smoke</strong> dims it.</li>
+          <li><strong>Dead</strong>, the keyboard breathes red until your hero respawns.</li>
+        </ul>
+      </section>
+
+      <section>
         <h2>Make it your own</h2>
         <p>
           What the game says arrives as <a href="signals.html">signals</a>, so everything signals do
@@ -88,6 +105,11 @@
               <tr><td><code>cs2.flashed</code> <code>cs2.burning</code></td><td>0 to 100</td></tr>
               <tr><td><code>cs2.bomb</code></td><td><code>none</code>, <code>planted</code>, <code>defused</code> or <code>exploded</code></td></tr>
               <tr><td><code>cs2.phase</code></td><td><code>freezetime</code>, <code>live</code> or <code>over</code></td></tr>
+              <tr><td><code>dota2.health</code> <code>dota2.mana</code></td><td>0 to 100</td></tr>
+              <tr><td><code>dota2.respawn</code></td><td>the seconds before respawning, while dead</td></tr>
+              <tr><td><code>dota2.stunned</code> <code>dota2.silenced</code> <code>dota2.smoked</code></td><td><code>yes</code> while it lasts</td></tr>
+              <tr><td><code>dota2.daytime</code></td><td><code>day</code> or <code>night</code></td></tr>
+              <tr><td><code>dota2.phase</code></td><td><code>pre_game</code>, <code>game_in_progress</code>, <code>post_game</code>…</td></tr>
             </tbody>
           </table>
         </div>
