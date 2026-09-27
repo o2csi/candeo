@@ -226,6 +226,7 @@
     "noDevice": "Aucun appareil piloté : pilotez-en un dans Appareils, puis choisissez-le dans une règle.",
     "dragHint": "Glisser pour changer l'ordre",
     "enabled": "Règle activée",
+    "gameRule": "Active tant que le jeu est connecté dans Jeux",
     "on": "sur",
     "show": "afficher",
     "for": "pendant",

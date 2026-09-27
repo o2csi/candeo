@@ -62,6 +62,7 @@ import {
   moved,
   readSimple,
   ruleValues,
+  switchedOn,
   whileItHolds,
   withoutSettings,
   writeSimple,
@@ -401,7 +402,7 @@ function onDrop(to: number): void {
         v-for="(raw, index) in rules"
         :key="editable(raw) ? raw.id : index"
         class="rule"
-        :class="{ off: editable(raw) && !raw.enabled }"
+        :class="{ off: editable(raw) && !switchedOn(raw) }"
         @dragover.prevent
         @drop="onDrop(index)"
       >
@@ -420,7 +421,9 @@ function onDrop(to: number): void {
             <input
               type="checkbox"
               class="switch"
-              :checked="raw.enabled"
+              :checked="switchedOn(raw)"
+              :disabled="raw.game !== undefined"
+              :title="raw.game !== undefined ? t('automations.gameRule') : undefined"
               :aria-label="t('automations.enabled')"
               @change="update(index, (r) => ({ ...r, enabled: !r.enabled }))"
             />

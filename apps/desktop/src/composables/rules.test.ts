@@ -15,6 +15,7 @@ import {
   readSimple,
   ruleValues,
   signalTrigger,
+  switchedOn,
   validSignalName,
   whileItHolds,
   withoutSettings,
@@ -141,6 +142,15 @@ describe('editable', () => {
       false,
     )
     expect(editable({ ...blankRule(KEYBOARD, 'x'), when: { ...when, equals: 1 } })).toBe(false)
+  })
+})
+
+describe('switchedOn', () => {
+  it('follows the switch, except for a game rule, on while its game is connected', () => {
+    const off = blankRule(KEYBOARD, 'shipped:Clock')
+    expect(switchedOn(off)).toBe(false)
+    expect(switchedOn({ ...off, enabled: true })).toBe(true)
+    expect(switchedOn({ ...off, game: 'cs2' })).toBe(true)
   })
 })
 
