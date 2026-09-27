@@ -126,7 +126,7 @@ const TOKEN = {
   TAB: 'tab', LEFT_BRACKET: 'lbracket', RIGHT_BRACKET: 'rbracket', ANSI_BACK_SLASH: 'backslash', DELETE: 'del', END: 'end', PAGE_DOWN: 'pgdn',
   CAPS_LOCK: 'caps', SEMICOLON: 'semicolon', QUOTE: 'quote', POUND: 'hash', ANSI_ENTER: 'enter',
   LEFT_SHIFT: 'lshift', ISO_BACK_SLASH: 'iso', COMMA: 'comma', PERIOD: 'period', FORWARD_SLASH: 'slash', RIGHT_SHIFT: 'rshift', UP_ARROW: 'up',
-  LEFT_CONTROL: 'lctrl', LEFT_WINDOWS: 'lwin', LEFT_ALT: 'lalt', SPACE: 'space', RIGHT_ALT: 'ralt', RIGHT_FUNCTION: 'fn', MENU: 'menu', RIGHT_CONTROL: 'rctrl',
+  LEFT_CONTROL: 'lctrl', LEFT_WINDOWS: 'lwin', LEFT_ALT: 'lalt', SPACE: 'space', RIGHT_ALT: 'ralt', RIGHT_FUNCTION: 'fn', MENU: 'menu', RIGHT_CONTROL: 'rctrl', RIGHT_WINDOWS: 'rwin',
   LEFT_ARROW: 'left', DOWN_ARROW: 'down', RIGHT_ARROW: 'right',
   NUMPAD_LOCK: 'numlk', NUMPAD_DIVIDE: 'kpdiv', NUMPAD_TIMES: 'kpmul', NUMPAD_MINUS: 'kpsub', NUMPAD_PLUS: 'kpadd', NUMPAD_ENTER: 'kpenter', NUMPAD_PERIOD: 'kpdot',
   MEDIA_PREVIOUS: 'prev', MEDIA_PLAY_PAUSE: 'play', MEDIA_NEXT: 'next', MEDIA_MUTE: 'mute', MEDIA_VOLUME_DOWN: 'voldown', MEDIA_VOLUME_UP: 'volup',
