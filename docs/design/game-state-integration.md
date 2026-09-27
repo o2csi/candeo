@@ -69,20 +69,33 @@ The game cannot set a header: the file's `auth` block is sent in the body, as
 
 A web page is refused on both, as today: a browser says where it comes from.
 
-## 4. Connecting a game
+## 4. Turning games on, and the Games tab
 
-*Settings › Signals* gains **Games**, a row per supported game:
+Most people using Candeo do not play, and their screens stay as they are:
 
-- **not found** — Steam does not have it;
-- **Connect** — writes the file into the game's `cfg` folder, pointing at this
-  computer's port with the game token, and turns reception on for this computer
-  if it was off;
-- **connected** — the file is there and says what Candeo expects; *Disconnect*
-  removes it.
+- **Settings has one switch per integration**: *Valve's game state
+  integration*, for Counter-Strike 2 and, later, Dota 2. Another game's API —
+  League of Legends' — would be a switch of its own. It is `valveGames` in the
+  signals settings; off, `/gsi/` refuses every post.
+- **On, a *Games* tab appears** beside the others, and everything about games
+  lives there. A card per game shows:
+  - where it stands: not found, not connected, connected, or *playing* — its
+    values arriving now;
+  - **Connect**, which writes the game's file into its `cfg` folder, pointing at
+    this computer's port with the game token, and turns reception on if it was
+    off; **Disconnect** removes the file. The game reads its file at launch, so
+    connecting while it runs takes effect at its next launch, and the card says
+    so. When the port or the game token changes, the files of connected games
+    are written again;
+  - its values as they arrive — the simplest way to see it works;
+  - **while playing**: which effect to show on which devices during a match,
+    and the device's own effect back after it. It is a rule — *while
+    `cs2.phase` is set* — made and edited here, carrying the game it belongs
+    to, and listed in *Automations* like any other so that its priority stays
+    visible there.
 
-The game reads its file at launch: connecting while it runs takes effect at its
-next launch, and the row says so. When the port or the game token changes, the
-files of connected games are written again.
+A signal condition with no value to match is met by any value, which is what
+*set* means; it is useful beyond games — *while `call` is set*.
 
 Finding the game: Steam's folder — on Windows `SteamPath` under
 `HKCU\Software\Valve\Steam`, on Linux `~/.steam/steam` or
@@ -92,12 +105,21 @@ is `steamapps/common/Counter-Strike Global Offensive/game/csgo/cfg/` for
 Counter-Strike 2, `steamapps/common/dota 2 beta/game/dota/cfg/gamestate_integration/`
 for Dota 2.
 
-## 5. The shipped effect
+## 5. Effects for a game, and the gallery
 
-*Counter-Strike 2*, the one tested on 2026-09-26: health on the number row from
-green to red, the clip on the function row, a flash turning the keyboard white,
-fire turning it orange, and the whole keyboard pulsing red while the bomb is
-planted. Rules add the rest — a flash of colour on a kill, a round won.
+*Counter-Strike 2*, shipped, is the one tested on 2026-09-26: health on the
+number row from green to red, the clip on the function row, a flash turning
+the keyboard white, fire turning it orange, and the whole keyboard pulsing
+while the bomb is planted. Every colour is a setting.
+
+Effects for games would soon outnumber the others in the gallery, which is
+where someone picks the lighting of their desk. So:
+
+- **an effect says which game it is for**, `game: 'cs2'` in its declaration,
+  like its `inputs`;
+- **the gallery keeps them apart**: a *Games* group, folded, after the others,
+  and only while games are on;
+- **their place is the game's card**, where *while playing* picks one.
 
 ## 6. Adding a game
 
@@ -112,5 +134,7 @@ reading stay out, whatever the game.
 ## 7. Order of work
 
 1. The route, the translation and the game token, with their tests.
-2. Finding Steam's libraries and writing the file; *Games* in Settings.
-3. The shipped effect, a page on the site, and the Store's *What's new*.
+2. Finding Steam's libraries and writing the file.
+3. The switch in Settings, the *Games* tab, and *while playing* as a rule.
+4. `game` in an effect's declaration, and the gallery's *Games* group.
+5. The shipped effect, a page on the site, and the Store's *What's new*.
