@@ -13,6 +13,7 @@
 //! across another: a request reads the token, then changes the store, then
 //! notifies, one after the other.
 
+pub mod gsi;
 pub mod http;
 pub mod interfaces;
 pub mod store;
@@ -60,6 +61,15 @@ pub struct SignalsConfig {
     /// The interfaces listened on besides loopback, **by name**.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub interfaces: Vec<String>,
+    /// What games post their state with, written into their file: made when a
+    /// first game is connected, and apart from `token` so that renewing one
+    /// leaves the other (`docs/design/game-state-integration.md` §3).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub game_token: String,
+    /// Valve's game state integration turned on in Settings: the Games tab
+    /// shows, and `/gsi/` takes posts (§4). Off, it refuses them.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub valve_games: bool,
 }
 
 impl Default for SignalsConfig {
@@ -69,6 +79,8 @@ impl Default for SignalsConfig {
             port: DEFAULT_PORT,
             token: String::new(),
             interfaces: Vec::new(),
+            game_token: String::new(),
+            valve_games: false,
         }
     }
 }
@@ -91,6 +103,7 @@ pub struct SignalsApi {
     pub listening: Vec<String>,
     /// The port is held by something else on loopback: nothing answers.
     pub port_in_use: bool,
+    pub valve_games: bool,
 }
 
 #[derive(Default)]
@@ -215,11 +228,19 @@ fn serve(app: &AppHandle, request: &Request) -> Response {
             body: json!({ "error": "Candeo is starting" }),
         };
     };
-    let token = signals.config.lock().unwrap().token.clone();
+    let (token, game_token) = {
+        let config = signals.config.lock().unwrap();
+        let games = config.valve_games.then(|| config.game_token.clone());
+        (config.token.clone(), games)
+    };
     let now = chrono::Local::now().timestamp_millis();
     let (response, changed) = {
         let mut store = signals.store.lock().unwrap();
-        http::handle(request, &token, &mut store, now)
+        if http::for_game(request.url) {
+            http::game(request, game_token.as_deref(), &mut store, now)
+        } else {
+            http::handle(request, &token, &mut store, now)
+        }
     };
     if changed {
         notify(app);
@@ -283,6 +304,7 @@ fn view(app: &AppHandle, config: &SignalsConfig) -> SignalsApi {
         interfaces: config.interfaces.clone(),
         listening,
         port_in_use,
+        valve_games: config.valve_games,
     }
 }
 
@@ -321,6 +343,20 @@ pub fn set_signals_api(
         interfaces = settings.signals.interfaces.len(),
         "signals API set"
     );
+    reconcile(&app);
+    // A connected game posts to the port its file names.
+    rewrite_games(&settings.signals);
+    Ok(view(&app, &settings.signals))
+}
+
+/// Turns Valve's game state integration on or off: the Games tab follows.
+#[tauri::command]
+pub fn set_valve_games(app: AppHandle, on: bool) -> CmdResult<SignalsApi> {
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    settings.signals.valve_games = on;
+    store.write_settings(&settings)?;
+    tracing::info!(on, "Valve's game state integration set");
     reconcile(&app);
     Ok(view(&app, &settings.signals))
 }
@@ -388,6 +424,139 @@ pub fn erase_signal(app: AppHandle, name: String) {
     if erased {
         notify(&app);
     }
+}
+
+// ---------------------------------------------------------------- games
+
+/// Where a game stands, as Settings shows it.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum GameState {
+    /// Steam does not have it here.
+    NotFound,
+    /// No file of Candeo's in its folder.
+    Disconnected,
+    /// Its file says what Candeo expects, and reception is on.
+    Connected,
+    /// Its file is there, but names another port or token, or reception is off:
+    /// connecting again sets both right.
+    Outdated,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GameView {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub state: GameState,
+}
+
+fn games(config: &SignalsConfig) -> Vec<GameView> {
+    gsi::Game::ALL
+        .into_iter()
+        .map(|game| {
+            let state = match gsi::folder(game) {
+                None => GameState::NotFound,
+                Some(folder) => {
+                    let expected = gsi::file_text(game, config.port, &config.game_token);
+                    match gsi::file_state(&folder, &expected) {
+                        (false, _) => GameState::Disconnected,
+                        (true, true) if config.enabled && !config.game_token.is_empty() => {
+                            GameState::Connected
+                        }
+                        (true, _) => GameState::Outdated,
+                    }
+                }
+            };
+            GameView {
+                id: game.id(),
+                name: game.name(),
+                state,
+            }
+        })
+        .collect()
+}
+
+/// Writes again the file of every game that has one: after a new port, what it
+/// names must follow.
+fn rewrite_games(config: &SignalsConfig) {
+    if config.game_token.is_empty() {
+        return;
+    }
+    for game in gsi::Game::ALL {
+        let Some(folder) = gsi::folder(game) else {
+            continue;
+        };
+        let file = folder.join(gsi::FILE);
+        if file.exists() {
+            let text = gsi::file_text(game, config.port, &config.game_token);
+            if let Err(e) = std::fs::write(&file, text) {
+                tracing::warn!(game = game.id(), "game file not written again: {e}");
+            }
+        }
+    }
+}
+
+fn known_game(id: &str) -> CmdResult<gsi::Game> {
+    gsi::Game::from_id(id).ok_or_else(|| Failure::unexpected(format!("no game {id:?}")))
+}
+
+#[tauri::command]
+pub fn list_games(app: AppHandle) -> CmdResult<Vec<GameView>> {
+    let config = crate::storage::store(&app)?.read_settings()?.signals;
+    Ok(games(&config))
+}
+
+/// Writes the game's file into its folder, pointing at this computer, and turns
+/// reception on if it was off: what connecting a game asks for (§4). The game
+/// reads its file at launch.
+#[tauri::command]
+pub fn connect_game(app: AppHandle, game: String) -> CmdResult<Vec<GameView>> {
+    let game = known_game(&game)?;
+    let folder =
+        gsi::folder(game).ok_or_else(|| Failure::new("gameNotFound").with("game", game.name()))?;
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    let config = &mut settings.signals;
+    if config.token.is_empty() {
+        config.token = new_token()?;
+    }
+    if config.game_token.is_empty() {
+        config.game_token = new_token()?;
+    }
+    let turned_on = !config.enabled;
+    config.enabled = true;
+    let text = gsi::file_text(game, config.port, &config.game_token);
+    std::fs::write(folder.join(gsi::FILE), text).map_err(|e| {
+        Failure::unexpected(format!(
+            "cannot write the file in {}'s folder: {e}",
+            game.name()
+        ))
+    })?;
+    store.write_settings(&settings)?;
+    tracing::info!(game = game.id(), turned_on, "game connected");
+    reconcile(&app);
+    Ok(games(&settings.signals))
+}
+
+/// Removes the game's file: it stops posting at its next launch.
+#[tauri::command]
+pub fn disconnect_game(app: AppHandle, game: String) -> CmdResult<Vec<GameView>> {
+    let game = known_game(&game)?;
+    if let Some(folder) = gsi::folder(game) {
+        let file = folder.join(gsi::FILE);
+        if file.exists() {
+            std::fs::remove_file(&file).map_err(|e| {
+                Failure::unexpected(format!(
+                    "cannot remove the file from {}'s folder: {e}",
+                    game.name()
+                ))
+            })?;
+        }
+    }
+    tracing::info!(game = game.id(), "game disconnected");
+    let config = crate::storage::store(&app)?.read_settings()?.signals;
+    Ok(games(&config))
 }
 
 #[cfg(test)]

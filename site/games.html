@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — games</title>
+    <meta
+      name="description"
+      content="Your health, your ammo, a flashbang, the bomb: Counter-Strike 2 shows on your keyboard through Valve's own game state integration. Connected in one click, safe with anti-cheat, and nothing leaves your computer."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+{{nav}}
+      <h1>Games</h1>
+      <p class="lead">
+        Your health on the number row, your clip on the function keys, the keyboard white when a
+        flashbang goes off and red while the bomb ticks. Counter-Strike 2 tells Candeo what happens
+        in your game, and your keyboard shows it.
+      </p>
+
+      <section>
+        <h2>Connect Counter-Strike 2</h2>
+        <ol class="steps">
+          <li>
+            <span>In <strong>Settings</strong>, tick <em>Valve's game state integration</em>: a
+            <strong>Games</strong> tab appears.</span>
+          </li>
+          <li>
+            <span>In <strong>Games</strong>, click <em>Connect</em> next to Counter-Strike 2, and
+            tick <em>While playing</em>: the Counter-Strike 2 effect on your keyboard during a
+            match, your usual effect back after it.</span>
+          </li>
+          <li>
+            <span><strong>Start the game</strong> — or restart it if it was running: it reads the
+            connection when it starts.</span>
+          </li>
+        </ol>
+        <p>
+          To try it without a real match: <em>Play › Practice › With bots</em>. With the developer
+          console on and <code>sv_cheats 1</code>, <code>give weapon_flashbang</code> or, playing
+          terrorist, <code>give weapon_c4</code> tries the flash and the bomb.
+        </p>
+      </section>
+
+      <section>
+        <h2>The Counter-Strike 2 effect</h2>
+        <ul>
+          <li><strong>Your health</strong> fills the number row, from green to red as it drops.</li>
+          <li><strong>The clip</strong> of the weapon in hand fills the function row.</li>
+          <li><strong>A flashbang</strong> turns the keyboard white, as it turns your screen.</li>
+          <li><strong>Fire</strong> turns it orange.</li>
+          <li><strong>The planted bomb</strong> makes the whole keyboard pulse red.</li>
+        </ul>
+        <p>
+          Every colour is a setting, and so is the flash's strength. Before the game says anything,
+          both bars glow faintly: waiting, not broken. Effects made for a game stay out of the
+          gallery's main list: they are in its <em>Games</em> group, folded, and on the game's
+          card.
+        </p>
+      </section>
+
+      <section>
+        <h2>Make it your own</h2>
+        <p>
+          What the game says arrives as <a href="signals.html">signals</a>, so everything signals do
+          works with it — a rule, a setting following a value, an effect of your own:
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>cs2.health</code> <code>cs2.armor</code></td><td>0 to 100</td></tr>
+              <tr><td><code>cs2.ammo</code></td><td>the clip of the weapon in hand, 0 to 100 %</td></tr>
+              <tr><td><code>cs2.flashed</code> <code>cs2.burning</code></td><td>0 to 100</td></tr>
+              <tr><td><code>cs2.bomb</code></td><td><code>none</code>, <code>planted</code>, <code>defused</code> or <code>exploded</code></td></tr>
+              <tr><td><code>cs2.phase</code></td><td><code>freezetime</code>, <code>live</code> or <code>over</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <blockquote class="sentence">
+          When cs2.bomb is exploded · on the keyboard · show Lightning · for 3 seconds
+        </blockquote>
+        <p>
+          <em>While playing</em> is such a rule — <em>while cs2.phase is set</em> — listed in
+          Automations with the others, where its priority can be changed.
+        </p>
+        <p>
+          Only your own values: while you spectate a teammate, theirs are not shown as yours. They
+          last fifteen seconds and the game renews them every five, so quitting the game leaves
+          nothing frozen on the keys.
+        </p>
+      </section>
+
+      <section>
+        <h2>How it works</h2>
+        <p>
+          Counter-Strike 2 has a feature of its own, Valve's <em>game state integration</em>: a
+          small file in the game's folder names where to send its state, and the game sends it
+          there as it changes. <em>Connect</em> writes that file, pointing at Candeo on your
+          computer. Nothing reads the game's memory or its screen — it is the game telling what
+          it chooses to tell, which is why it is safe with anti-cheat.
+        </p>
+        <p>
+          It goes to Candeo's local signals API, behind a token of its own, and stays in memory:
+          nothing of your game reaches the disk or the log, and nothing leaves your computer.
+          <em>Disconnect</em> removes the file.
+        </p>
+        <p class="note">
+          Dota 2 has the same integration, and is next. The design is in
+          <a href="{{repository}}/blob/main/docs/design/game-state-integration.md">docs/design/game-state-integration.md</a>.
+        </p>
+      </section>
+    </main>
+
+{{footer}}
+  </body>
+</html>

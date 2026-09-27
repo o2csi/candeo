@@ -24,7 +24,7 @@ account, no extra services to install, nothing sent anywhere.
 
 ## What it does
 
-- **Twenty-three effects, ready to go** — waves, rain, a starry night, a clock,
+- **Twenty-four effects, ready to go** — waves, rain, a starry night, a clock,
   scrolling text, ripples from the keys you press, fireworks on the beat. Tune
   each one while you watch it; your keyboard's own built-in effects are there
   too.
@@ -35,6 +35,8 @@ account, no extra services to install, nothing sent anywhere.
   night, the keyboard red when a build fails.
   [Rules](https://o2csi.github.io/candeo/automations.html) ·
   [Signals](https://o2csi.github.io/candeo/signals.html)
+- **Your games** — your health, ammo, flashes and the bomb in Counter-Strike 2,
+  connected in one click. [Games](https://o2csi.github.io/candeo/games.html)
 - **Your devices** — the Razer DeathStalker V2 Pro and the Alienware m18 R1,
   keyboard and lighting zones. [Devices](https://o2csi.github.io/candeo/devices.html)
 - **Sends nothing** — no account, no telemetry. In English and French.

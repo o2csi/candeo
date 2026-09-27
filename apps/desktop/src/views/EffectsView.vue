@@ -100,6 +100,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
+import { valveGames } from '../composables/games'
 import { isLook } from '../keyboard/illustration'
 import {
   colourBytes,
@@ -223,6 +224,8 @@ const noDevice = computed(() => controlled.value.length === 0 && !busy.value)
 // ---------------------------------------------------------------- library
 
 type Nature = 'builtin' | 'user' | 'hardware'
+/** A group of the column: a nature, or the effects made for a game. */
+type Group = Nature | 'game'
 
 /**
  * An effect, whatever its nature.
@@ -269,6 +272,8 @@ interface Choice {
   readsSignals: boolean
   /** It is given the sound playing: captured while it runs, said on screen. */
   readsAudio: boolean
+  /** The game it is for: its group is the games', shown only while they are on. */
+  game: string | null
 }
 
 const library = ref<EffectEntry[]>([])
@@ -295,6 +300,7 @@ function fromEntry(e: EffectEntry): Choice {
     readsClock: e.readsClock ?? false,
     readsSignals: e.readsSignals ?? false,
     readsAudio: e.readsAudio ?? false,
+    game: e.game ?? null,
   }
 }
 
@@ -316,6 +322,7 @@ function fromHardware(e: HardwareEffect): Choice {
     readsClock: false,
     readsSignals: false,
     readsAudio: false,
+    game: null,
   }
 }
 
@@ -330,9 +337,17 @@ function offered(e: Choice): boolean {
   return !e.readsKeys || (board.value?.lights ?? 'keys') === 'keys'
 }
 
+/**
+ * An effect made for a game shows only while games are on: someone who does not
+ * play never sees them (`docs/design/game-state-integration.md` §5).
+ */
+function forGamesShown(e: Choice): boolean {
+  return e.game === null || valveGames.value
+}
+
 const choices = computed<Choice[]>(() => [
-  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry).filter(offered),
-  ...library.value.filter((e) => e.kind === 'user').map(fromEntry).filter(offered),
+  ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry).filter(offered).filter(forGamesShown),
+  ...library.value.filter((e) => e.kind === 'user').map(fromEntry).filter(offered).filter(forGamesShown),
   // Only what this device's firmware runs: offering a mode it does not know
   // would be offering an effect that never starts.
   ...hardwareEffectsFor(board.value).map(fromHardware),
@@ -350,14 +365,19 @@ const choices = computed<Choice[]>(() => [
  * `choices`, a built-in: a hardware effect would open the screen on a simulator
  * with nothing to animate.
  */
-const GROUPS: readonly Nature[] = ['hardware', 'builtin', 'user']
+const GROUPS: readonly Group[] = ['hardware', 'builtin', 'user', 'game']
+
+/** Where an effect sits: with its game's, else with its nature's. */
+function groupOf(c: Choice): Group {
+  return c.game === null ? c.nature : 'game'
+}
 
 const grouped = computed(() =>
   GROUPS.map((nature) => ({
     nature,
     title: t(`effects.groups.${nature}`),
-    items: choices.value.filter((c) => c.nature === nature),
-  })),
+    items: choices.value.filter((c) => groupOf(c) === nature),
+  })).filter((g) => g.nature !== 'game' || g.items.length > 0),
 )
 
 /**
@@ -370,36 +390,45 @@ const grouped = computed(() =>
  */
 const SECTION_STORAGE_PREFIX = 'candeo:effects-section:'
 
-function readSectionFolded(nature: Nature): boolean {
+/**
+ * The games' group starts folded, the others open: effects for a game are
+ * picked on its card, and the gallery is for the desk's lighting.
+ */
+function foldedByDefault(nature: Group): boolean {
+  return nature === 'game'
+}
+
+function readSectionFolded(nature: Group): boolean {
   try {
-    return localStorage.getItem(SECTION_STORAGE_PREFIX + nature) === 'folded'
+    const kept = localStorage.getItem(SECTION_STORAGE_PREFIX + nature)
+    return kept === null ? foldedByDefault(nature) : kept === 'folded'
   } catch {
-    return false
+    return foldedByDefault(nature)
   }
 }
 
-function writeSectionFolded(nature: Nature, folded: boolean): void {
+function writeSectionFolded(nature: Group, folded: boolean): void {
   try {
-    // Removed rather than stored as "expanded": expanded is the default, and a
-    // missing key must keep meaning it.
-    if (folded) localStorage.setItem(SECTION_STORAGE_PREFIX + nature, 'folded')
-    else localStorage.removeItem(SECTION_STORAGE_PREFIX + nature)
+    // Removed when it is the default, so that a missing key keeps meaning it.
+    if (folded === foldedByDefault(nature)) localStorage.removeItem(SECTION_STORAGE_PREFIX + nature)
+    else localStorage.setItem(SECTION_STORAGE_PREFIX + nature, folded ? 'folded' : 'expanded')
   } catch {
     // See `SECTION_STORAGE_PREFIX`: the fold simply does not outlive the session.
   }
 }
 
-const foldedSections = ref<Record<Nature, boolean>>({
+const foldedSections = ref<Record<Group, boolean>>({
   hardware: readSectionFolded('hardware'),
   builtin: readSectionFolded('builtin'),
   user: readSectionFolded('user'),
+  game: readSectionFolded('game'),
 })
 
 /**
  * Folding only hides entries: the selection is left alone, so the settings
  * panel keeps showing the effect even when its section is folded.
  */
-function toggleSection(nature: Nature): void {
+function toggleSection(nature: Group): void {
   const folded = !foldedSections.value[nature]
   foldedSections.value[nature] = folded
   writeSectionFolded(nature, folded)

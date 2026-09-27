@@ -5,7 +5,8 @@
       "effects": "Effects",
       "automations": "Automations",
       "devices": "Devices",
-      "settings": "Settings"
+      "settings": "Settings",
+      "games": "Games"
     },
     "theme": {
       "label": "Theme",
@@ -40,7 +41,8 @@
     "groups": {
       "hardware": "hardware",
       "builtin": "built-in",
-      "user": "yours"
+      "user": "yours",
+      "game": "games"
     },
     "natures": {
       "hardware": "hardware",
@@ -275,7 +277,9 @@
     "byExpression": "as the expression below says",
     "format": "How to write an expression",
     "expression": "Cron expression",
-    "expressionHelp": "Five fields: minute hour day-of-month month day-of-week (0 is Sunday), or six with seconds first. * means any, */15 every 15, 1-5 a range, 1,3,5 a list.\nExamples: 0 * * * * every hour · 30 12 * * 1-5 at 12:30 on weekdays · 0 9-18 * * * every hour from 9 to 18 · */30 * * * * * every 30 seconds."
+    "expressionHelp": "Five fields: minute hour day-of-month month day-of-week (0 is Sunday), or six with seconds first. * means any, */15 every 15, 1-5 a range, 1,3,5 a list.\nExamples: 0 * * * * every hour · 30 12 * * 1-5 at 12:30 on weekdays · 0 9-18 * * * every hour from 9 to 18 · */30 * * * * * every 30 seconds.",
+    "signalSet": "when “{name}” is set",
+    "signalAny": "any value"
   },
   "devices": {
     "title": "Devices",
@@ -351,7 +355,12 @@
     "definition": "Definition",
     "unloadedChoice": "“{file}” does not load: the built-in definition is used instead.",
     "unloadedChoiceOther": "“{file}” does not load: “{used}” is used instead.",
-    "inUse": "in use"
+    "inUse": "in use",
+    "chip": {
+      "label": "Devices",
+      "all": "all {n} devices",
+      "some": "{n} device | {n} devices"
+    }
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
@@ -366,6 +375,7 @@
     "ruleInvalid": "The rule “{name}” cannot be saved: {error}.",
     "ruleNotFound": "No rule is named “{name}”.",
     "signalsPortInvalid": "Port {port} cannot be used: choose one from 1024 to 65535.",
+    "gameNotFound": "Steam does not have {game} on this computer.",
     "signalNameInvalid": "“{name}” cannot name a signal: use letters, digits, or _ - . :",
     "signalValueTooLong": "The value of “{name}” is too long: {max} characters at most.",
     "signalsFull": "{max} signals are already held: erase one, or wait for one to expire.",
@@ -465,6 +475,11 @@
       "test": "Send a test signal",
       "send": "Send"
     },
+    "games": {
+      "title": "Games",
+      "valve": "Valve's game state integration",
+      "note": "A Games tab appears, with the games it supports."
+    },
     "version": {
       "title": "Candeo {version}",
       "check": "Check for new versions",
@@ -514,5 +529,28 @@
       "confirm": "Reset to default",
       "cancel": "Cancel"
     }
+  },
+  "games": {
+    "title": "Games",
+    "lead": "What happens in your game, on your keyboard.",
+    "state": {
+      "notFound": "not found on this computer",
+      "disconnected": "not connected",
+      "connected": "connected",
+      "outdated": "to connect again",
+      "playing": "playing"
+    },
+    "connect": "Connect",
+    "reconnect": "Connect again",
+    "disconnect": "Disconnect",
+    "restart": "{game} reads it when it starts: restart it if it is running.",
+    "values": "What it says now",
+    "quiet": "Nothing yet: start a match.",
+    "whilePlaying": "While playing",
+    "show": "Show",
+    "on": "on",
+    "noDevice": "Control a device first, in Devices.",
+    "ruleName": "While playing {game}",
+    "ruleNote": "A rule, listed in Automations: your effect comes back after the match."
   }
 }

@@ -37,6 +37,7 @@ import SignalsSettings from '../components/SignalsSettings.vue'
 import SoundSettings from '../components/SoundSettings.vue'
 import { useDevice } from '../composables/useDevice'
 import { useEffects } from '../composables/useEffects'
+import { setValveGames, valveGames } from '../composables/games'
 import { useSettings } from '../composables/useSettings'
 import { useTheme } from '../composables/useTheme'
 import { useUpdateCheck, type Found } from '../composables/useUpdateCheck'
@@ -273,6 +274,17 @@ const problem = ref<string | null>(null)
  */
 const resets = ref(0)
 
+/** What kept games from being turned on or off. */
+const gamesProblem = ref<string | null>(null)
+
+async function onValveGames(event: Event): Promise<void> {
+  const on = (event.target as HTMLInputElement).checked
+  gamesProblem.value = null
+  await setValveGames(on).catch((e: unknown) => {
+    gamesProblem.value = message(e)
+  })
+}
+
 /**
  * Resets `settings.json`. Rust stops the loops, turns the backlight off and
  * closes the devices before writing, and touches no effect.
@@ -372,6 +384,16 @@ onMounted(() => {
     </section>
 
     <SignalsSettings :key="resets" />
+
+    <section class="block" aria-labelledby="games-title">
+      <h2 id="games-title">{{ t('settings.games.title') }}</h2>
+      <label class="level">
+        <input type="checkbox" :checked="valveGames" @change="onValveGames" />
+        {{ t('settings.games.valve') }}
+      </label>
+      <p class="note">{{ t('settings.games.note') }}</p>
+      <FailureNote v-if="gamesProblem" @close="gamesProblem = null">{{ gamesProblem }}</FailureNote>
+    </section>
 
     <SoundSettings :key="resets" />
 

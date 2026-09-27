@@ -227,6 +227,8 @@ export interface EffectManifest {
   readsSignals?: boolean
   /** Declares `inputs: ['audio']`: the sound playing is captured while it runs. */
   readsAudio?: boolean
+  /** The game it is for, `cs2`: the gallery keeps it apart. */
+  game?: string
 }
 
 /**
@@ -678,6 +680,8 @@ export interface Rule {
   show: RuleShow
   /** Named `for` in the file, as the sentence reads: show Clock *for* 10 seconds. */
   for: RuleDuration
+  /** The game whose *while playing* this rule is, made on its card in Games. */
+  game?: string
 }
 
 /**
@@ -1114,6 +1118,8 @@ export interface SignalsApi {
   listening: string[]
   /** Something else holds the port on loopback: nothing answers there. */
   portInUse: boolean
+  /** Valve's game state integration is on: the Games tab shows. */
+  valveGames: boolean
 }
 
 // ---------------------------------------------------------------- sound
@@ -1227,6 +1233,35 @@ export function sendSignal(name: string, value: string): Promise<void> {
 /** Erases a signal whatever its lifetime: the way out of one sent "until erased". */
 export function eraseSignal(name: string): Promise<void> {
   return invoke('erase_signal', { name })
+}
+
+/**
+ * A game whose state Candeo can receive (`docs/design/game-state-integration.md`):
+ * `notFound` when Steam does not have it here, `outdated` when its file names
+ * another port or token, or reception is off.
+ */
+export interface GameView {
+  id: string
+  name: string
+  state: 'notFound' | 'disconnected' | 'connected' | 'outdated'
+}
+
+/** Turns Valve's game state integration on or off: the Games tab follows. */
+export function setValveGames(on: boolean): Promise<SignalsApi> {
+  return invoke('set_valve_games', { on })
+}
+
+export function listGames(): Promise<GameView[]> {
+  return invoke('list_games')
+}
+
+/** Writes the game's file, and turns reception on if it was off. */
+export function connectGame(game: string): Promise<GameView[]> {
+  return invoke('connect_game', { game })
+}
+
+export function disconnectGame(game: string): Promise<GameView[]> {
+  return invoke('disconnect_game', { game })
 }
 
 /**

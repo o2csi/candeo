@@ -13,6 +13,7 @@ import { useUpdateCheck } from './composables/useUpdateCheck'
 import type { ThemeSetting } from './api/candeo'
 import { refreshLibrary } from './editor/library'
 import { refreshFirmwareEffects } from './composables/useEffects'
+import { refreshGames, valveGames } from './composables/games'
 import { t } from './i18n'
 
 const route = useRoute()
@@ -60,6 +61,8 @@ onMounted(() => {
   )
   // What names a firmware effect a rule shows, on whichever device.
   void refreshFirmwareEffects()
+  // Whether the Games tab shows.
+  void refreshGames()
 
   // The state can change **without the window**: the notification area icon
   // starts, stops and turns off without it. And the window now outlives it
@@ -91,6 +94,7 @@ onMounted(() => {
       <RouterLink to="/" class="tab">{{ t('app.tabs.effects') }}</RouterLink>
       <RouterLink to="/automations" class="tab">{{ t('app.tabs.automations') }}</RouterLink>
       <RouterLink to="/devices" class="tab">{{ t('app.tabs.devices') }}</RouterLink>
+      <RouterLink v-if="valveGames" to="/games" class="tab">{{ t('app.tabs.games') }}</RouterLink>
       <RouterLink to="/settings" class="tab">{{ t('app.tabs.settings') }}</RouterLink>
 
       <span class="spacer" />

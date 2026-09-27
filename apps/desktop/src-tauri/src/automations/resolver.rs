@@ -53,6 +53,11 @@ pub struct Rule {
     pub show: Show,
     #[serde(rename = "for", default)]
     pub lasts: Lasts,
+    /// The game whose *while playing* this is, made on its card in the Games
+    /// tab (`docs/design/game-state-integration.md` §4). It changes nothing to
+    /// how the rule runs; the card finds its rule by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<String>,
 }
 
 /// When a rule applies.
@@ -69,6 +74,10 @@ pub enum Trigger {
     /// when that value was set, for as long as it holds — or, with `hold` off,
     /// for the rule's duration from each time it is received. There is no
     /// "becomes": the sender already chooses when to send.
+    ///
+    /// An empty `equals` is met by any value: *while `cs2.phase` is set*. No
+    /// signal can hold an empty text — sending one erases it — so no rule
+    /// written before meant anything else by it.
     Signal {
         name: String,
         equals: String,
@@ -258,7 +267,7 @@ pub fn active<Tz: TimeZone>(context: &Context<Tz>, device: DeviceRef) -> Vec<Int
             } => {
                 let held = context.signals.get(name)?;
                 let alive = held.expires.is_none_or(|at| now < at);
-                if !alive || held.value.as_text() != *equals {
+                if !alive || (!equals.is_empty() && held.value.as_text() != *equals) {
                     return None;
                 }
                 if hold {
@@ -350,6 +359,7 @@ mod tests {
                 bindings: crate::runtime::Bindings::new(),
             },
             lasts: Lasts { seconds },
+            game: None,
         }
     }
 
@@ -617,6 +627,25 @@ mod tests {
         assert_eq!(under_way.since, set);
         assert!(under_way.open);
         assert_eq!(under_way.until, now.timestamp_millis() + LOOK_MS);
+    }
+
+    /// No value to match: any value will do, as long as one is held — how a
+    /// game's rule plays during a match.
+    #[test]
+    fn a_signal_rule_with_no_value_holds_while_any_is_set() {
+        let set = at(17, 10, 0, 0).timestamp_millis();
+        let now = at(17, 10, 0, 5);
+        let rules = [signal_rule("Playing", "cs2.phase", "", true)];
+
+        for value in [
+            Scalar::Text("live".into()),
+            Scalar::Number(3.0),
+            Scalar::Flag(false),
+        ] {
+            let given = given_signal("cs2.phase", value, set, set + 15_000);
+            assert!(given.first(now, &rules, KEYBOARD).is_some());
+        }
+        assert_eq!(Given::nothing().first(now, &rules, KEYBOARD), None);
     }
 
     #[test]

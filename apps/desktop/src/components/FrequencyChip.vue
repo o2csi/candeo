@@ -69,6 +69,8 @@ const scheduled = computed(() => props.idle === null && props.signal === null)
 
 function summary(): string {
   if (props.signal) {
+    // No value to match: any will do.
+    if (props.signal.equals === '') return t('automations.signalSet', { name: props.signal.name })
     return t('automations.signal', { name: props.signal.name, value: props.signal.equals })
   }
   return props.idle === null ? text(props.frequency) : t('automations.idle', { n: props.idle })
@@ -209,6 +211,7 @@ function signalTyped(): void {
             type="text"
             spellcheck="false"
             autocomplete="off"
+            :placeholder="t('automations.signalAny')"
             @change="signalTyped"
           />
         </label>
