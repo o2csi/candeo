@@ -355,7 +355,12 @@
     "definition": "Definition",
     "unloadedChoice": "“{file}” does not load: the built-in definition is used instead.",
     "unloadedChoiceOther": "“{file}” does not load: “{used}” is used instead.",
-    "inUse": "in use"
+    "inUse": "in use",
+    "chip": {
+      "label": "Devices",
+      "all": "all {n} devices",
+      "some": "{n} device | {n} devices"
+    }
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
@@ -472,8 +477,8 @@
     },
     "games": {
       "title": "Games",
-      "valve": "Valve's game state integration — Counter-Strike 2",
-      "note": "A Games tab appears, where each game is connected."
+      "valve": "Valve's game state integration",
+      "note": "A Games tab appears, with the games it supports."
     },
     "version": {
       "title": "Candeo {version}",

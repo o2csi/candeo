@@ -355,7 +355,12 @@
     "definition": "Définition",
     "unloadedChoice": "« {file} » ne se charge pas : la définition intégrée est utilisée à la place.",
     "unloadedChoiceOther": "« {file} » ne se charge pas : « {used} » est utilisé à la place.",
-    "inUse": "utilisée"
+    "inUse": "utilisée",
+    "chip": {
+      "label": "Appareils",
+      "all": "les {n} appareils",
+      "some": "{n} appareil | {n} appareils"
+    }
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",
@@ -472,8 +477,8 @@
     },
     "games": {
       "title": "Jeux",
-      "valve": "Intégration de l’état de jeu de Valve — Counter-Strike 2",
-      "note": "Un onglet Jeux apparaît, où chaque jeu se connecte."
+      "valve": "Intégration de l’état de jeu de Valve",
+      "note": "Un onglet Jeux apparaît, avec les jeux qu’elle prend en charge."
     },
     "version": {
       "title": "Candeo {version}",

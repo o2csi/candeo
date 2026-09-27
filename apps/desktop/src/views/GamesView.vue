@@ -25,10 +25,10 @@ import {
 } from '../api/candeo'
 import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
+import DevicesChip from '../components/DevicesChip.vue'
 import FailureNote from '../components/FailureNote.vue'
 import { gameRule, gameSignals, playing, withGameRule } from '../composables/games'
 import { signalText } from '../composables/signals'
-import { ids } from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
 
@@ -131,9 +131,8 @@ function setEffect(game: GameView, rule: Rule, effect: string): Promise<void> {
   return whilePlaying(game, { effect, devices: ruleDevices(rule) })
 }
 
-function setDevice(game: GameView, rule: Rule, device: DeviceInfo, on: boolean): Promise<void> {
-  const chosen = ruleDevices(rule).filter((d) => ids(d) !== ids(device))
-  return whilePlaying(game, { effect: rule.show.effect, devices: on ? [...chosen, device] : chosen })
+function setDevices(game: GameView, rule: Rule, devices: DeviceInfo[]): Promise<void> {
+  return whilePlaying(game, { effect: rule.show.effect, devices })
 }
 
 onMounted(async () => {
@@ -215,15 +214,12 @@ onBeforeUnmount(() => unlisten?.())
             </select>
           </label>
           <span>{{ t('games.on') }}</span>
-          <label v-for="d in controlled" :key="ids(d)" class="check">
-            <input
-              type="checkbox"
-              :checked="ruleDevices(gameRule(rules, game.id)!).some((r) => ids(r) === ids(d))"
-              :disabled="busy"
-              @change="setDevice(game, gameRule(rules, game.id)!, d, ($event.target as HTMLInputElement).checked)"
-            />
-            {{ d.name }}
-          </label>
+          <DevicesChip
+            :devices="controlled"
+            :chosen="gameRule(rules, game.id)!.devices"
+            :disabled="busy"
+            @change="(chosen) => setDevices(game, gameRule(rules, game.id)!, chosen)"
+          />
           <p class="note">{{ t('games.ruleNote') }}</p>
         </div>
       </template>
