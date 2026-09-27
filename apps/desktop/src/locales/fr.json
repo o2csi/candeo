@@ -330,7 +330,7 @@
     "yoursNote": "Personne n'a relu vos définitions : elles envoient à vos appareils exactement ce qu'elles disent.",
     "pluggedIn": "Branchés · {n}",
     "nothingPlugged": "Aucun appareil connu de Candeo n’est branché.",
-    "known": "Tous les appareils connus de Candeo · {n}",
+    "known": "Appareils reconnus · {n}",
     "filter": "Filtrer par nom ou identifiants",
     "noMatch": "Aucun appareil ne correspond.",
     "columns": {
@@ -360,7 +360,9 @@
       "label": "Appareils",
       "all": "les {n} appareils",
       "some": "{n} appareil | {n} appareils"
-    }
+    },
+    "moreOnSite": "Pas dans la liste ? D’autres appareils sont sur le site, certains attendent quelqu’un pour les vérifier.",
+    "moreOnSiteLink": "D’autres appareils sur le site"
   },
   "errors": {
     "unexpected": "Une erreur s'est produite : {detail}",

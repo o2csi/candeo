@@ -1613,6 +1613,7 @@ pub fn run() {
             storage::restore_builtin,
             storage::open_effects_dir,
             storage::open_devices_dir,
+            storage::open_site_devices,
             storage::reload_device_definitions,
             storage::copy_device_definition,
             firmware_effects,

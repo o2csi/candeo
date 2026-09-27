@@ -366,6 +366,11 @@ export function openDevicesDir(): Promise<void> {
   return invoke('open_devices_dir')
 }
 
+/** Opens the site's list of devices in the browser: Candeo fetches nothing itself. */
+export function openSiteDevices(): Promise<void> {
+  return invoke('open_site_devices')
+}
+
 /**
  * Reads the folder of your device definitions again; the files that drive
  * nothing come back with their reason. A device already open keeps the
