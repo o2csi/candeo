@@ -722,3 +722,274 @@ fn probe_alienware_zones() {
         println!("  {sent} transactions written, {failed} failed");
     }
 }
+
+// ---------------------------------------------------------------- LampArray
+
+/// The Lighting and Illumination page of the HID usage tables (HUTRR84), which
+/// Windows' Dynamic Lighting speaks: a keyboard describing its lamps itself.
+const LAMP_ARRAY_PAGE: u16 = 0x59;
+
+/// One field of a report, as the descriptor declares it: its usage, page in the
+/// high half, and its width in bits.
+#[derive(Debug, Clone, Copy)]
+struct Field {
+    usage: u32,
+    bits: u32,
+}
+
+/// The feature reports a descriptor declares, by report id: the usage of the
+/// collection holding each, and its fields in order. Push, pop and long items
+/// are left out: the page's descriptors in the standard use none.
+fn feature_reports(d: &[u8]) -> std::collections::BTreeMap<u8, (u32, Vec<Field>)> {
+    let mut out = std::collections::BTreeMap::new();
+    let (mut page, mut size, mut count, mut id) = (0u32, 0u32, 0u32, 0u8);
+    let mut usages: Vec<u32> = Vec::new();
+    let mut collections: Vec<u32> = Vec::new();
+    let mut i = 0;
+    while i < d.len() {
+        let prefix = d[i];
+        if prefix == 0xfe {
+            i += 3 + d.get(i + 1).copied().unwrap_or(0) as usize;
+            continue;
+        }
+        let len = match prefix & 3 {
+            3 => 4,
+            n => n as usize,
+        };
+        let mut value = 0u32;
+        for k in 0..len {
+            value |= u32::from(d.get(i + 1 + k).copied().unwrap_or(0)) << (8 * k);
+        }
+        match ((prefix >> 2) & 3, prefix >> 4) {
+            (0, 0xa) => {
+                collections.push(usages.first().copied().unwrap_or(0));
+                usages.clear();
+            }
+            (0, 0xc) => {
+                collections.pop();
+            }
+            (0, 0xb) => {
+                let report = out
+                    .entry(id)
+                    .or_insert_with(|| (collections.last().copied().unwrap_or(0), Vec::new()));
+                for n in 0..count as usize {
+                    let usage = usages.get(n).or(usages.last()).copied().unwrap_or(0);
+                    report.1.push(Field { usage, bits: size });
+                }
+                usages.clear();
+            }
+            (0, _) => usages.clear(),
+            (1, 0) => page = value,
+            (1, 7) => size = value,
+            (1, 8) => id = value as u8,
+            (1, 9) => count = value,
+            (2, 0) => usages.push(if len == 4 {
+                value
+            } else {
+                (page << 16) | value
+            }),
+            _ => {}
+        }
+        i += 1 + len;
+    }
+    out
+}
+
+/// What the standard calls each usage of the page, for reading the output.
+fn lamp_usage_name(usage: u32) -> String {
+    if usage >> 16 != u32::from(LAMP_ARRAY_PAGE) {
+        return format!("{:04x}:{:04x}", usage >> 16, usage & 0xffff);
+    }
+    match usage & 0xffff {
+        0x01 => "LampArray",
+        0x02 => "LampArrayAttributesReport",
+        0x03 => "LampCount",
+        0x04 => "BoundingBoxWidthInMicrometers",
+        0x05 => "BoundingBoxHeightInMicrometers",
+        0x06 => "BoundingBoxDepthInMicrometers",
+        0x07 => "LampArrayKind",
+        0x08 => "MinUpdateIntervalInMicroseconds",
+        0x20 => "LampAttributesRequestReport",
+        0x21 => "LampId",
+        0x22 => "LampAttributesResponseReport",
+        0x23 => "PositionXInMicrometers",
+        0x24 => "PositionYInMicrometers",
+        0x25 => "PositionZInMicrometers",
+        0x26 => "LampPurposes",
+        0x27 => "UpdateLatencyInMicroseconds",
+        0x28 => "RedLevelCount",
+        0x29 => "GreenLevelCount",
+        0x2a => "BlueLevelCount",
+        0x2b => "IntensityLevelCount",
+        0x2c => "IsProgrammable",
+        0x2d => "InputBinding",
+        0x50 => "LampMultiUpdateReport",
+        0x55 => "LampUpdateFlags",
+        0x60 => "LampRangeUpdateReport",
+        0x61 => "LampIdStart",
+        0x62 => "LampIdEnd",
+        0x70 => "LampArrayControlReport",
+        0x71 => "AutonomousMode",
+        other => return format!("59:{other:04x}"),
+    }
+    .into()
+}
+
+/// A report's fields read from its bytes, after the report id, least
+/// significant bit first as HID packs them.
+fn read_fields(report: &[u8], fields: &[Field]) -> Vec<(u32, u64)> {
+    let mut bit = 8usize;
+    fields
+        .iter()
+        .map(|f| {
+            let mut value = 0u64;
+            for k in 0..f.bits as usize {
+                let at = bit + k;
+                if report.get(at / 8).is_some_and(|b| (b >> (at % 8)) & 1 == 1) {
+                    value |= 1 << k;
+                }
+            }
+            bit += f.bits as usize;
+            (f.usage, value)
+        })
+        .collect()
+}
+
+/// **What does the keyboard say about itself through LampArray?**
+/// (`docs/design/other-keyboards.md` §4)
+///
+/// Read only: the report descriptor, the array's attributes, then every lamp —
+/// a `LampAttributesRequest` naming lamp 0, which selects what the next reads
+/// answer and lights nothing, then one `LampAttributesResponse` per lamp, the
+/// device moving to the next by itself. No update, and autonomous mode is left
+/// as it is: nothing on the keyboard changes.
+#[test]
+#[ignore]
+fn probe_lamparray_attributes() {
+    let api = hidapi::HidApi::new().expect("HID");
+    println!("\n>>> The device's collections:");
+    for d in api
+        .device_list()
+        .filter(|d| d.vendor_id() == VID && d.product_id() == PID)
+    {
+        println!(
+            "    interface {} · usage page {:04x} · usage {:04x}",
+            d.interface_number(),
+            d.usage_page(),
+            d.usage()
+        );
+    }
+    let info = api
+        .device_list()
+        .find(|d| {
+            d.vendor_id() == VID
+                && d.product_id() == PID
+                && d.usage_page() == LAMP_ARRAY_PAGE
+                && d.usage() == 0x01
+        })
+        .expect("no LampArray collection");
+    let dev = info
+        .open_device(&api)
+        .expect("open the LampArray collection");
+
+    let mut descriptor = [0u8; 4096];
+    let n = dev
+        .get_report_descriptor(&mut descriptor)
+        .expect("report descriptor");
+    let descriptor = &descriptor[..n];
+    println!("\n>>> Report descriptor, {n} bytes:");
+    for line in descriptor.chunks(32) {
+        println!("    {line:02x?}");
+    }
+
+    let reports = feature_reports(descriptor);
+    println!("\n>>> Feature reports:");
+    for (id, (collection, fields)) in &reports {
+        let bits: u32 = fields.iter().map(|f| f.bits).sum();
+        println!(
+            "    id {id:02x} · {} · {} bytes",
+            lamp_usage_name(*collection),
+            bits.div_ceil(8)
+        );
+        for f in fields {
+            println!("        {} · {} bits", lamp_usage_name(f.usage), f.bits);
+        }
+    }
+    let report_of = |usage: u16| {
+        let wanted = (u32::from(LAMP_ARRAY_PAGE) << 16) | u32::from(usage);
+        reports
+            .iter()
+            .find(|(_, (c, _))| *c == wanted)
+            .map(|(id, (_, fields))| (*id, fields.clone()))
+    };
+    let get = |id: u8, fields: &[Field]| -> Option<Vec<(u32, u64)>> {
+        let bits: u32 = fields.iter().map(|f| f.bits).sum();
+        let mut buf = vec![0u8; 1 + bits.div_ceil(8) as usize];
+        buf[0] = id;
+        match dev.get_feature_report(&mut buf) {
+            Ok(_) => Some(read_fields(&buf, fields)),
+            Err(e) => {
+                println!("    read refused: {e}");
+                None
+            }
+        }
+    };
+    let value = |read: &[(u32, u64)], usage: u16| {
+        read.iter()
+            .find(|(u, _)| *u & 0xffff == u32::from(usage))
+            .map(|(_, v)| *v)
+    };
+
+    let (attributes_id, attributes) = report_of(0x02).expect("no attributes report");
+    println!("\n>>> LampArrayAttributes (id {attributes_id:02x}):");
+    let Some(array) = get(attributes_id, &attributes) else {
+        return;
+    };
+    for (usage, v) in &array {
+        println!("    {} = {v}", lamp_usage_name(*usage));
+    }
+    if let Some((control_id, control)) = report_of(0x70) {
+        println!("\n>>> LampArrayControl (id {control_id:02x}), read:");
+        if let Some(read) = get(control_id, &control) {
+            for (usage, v) in &read {
+                println!("    {} = {v}", lamp_usage_name(*usage));
+            }
+        }
+    }
+
+    let count = value(&array, 0x03).unwrap_or(0);
+    let (request_id, request) = report_of(0x20).expect("no request report");
+    let (response_id, response) = report_of(0x22).expect("no response report");
+    let bits: u32 = request.iter().map(|f| f.bits).sum();
+    let mut ask = vec![0u8; 1 + bits.div_ceil(8) as usize];
+    ask[0] = request_id;
+    dev.send_feature_report(&ask).expect("ask for lamp 0");
+    println!(
+        "\n>>> {count} lamps: id · x y z (mm) · purposes · levels r/g/b/i · programmable · key usage"
+    );
+    let mut wrong = 0;
+    for expected in 0..count {
+        let Some(lamp) = get(response_id, &response) else {
+            break;
+        };
+        let at = |usage| value(&lamp, usage).unwrap_or(0);
+        if at(0x21) != expected {
+            wrong += 1;
+        }
+        println!(
+            "    {:3} · {:6.1} {:6.1} {:5.1} · {:02x} · {}/{}/{}/{} · {} · {:02x}",
+            at(0x21),
+            at(0x23) as f64 / 1000.0,
+            at(0x24) as f64 / 1000.0,
+            at(0x25) as f64 / 1000.0,
+            at(0x26),
+            at(0x28),
+            at(0x29),
+            at(0x2a),
+            at(0x2b),
+            at(0x2c),
+            at(0x2d)
+        );
+    }
+    println!("\n>>> done: {wrong} lamps answered with another id than expected.");
+}

@@ -105,8 +105,9 @@ lamps and colours, eight or so per report, and a *complete* flag; *autonomous
 mode* off hands the lamps to the host, on gives them back to the firmware.
 
 - **Here:** the DeathStalker V2 Pro exposes a collection on page `0x59` next to
-  its Razer interfaces, in the Windows device list (2026-09-27): the standard
-  can be verified on a device we have.
+  its Razer interfaces, and describes itself through it: 105 lamps with their
+  positions in millimetres and their keys, read on 2026-09-27 (its survey,
+  §13). The standard can be verified on a device we have.
 - **Elsewhere:** other Razer keyboards (the DeathStalker V2, Huntsman V3 Pro,
   BlackWidow V4 Pro, Ornata V3, per Razer's support pages); laptops such as
   Acer's Predator Helios 16 and ASUS's Vivobook S14/S16, natively. Logitech
