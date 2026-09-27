@@ -106,6 +106,44 @@ ${rows}
         </div>`
 }
 
+/**
+ * The unverified definitions (`docs/design/device-sdk.md` §9), as a table with
+ * a download each: the facts they were derived from say what they are, and
+ * the file is served beside the page.
+ */
+const UNVERIFIED = join(root, 'crates/candeo-device/devices/unverified')
+const unverified = JSON.parse(readFileSync(join(UNVERIFIED, 'variants.json'), 'utf8'))
+
+function toVerify(repo) {
+  const rows = unverified.variants
+    .map(
+      (v) => `            <tr>
+              <td>${v.name}</td>
+              <td class="mono">1532:${v.pid}</td>
+              <td>${v.connection}</td>
+              <td><a href="devices/${v.file}" download>${v.file}</a></td>
+              <td><a href="${repo}/issues/new?template=device-report.yml&amp;title=Device:%20${encodeURIComponent(v.name)}">Report</a></td>
+            </tr>`,
+    )
+    .join('\n')
+  return `        <div class="scroller">
+          <table class="devices">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Ids</th>
+                <th>Connection</th>
+                <th>Definition</th>
+                <th>Does it light?</th>
+              </tr>
+            </thead>
+            <tbody>
+${rows}
+            </tbody>
+          </table>
+        </div>`
+}
+
 const repo = repository()
 const version = await latest(repo)
 const releases = `${repo}/releases`
@@ -172,6 +210,7 @@ const values = {
     : `${releases}/latest`,
   repository: repo,
   devices: table(repo),
+  toVerify: toVerify(repo),
   footer,
   zonesDefinition,
 }
@@ -337,6 +376,12 @@ cpSync(
   join(root, 'crates/candeo-device/devices/device-definition.schema.json'),
   join(out, 'device-definition.schema.json'),
 )
+
+// The unverified definitions, to download into Documents\candeo\devices.
+mkdirSync(join(out, 'devices'), { recursive: true })
+for (const v of unverified.variants) {
+  cpSync(join(UNVERIFIED, v.file), join(out, 'devices', v.file))
+}
 
 cpSync(join(here, 'style.css'), join(out, 'style.css'))
 cpSync(join(here, 'copy.js'), join(out, 'copy.js'))

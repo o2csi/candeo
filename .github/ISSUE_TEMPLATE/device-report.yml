@@ -1,0 +1,42 @@
+name: Device definition report
+description: Say whether a device definition lights your device — an unverified one most of all.
+title: "Device: "
+labels: ["device"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying it. Please never paste a serial number, your computer's name or a path with your user name in it.
+  - type: input
+    id: definition
+    attributes:
+      label: Definition
+      description: The file you tried, as the site or your folder names it.
+      placeholder: razer-deathstalker-v2-pro-wireless.json
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Does it light?
+      options:
+        - Yes, every key follows the effect
+        - Partly (say what does not below)
+        - No, nothing changes
+    validations:
+      required: true
+  - type: textarea
+    id: seen
+    attributes:
+      label: What you see
+      description: Keys lit in the wrong place, brightness, the device's own effects, anything the Devices card says.
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware
+      description: As the device's card shows it under ⋯, if it shows one.
+  - type: input
+    id: candeo
+    attributes:
+      label: Candeo version and system
+      placeholder: 0.15.0, Windows 11
