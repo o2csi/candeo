@@ -505,7 +505,8 @@ hex dump, and the byte positions give the component order without inferring it.
 - [ ] Is the transaction identifier (`0x9f`) checked by the device? OpenRazer
   sends this model's frames with `0x3f` (commit `6820f9da`, 2026-07-05), and
   `0x9f` works here on firmware v1.5: the device apparently accepts either.
-  `0x3f` was not tried on it (2026-09-27).
+  `0x3f` was not tried on it (2026-09-27). OpenRGB sends `0x9f` (commit
+  `0f8f2dcc`, 2026-09-25).
 - [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
 - [ ] Effect identifier `0x06`: never tried
 - [x] **Maximum throughput accepted before the device drops out** — see below

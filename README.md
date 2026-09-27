@@ -38,7 +38,8 @@ account, no extra services to install, nothing sent anywhere.
 - **Your games** — your health, ammo, flashes and the bomb in Counter-Strike 2,
   connected in one click. [Games](https://o2csi.github.io/candeo/games.html)
 - **Your devices** — the Razer DeathStalker V2 Pro and the Alienware m18 R1,
-  keyboard and lighting zones. [Devices](https://o2csi.github.io/candeo/devices.html)
+  keyboard and lighting zones, and more Razer keyboards to try.
+  [Devices](https://o2csi.github.io/candeo/devices.html)
 - **Sends nothing** — no account, no telemetry. In English and French.
 
 ## Make it yours

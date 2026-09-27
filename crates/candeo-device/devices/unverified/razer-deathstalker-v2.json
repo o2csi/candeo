@@ -3,7 +3,11 @@
   "name": "Razer DeathStalker V2",
   "notes": [
     "Unverified: never tried on the device. Derived on 2026-09-27 from razer-deathstalker-v2-pro.json, verified on firmware v1.5, by derive.mjs.",
-    "What differs, from OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py: product id 0295, interface 3, transaction byte 3f, a 6×22 grid (wired).",
+    "What differs: product id 0295, interface 3, transaction byte 1f, a 6×22 matrix (wired).",
+    "From OpenRGB, https://gitlab.com/CalcProgrammer1/OpenRGB, commit 0f8f2dcc (2026-09-25): Controllers/RazerController, for each model's matrix, read by openrgb.mjs, its interface and its transaction byte.",
+    "From OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py, for the same facts as seen from Linux.",
+    "OpenRazer sends 3f in the transaction byte: if nothing lights, try it in every report.",
+    "Drawn as an ISO board: on an ANSI one, the key left of Z is absent and the backslash lights with Enter. Lights that are not keys are placed by convention.",
     "The inspection is left out until someone confirms the device answers it.",
     "Does it light? Say so: https://github.com/o2csi/candeo/issues/new?template=device-report.yml"
   ],
@@ -18,14 +22,14 @@
   "frame": {
     "each": {
       "by": "row",
-      "send": ["00 3f 00 00 00 {length:8} 0f 03 00 00 {row} {start} {end} {lights}"],
+      "send": ["00 1f 00 00 00 {length:8} 0f 03 00 00 {row} {start} {end} {lights}"],
       "light": "{r} {g} {b}"
     },
-    "close": ["00 3f 00 00 00 06 0f 02 00 00 08 00 00 00"]
+    "close": ["00 1f 00 00 00 06 0f 02 00 00 08 00 00 00"]
   },
-  "brightness": ["00 3f 00 00 00 03 0f 04 00 00 {level}"],
+  "brightness": ["00 1f 00 00 00 03 0f 04 00 00 {level}"],
   "firmware": {
-    "send": "00 3f 00 00 00 06 0f 02 00 00 {kind} 00 00 00",
+    "send": "00 1f 00 00 00 06 0f 02 00 00 {kind} 00 00 00",
     "off": "00",
     "effects": [
       {
@@ -42,7 +46,7 @@
         "id": "hardware:wave",
         "kind": "04",
         "looks": "wave",
-        "send": "00 3f 00 00 00 06 0f 02 00 00 04 02 28 00",
+        "send": "00 1f 00 00 00 06 0f 02 00 00 04 02 28 00",
         "name": "Wave",
         "summary": {
           "en": "A gradient crosses the keyboard from side to side.",
@@ -85,14 +89,14 @@
       { "row": 1, "col": 10, "address": 32, "scancode": "0b", "rect": [10, 1.5, 1, 1] },
       { "row": 1, "col": 11, "address": 33, "scancode": "0c", "rect": [11, 1.5, 1, 1] },
       { "row": 1, "col": 12, "address": 34, "scancode": "0d", "rect": [12, 1.5, 1, 1] },
-      { "row": 1, "col": 13, "address": 35, "scancode": "0e", "rect": [13, 1.5, 2, 1] },
-      { "row": 1, "col": 14, "address": 36, "scancode": "e052", "rect": [15.25, 1.5, 1, 1] },
-      { "row": 1, "col": 15, "address": 37, "scancode": "e047", "rect": [16.25, 1.5, 1, 1] },
-      { "row": 1, "col": 16, "address": 38, "scancode": "e049", "rect": [17.25, 1.5, 1, 1] },
-      { "row": 1, "col": 17, "address": 39, "scancode": "45", "rect": [18.5, 1.5, 1, 1] },
-      { "row": 1, "col": 18, "address": 40, "scancode": "e035", "rect": [19.5, 1.5, 1, 1] },
-      { "row": 1, "col": 19, "address": 41, "scancode": "37", "rect": [20.5, 1.5, 1, 1] },
-      { "row": 1, "col": 20, "address": 42, "scancode": "4a", "rect": [21.5, 1.5, 1, 1] },
+      { "row": 1, "col": 14, "address": 36, "scancode": "0e", "rect": [13, 1.5, 2, 1] },
+      { "row": 1, "col": 15, "address": 37, "scancode": "e052", "rect": [15.25, 1.5, 1, 1] },
+      { "row": 1, "col": 16, "address": 38, "scancode": "e047", "rect": [16.25, 1.5, 1, 1] },
+      { "row": 1, "col": 17, "address": 39, "scancode": "e049", "rect": [17.25, 1.5, 1, 1] },
+      { "row": 1, "col": 18, "address": 40, "scancode": "45", "rect": [18.5, 1.5, 1, 1] },
+      { "row": 1, "col": 19, "address": 41, "scancode": "e035", "rect": [19.5, 1.5, 1, 1] },
+      { "row": 1, "col": 20, "address": 42, "scancode": "37", "rect": [20.5, 1.5, 1, 1] },
+      { "row": 1, "col": 21, "address": 43, "scancode": "4a", "rect": [21.5, 1.5, 1, 1] },
       { "row": 2, "col": 0, "address": 44, "scancode": "0f", "rect": [0, 2.5, 1.5, 1] },
       { "row": 2, "col": 1, "address": 45, "scancode": "10", "rect": [1.5, 2.5, 1, 1] },
       { "row": 2, "col": 2, "address": 46, "scancode": "11", "rect": [2.5, 2.5, 1, 1] },
@@ -168,13 +172,13 @@
     {
       "colours": ["ff0000", "00ff00", "0000ff"],
       "reports": [
-        "00 3f 00 00 00 47 0f 03 00 00 00 00 15 ff 00 00 00 00 00 00 ff 00 00 00 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 a1",
-        "00 3f 00 00 00 47 0f 03 00 00 01 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5f",
-        "00 3f 00 00 00 47 0f 03 00 00 02 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c",
-        "00 3f 00 00 00 47 0f 03 00 00 03 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5d",
-        "00 3f 00 00 00 47 0f 03 00 00 04 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5a",
-        "00 3f 00 00 00 47 0f 03 00 00 05 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5b",
-        "00 3f 00 00 00 06 0f 02 00 00 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03"
+        "00 1f 00 00 00 47 0f 03 00 00 00 00 15 ff 00 00 00 00 00 00 ff 00 00 00 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 a1",
+        "00 1f 00 00 00 47 0f 03 00 00 01 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5f",
+        "00 1f 00 00 00 47 0f 03 00 00 02 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5c",
+        "00 1f 00 00 00 47 0f 03 00 00 03 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5d",
+        "00 1f 00 00 00 47 0f 03 00 00 04 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5a",
+        "00 1f 00 00 00 47 0f 03 00 00 05 00 15 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 5b",
+        "00 1f 00 00 00 06 0f 02 00 00 08 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 03"
       ]
     }
   ]
