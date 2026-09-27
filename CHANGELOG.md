@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.15.0](https://github.com/o2csi/candeo/compare/v0.14.0...v0.15.0) (2026-09-27)
+
+
+### Features
+
+* a Games tab behind a switch in Settings, and game effects apart ([ad4d83a](https://github.com/o2csi/candeo/commit/ad4d83aee88a80adc4f4942b7bcb23f9dc97d74c))
+* choose devices from a list, and name the games switch by its API ([05c6578](https://github.com/o2csi/candeo/commit/05c65785f26a83b2c327a3dd99c68b79b58641b4))
+* connect Counter-Strike 2 from Settings, Games ([c68fd78](https://github.com/o2csi/candeo/commit/c68fd788b7775438463f8560c3cfb24d4fabf684))
+* derive four unverified DeathStalker V2 definitions ([7d470dc](https://github.com/o2csi/candeo/commit/7d470dcf9b3f94522032a44dea38b00a8c33be55))
+* games behind a switch, rules on any value, effects for a game ([1a4b95c](https://github.com/o2csi/candeo/commit/1a4b95c19c6fbf40d7393493f28983a210baf7cc))
+* receive Counter-Strike 2's game state as signals ([14d82d7](https://github.com/o2csi/candeo/commit/14d82d79acd8a3dec58cb3054d8bf404a8a3082f))
+* ship a Counter-Strike 2 effect ([ae8e5a0](https://github.com/o2csi/candeo/commit/ae8e5a0d191d9fd484bdfa6432e45f34f4c7b2e9))
+
+
+### Documentation
+
+* a Games page, and Counter-Strike 2 on the landing page ([245bb33](https://github.com/o2csi/candeo/commit/245bb3362ee529ff0bc8770d1882db6c889a283a))
+* add install, build-on-Candeo and describe-a-device pages ([7956f5f](https://github.com/o2csi/candeo/commit/7956f5fb072ec4426a90f3e6e3fb91a39c5ebe62))
+* design receiving Valve's game state integration as signals ([8d7ac72](https://github.com/o2csi/candeo/commit/8d7ac720ad1b1dc5a08d6278aef7e220a55cc07f))
+* games behind a switch, in a tab of their own ([fdc3e81](https://github.com/o2csi/candeo/commit/fdc3e81bacb82d8dbf3db43edd48c29bb4ef0479))
+* lead the landing page and README with getting started ([f2ceacf](https://github.com/o2csi/candeo/commit/f2ceacf085d16b89cfc2cfc2e1f59098b1b33725))
+* list the definitions to verify, with an issue form ([2cde213](https://github.com/o2csi/candeo/commit/2cde21364db75f8ab8dab503d2d26d46f8b49061))
+* send the computer's load to Candeo as signals ([829a347](https://github.com/o2csi/candeo/commit/829a347522c5c1eaeed8d70316e9950752c3e67e))
+* unverified device definitions, and what OpenRazer sends ([7a2446f](https://github.com/o2csi/candeo/commit/7a2446fe59c8e57093fd00dcf5d5a8cc20b79b2b))
+
+
+### CI/CD
+
+* delete the CI runs GitHub holds on the release pull request ([4d8df70](https://github.com/o2csi/candeo/commit/4d8df70a73151713cc978bfbc9428c6c3274ff08))
+
 ## [0.14.0](https://github.com/o2csi/candeo/compare/v0.13.0...v0.14.0) (2026-09-26)
 
 
