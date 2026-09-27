@@ -39,8 +39,13 @@ const TRANSACTION: u8 = 0x9f;
 
 /// Builds a 90-byte report, checksum included.
 fn report(command: u8, args: &[u8]) -> [u8; REPORT_LEN + 1] {
+    report_with(TRANSACTION, command, args)
+}
+
+/// A lighting report with another transaction byte than the one surveyed.
+fn report_with(transaction: u8, command: u8, args: &[u8]) -> [u8; REPORT_LEN + 1] {
     let mut r = [0u8; REPORT_LEN];
-    r[1] = TRANSACTION;
+    r[1] = transaction;
     r[5] = args.len() as u8;
     r[6] = CLASS_LIGHTING;
     r[7] = command;
@@ -448,6 +453,84 @@ fn probe_sustainable_frame_rate() {
 
     let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
     println!(">>> back on Spectrum Cycle.");
+}
+
+/// **Does the device check the transaction byte?** (§10)
+///
+/// OpenRazer sends this model's frames with `0x3f`, OpenRGB with `0x9f`, and
+/// other Razer keyboards use `0x1f`: the definitions to verify follow one
+/// source where they disagree. Each byte here sends a full frame of its own
+/// colour, then the custom effect. Between two, the keyboard goes back to
+/// Spectrum Cycle with `0x9f`, so the effect read back says, without the eye,
+/// whether the custom effect sent with that byte was taken; the colour says
+/// whether the rows were.
+#[test]
+#[ignore]
+fn probe_transaction_byte() {
+    let dev = open_keyboard();
+    let tries: [(u8, &str, [u8; 3]); 4] = [
+        (0x9f, "blue (control, the surveyed byte)", [0, 0, 255]),
+        (0x1f, "red", [255, 0, 0]),
+        (0x3f, "green", [0, 255, 0]),
+        (0xff, "yellow", [255, 255, 0]),
+    ];
+
+    let _ = dev.send_feature_report(&report(0x04, &[0, 0, 0xff]));
+    println!(
+        "
+>>> Watch the keyboard: each byte, 4 s, after a second of Spectrum Cycle.
+"
+    );
+    for (transaction, colour, rgb) in tries {
+        let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
+        std::thread::sleep(Duration::from_millis(1200));
+
+        let mut refused = 0;
+        for row in 0u8..6 {
+            let mut args = vec![0u8, 0, row, 0, 21];
+            for _ in 0..22 {
+                args.extend_from_slice(&rgb);
+            }
+            if dev
+                .send_feature_report(&report_with(transaction, 0x03, &args))
+                .is_err()
+            {
+                refused += 1;
+            }
+        }
+        if dev
+            .send_feature_report(&report_with(transaction, 0x02, &[0, 0, 0x08, 0, 0, 0]))
+            .is_err()
+        {
+            refused += 1;
+        }
+        std::thread::sleep(Duration::from_millis(60));
+        let reply = read_reply(&dev);
+
+        dev.send_feature_report(&class_report(0x0f, 0x82, 0x03))
+            .ok();
+        std::thread::sleep(Duration::from_millis(60));
+        let effect = read_reply(&dev).map(|r| r[10]);
+
+        println!(">>> 0x{transaction:02x} — expect {colour}");
+        match reply {
+            Some(r) => println!(
+                "    reply: status 0x{:02x} ({}), transaction 0x{:02x}",
+                r[0],
+                status_name(r[0]),
+                r[1]
+            ),
+            None => println!("    no reply"),
+        }
+        println!("    writes refused: {refused} · effect read back: {effect:02x?} (08 custom, 03 Spectrum Cycle)");
+        std::thread::sleep(Duration::from_secs(4));
+    }
+
+    let _ = dev.send_feature_report(&report(0x02, &[0, 0, 0x03, 0, 0, 0]));
+    println!(
+        "
+>>> done — back on Spectrum Cycle."
+    );
 }
 
 /// What HID enumeration gives **without any protocol**, on each interface.
