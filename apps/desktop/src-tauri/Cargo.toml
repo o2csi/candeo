@@ -80,7 +80,7 @@ croner = "4"
 # may listen on; and the token's randomness. See `src/signals/`.
 tiny_http = "0.12"
 if-addrs = "0.15"
-getrandom = "0.3"
+getrandom = "0.4"
 
 # Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`), key
 # presses through Raw Input (`src/runtime/presses.rs`) and the display language
