@@ -170,8 +170,8 @@ importers:
         specifier: ^11.12.0
         version: 11.12.0
       marked:
-        specifier: ^18.0.13
-        version: 18.0.13
+        specifier: ^18.0.14
+        version: 18.0.14
 
   apps/desktop:
     dependencies:
@@ -855,8 +855,8 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  marked@18.0.13:
-    resolution: {integrity: sha512-xTxVzZsBFwunP6HDmtBkabUQEYArnP7/rMDGmPj9SlrKlQ4i8MdYVow+nJL0eOqwpUqhzBoTBRADGN6uYwPyOw==}
+  marked@18.0.14:
+    resolution: {integrity: sha512-mBHK6FBHuBAlhgRe88w9F0O1AbwwXJUcQibUbC/QcdTbVGAD7aWza+xt3N6oT/jCZx3/OMeS+8rnuiHZcQ9s7A==}
     engines: {node: '>= 20'}
     hasBin: true
 
@@ -1629,7 +1629,7 @@ snapshots:
 
   marked@14.0.0: {}
 
-  marked@18.0.13: {}
+  marked@18.0.14: {}
 
   mlly@1.8.2:
     dependencies:
