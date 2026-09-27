@@ -715,10 +715,10 @@ fn follows_schema(json: &str) -> Result<(), String> {
     });
     let file: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let refused = validator.iter_errors(&file).next().map(|e| {
-        if e.instance_path.as_str().is_empty() {
+        if e.instance_path().as_str().is_empty() {
             e.to_string()
         } else {
-            format!("{}: {e}", e.instance_path)
+            format!("{}: {e}", e.instance_path())
         }
     });
     refused.map_or(Ok(()), Err)
@@ -1455,7 +1455,7 @@ mod tests {
             let file: serde_json::Value = serde_json::from_str(json).unwrap();
             let errors: Vec<String> = validator
                 .iter_errors(&file)
-                .map(|e| format!("{} at {}", e, e.instance_path))
+                .map(|e| format!("{} at {}", e, e.instance_path()))
                 .collect();
             assert!(errors.is_empty(), "{name}: {errors:#?}");
         }
