@@ -2568,10 +2568,6 @@ pub fn restore_builtin(app: AppHandle, name: String) -> CmdResult<()> {
     store(&app)?.restore_shipped(&crate::shipped::ALL, &name)
 }
 
-/// Opens the user's effects folder in the system file manager.
-///
-/// Adding an effect is saving a `.ts` file there: the folder has to be one click
-/// away, not a path to look up.
 /// Opens the folder of your device definitions, created if needed.
 #[tauri::command]
 pub fn open_devices_dir(app: AppHandle) -> CmdResult<()> {
@@ -2580,6 +2576,20 @@ pub fn open_devices_dir(app: AppHandle) -> CmdResult<()> {
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
         .map_err(|e| Failure::unexpected(format!("cannot open {}: {e}", crate::paths::shown(&dir))))
+}
+
+/// The site's list of devices, with the definitions still to verify
+/// (`docs/design/device-sdk.md` §9). A fixed address: the window names no page.
+const SITE_DEVICES: &str = "https://o2csi.github.io/candeo/devices.html";
+
+/// Opens the site's list of devices in the browser. Candeo itself fetches
+/// nothing: finding a definition there and saving it in your folder is yours
+/// to do.
+#[tauri::command]
+pub fn open_site_devices(app: AppHandle) -> CmdResult<()> {
+    app.opener()
+        .open_url(SITE_DEVICES, None::<&str>)
+        .map_err(|e| Failure::unexpected(format!("cannot open the site's devices: {e}")))
 }
 
 /// Copies a built-in device's definition into your folder, where it replaces
@@ -2709,6 +2719,10 @@ pub fn reload_device_definitions(app: AppHandle) -> CmdResult<Vec<crate::catalog
     Ok(store.reload_catalog().problems.clone())
 }
 
+/// Opens the user's effects folder in the system file manager.
+///
+/// Adding an effect is saving a `.ts` file there: the folder has to be one click
+/// away, not a path to look up.
 #[tauri::command]
 pub fn open_effects_dir(app: AppHandle) -> CmdResult<()> {
     let store = store(&app)?;

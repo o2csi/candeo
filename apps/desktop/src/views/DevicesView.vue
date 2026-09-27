@@ -11,6 +11,7 @@ import { useRouter } from 'vue-router'
 import {
   chooseDeviceDefinition,
   openDevicesDir,
+  openSiteDevices,
   reloadDeviceDefinitions,
   type DefinitionProblem,
 } from '../api/candeo'
@@ -302,6 +303,17 @@ onMounted(reread)
       </tbody>
     </table>
     <p v-else class="note">{{ t('devices.noMatch') }}</p>
+    <!--
+      This list is what this computer has a definition for; more are published,
+      some waiting for someone with the device. Opened in the browser: Candeo
+      fetches nothing.
+    -->
+    <p class="elsewhere">
+      {{ t('devices.moreOnSite') }}
+      <button type="button" class="ghost small" @click="attempt(openSiteDevices)">
+        {{ t('devices.moreOnSiteLink') }}
+      </button>
+    </p>
 
     <!-- ------------------------------------------------ yours -->
     <!--
@@ -505,6 +517,17 @@ onMounted(reread)
 .seg[aria-pressed='true'] {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.elsewhere {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 
 /* A list of what exists: a row a device, a column a fact. */

@@ -330,7 +330,7 @@
     "yoursNote": "Nobody reviewed your definitions: they send your devices exactly what they say.",
     "pluggedIn": "Plugged in · {n}",
     "nothingPlugged": "No device Candeo knows is plugged in.",
-    "known": "Every device Candeo knows · {n}",
+    "known": "Recognised devices · {n}",
     "filter": "Filter by name or ids",
     "noMatch": "No device matches.",
     "columns": {
@@ -360,7 +360,9 @@
       "label": "Devices",
       "all": "all {n} devices",
       "some": "{n} device | {n} devices"
-    }
+    },
+    "moreOnSite": "Not in the list? More devices are on the website, some waiting for someone to verify them.",
+    "moreOnSiteLink": "More devices on the website"
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
