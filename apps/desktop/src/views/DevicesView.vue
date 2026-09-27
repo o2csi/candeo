@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * Devices: what is plugged in first, then every device Candeo knows, then your
- * definitions (`docs/design/device-sdk.md` §9). What concerns the whole
- * application lives in Settings.
+ * Devices: one list, what is plugged in first, every device Candeo knows under
+ * *All*, then your definitions (`docs/design/device-sdk.md` §9). What concerns
+ * the whole application lives in Settings.
  */
 
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -20,11 +20,11 @@ import type { DeviceInfo } from '../api/types'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
 import {
+  FILTER_PAST,
   definitionChoice,
   ids,
-  known,
-  pluggedIn,
-  type OriginFilter,
+  listed,
+  type Shown,
   yourFiles,
 } from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
@@ -52,12 +52,11 @@ function hush(d: DeviceInfo): void {
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
 
-const plugged = computed(() => pluggedIn(devices.value))
-
-/** The list of known devices, as filtered: it grows with every device described. */
+/** The list, as filtered: what is plugged in, or every device described. */
+const shown = ref<Shown>('plugged')
 const text = ref('')
-const origin = ref<OriginFilter>('all')
-const listed = computed(() => known(devices.value, text.value, origin.value))
+const list = computed(() => listed(devices.value, shown.value, text.value))
+const pluggedCount = computed(() => devices.value.filter((d) => d.present).length)
 
 /** Which cards show their technical details. */
 const opened = reactive<Record<string, boolean>>({})
@@ -119,22 +118,52 @@ onMounted(reread)
   <section class="page">
     <header class="head">
       <h1>{{ t('devices.title') }}</h1>
+      <span class="seg-group" role="group" :aria-label="t('devices.shown')">
+        <button
+          type="button"
+          class="seg"
+          :aria-pressed="shown === 'plugged'"
+          @click="shown = 'plugged'"
+        >
+          {{ t('devices.pluggedIn', { n: pluggedCount }) }}
+        </button>
+        <button type="button" class="seg" :aria-pressed="shown === 'all'" @click="shown = 'all'">
+          {{ t('devices.all', { n: devices.length }) }}
+        </button>
+      </span>
       <button class="ghost" :disabled="busy" :title="t('devices.refreshTitle')" @click="reread">
         {{ t('devices.refresh') }}
       </button>
     </header>
 
-    <!-- ------------------------------------------------ plugged in -->
-    <h2 class="group">{{ t('devices.pluggedIn', { n: plugged.length }) }}</h2>
-    <ul v-if="plugged.length" class="cards">
+    <input
+      v-if="shown === 'all' && devices.length > FILTER_PAST"
+      v-model="text"
+      class="filter"
+      type="search"
+      spellcheck="false"
+      :placeholder="t('devices.filter')"
+      :aria-label="t('devices.filter')"
+    />
+
+    <!--
+      One list: a device plugged in is a card to act on; one known but not
+      plugged in, under *All*, only has its definition to read.
+    -->
+    <ul v-if="list.length" class="cards">
       <li
-        v-for="d in plugged"
+        v-for="d in list"
         :key="ids(d)"
         class="card"
-        :class="{ controlled: d.state === 'adopted', ignored: d.state === 'ignored' }"
+        :class="{ controlled: d.present && d.state === 'adopted', away: !d.present }"
       >
         <div class="main">
-          <DeviceStatusDot :device="d" />
+          <!--
+            The dot speaks of a device someone decided to control: orange on one
+            never controlled and not plugged in would warn about nothing.
+          -->
+          <DeviceStatusDot v-if="d.present || d.state === 'adopted'" :device="d" />
+          <span v-else class="spacer" aria-hidden="true" />
           <div class="id">
             <span class="name">
               {{ d.name }}
@@ -142,6 +171,7 @@ onMounted(reread)
             </span>
             <span class="sub">
               <span class="mono">{{ ids(d) }}</span> · {{ count(d) }}
+              <template v-if="!d.present"> · {{ t('devices.status.unplugged') }}</template>
             </span>
           </div>
 
@@ -150,7 +180,7 @@ onMounted(reread)
             or a file of yours for the same ids. None takes over by being in
             the folder (`docs/design/device-sdk.md` §9).
           -->
-          <label v-if="definitionChoice(d) !== null" class="choice">
+          <label v-if="d.present && definitionChoice(d) !== null" class="choice">
             <span class="sr-only">{{ t('devices.definition') }}</span>
             <select
               :value="definitionChoice(d)"
@@ -171,138 +201,88 @@ onMounted(reread)
             </select>
           </label>
 
+          <!-- Not *Open*: on a device, it would read as its state, *not open*. -->
+          <button v-if="d.file" class="ghost" @click="edit(d.origin, d.file)">
+            {{ t('devices.definition') }}
+          </button>
+
           <!--
-            The decision, not the connection: every card here is plugged in.
-            *Control* stays offered on a controlled device that is closed: the
-            decision may target another unit of the same model (its serial says
-            so on open), and it could otherwise only be adopted again through
-            *Ignore*.
+            The decision, one action: *Release* what is controlled, *Control*
+            the rest; the dot says the state. A controlled device that is not
+            open keeps *Release*: *Refresh* tries again, and *Release* then
+            *Control* targets another unit of the same model, its serial read
+            on open. Released and never decided look alike: neither is opened.
           -->
-          <span v-if="d.state !== 'detected'" class="tag" :class="d.state">
-            {{ t(`devices.state.${d.state}`) }}
-          </span>
-          <button
-            v-if="d.state !== 'adopted' || !d.open"
-            class="solid"
-            :disabled="busy"
-            @click="adopt(d)"
-          >
-            {{ t('devices.control') }}
-          </button>
-          <button v-if="d.state !== 'ignored'" class="ghost" :disabled="busy" @click="ignore(d)">
-            {{ t('devices.ignore') }}
-          </button>
-          <button
-            class="ghost more"
-            :aria-expanded="Boolean(opened[ids(d)])"
-            :title="t('devices.details')"
-            :aria-label="t('devices.details')"
-            @click="opened[ids(d)] = !opened[ids(d)]"
-          >
-            ⋯
-          </button>
+          <template v-if="d.present">
+            <button v-if="d.state === 'adopted'" class="ghost" :disabled="busy" @click="ignore(d)">
+              {{ t('devices.release') }}
+            </button>
+            <button v-else class="solid" :disabled="busy" @click="adopt(d)">
+              {{ t('devices.control') }}
+            </button>
+            <button
+              class="ghost more"
+              :aria-expanded="Boolean(opened[ids(d)])"
+              :title="t('devices.details')"
+              :aria-label="t('devices.details')"
+              @click="opened[ids(d)] = !opened[ids(d)]"
+            >
+              ⋯
+            </button>
+          </template>
         </div>
 
-        <!--
-          The version read, next to the survey's: the first question in front of
-          a keyboard that does not obey. 132 and 106 are named apart, since
-          confusing them is this hardware's trap.
-        -->
-        <div v-if="opened[ids(d)]" class="details mono">
-          <span>
-            {{
-              t('devices.firmware', {
-                version:
-                  d.firmware ??
-                  (d.open ? t('devices.firmwareNotRead') : t('devices.firmwareNotReadClosed')),
-                surveyed: d.surveyedFirmware,
-              })
-            }}
-          </span>
-          <span v-if="d.open && layout?.name === d.name">
-            {{
-              t('devices.matrix', {
-                rows: layout.rows,
-                cols: layout.cols,
-                frameLen: layout.frameLen,
-                keys: layout.keys.length,
-              })
-            }}
-          </span>
-        </div>
+        <template v-if="d.present">
+          <!--
+            The version read, next to the survey's: the first question in front of
+            a keyboard that does not obey. 132 and 106 are named apart, since
+            confusing them is this hardware's trap.
+          -->
+          <div v-if="opened[ids(d)]" class="details mono">
+            <span>
+              {{
+                t('devices.firmware', {
+                  version:
+                    d.firmware ??
+                    (d.open ? t('devices.firmwareNotRead') : t('devices.firmwareNotReadClosed')),
+                  surveyed: d.surveyedFirmware,
+                })
+              }}
+            </span>
+            <span v-if="d.open && layout?.name === d.name">
+              {{
+                t('devices.matrix', {
+                  rows: layout.rows,
+                  cols: layout.cols,
+                  frameLen: layout.frameLen,
+                  keys: layout.keys.length,
+                })
+              }}
+            </span>
+          </div>
 
-        <!-- The error belongs to the device that produced it, on its card. -->
-        <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
-        <FailureNote v-if="choiceError[ids(d)]" class="err" @close="delete choiceError[ids(d)]">
-          {{ choiceError[ids(d)] }}
-        </FailureNote>
-        <!-- Said where the choice is: the reason is with your definitions. -->
-        <p v-if="d.unloadedChoice" class="warn" role="status">{{ unloaded(d) }}</p>
-        <!--
-          A warning, not an error: nothing is blocked. On the card rather than
-          behind *Details*: a version different from the survey's is the first
-          lead, and nobody would go looking for it.
-        -->
-        <p v-for="w in d.warnings" :key="w" class="warn" role="status">{{ w }}</p>
+          <!-- The error belongs to the device that produced it, on its card. -->
+          <FailureNote v-if="trouble(d)" class="err" @close="hush(d)">{{ trouble(d) }}</FailureNote>
+          <FailureNote v-if="choiceError[ids(d)]" class="err" @close="delete choiceError[ids(d)]">
+            {{ choiceError[ids(d)] }}
+          </FailureNote>
+          <!-- Said where the choice is: the reason is with your definitions. -->
+          <p v-if="d.unloadedChoice" class="warn" role="status">{{ unloaded(d) }}</p>
+          <!--
+            A warning, not an error: nothing is blocked. On the card rather than
+            behind *Details*: a version different from the survey's is the first
+            lead, and nobody would go looking for it.
+          -->
+          <p v-for="w in d.warnings" :key="w" class="warn" role="status">{{ w }}</p>
+        </template>
       </li>
     </ul>
-    <p v-else class="note">{{ t('devices.nothingPlugged') }}</p>
-    <p v-if="plugged.some((d) => d.state === 'detected')" class="note">{{ t('devices.neverSeen') }}</p>
-
-    <!-- ------------------------------------------------ every device known -->
-    <div class="bar">
-      <h2 class="group">{{ t('devices.known', { n: devices.length }) }}</h2>
-      <input
-        v-model="text"
-        class="filter"
-        type="search"
-        spellcheck="false"
-        :placeholder="t('devices.filter')"
-        :aria-label="t('devices.filter')"
-      />
-      <span class="seg-group" role="group" :aria-label="t('devices.columns.origin')">
-        <button
-          v-for="o in ['all', 'builtIn', 'yours'] as const"
-          :key="o"
-          type="button"
-          class="seg"
-          :aria-pressed="origin === o"
-          @click="origin = o"
-        >
-          {{ t(`devices.groups.${o}`) }}
-        </button>
-      </span>
-    </div>
-    <table v-if="listed.length" class="known">
-      <thead>
-        <tr>
-          <th>{{ t('devices.columns.device') }}</th>
-          <th>{{ t('devices.columns.kind') }}</th>
-          <th>{{ t('devices.columns.origin') }}</th>
-          <th>{{ t('devices.columns.here') }}</th>
-          <th />
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="d in listed" :key="ids(d)">
-          <td>
-            {{ d.name }}
-            <span class="mono faint">{{ ids(d) }}</span>
-          </td>
-          <td class="faint">{{ t(`devices.kinds.${d.lights}`) }}</td>
-          <td :class="d.origin === 'yours' ? 'mine' : 'faint'">{{ t(`devices.groups.${d.origin}`) }}</td>
-          <td :class="d.present ? 'ok' : 'faint'">
-            {{ d.present ? t('devices.plugged') : t('devices.unplugged') }}
-          </td>
-          <td class="act">
-            <button v-if="d.file" class="ghost small" @click="edit(d.origin, d.file)">
-              {{ t('devices.open') }}
-            </button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else class="note">{{ t('devices.noMatch') }}</p>
+    <p v-else class="note">
+      {{ shown === 'plugged' ? t('devices.nothingPlugged') : t('devices.noMatch') }}
+    </p>
+    <p v-if="list.some((d) => d.present && d.state === 'detected')" class="note">
+      {{ t('devices.neverSeen') }}
+    </p>
     <!--
       This list is what this computer has a definition for; more are published,
       some waiting for someone with the device. Opened in the browser: Candeo
@@ -362,8 +342,8 @@ onMounted(reread)
   gap: var(--gap-3);
 }
 
-.head {
-  justify-content: space-between;
+.head h1 {
+  flex: 1;
 }
 
 .bar .group {
@@ -404,8 +384,20 @@ onMounted(reread)
   border-color: var(--accent);
 }
 
-.card.ignored {
-  opacity: 0.6;
+/* Known, not plugged in: listed under *All*, with only its definition to read. */
+.card.away {
+  padding: var(--gap-2) var(--gap-4);
+  background: transparent;
+}
+
+.spacer {
+  flex: none;
+  width: 8px;
+}
+
+.card.away .name {
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .main {
@@ -467,11 +459,6 @@ onMounted(reread)
   background: var(--accent-soft);
 }
 
-.tag.ignored {
-  color: var(--text-faint);
-  border: 1px solid var(--line-strong);
-}
-
 /* Yours: nobody reviewed it, and it shows wherever the device does. */
 .tag.yours {
   margin-left: var(--gap-2);
@@ -481,6 +468,7 @@ onMounted(reread)
 }
 
 .filter {
+  align-self: flex-end;
   width: min(240px, 40%);
   padding: 5px var(--gap-2);
   background: var(--raised);
@@ -528,49 +516,6 @@ onMounted(reread)
   margin: 0;
   color: var(--text-faint);
   font-size: 12px;
-}
-
-/* A list of what exists: a row a device, a column a fact. */
-.known {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.known th {
-  padding: 0 var(--gap-3) var(--gap-2) 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--text-faint);
-  font-size: 11px;
-  font-weight: 500;
-  text-align: left;
-}
-
-.known td {
-  padding: var(--gap-2) var(--gap-3) var(--gap-2) 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.known .act {
-  padding-right: 0;
-  text-align: right;
-}
-
-.faint {
-  color: var(--text-faint);
-}
-
-.known .mono.faint {
-  margin-left: var(--gap-2);
-  font-size: 11px;
-}
-
-.mine {
-  color: var(--warn);
-}
-
-.ok {
-  color: var(--ok);
 }
 
 .solid,

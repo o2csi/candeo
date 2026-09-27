@@ -827,6 +827,10 @@ add what compiling could not:
 A definition that fails to load is listed with the reason, like an effect that
 does not compile, and drives nothing.
 
+*Devices* lists what is plugged in, or every device this computer has a
+definition for under *All*: one list, the devices known but not plugged in
+dimmed after the others, each with its definition to open (#292).
+
 **Which one drives a device is a choice**, made on its card in *Devices*: the
 built-in definition, or one of your files for the same `vid:pid`. Several files
 may define a device, a variant each; none takes over by being in the folder.

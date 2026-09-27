@@ -414,7 +414,9 @@ place, or a model whose survey is uncertain.
 | `ignored` — ignored | left alone, and stays that way |
 
 The default is `detected`: the ceremony disappears without anything being taken
-over without consent. The exact shape in `settings.json` is in
+over without consent. The Devices page offers one action per device, *Control*
+(`adopted`) or *Release* (`ignored`); a released device and one never decided
+about look alike there, since neither is opened (#292). The exact shape in `settings.json` is in
 [`../api/commands.md`](../api/commands.md).
 
 ### Identity rests on VID / PID / serial, nothing else

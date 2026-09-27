@@ -86,9 +86,10 @@ catalogs; new interface text goes there too.
   place.
 - **An error is one sentence and the action to take.** Technical detail goes to
   the log and the copied diagnostic, never raw into the window or the tray.
-- **One term per state:** *controlled*, *not open*, *unplugged*; the action is
-  *Control* (*piloté*, *non ouvert*, *débranché*, *Piloter* in the current French
-  interface). Settle a new term before using it anywhere.
+- **One term per state:** *controlled*, *not open*, *unplugged*; the actions are
+  *Control* and *Release* (*piloté*, *non ouvert*, *débranché*, *Piloter* and
+  *Libérer* in the current French interface). Settle a new term before using it
+  anywhere.
 - The copied diagnostic is for bug reports: it stays in English and does not go
   through the catalogs.
 
