@@ -987,23 +987,27 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         })
         .collect();
 
-    let port = match (
-        &d.matching.usage_page,
-        &d.matching.usage,
-        d.matching.interface,
-    ) {
-        (Some(page), Some(usage), None) => Port::Collection {
-            usage_page: hex_u16(page, "usage page")?,
-            usage: hex_u16(usage, "usage")?,
-        },
-        (None, None, Some(interface)) => Port::Interface(interface),
-        (Some(page), Some(usage), Some(interface)) => Port::InterfaceCollection {
-            interface,
-            usage_page: hex_u16(page, "usage page")?,
-            usage: hex_u16(usage, "usage")?,
-        },
-        _ => return Err("match an interface, a usage page and a usage, or all three".into()),
-    };
+    let port =
+        match (
+            &d.matching.usage_page,
+            &d.matching.usage,
+            d.matching.interface,
+        ) {
+            (Some(page), Some(usage), None) => Port::Collection {
+                usage_page: hex_u16(page, "usage page")?,
+                usage: hex_u16(usage, "usage")?,
+            },
+            (None, None, Some(interface)) => Port::Interface(interface),
+            (Some(page), usage, Some(interface)) => Port::InterfaceCollection {
+                interface,
+                usage_page: hex_u16(page, "usage page")?,
+                usage: usage.as_ref().map(|u| hex_u16(u, "usage")).transpose()?,
+            },
+            _ => return Err(
+                "match an interface, a usage page and a usage, or an interface and a usage page"
+                    .into(),
+            ),
+        };
 
     let layout = Layout {
         name: Box::leak(d.name.into_boxed_str()),
@@ -1171,7 +1175,7 @@ mod tests {
             load(json).unwrap_or_else(|e| panic!("{name}: {e}"));
             replay(json).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
-        assert!(files.len() >= 40, "{} unverified definitions", files.len());
+        assert!(files.len() >= 56, "{} unverified definitions", files.len());
     }
 
     /// What *Copy to yours* and the editor start from: the text shipped.

@@ -118,6 +118,7 @@ const families = [
   { facts: 'variants.json', vid: '1532', heading: 'Their protocol proved on a sibling' },
   { facts: 'steelseries.facts.json', vid: '1038', heading: 'Their protocol to verify too' },
   { facts: 'logitech.facts.json', vid: '046d' },
+  { facts: 'asus.facts.json', vid: '0b05' },
 ].map((f) => ({
   ...f,
   variants: JSON.parse(readFileSync(join(UNVERIFIED, f.facts), 'utf8')).variants.map((v) => ({ ...v, vid: f.vid })),

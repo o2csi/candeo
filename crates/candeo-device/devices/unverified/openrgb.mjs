@@ -21,6 +21,8 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
+import { token } from './keys.mjs'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const checkout = process.argv[2]
 if (!checkout) {
@@ -223,33 +225,6 @@ class Layout {
   at(row, col) {
     return this.keys.find((k) => k.row === row && k.col === col)?.what ?? ''
   }
-}
-
-// ---------------------------------------------------------------- tokens
-
-/** OpenRGB's names, as the tokens `derive.mjs` reads. */
-const TOKEN = {
-  ESCAPE: 'esc', PRINT_SCREEN: 'prtsc', SCROLL_LOCK: 'scrlk', PAUSE_BREAK: 'pause',
-  BACK_TICK: 'grave', MINUS: 'minus', EQUALS: 'equal', BACKSPACE: 'bksp', INSERT: 'ins', HOME: 'home', PAGE_UP: 'pgup',
-  TAB: 'tab', LEFT_BRACKET: 'lbracket', RIGHT_BRACKET: 'rbracket', ANSI_BACK_SLASH: 'backslash', DELETE: 'del', END: 'end', PAGE_DOWN: 'pgdn',
-  CAPS_LOCK: 'caps', SEMICOLON: 'semicolon', QUOTE: 'quote', POUND: 'hash', ANSI_ENTER: 'enter',
-  LEFT_SHIFT: 'lshift', ISO_BACK_SLASH: 'iso', COMMA: 'comma', PERIOD: 'period', FORWARD_SLASH: 'slash', RIGHT_SHIFT: 'rshift', UP_ARROW: 'up',
-  LEFT_CONTROL: 'lctrl', LEFT_WINDOWS: 'lwin', LEFT_ALT: 'lalt', SPACE: 'space', RIGHT_ALT: 'ralt', RIGHT_FUNCTION: 'fn', MENU: 'menu', RIGHT_CONTROL: 'rctrl',
-  LEFT_ARROW: 'left', DOWN_ARROW: 'down', RIGHT_ARROW: 'right',
-  NUMPAD_LOCK: 'numlk', NUMPAD_DIVIDE: 'kpdiv', NUMPAD_TIMES: 'kpmul', NUMPAD_MINUS: 'kpsub', NUMPAD_PLUS: 'kpadd', NUMPAD_ENTER: 'kpenter', NUMPAD_PERIOD: 'kpdot',
-  MEDIA_PREVIOUS: 'prev', MEDIA_PLAY_PAUSE: 'play', MEDIA_NEXT: 'next', MEDIA_MUTE: 'mute', MEDIA_VOLUME_DOWN: 'voldown', MEDIA_VOLUME_UP: 'volup',
-  'Key: M1': 'm1', 'Key: M2': 'm2', 'Key: M3': 'm3', 'Key: M4': 'm4', 'Key: M5': 'm5', 'Key: M6': 'm6', 'Key: Dial': 'dial',
-  Logo: 'logo', 'Media group': 'media', 'Media: Volume Dial': 'voldial', 'Xbox Game Bar': 'gamebar',
-}
-
-function token(what) {
-  if (what === '') return '.'
-  const name = what.replace(/^KEY_EN_/, '')
-  if (TOKEN[name]) return TOKEN[name]
-  if (/^([A-Z0-9]|F\d+)$/.test(name)) return name.toLowerCase()
-  const pad = name.match(/^NUMPAD_(\d)$/)
-  if (pad) return `kp${pad[1]}`
-  throw new Error(`no token for ${what}`)
 }
 
 // ---------------------------------------------------------------- models
