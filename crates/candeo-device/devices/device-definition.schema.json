@@ -36,9 +36,9 @@
           "description": "The interface of a composite device that carries the lighting: `3` on the DeathStalker."
         },
         "usagePage": { "$ref": "#/$defs/hex16", "description": "The collection's usage page, when several collections share one interface: `ff00`." },
-        "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`." }
+        "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`. Left out with an `interface`, any usage of that page on it matches." }
       },
-      "dependentRequired": { "usagePage": ["usage"], "usage": ["usagePage"] },
+      "dependentRequired": { "usage": ["usagePage"] },
       "anyOf": [{ "required": ["interface"] }, { "required": ["usagePage", "usage"] }]
     },
     "surveyed": {

@@ -162,11 +162,12 @@ pub enum Port {
     Collection { usage_page: u16, usage: u16 },
     /// One collection of one interface: a device repeating the same usage page
     /// on several interfaces, where only one of them lights — SteelSeries'
-    /// wireless Apex, per OpenRGB (`docs/design/other-keyboards.md` §2).
+    /// wireless Apex, per OpenRGB (`docs/design/other-keyboards.md` §2). The
+    /// usage may go unnamed where the sources name only the page, as for ASUS.
     InterfaceCollection {
         interface: u8,
         usage_page: u16,
-        usage: u16,
+        usage: Option<u16>,
     },
 }
 
@@ -268,7 +269,11 @@ impl Layout {
                 interface: number,
                 usage_page: page,
                 usage: which,
-            } => interface == i32::from(number) && usage_page == page && usage == which,
+            } => {
+                interface == i32::from(number)
+                    && usage_page == page
+                    && which.is_none_or(|which| usage == which)
+            }
         }
     }
 
