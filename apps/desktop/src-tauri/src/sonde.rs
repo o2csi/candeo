@@ -993,3 +993,215 @@ fn probe_lamparray_attributes() {
     }
     println!("\n>>> done: {wrong} lamps answered with another id than expected.");
 }
+
+/// A report built from the fields its descriptor declares: each field takes
+/// the next value given for its usage, in order, and 0 when none is left.
+fn write_fields(id: u8, fields: &[Field], values: &[(u16, u64)]) -> Vec<u8> {
+    let bits: u32 = fields.iter().map(|f| f.bits).sum();
+    let mut out = vec![0u8; 1 + bits.div_ceil(8) as usize];
+    out[0] = id;
+    let mut used = vec![false; values.len()];
+    let mut bit = 8usize;
+    for f in fields {
+        let slot = values
+            .iter()
+            .enumerate()
+            .position(|(i, (usage, _))| !used[i] && u32::from(*usage) == f.usage & 0xffff);
+        if let Some(i) = slot {
+            used[i] = true;
+            for k in 0..f.bits as usize {
+                if (values[i].1 >> k) & 1 == 1 {
+                    out[(bit + k) / 8] |= 1 << ((bit + k) % 8);
+                }
+            }
+        }
+        bit += f.bits as usize;
+    }
+    out
+}
+
+/// The LampArray collection, opened: its feature reports as the descriptor
+/// declares them, and how many lamps it has.
+struct LampArray {
+    dev: hidapi::HidDevice,
+    reports: std::collections::BTreeMap<u8, (u32, Vec<Field>)>,
+    count: u64,
+    start: Instant,
+}
+
+/// `LampUpdateComplete`: this report ends an image.
+const UPDATE_COMPLETE: u64 = 1;
+
+impl LampArray {
+    fn open(api: &hidapi::HidApi) -> Self {
+        let info = api
+            .device_list()
+            .find(|d| {
+                d.vendor_id() == VID
+                    && d.product_id() == PID
+                    && d.usage_page() == LAMP_ARRAY_PAGE
+                    && d.usage() == 0x01
+            })
+            .expect("no LampArray collection");
+        let dev = info
+            .open_device(api)
+            .expect("open the LampArray collection");
+        let mut descriptor = [0u8; 4096];
+        let n = dev
+            .get_report_descriptor(&mut descriptor)
+            .expect("report descriptor");
+        let mut lamps = Self {
+            dev,
+            reports: feature_reports(&descriptor[..n]),
+            count: 0,
+            start: Instant::now(),
+        };
+        let (id, fields) = lamps.report(0x02);
+        let bits: u32 = fields.iter().map(|f| f.bits).sum();
+        let mut buf = vec![0u8; 1 + bits.div_ceil(8) as usize];
+        buf[0] = id;
+        lamps.dev.get_feature_report(&mut buf).expect("attributes");
+        lamps.count = read_fields(&buf, &fields)
+            .iter()
+            .find(|(u, _)| *u & 0xffff == 0x03)
+            .map(|(_, v)| *v)
+            .unwrap_or(0);
+        lamps
+    }
+
+    fn report(&self, usage: u16) -> (u8, Vec<Field>) {
+        let wanted = (u32::from(LAMP_ARRAY_PAGE) << 16) | u32::from(usage);
+        self.reports
+            .iter()
+            .find(|(_, (c, _))| *c == wanted)
+            .map(|(id, (_, fields))| (*id, fields.clone()))
+            .expect("a report the descriptor lacks")
+    }
+
+    fn send(&self, what: &str, report: Vec<u8>) {
+        let result = self.dev.send_feature_report(&report);
+        println!(
+            "    {:5.1} s · {what} · {:02x?} · {}",
+            self.start.elapsed().as_secs_f32(),
+            &report[..report.len().min(12)],
+            match result {
+                Ok(()) => "written".to_string(),
+                Err(e) => format!("REFUSED: {e}"),
+            }
+        );
+    }
+
+    fn autonomous(&self, on: bool) {
+        let (id, fields) = self.report(0x70);
+        let what = if on {
+            "autonomous mode on"
+        } else {
+            "autonomous mode off"
+        };
+        self.send(what, write_fields(id, &fields, &[(0x71, u64::from(on))]));
+    }
+
+    /// Every lamp one colour, in one range update.
+    fn all(&self, what: &str, r: u64, g: u64, b: u64) {
+        let (id, fields) = self.report(0x60);
+        let values = [
+            (0x55, UPDATE_COMPLETE),
+            (0x61, 0),
+            (0x62, self.count - 1),
+            (0x51, r),
+            (0x52, g),
+            (0x53, b),
+            (0x54, 0xff),
+        ];
+        self.send(what, write_fields(id, &fields, &values));
+    }
+
+    /// The first eight lamps blue, in one multi-update.
+    fn first_eight_blue(&self) {
+        let (id, fields) = self.report(0x50);
+        let mut values = vec![(0x03, 8), (0x55, UPDATE_COMPLETE)];
+        values.extend((0..8).map(|lamp| (0x21, lamp)));
+        for _ in 0..8 {
+            values.extend([(0x51, 0), (0x52, 0), (0x53, 0xff), (0x54, 0xff)]);
+        }
+        self.send("lamps 0 to 7 blue", write_fields(id, &fields, &values));
+    }
+}
+
+/// **Does a LampArray update light the keys?** (§13 of the survey)
+///
+/// Autonomous mode off, then the whole keyboard red, then green — one range
+/// update each — then the first eight lamps blue, with one multi-update. Three
+/// seconds each, watched. Autonomous mode back on at the end hands the lamps
+/// back to the firmware.
+///
+/// Run on 2026-09-27 with the keyboard left on the custom effect by Candeo:
+/// every report written, nothing shown — see `probe_lamparray_over_firmware`.
+#[test]
+#[ignore]
+fn probe_lamparray_update() {
+    let api = hidapi::HidApi::new().expect("HID");
+    let lamps = LampArray::open(&api);
+    println!("\n>>> {} lamps. Watch the keyboard.\n", lamps.count);
+    lamps.autonomous(false);
+    std::thread::sleep(Duration::from_millis(50));
+    lamps.all("everything red", 0xff, 0, 0);
+    std::thread::sleep(Duration::from_secs(3));
+    lamps.all("everything green", 0, 0xff, 0);
+    std::thread::sleep(Duration::from_secs(3));
+    lamps.first_eight_blue();
+    std::thread::sleep(Duration::from_secs(3));
+    lamps.autonomous(true);
+    println!("\n>>> done: the firmware has the lamps back.");
+}
+
+/// **Does the firmware show LampArray over its own effects?**
+///
+/// The Razer protocol's effect decides what the keyboard shows: this puts it on
+/// Spectrum Cycle, writes LampArray colours, gives the lamps back, then tries
+/// again over the effect *Off*. Each step names what the keyboard should show.
+#[test]
+#[ignore]
+fn probe_lamparray_over_firmware() {
+    let razer = open_keyboard();
+    let api = hidapi::HidApi::new().expect("HID");
+    let lamps = LampArray::open(&api);
+    let effect = |what: &str, id: u8| {
+        let result = razer.send_feature_report(&report(0x02, &[0, 0, id, 0, 0, 0]));
+        println!(
+            "    {:5.1} s · Razer effect {what} · {}",
+            lamps.start.elapsed().as_secs_f32(),
+            if result.is_ok() { "written" } else { "REFUSED" }
+        );
+    };
+    println!("\n>>> {} lamps. Watch the keyboard.\n", lamps.count);
+
+    println!(">>> 1. Spectrum Cycle, by the Razer protocol: colours cycling.");
+    effect("Spectrum Cycle", 0x03);
+    std::thread::sleep(Duration::from_secs(3));
+
+    println!(">>> 2. LampArray over it: red, then green.");
+    lamps.autonomous(false);
+    std::thread::sleep(Duration::from_millis(50));
+    lamps.all("everything red", 0xff, 0, 0);
+    std::thread::sleep(Duration::from_secs(3));
+    lamps.all("everything green", 0, 0xff, 0);
+    std::thread::sleep(Duration::from_secs(3));
+
+    println!(">>> 3. Lamps given back: Spectrum Cycle again?");
+    lamps.autonomous(true);
+    std::thread::sleep(Duration::from_secs(3));
+
+    println!(">>> 4. The Razer effect Off, then LampArray: blue.");
+    effect("Off", 0x00);
+    std::thread::sleep(Duration::from_secs(1));
+    lamps.autonomous(false);
+    std::thread::sleep(Duration::from_millis(50));
+    lamps.all("everything blue", 0, 0, 0xff);
+    std::thread::sleep(Duration::from_secs(3));
+
+    println!(">>> 5. Back to Spectrum Cycle.");
+    lamps.autonomous(true);
+    effect("Spectrum Cycle", 0x03);
+    println!("\n>>> done.");
+}

@@ -107,7 +107,9 @@ mode* off hands the lamps to the host, on gives them back to the firmware.
 - **Here:** the DeathStalker V2 Pro exposes a collection on page `0x59` next to
   its Razer interfaces, and describes itself through it: 105 lamps with their
   positions in millimetres and their keys, read on 2026-09-27 (its survey,
-  §13). The standard can be verified on a device we have.
+  §13). Its updates, though, are taken and not shown: Razer's firmware keeps
+  the lamps until Synapse hands them over, with a switch that is not known yet.
+  A standard in the descriptor is not a standard in use.
 - **Elsewhere:** other Razer keyboards (the DeathStalker V2, Huntsman V3 Pro,
   BlackWidow V4 Pro, Ornata V3, per Razer's support pages); laptops such as
   Acer's Predator Helios 16 and ASUS's Vivobook S14/S16, natively. Logitech
@@ -122,7 +124,8 @@ mode* off hands the lamps to the host, on gives them back to the firmware.
   Lighting on, gives way to the foreground application, and needs package
   identity to light in the background. Raw HID is the path on both systems;
   the API may come later for when Dynamic Lighting is on.
-- **Risks.** Racing Windows when Dynamic Lighting is on; a keyboard driven by
+- **Risks.** A maker holding the lamps until its own software releases them,
+  as Razer does; racing Windows when Dynamic Lighting is on; a keyboard driven by
   two protocols at once, so one is chosen per device; no colour read back, so a
   report a device drops is dropped silently; lamps are points, so rectangles
   are guessed from their spacing; about thirteen reports per frame for a full
