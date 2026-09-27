@@ -117,10 +117,20 @@ const UNVERIFIED = join(root, 'crates/candeo-device/devices/unverified')
 const families = [
   { facts: 'variants.json', vid: '1532', heading: 'Their protocol proved on a sibling' },
   { facts: 'steelseries.facts.json', vid: '1038', heading: 'Their protocol to verify too' },
-].map((f) => ({ ...f, variants: JSON.parse(readFileSync(join(UNVERIFIED, f.facts), 'utf8')).variants }))
+  { facts: 'logitech.facts.json', vid: '046d' },
+].map((f) => ({
+  ...f,
+  variants: JSON.parse(readFileSync(join(UNVERIFIED, f.facts), 'utf8')).variants.map((v) => ({ ...v, vid: f.vid })),
+}))
 
 function toVerify(repo) {
-  return families.map((f) => `        <h3>${f.heading}</h3>\n${familyTable(repo, f)}`).join('\n')
+  // A family without a heading shares the table of the one before it.
+  const degrees = []
+  for (const f of families) {
+    if (f.heading) degrees.push({ heading: f.heading, variants: [] })
+    degrees.at(-1).variants.push(...f.variants)
+  }
+  return degrees.map((d) => `        <h3>${d.heading}</h3>\n${familyTable(repo, d)}`).join('\n')
 }
 
 function familyTable(repo, family) {
@@ -128,7 +138,7 @@ function familyTable(repo, family) {
     .map(
       (v) => `            <tr>
               <td>${v.name}</td>
-              <td class="mono">${family.vid}:${v.pid}</td>
+              <td class="mono">${v.vid}:${v.pid}</td>
               <td>${v.connection}</td>
               <td><a href="devices/${v.file}" download>${v.file}</a></td>
               <td><a href="${repo}/issues/new?template=device-report.yml&amp;title=Device:%20${encodeURIComponent(v.name)}">Report</a></td>

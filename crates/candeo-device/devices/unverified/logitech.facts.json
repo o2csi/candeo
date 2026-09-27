@@ -1,0 +1,171 @@
+{
+  "source": "OpenRGB, https://gitlab.com/CalcProgrammer1/OpenRGB, commit 0f8f2dcc (2026-09-25): Controllers/LogitechController — LogitechControllerDetect.cpp for the product ids and collections, LogitechG815Controller and LogitechG915Controller for the reports, their RGBController files for the keys.",
+  "derived": "2026-09-27",
+  "addresses": {
+    "g1": "b4",
+    "g2": "b5",
+    "g3": "b6",
+    "g4": "b7",
+    "g5": "b8",
+    "logo": "d2",
+    "brightness": "99",
+    "play": "9b",
+    "mute": "9c",
+    "next": "9d",
+    "prev": "9e",
+    "fn": "6f"
+  },
+  "links": {
+    "g815": {
+      "device": "ff",
+      "effects": "08",
+      "rgb": "0f",
+      "perKey": "10"
+    },
+    "g915-wired": {
+      "device": "ff",
+      "effects": "0e",
+      "rgb": "09",
+      "perKey": "0a"
+    },
+    "g915-receiver": {
+      "device": "01",
+      "effects": "0f",
+      "rgb": "0a",
+      "perKey": "0b"
+    }
+  },
+  "sizes": {
+    "full": [
+      "brightness esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute logo",
+      "g1 grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+      "g2 tab q w e r t y u i o p lbracket rbracket backslash del end pgdn kp7 kp8 kp9 kpadd .",
+      "g3 caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+      "g4 lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+      "g5 lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+    ],
+    "full-no-g": [
+      "esc brightness f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute logo",
+      "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+      "tab q w e r t y u i o p lbracket rbracket backslash del end pgdn kp7 kp8 kp9 kpadd .",
+      "caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+      "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+      "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . kp0 kpdot . ."
+    ],
+    "tkl": [
+      "esc brightness f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause prev play next mute logo",
+      "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup . . . . .",
+      "tab q w e r t y u i o p lbracket rbracket backslash del end pgdn . . . . .",
+      "caps a s d f g h j k l semicolon quote hash enter . . . . . . . .",
+      "lshift iso z x c v b n m comma period slash . rshift . up . . . . . .",
+      "lctrl lwin lalt . . . space . . . ralt fn menu rctrl left down right . . . . ."
+    ]
+  },
+  "variants": [
+    {
+      "file": "logitech-g815.json",
+      "name": "Logitech G815",
+      "pid": "c33f",
+      "match": {
+        "interface": 1,
+        "usagePage": "ff43",
+        "usage": "0602"
+      },
+      "size": "full",
+      "link": "g815",
+      "connection": "wired"
+    },
+    {
+      "file": "logitech-g813.json",
+      "name": "Logitech G813",
+      "pid": "c232",
+      "match": {
+        "interface": 1,
+        "usagePage": "ff43",
+        "usage": "0602"
+      },
+      "size": "full-no-g",
+      "link": "g815",
+      "connection": "wired",
+      "notes": [
+        "OpenRGB drives it as the G815; drawn without the G keys it does not have."
+      ],
+      "rects": {
+        "0:1": [
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "file": "logitech-g915.json",
+      "name": "Logitech G915 (cable)",
+      "pid": "c33e",
+      "match": {
+        "interface": 2,
+        "usagePage": "ff00",
+        "usage": "0002"
+      },
+      "size": "full",
+      "link": "g915-wired",
+      "connection": "wired"
+    },
+    {
+      "file": "logitech-g915-receiver.json",
+      "name": "Logitech G915 (LIGHTSPEED receiver)",
+      "pid": "c541",
+      "match": {
+        "interface": 2,
+        "usagePage": "ff00",
+        "usage": "0002"
+      },
+      "size": "full",
+      "link": "g915-receiver",
+      "connection": "LIGHTSPEED receiver"
+    },
+    {
+      "file": "logitech-g915-tkl.json",
+      "name": "Logitech G915 TKL (cable)",
+      "pid": "c343",
+      "match": {
+        "interface": 2,
+        "usagePage": "ff00",
+        "usage": "0002"
+      },
+      "size": "tkl",
+      "link": "g915-wired",
+      "connection": "wired",
+      "rects": {
+        "0:1": [
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "file": "logitech-g915-tkl-receiver.json",
+      "name": "Logitech G915 TKL (LIGHTSPEED receiver)",
+      "pid": "c545",
+      "match": {
+        "interface": 2,
+        "usagePage": "ff00",
+        "usage": "0002"
+      },
+      "size": "tkl",
+      "link": "g915-receiver",
+      "connection": "LIGHTSPEED receiver",
+      "rects": {
+        "0:1": [
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    }
+  ]
+}
