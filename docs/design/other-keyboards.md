@@ -79,12 +79,15 @@ Across them:
 By what each opens, the cheapest first:
 
 1. **A `write` wire** — `hid_write`, the interrupt pipe. Asked by most
-   families above. Small.
-2. **Reports on leaving** — what gives the lighting back to the firmware when
-   Candeo lets a device go: SteelSeries `3B`/`41`, the Claymore's `41 00`,
-   Wooting's reset. Small, and what *hand back* already means for Razer.
-3. **A keep-alive** — the last image sent again after so many milliseconds
-   without a change: HyperX, Corsair V2. Small; `skipUnchanged` gives way to it.
+   families above. Small, and done: `"wire": "write"`.
+2. ~~Reports on leaving~~ — not needed. Giving the lighting back to the
+   firmware is already a firmware effect the gallery offers: SteelSeries' `3B`
+   or `41`, the Claymore's `41 00`, Wooting's reset are each an effect's
+   `send`. Candeo quitting leaves the last image, as it does on a Razer.
+3. ~~A keep-alive~~ — not needed while an effect runs: Candeo sends thirty
+   images a second, well inside HyperX's and Corsair's timeouts. Only a file
+   pacing itself with `skipUnchanged` would starve such a keyboard; it should
+   not use it.
 4. **A stream** — one buffer of colours cut across reports whatever falls
    where, with a packet index and a 16-bit length: Ducky, Cooler Master V2,
    Roccat, Corsair V2, Wooting's ARM boards. Medium.
@@ -143,11 +146,16 @@ frames without waiting the device's minimum interval.
 
 ## 5. Proposed order
 
-1. **LampArray, verified on the DeathStalker.** A read-only probe first — the
-   attributes and every lamp, `Get` feature reports — then one frame with
-   Dynamic Lighting off. It is the one path verifiable here, and it serves every
-   brand that ships the standard.
-2. **The `write` wire, reports on leaving, the keep-alive**, then unverified
+1. ~~LampArray, verified on the DeathStalker~~ — **set aside**, 2026-09-27.
+   The DeathStalker describes itself through it and takes its updates, but
+   shows none until Synapse hands the lamps over (its survey, §13). OpenRGB
+   never meets this: where its Razer driver knows a device, it turns its
+   LampArray driver off for it. The standard is alive mostly in laptop
+   keyboards, certified for Windows' Dynamic Lighting; a built-in family is
+   worth it once one of those is at hand to verify it on. Candeo already
+   drives this keyboard through its own protocol, which LampArray would not
+   improve.
+2. **The `write` wire**, then unverified
    definitions — *protocol unverified*, one degree below the Razer ones, whose
    protocol is verified on a sibling — for ASUS ROG/TUF, SteelSeries Apex,
    HyperX Origins and Logitech G815/G915. Their key maps are C++ arrays, per
