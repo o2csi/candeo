@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.17.0](https://github.com/o2csi/candeo/compare/v0.16.0...v0.17.0) (2026-09-27)
+
+
+### Features
+
+* **devices:** a write wire for reports on the interrupt pipe ([eeac95e](https://github.com/o2csi/candeo/commit/eeac95ed9abae7a7481be385010003d1676498c1))
+* **devices:** an interface and a usage page may match without a usage ([69147d5](https://github.com/o2csi/candeo/commit/69147d5384dafbe4042e8a7f4c4941e11a0c3d8e))
+* **devices:** ASUS ROG and TUF definitions to verify ([9af4aff](https://github.com/o2csi/candeo/commit/9af4affec8682ce7b67dcfc77d0e155c651d525f))
+* **devices:** HyperX Alloy Origins and Elite 2 definitions to verify ([07bfe4c](https://github.com/o2csi/candeo/commit/07bfe4cecb046e3afb93d08a698b4262dfa87c98))
+* **devices:** Logitech G815, G813 and G915 definitions to verify ([51d3c55](https://github.com/o2csi/candeo/commit/51d3c55c4e89488ab455802adbeb1fae95f0c85e))
+* **devices:** match an interface and a collection together ([0471ede](https://github.com/o2csi/candeo/commit/0471edecdfe9453fc3cb41e0df53e684e857f909))
+* **devices:** SteelSeries Apex definitions to verify ([0013fd2](https://github.com/o2csi/candeo/commit/0013fd2bd52e6720c033d6bbc837100e6bbd33bb))
+
+
+### Refactoring
+
+* **devices:** share OpenRGB's key names between generators ([1a6a7f4](https://github.com/o2csi/candeo/commit/1a6a7f414c9874714632522f9aafb8fbeb7a6a14))
+* **devices:** share the key tables between generators ([594a993](https://github.com/o2csi/candeo/commit/594a993eeb4bc485e191254965156a3f3023af77))
+
+
+### Documentation
+
+* LampArray set aside, and what the format really lacked ([dfbef75](https://github.com/o2csi/candeo/commit/dfbef75f29382d7cbda1e023075bf8e694dfb3b3))
+* the DeathStalker describes itself through LampArray ([dd4fc48](https://github.com/o2csi/candeo/commit/dd4fc48486dcdc20e5b519e783f2c45cae8b0c4c))
+* what other keyboard brands would take ([a0d5de7](https://github.com/o2csi/candeo/commit/a0d5de7b53033d2ae59d9118d2a2ce579d723344))
+
 ## [0.16.0](https://github.com/o2csi/candeo/compare/v0.15.0...v0.16.0) (2026-09-27)
 
 
