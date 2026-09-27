@@ -546,6 +546,7 @@
     "reconnect": "Reconnecter",
     "disconnect": "Déconnecter",
     "restart": "{game} le lit au démarrage : relancez-le s’il est ouvert.",
+    "launchOption": "{game} ne le lit que lancé avec {option} : ajoutez-le à ses options de lancement, dans ses propriétés dans Steam.",
     "values": "Ce qu’il dit maintenant",
     "quiet": "Rien pour l’instant : lancez une partie.",
     "duringMatch": "Pendant une partie",

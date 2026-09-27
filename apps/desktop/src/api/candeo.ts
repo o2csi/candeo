@@ -1249,6 +1249,8 @@ export interface GameView {
   id: string
   name: string
   state: 'notFound' | 'disconnected' | 'connected' | 'outdated'
+  /** What its launch options must carry for it to read the file: Dota 2's `-gamestateintegration`. */
+  launchOption: string | null
 }
 
 /** Turns Valve's game state integration on or off: the Games tab follows. */

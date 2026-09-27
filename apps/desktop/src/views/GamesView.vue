@@ -190,6 +190,9 @@ onBeforeUnmount(() => unlisten?.())
       <p v-if="restart === game.name" class="note" role="status">
         {{ t('games.restart', { game: game.name }) }}
       </p>
+      <p v-if="game.launchOption && game.state !== 'notFound'" class="note">
+        {{ t('games.launchOption', { game: game.name, option: game.launchOption }) }}
+      </p>
 
       <template v-if="game.state !== 'notFound'">
         <!-- What it says now: the simplest way to see it works. -->
