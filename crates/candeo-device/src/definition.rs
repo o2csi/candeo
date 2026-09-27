@@ -1175,7 +1175,7 @@ mod tests {
             load(json).unwrap_or_else(|e| panic!("{name}: {e}"));
             replay(json).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
-        assert!(files.len() >= 56, "{} unverified definitions", files.len());
+        assert!(files.len() >= 60, "{} unverified definitions", files.len());
     }
 
     /// What *Copy to yours* and the editor start from: the text shipped.
