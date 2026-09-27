@@ -842,10 +842,11 @@ transaction byte, matrix), each with its source and date in its `notes`; the
 site lists them to download into your folder, with an issue form to say whether
 it lights. The Razer keyboards take their matrix from OpenRGB's tables, read by
 `openrgb.mjs`: laid out the way OpenRGB lays them out, they give the verified
-DeathStalker V2 Pro its surveyed keys. Where OpenRGB and OpenRazer disagree on a
-byte, the file follows OpenRGB, right on that same keyboard, and its notes say
-what OpenRazer sends. One confirmed on the device, with frames captured there, joins the
-built-in ones.
+DeathStalker V2 Pro its surveyed keys. Where OpenRGB and OpenRazer disagree on
+the transaction byte, the file follows OpenRGB and its notes say what OpenRazer
+sends: the DeathStalker V2 Pro does not check that byte, which other models may.
+One confirmed on the device, with frames captured there, joins the built-in
+ones.
 
 Both kinds open in the application's editor, checked against the schema as they
 are typed. A built-in one is read only: *Copy to yours* puts it in the folder

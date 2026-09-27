@@ -502,11 +502,11 @@ hex dump, and the byte positions give the component order without inferring it.
 - [x] **Read back the current effect** — `0x0f`/`0x82`, which makes it possible to verify without the eye
 - [x] **Which effect identifiers the device accepts** — the six from the SDK; `0x05` and `0x07` are refused
 - [ ] Meaning of arguments 0 and 1 (offsets 8 and 9), constant at `0x00` — a third-party driver names them *variable storage* and *LED identifier*, unverified
-- [ ] Is the transaction identifier (`0x9f`) checked by the device? OpenRazer
-  sends this model's frames with `0x3f` (commit `6820f9da`, 2026-07-05), and
-  `0x9f` works here on firmware v1.5: the device apparently accepts either.
-  `0x3f` was not tried on it (2026-09-27). OpenRGB sends `0x9f` (commit
-  `0f8f2dcc`, 2026-09-25).
+- [x] **The transaction identifier is not checked** — `0x1f`, `0x3f` and `0xff`
+  light a full frame and take the custom effect just as `0x9f` does, and the
+  reply echoes the byte sent (`probe_transaction_byte`, firmware v1.5,
+  2026-09-27, the colours watched on the keyboard). OpenRazer sends `0x3f` to
+  this model (commit `6820f9da`), OpenRGB `0x9f` (commit `0f8f2dcc`): both work.
 - [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
 - [ ] Effect identifier `0x06`: never tried
 - [x] **Maximum throughput accepted before the device drops out** — see below
@@ -542,6 +542,7 @@ hex dump, and the byte positions give the component order without inferring it.
 | 2026-09-13 | **The `interface -1` entry explained** by the device tree: virtual HID collection under `RZVIRTUAL`, `RzDev_0292` service of the manufacturer's driver — not the keyboard |
 | 2026-09-14 | **Response checksums are correct**: 8 of 8 responses to an open's inspection (§8) |
 | 2026-09-14 | **Rewriting a running Wave identically shows no visible restart**, watched on the keyboard while the device was reopened (Ignore, then Control); the effect read back identical |
+| 2026-09-27 | **The transaction identifier is not checked**: `0x9f`, `0x1f`, `0x3f` and `0xff` each light a full frame, watched on the keyboard, and take the custom effect, read back as `0x08`; the reply echoes the byte |
 
 ## 12. Captures
 
