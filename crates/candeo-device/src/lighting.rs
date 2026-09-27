@@ -25,6 +25,10 @@ pub enum Wire {
     Feature,
     /// `HidD_SetOutputReport`: the zones.
     Output,
+    /// `hid_write`, `WriteFile` on Windows: an output report on the interrupt
+    /// pipe where the device has one. How most makers' software writes to their
+    /// keyboards, per OpenRGB (`docs/design/other-keyboards.md` §2).
+    Write,
 }
 
 /// One report on its way to a device.
