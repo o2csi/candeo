@@ -43,7 +43,7 @@ Composite device with five interfaces. Lighting goes through **`MI_03`**, which 
 | `MI_01` | multiple HID collections |
 | `MI_02` | HID mouse |
 | **`MI_03`** | **lighting** |
-| `MI_04` | additional HID input |
+| `MI_04` | LampArray, the HID lighting standard (§13) |
 
 > On a composite device, opening the wrong interface gives a **valid** handle on which
 > every write fails — with no explicit error. Filter on `interface_number`.
@@ -507,6 +507,8 @@ hex dump, and the byte positions give the component order without inferring it.
   reply echoes the byte sent (`probe_transaction_byte`, firmware v1.5,
   2026-09-27, the colours watched on the keyboard). OpenRazer sends `0x3f` to
   this model (commit `6820f9da`), OpenRGB `0x9f` (commit `0f8f2dcc`): both work.
+- [ ] **LampArray updates**: with autonomous mode off, does a multi-update light
+  the keys, and does Windows' Dynamic Lighting write over them (§13)?
 - [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
 - [ ] Effect identifier `0x06`: never tried
 - [x] **Maximum throughput accepted before the device drops out** — see below
@@ -543,6 +545,7 @@ hex dump, and the byte positions give the component order without inferring it.
 | 2026-09-14 | **Response checksums are correct**: 8 of 8 responses to an open's inspection (§8) |
 | 2026-09-14 | **Rewriting a running Wave identically shows no visible restart**, watched on the keyboard while the device was reopened (Ignore, then Control); the effect read back identical |
 | 2026-09-27 | **The transaction identifier is not checked**: `0x9f`, `0x1f`, `0x3f` and `0xff` each light a full frame, watched on the keyboard, and take the custom effect, read back as `0x08`; the reply echoes the byte |
+| 2026-09-27 | **LampArray read** on `MI_04`: the descriptor, 105 lamps with their positions and keys, each answering with its own id (§13) |
 
 ## 12. Captures
 
@@ -551,3 +554,37 @@ hex dump, and the byte positions give the component order without inferring it.
 | `deathstalker-*.pcap` | reference: red / green / blue / black / white |
 | `fix132-*.pcap` | validation of the full 132-position send |
 | `modes2-*.pcap` | effect switches: Spectrum, Wave, Off, Direct |
+
+## 13. LampArray — page `0x59`, on `MI_04`
+
+The keyboard also speaks the HID lighting standard that Windows' Dynamic
+Lighting uses ([HUTRR84], `docs/design/other-keyboards.md` §4), on its own
+interface. Read on 2026-09-27, firmware v1.5, by `probe_lamparray_attributes`,
+**reading only**: the descriptor, the attributes, then each lamp — the request
+naming lamp 0 selects what the next reads answer, and lights nothing.
+
+[HUTRR84]: https://www.usb.org/sites/default/files/hutrr84_-_lighting_and_illumination_page.pdf
+
+- **Descriptor:** 327 bytes, six feature reports and nothing else, laid out
+  as Microsoft's example: `01` attributes (22 bytes), `02` lamp request (2),
+  `03` lamp response (28), `04` multi-update (50: a count, flags, 8 lamp ids,
+  8 × red, green, blue, intensity), `05` range update (9), `06` control (1:
+  autonomous mode).
+- **Attributes:** 105 lamps; a box of 450.7 × 157.9 × 42.1 mm; kind 1, a
+  keyboard; at least 33 333 µs between updates — 30 images a second, the rate
+  Candeo already sends at (§5).
+- **Lamps:** each answered with its own id, 0 to 104. All programmable, with
+  256 levels of red, green, blue and intensity. All have purpose `01`
+  (control) but lamp 97, `04` (branding), bound to no key: the right Fn, which
+  sends nothing.
+- **Positions:** six rows, at 17.4, 42.7, 61.7, 80.7, 99.7 and 118.7 mm;
+  keys 19 mm apart, a letter key's pitch.
+- **Keys** are HID usages, by position rather than by what the keycap prints:
+  `14` is the key right of Tab. The layout is ISO: `64` left of Z, `32` left of
+  Enter. Enter is one lamp where the Razer protocol lights two (§6), which is
+  the difference between 105 lamps and 106 lights.
+- **Autonomous mode is not read back:** a read of report `06` answers `105`,
+  the lamp count, not a mode.
+- **Not done:** any update; autonomous mode left as it was. Whether Windows,
+  with Dynamic Lighting on, keeps the lamps while Candeo writes to them is the
+  next question (§10).
