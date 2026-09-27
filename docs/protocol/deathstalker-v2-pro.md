@@ -507,8 +507,8 @@ hex dump, and the byte positions give the component order without inferring it.
   reply echoes the byte sent (`probe_transaction_byte`, firmware v1.5,
   2026-09-27, the colours watched on the keyboard). OpenRazer sends `0x3f` to
   this model (commit `6820f9da`), OpenRGB `0x9f` (commit `0f8f2dcc`): both work.
-- [ ] **LampArray updates**: with autonomous mode off, does a multi-update light
-  the keys, and does Windows' Dynamic Lighting write over them (§13)?
+- [ ] **What hands the lamps to LampArray**: updates are taken and not shown
+  (§13); Synapse's *Dynamic Lighting* switch is the lead, to capture.
 - [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
 - [ ] Effect identifier `0x06`: never tried
 - [x] **Maximum throughput accepted before the device drops out** — see below
@@ -546,6 +546,7 @@ hex dump, and the byte positions give the component order without inferring it.
 | 2026-09-14 | **Rewriting a running Wave identically shows no visible restart**, watched on the keyboard while the device was reopened (Ignore, then Control); the effect read back identical |
 | 2026-09-27 | **The transaction identifier is not checked**: `0x9f`, `0x1f`, `0x3f` and `0xff` each light a full frame, watched on the keyboard, and take the custom effect, read back as `0x08`; the reply echoes the byte |
 | 2026-09-27 | **LampArray read** on `MI_04`: the descriptor, 105 lamps with their positions and keys, each answering with its own id (§13) |
+| 2026-09-27 | **LampArray updates taken, not shown**, over the custom effect, Spectrum Cycle and *Off* alike, watched: the firmware waits for Synapse's switch (§13) |
 
 ## 12. Captures
 
@@ -585,6 +586,14 @@ naming lamp 0 selects what the next reads answer, and lights nothing.
   the difference between 105 lamps and 106 lights.
 - **Autonomous mode is not read back:** a read of report `06` answers `105`,
   the lamp count, not a mode.
-- **Not done:** any update; autonomous mode left as it was. Whether Windows,
-  with Dynamic Lighting on, keeps the lamps while Candeo writes to them is the
-  next question (§10).
+- **Updates are taken and not shown.** Autonomous mode off, then a range
+  update of every lamp, a multi-update of eight, autonomous mode on: every
+  report written, nothing changing on the keyboard, watched
+  (`probe_lamparray_update`, `probe_lamparray_over_firmware`, 2026-09-27). The
+  keyboard kept what the Razer protocol last set — the custom effect's last
+  image, Spectrum Cycle, even *Off*. Windows' own Dynamic Lighting, on for this
+  device, showed nothing either.
+- **Razer holds the lamps back** until its software hands them over: Razer's
+  support says Dynamic Lighting must first be turned on in Synapse, after which
+  Synapse's own lighting stops. What Synapse sends the keyboard for that is not
+  known; a capture of that switch would tell (§9).
