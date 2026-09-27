@@ -27,7 +27,7 @@ import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
 import DevicesChip from '../components/DevicesChip.vue'
 import FailureNote from '../components/FailureNote.vue'
-import { gameRule, gameSignals, playing, withGameRule } from '../composables/games'
+import { gameRule, gameSignals, playing, withGameConnected, withGameRule } from '../composables/games'
 import { signalText } from '../composables/signals'
 import { useDevice } from '../composables/useDevice'
 import { t } from '../i18n'
@@ -75,16 +75,30 @@ async function act(task: () => Promise<void>): Promise<void> {
   }
 }
 
+/** Saves the rules when they changed. */
+async function keep(next: Rule[]): Promise<void> {
+  if (next === rules.value) return
+  await setRules(next)
+  rules.value = next
+}
+
+const refs = (list: DeviceInfo[]) => list.map((d) => ({ vid: d.vid, pid: d.pid }))
+
+/** Connecting a game is wanting its lighting during a match: its rule comes with it. */
 const connect = (game: GameView) =>
   act(async () => {
     games.value = await connectGame(game.id)
     restart.value = game.name
+    const name = t('games.ruleName', { game: game.name })
+    await keep(withGameConnected(rules.value, game.id, name, effectsFor(game.id)[0]?.id, refs(controlled.value)))
   })
 
+/** A disconnected game plays no match: its rule goes with it. */
 const disconnect = (game: GameView) =>
   act(async () => {
     games.value = await disconnectGame(game.id)
     restart.value = null
+    if (gameRule(rules.value, game.id)) await keep(withGameRule(rules.value, game.id, '', null))
   })
 
 /** Where it stands, *playing* while a match sends its values. */
@@ -99,25 +113,23 @@ function effectsFor(game: string): EffectEntry[] {
   return [...mine, ...effects.value.filter((e) => e.game !== game)]
 }
 
-/** Saves the game's *while playing*, or removes it with `null`. */
-function whilePlaying(game: GameView, wanted: { effect: string; devices: DeviceInfo[] } | null) {
-  return act(async () => {
-    const next = withGameRule(
-      rules.value,
-      game.id,
-      t('games.ruleName', { game: game.name }),
-      wanted && {
+/** Saves the game's *while playing* as chosen on its card. */
+function whilePlaying(game: GameView, wanted: { effect: string; devices: DeviceInfo[] }) {
+  return act(() =>
+    keep(
+      withGameRule(rules.value, game.id, t('games.ruleName', { game: game.name }), {
         effect: wanted.effect,
-        devices: wanted.devices.map((d) => ({ vid: d.vid, pid: d.pid })),
-      },
-    )
-    await setRules(next)
-    rules.value = next
-  })
+        devices: refs(wanted.devices),
+      }),
+    ),
+  )
 }
 
-function toggleWhilePlaying(game: GameView, on: boolean): Promise<void> {
-  if (!on) return whilePlaying(game, null)
+/**
+ * A connected game without its rule — connected with no device controlled, or
+ * the rule deleted in Automations — gets it back on request.
+ */
+function useDuringMatch(game: GameView): Promise<void> {
   const effect = effectsFor(game.id)[0]?.id
   if (!effect) return Promise.resolve()
   return whilePlaying(game, { effect, devices: controlled.value })
@@ -190,38 +202,36 @@ onBeforeUnmount(() => unlisten?.())
         </dl>
         <p v-else class="note">{{ t('games.quiet') }}</p>
 
-        <h3>
-          <label class="check">
-            <input
-              type="checkbox"
-              :checked="gameRule(rules, game.id) !== undefined"
-              :disabled="busy || controlled.length === 0"
-              @change="toggleWhilePlaying(game, ($event.target as HTMLInputElement).checked)"
-            />
-            {{ t('games.whilePlaying') }}
-          </label>
-        </h3>
-        <p v-if="controlled.length === 0" class="note">{{ t('games.noDevice') }}</p>
-        <div v-else-if="gameRule(rules, game.id)" class="playing">
-          <label>
-            {{ t('games.show') }}
-            <select
-              :value="gameRule(rules, game.id)!.show.effect"
+        <template v-if="game.state === 'connected' || game.state === 'outdated'">
+          <h3>{{ t('games.duringMatch') }}</h3>
+          <p v-if="controlled.length === 0" class="note">{{ t('games.noDevice') }}</p>
+          <div v-else-if="gameRule(rules, game.id)" class="playing">
+            <label>
+              {{ t('games.show') }}
+              <select
+                :value="gameRule(rules, game.id)!.show.effect"
+                :disabled="busy"
+                @change="setEffect(game, gameRule(rules, game.id)!, ($event.target as HTMLSelectElement).value)"
+              >
+                <option v-for="e in effectsFor(game.id)" :key="e.id" :value="e.id">{{ e.name }}</option>
+              </select>
+            </label>
+            <span>{{ t('games.on') }}</span>
+            <DevicesChip
+              :devices="controlled"
+              :chosen="gameRule(rules, game.id)!.devices"
               :disabled="busy"
-              @change="setEffect(game, gameRule(rules, game.id)!, ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="e in effectsFor(game.id)" :key="e.id" :value="e.id">{{ e.name }}</option>
-            </select>
-          </label>
-          <span>{{ t('games.on') }}</span>
-          <DevicesChip
-            :devices="controlled"
-            :chosen="gameRule(rules, game.id)!.devices"
-            :disabled="busy"
-            @change="(chosen) => setDevices(game, gameRule(rules, game.id)!, chosen)"
-          />
-          <p class="note">{{ t('games.ruleNote') }}</p>
-        </div>
+              @change="(chosen) => setDevices(game, gameRule(rules, game.id)!, chosen)"
+            />
+            <p class="note">{{ t('games.ruleNote') }}</p>
+          </div>
+          <p v-else class="note">
+            {{ t('games.unchanged') }}
+            <button type="button" class="ghost small" :disabled="busy" @click="useDuringMatch(game)">
+              {{ t('games.useEffect') }}
+            </button>
+          </p>
+        </template>
       </template>
     </article>
 
@@ -336,16 +346,6 @@ h3 {
 
 .playing .note {
   flex-basis: 100%;
-}
-
-.check {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--gap-2);
-  text-transform: none;
-  letter-spacing: normal;
-  font-size: 13px;
-  color: var(--text);
 }
 
 .note {

@@ -90,9 +90,15 @@ Most people using Candeo do not play, and their screens stay as they are:
   - its values as they arrive — the simplest way to see it works;
   - **while playing**: which effect to show on which devices during a match,
     and the device's own effect back after it. It is a rule — *while
-    `cs2.phase` is set* — made and edited here, carrying the game it belongs
-    to, and listed in *Automations* like any other so that its priority stays
-    visible there.
+    `cs2.phase` is set* — carrying the game it belongs to, and listed in
+    *Automations* like any other so that its priority stays visible there.
+    Connecting a game is wanting its lighting during a match, so **Connect**
+    makes it, with the game's effect on the devices Candeo controls, and
+    **Disconnect** removes it; the card changes its effect and devices. A game
+    connected without it — no device controlled then, or the rule deleted in
+    *Automations* — says its lighting stays as it is, and makes it on request.
+    There is no box to tick: without the rule, a connected game would light
+    nothing.
 
 A signal condition with no value to match is met by any value, which is what
 *set* means; it is useful beyond games — *while `call` is set*.

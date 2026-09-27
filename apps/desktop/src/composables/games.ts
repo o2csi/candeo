@@ -56,6 +56,24 @@ export interface WhilePlaying {
 }
 
 /**
+ * The rules once a game is connected: its *while playing* made if it has none,
+ * the game's own effect on the devices Candeo controls, since connecting a game
+ * is wanting its lighting during a match. One already there, perhaps changed,
+ * is kept; without an effect or a device, there is nothing to make. The same
+ * array when nothing changes.
+ */
+export function withGameConnected(
+  rules: Rule[],
+  game: string,
+  name: string,
+  effect: string | undefined,
+  devices: DeviceRef[],
+): Rule[] {
+  if (gameRule(rules, game) || !effect || devices.length === 0) return rules
+  return withGameRule(rules, game, name, { effect, devices })
+}
+
+/**
  * The rules with the game's *while playing* set as asked, `null` to remove it.
  *
  * A rule made here goes first: during a match, the game's effect wins over a
