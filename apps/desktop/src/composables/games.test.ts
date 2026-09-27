@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('../api/candeo', () => ({}))
 
 import type { HeldSignal, Rule } from '../api/candeo'
-import { gameRule, gameSignals, playing, withGameRule } from './games'
+import { gameRule, gameSignals, playing, withGameConnected, withGameRule } from './games'
 
 const held = (name: string, value: string | number): HeldSignal => ({
   name,
@@ -40,6 +40,17 @@ describe('games', () => {
     expect(made.when).toEqual({ kind: 'signal', name: 'cs2.phase', equals: '', hold: true })
     expect(made.show.effect).toBe('shipped:Counter-Strike 2')
     expect(made.enabled).toBe(true)
+  })
+
+  it('makes the rule when the game is connected, and keeps one already there', () => {
+    const device = [{ vid: 1, pid: 2 }]
+    const made = withGameConnected([clock], 'cs2', 'While playing', 'shipped:Counter-Strike 2', device)
+    expect(gameRule(made, 'cs2')!.show.effect).toBe('shipped:Counter-Strike 2')
+    const changed = withGameRule(made, 'cs2', 'While playing', { effect: 'shipped:Aurora', devices: device })
+    expect(withGameConnected(changed, 'cs2', 'While playing', 'shipped:Counter-Strike 2', device)).toBe(changed)
+    const rules = [clock]
+    expect(withGameConnected(rules, 'cs2', 'While playing', undefined, device)).toBe(rules)
+    expect(withGameConnected(rules, 'cs2', 'While playing', 'shipped:Counter-Strike 2', [])).toBe(rules)
   })
 
   it('keeps the rule where it was moved, and removes it on request', () => {

@@ -548,10 +548,12 @@
     "restart": "{game} reads it when it starts: restart it if it is running.",
     "values": "What it says now",
     "quiet": "Nothing yet: start a match.",
-    "whilePlaying": "While playing",
+    "duringMatch": "During a match",
     "show": "Show",
     "on": "on",
     "noDevice": "Control a device first, in Devices.",
+    "unchanged": "Your lighting stays as it is during a match.",
+    "useEffect": "Use its effect",
     "ruleName": "While playing {game}",
     "ruleNote": "A rule, listed in Automations: your effect comes back after the match."
   }

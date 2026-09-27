@@ -548,10 +548,12 @@
     "restart": "{game} le lit au démarrage : relancez-le s’il est ouvert.",
     "values": "Ce qu’il dit maintenant",
     "quiet": "Rien pour l’instant : lancez une partie.",
-    "whilePlaying": "Pendant une partie",
+    "duringMatch": "Pendant une partie",
     "show": "Afficher",
     "on": "sur",
     "noDevice": "Pilotez d’abord un appareil, dans Appareils.",
+    "unchanged": "Votre éclairage reste tel quel pendant une partie.",
+    "useEffect": "Utiliser son effet",
     "ruleName": "Pendant une partie de {game}",
     "ruleNote": "Une règle, listée dans Automatisations : votre effet revient après la partie."
   }
