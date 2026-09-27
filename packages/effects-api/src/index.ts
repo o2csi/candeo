@@ -368,6 +368,13 @@ export interface EffectModule<P = undefined> {
    * an effect runs, and the gallery says so.
    */
   readonly inputs?: readonly Input[]
+  /**
+   * The game this effect is for, `'cs2'`: the gallery keeps it with that game's
+   * rather than among the others, and the game's card in the Games tab offers
+   * it (`docs/design/game-state-integration.md` §5). Most effects are for no
+   * game, and say nothing.
+   */
+  readonly game?: string
   readonly params?: P
   /** `ctx.params` is typed from `params` above. */
   readonly render: (ctx: EffectContext<P>) => void

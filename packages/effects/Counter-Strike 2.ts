@@ -1,6 +1,6 @@
 import { BLACK, defineEffect, mix } from '@candeo/effects-api'
 
-// What Counter-Strike 2 says of your game, once connected in Settings › Games
+// What Counter-Strike 2 says of your game, once connected in the Games tab
 // (`docs/design/game-state-integration.md`): your health on the number row, the
 // clip of the weapon in hand on the function row, a flashbang turning the
 // keyboard white, fire turning it orange, and the whole keyboard pulsing while
@@ -17,10 +17,11 @@ const WHITE = { r: 255, g: 255, b: 255 }
 
 export default defineEffect({
   description: {
-    en: 'Your health, ammo, flashes and the bomb in Counter-Strike 2, once connected in Settings',
-    fr: 'Votre vie, vos munitions, les flashs et la bombe dans Counter-Strike 2, une fois connecté dans les réglages',
+    en: 'Your health, ammo, flashes and the bomb in Counter-Strike 2, once connected in Games',
+    fr: 'Votre vie, vos munitions, les flashs et la bombe dans Counter-Strike 2, une fois connecté dans Jeux',
   },
   inputs: ['signals'],
+  game: 'cs2',
   params: {
     healthFull: { kind: 'color', label: { en: 'Full health', fr: 'Vie pleine' }, default: HEALTH_FULL },
     healthLow: { kind: 'color', label: { en: 'Low health', fr: 'Vie basse' }, default: HEALTH_LOW },

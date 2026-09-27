@@ -53,6 +53,11 @@ pub struct Rule {
     pub show: Show,
     #[serde(rename = "for", default)]
     pub lasts: Lasts,
+    /// The game whose *while playing* this is, made on its card in the Games
+    /// tab (`docs/design/game-state-integration.md` §4). It changes nothing to
+    /// how the rule runs; the card finds its rule by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<String>,
 }
 
 /// When a rule applies.
@@ -354,6 +359,7 @@ mod tests {
                 bindings: crate::runtime::Bindings::new(),
             },
             lasts: Lasts { seconds },
+            game: None,
         }
     }
 

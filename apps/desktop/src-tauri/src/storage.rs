@@ -5206,7 +5206,8 @@ mod tests {
                 "effect": "hardware:off", "params": {},
                 "bindings": { "colour": "signal:status" }
             },
-            "for": { "seconds": 32400 }
+            "for": { "seconds": 32400 },
+            "game": "cs2"
         }))
         .expect("a rule");
         mirror("Rule", &rule);

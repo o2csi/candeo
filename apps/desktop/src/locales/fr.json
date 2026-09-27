@@ -5,7 +5,8 @@
       "effects": "Effets",
       "automations": "Automatisations",
       "devices": "Périphériques",
-      "settings": "Réglages"
+      "settings": "Réglages",
+      "games": "Jeux"
     },
     "theme": {
       "label": "Thème",
@@ -40,7 +41,8 @@
     "groups": {
       "hardware": "matériel",
       "builtin": "intégrés",
-      "user": "à vous"
+      "user": "à vous",
+      "game": "jeux"
     },
     "natures": {
       "hardware": "matériel",
@@ -275,7 +277,9 @@
     "byExpression": "selon l'expression ci-dessous",
     "format": "Comment écrire une expression",
     "expression": "Expression cron",
-    "expressionHelp": "Cinq champs : minute heure jour-du-mois mois jour-de-la-semaine (0 est dimanche), ou six avec les secondes en premier. * veut dire n'importe lequel, */15 tous les 15, 1-5 une plage, 1,3,5 une liste.\nExemples : 0 * * * * toutes les heures · 30 12 * * 1-5 à 12:30 en semaine · 0 9-18 * * * toutes les heures de 9 h à 18 h · */30 * * * * * toutes les 30 secondes."
+    "expressionHelp": "Cinq champs : minute heure jour-du-mois mois jour-de-la-semaine (0 est dimanche), ou six avec les secondes en premier. * veut dire n'importe lequel, */15 tous les 15, 1-5 une plage, 1,3,5 une liste.\nExemples : 0 * * * * toutes les heures · 30 12 * * 1-5 à 12:30 en semaine · 0 9-18 * * * toutes les heures de 9 h à 18 h · */30 * * * * * toutes les 30 secondes.",
+    "signalSet": "quand « {name} » est présent",
+    "signalAny": "n’importe quelle valeur"
   },
   "devices": {
     "title": "Périphériques",
@@ -468,17 +472,8 @@
     },
     "games": {
       "title": "Jeux",
-      "detail": "Ce qui se passe dans le jeu — votre vie, la bombe — arrive en signaux : cs2.health, cs2.bomb.",
-      "state": {
-        "notFound": "introuvable sur cet ordinateur",
-        "disconnected": "non connecté",
-        "connected": "connecté",
-        "outdated": "à reconnecter"
-      },
-      "connect": "Connecter",
-      "reconnect": "Reconnecter",
-      "disconnect": "Déconnecter",
-      "restart": "{game} le lit au démarrage : relancez-le s’il est ouvert."
+      "valve": "Intégration de l’état de jeu de Valve — Counter-Strike 2",
+      "note": "Un onglet Jeux apparaît, où chaque jeu se connecte."
     },
     "version": {
       "title": "Candeo {version}",
@@ -529,5 +524,28 @@
       "confirm": "Remettre au défaut",
       "cancel": "Annuler"
     }
+  },
+  "games": {
+    "title": "Jeux",
+    "lead": "Ce qui se passe dans votre jeu, sur votre clavier.",
+    "state": {
+      "notFound": "introuvable sur cet ordinateur",
+      "disconnected": "non connecté",
+      "connected": "connecté",
+      "outdated": "à reconnecter",
+      "playing": "en jeu"
+    },
+    "connect": "Connecter",
+    "reconnect": "Reconnecter",
+    "disconnect": "Déconnecter",
+    "restart": "{game} le lit au démarrage : relancez-le s’il est ouvert.",
+    "values": "Ce qu’il dit maintenant",
+    "quiet": "Rien pour l’instant : lancez une partie.",
+    "whilePlaying": "Pendant une partie",
+    "show": "Afficher",
+    "on": "sur",
+    "noDevice": "Pilotez d’abord un appareil, dans Appareils.",
+    "ruleName": "Pendant une partie de {game}",
+    "ruleNote": "Une règle, listée dans Automatisations : votre effet revient après la partie."
   }
 }

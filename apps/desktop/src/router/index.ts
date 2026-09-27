@@ -30,6 +30,12 @@ export const router = createRouter({
       component: () => import('../views/DevicesView.vue'),
     },
     {
+      // Shown once games are turned on in Settings.
+      path: '/games',
+      name: 'games',
+      component: () => import('../views/GamesView.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('../views/SettingsView.vue'),
