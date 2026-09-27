@@ -1,0 +1,186 @@
+{
+  "source": "OpenRGB, https://gitlab.com/CalcProgrammer1/OpenRGB, commit 0f8f2dcc (2026-09-25): Controllers/SteelSeriesController — SteelSeriesDevices.h for the product ids, SteelSeriesControllerDetect.cpp for the interfaces, SteelSeriesApexController for the reports and the keys, SteelSeriesApexBaseController.h for the packet ids and lengths.",
+  "derived": "2026-09-27",
+  "addresses": { "fnkey": "f0", "play": "fb" },
+  "generations": {
+    "1": { "packet": "3a", "takeOver": [] },
+    "2": { "packet": "40", "takeOver": [] },
+    "3": { "packet": "40", "takeOver": ["4b"] },
+    "3-wireless": { "packet": "61", "takeOver": ["4b"] }
+  },
+  "sizes": {
+    "full": [
+      "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause . play . . .",
+      "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup numlk kpdiv kpmul kpsub .",
+      "tab q w e r t y u i o p lbracket rbracket backslash del end pgdn kp7 kp8 kp9 kpadd .",
+      "caps a s d f g h j k l semicolon quote hash enter . . . kp4 kp5 kp6 . .",
+      "lshift iso z x c v b n m comma period slash . rshift . up . kp1 kp2 kp3 kpenter .",
+      "lctrl lwin lalt . . . space . . . ralt rwin fnkey rctrl left down right . kp0 kpdot . ."
+    ],
+    "tkl": [
+      "esc . f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 prtsc scrlk pause",
+      "grave 1 2 3 4 5 6 7 8 9 0 minus equal bksp ins home pgup",
+      "tab q w e r t y u i o p lbracket rbracket backslash del end pgdn",
+      "caps a s d f g h j k l semicolon quote hash enter . . .",
+      "lshift iso z x c v b n m comma period slash . rshift . up .",
+      "lctrl lwin lalt . . . space . . . ralt rwin fnkey rctrl left down right"
+    ]
+  },
+  "variants": [
+    {
+      "file": "steelseries-apex-5.json",
+      "name": "SteelSeries Apex 5",
+      "pid": "161c",
+      "match": { "interface": 1 },
+      "size": "full",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-7.json",
+      "name": "SteelSeries Apex 7",
+      "pid": "1612",
+      "match": { "interface": 1 },
+      "size": "full",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-pro.json",
+      "name": "SteelSeries Apex Pro",
+      "pid": "1610",
+      "match": { "interface": 1 },
+      "size": "full",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-pro-3.json",
+      "name": "SteelSeries Apex Pro 3",
+      "pid": "1640",
+      "match": { "interface": 1 },
+      "size": "full",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired",
+      "notes": ["OpenRGB names no generation for it, so sends it the first one's packet, 3a."]
+    },
+    {
+      "file": "steelseries-apex-7-tkl.json",
+      "name": "SteelSeries Apex 7 TKL",
+      "pid": "1618",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl.json",
+      "name": "SteelSeries Apex Pro TKL (firmware before 1.19.7)",
+      "pid": "1614",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "1",
+      "length": 642,
+      "connection": "wired",
+      "notes": ["From firmware 1.19.7 on, OpenRGB speaks the third generation to it: choose steelseries-apex-pro-tkl-new-firmware.json then."]
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-new-firmware.json",
+      "name": "SteelSeries Apex Pro TKL (firmware 1.19.7 or later)",
+      "pid": "1614",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "3",
+      "length": 642,
+      "connection": "wired",
+      "notes": ["Before firmware 1.19.7, OpenRGB speaks the first generation to it: choose steelseries-apex-pro-tkl.json then."]
+    },
+    {
+      "file": "steelseries-apex-9-tkl.json",
+      "name": "SteelSeries Apex 9 TKL (firmware before 1.19.7)",
+      "pid": "1634",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "2",
+      "length": 512,
+      "connection": "wired",
+      "notes": ["From firmware 1.19.7 on, OpenRGB speaks the third generation to it: choose steelseries-apex-9-tkl-new-firmware.json then."]
+    },
+    {
+      "file": "steelseries-apex-9-tkl-new-firmware.json",
+      "name": "SteelSeries Apex 9 TKL (firmware 1.19.7 or later)",
+      "pid": "1634",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "3",
+      "length": 512,
+      "connection": "wired",
+      "notes": ["Before firmware 1.19.7, OpenRGB speaks the second generation to it: choose steelseries-apex-9-tkl.json then."]
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-2023.json",
+      "name": "SteelSeries Apex Pro TKL (2023)",
+      "pid": "1628",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "2",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-2023-wireless.json",
+      "name": "SteelSeries Apex Pro TKL Wireless (2023)",
+      "pid": "1630",
+      "match": { "interface": 3, "usagePage": "ffc0", "usage": "0001" },
+      "size": "tkl",
+      "generation": "3-wireless",
+      "length": 642,
+      "connection": "wireless"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-2023-wireless-2.json",
+      "name": "SteelSeries Apex Pro TKL Wireless (2023, second id)",
+      "pid": "1632",
+      "match": { "interface": 3, "usagePage": "ffc0", "usage": "0001" },
+      "size": "tkl",
+      "generation": "3-wireless",
+      "length": 642,
+      "connection": "wireless"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-gen3.json",
+      "name": "SteelSeries Apex Pro TKL Gen 3",
+      "pid": "1642",
+      "match": { "interface": 1 },
+      "size": "tkl",
+      "generation": "3",
+      "length": 642,
+      "connection": "wired"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-gen3-wireless.json",
+      "name": "SteelSeries Apex Pro TKL Gen 3 Wireless",
+      "pid": "1644",
+      "match": { "interface": 3, "usagePage": "ffc0", "usage": "0001" },
+      "size": "tkl",
+      "generation": "3-wireless",
+      "length": 642,
+      "connection": "wireless"
+    },
+    {
+      "file": "steelseries-apex-pro-tkl-gen3-wireless-2.json",
+      "name": "SteelSeries Apex Pro TKL Gen 3 Wireless (second id)",
+      "pid": "1646",
+      "match": { "interface": 3, "usagePage": "ffc0", "usage": "0001" },
+      "size": "tkl",
+      "generation": "3-wireless",
+      "length": 642,
+      "connection": "wireless"
+    }
+  ]
+}

@@ -997,7 +997,12 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
             usage: hex_u16(usage, "usage")?,
         },
         (None, None, Some(interface)) => Port::Interface(interface),
-        _ => return Err("match an interface, or a usage page and a usage".into()),
+        (Some(page), Some(usage), Some(interface)) => Port::InterfaceCollection {
+            interface,
+            usage_page: hex_u16(page, "usage page")?,
+            usage: hex_u16(usage, "usage")?,
+        },
+        _ => return Err("match an interface, a usage page and a usage, or all three".into()),
     };
 
     let layout = Layout {
@@ -1141,8 +1146,11 @@ mod tests {
             .expect("the unverified definitions")
             .map(|entry| entry.unwrap().path())
             .filter(|path| {
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                // The facts the generators read, beside what they write.
                 path.extension().is_some_and(|e| e == "json")
-                    && path.file_name().is_some_and(|n| n != "variants.json")
+                    && name != "variants.json"
+                    && !name.ends_with(".facts.json")
             })
             .map(|path| {
                 let name = path.file_name().unwrap().to_string_lossy().into_owned();
@@ -1163,7 +1171,7 @@ mod tests {
             load(json).unwrap_or_else(|e| panic!("{name}: {e}"));
             replay(json).unwrap_or_else(|e| panic!("{name}: {e}"));
         }
-        assert!(files.len() >= 19, "{} unverified definitions", files.len());
+        assert!(files.len() >= 34, "{} unverified definitions", files.len());
     }
 
     /// What *Copy to yours* and the editor start from: the text shipped.

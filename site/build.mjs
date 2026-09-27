@@ -107,19 +107,28 @@ ${rows}
 }
 
 /**
- * The unverified definitions (`docs/design/device-sdk.md` §9), as a table with
+ * The unverified definitions (`docs/design/device-sdk.md` §9), as tables with
  * a download each: the facts they were derived from say what they are, and
- * the file is served beside the page.
+ * the file is served beside the page. Two degrees: a model whose protocol a
+ * sibling proved, and a family whose protocol comes from OpenRGB alone
+ * (`docs/design/other-keyboards.md` §5).
  */
 const UNVERIFIED = join(root, 'crates/candeo-device/devices/unverified')
-const unverified = JSON.parse(readFileSync(join(UNVERIFIED, 'variants.json'), 'utf8'))
+const families = [
+  { facts: 'variants.json', vid: '1532', heading: 'Their protocol proved on a sibling' },
+  { facts: 'steelseries.facts.json', vid: '1038', heading: 'Their protocol to verify too' },
+].map((f) => ({ ...f, variants: JSON.parse(readFileSync(join(UNVERIFIED, f.facts), 'utf8')).variants }))
 
 function toVerify(repo) {
-  const rows = unverified.variants
+  return families.map((f) => `        <h3>${f.heading}</h3>\n${familyTable(repo, f)}`).join('\n')
+}
+
+function familyTable(repo, family) {
+  const rows = family.variants
     .map(
       (v) => `            <tr>
               <td>${v.name}</td>
-              <td class="mono">1532:${v.pid}</td>
+              <td class="mono">${family.vid}:${v.pid}</td>
               <td>${v.connection}</td>
               <td><a href="devices/${v.file}" download>${v.file}</a></td>
               <td><a href="${repo}/issues/new?template=device-report.yml&amp;title=Device:%20${encodeURIComponent(v.name)}">Report</a></td>
@@ -379,7 +388,7 @@ cpSync(
 
 // The unverified definitions, to download into Documents\candeo\devices.
 mkdirSync(join(out, 'devices'), { recursive: true })
-for (const v of unverified.variants) {
+for (const v of families.flatMap((f) => f.variants)) {
   cpSync(join(UNVERIFIED, v.file), join(out, 'devices', v.file))
 }
 
