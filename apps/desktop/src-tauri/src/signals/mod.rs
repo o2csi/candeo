@@ -66,6 +66,10 @@ pub struct SignalsConfig {
     /// leaves the other (`docs/design/game-state-integration.md` §3).
     #[serde(skip_serializing_if = "String::is_empty")]
     pub game_token: String,
+    /// Valve's game state integration turned on in Settings: the Games tab
+    /// shows, and `/gsi/` takes posts (§4). Off, it refuses them.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub valve_games: bool,
 }
 
 impl Default for SignalsConfig {
@@ -76,6 +80,7 @@ impl Default for SignalsConfig {
             token: String::new(),
             interfaces: Vec::new(),
             game_token: String::new(),
+            valve_games: false,
         }
     }
 }
@@ -98,6 +103,7 @@ pub struct SignalsApi {
     pub listening: Vec<String>,
     /// The port is held by something else on loopback: nothing answers.
     pub port_in_use: bool,
+    pub valve_games: bool,
 }
 
 #[derive(Default)]
@@ -224,13 +230,14 @@ fn serve(app: &AppHandle, request: &Request) -> Response {
     };
     let (token, game_token) = {
         let config = signals.config.lock().unwrap();
-        (config.token.clone(), config.game_token.clone())
+        let games = config.valve_games.then(|| config.game_token.clone());
+        (config.token.clone(), games)
     };
     let now = chrono::Local::now().timestamp_millis();
     let (response, changed) = {
         let mut store = signals.store.lock().unwrap();
         if http::for_game(request.url) {
-            http::game(request, &game_token, &mut store, now)
+            http::game(request, game_token.as_deref(), &mut store, now)
         } else {
             http::handle(request, &token, &mut store, now)
         }
@@ -297,6 +304,7 @@ fn view(app: &AppHandle, config: &SignalsConfig) -> SignalsApi {
         interfaces: config.interfaces.clone(),
         listening,
         port_in_use,
+        valve_games: config.valve_games,
     }
 }
 
@@ -338,6 +346,18 @@ pub fn set_signals_api(
     reconcile(&app);
     // A connected game posts to the port its file names.
     rewrite_games(&settings.signals);
+    Ok(view(&app, &settings.signals))
+}
+
+/// Turns Valve's game state integration on or off: the Games tab follows.
+#[tauri::command]
+pub fn set_valve_games(app: AppHandle, on: bool) -> CmdResult<SignalsApi> {
+    let store = crate::storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    settings.signals.valve_games = on;
+    store.write_settings(&settings)?;
+    tracing::info!(on, "Valve's game state integration set");
+    reconcile(&app);
     Ok(view(&app, &settings.signals))
 }
 

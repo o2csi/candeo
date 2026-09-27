@@ -130,13 +130,27 @@ pub fn for_game(url: &str) -> bool {
 /// The game cannot set a header: its token comes in the body, from the file's
 /// `auth` block, and only the games' token opens this route — a sender's
 /// `Bearer` one does not, nor does the games' open `/signals`.
-pub fn game(request: &Request, token: &str, store: &mut Store, now: i64) -> (Response, bool) {
+///
+/// `token` is `None` while games are turned off in Settings: every post is then
+/// refused.
+pub fn game(
+    request: &Request,
+    token: Option<&str>,
+    store: &mut Store,
+    now: i64,
+) -> (Response, bool) {
     if request.from_browser {
         return (
             Response::error(403, "requests from a web page are refused"),
             false,
         );
     }
+    let Some(token) = token else {
+        return (
+            Response::error(403, "games are turned off in Candeo"),
+            false,
+        );
+    };
     let path = request
         .url
         .split_once('?')
@@ -318,7 +332,7 @@ mod tests {
         let mut store = Store::default();
         let mut sent = request("POST", "/gsi/cs2", GAME_STATE);
         sent.authorization = None;
-        let (response, changed) = game(&sent, "fedcba9876543210", &mut store, NOW);
+        let (response, changed) = game(&sent, Some("fedcba9876543210"), &mut store, NOW);
         assert_eq!((response.status, changed), (200, true));
         let held = store.views(NOW);
         let health = held
@@ -338,7 +352,7 @@ mod tests {
         let mut store = Store::default();
         let sent = request("POST", "/gsi/cs2", GAME_STATE);
         assert_eq!(
-            game(&sent, TOKEN, &mut store, NOW).0.status,
+            game(&sent, Some(TOKEN), &mut store, NOW).0.status,
             401,
             "the sender's token"
         );
@@ -355,7 +369,18 @@ mod tests {
     #[test]
     fn a_game_route_refuses_what_is_not_a_game_post() {
         let mut store = Store::default();
-        let key = "fedcba9876543210";
+        assert_eq!(
+            game(
+                &request("POST", "/gsi/cs2", GAME_STATE),
+                None,
+                &mut store,
+                NOW
+            )
+            .0
+            .status,
+            403
+        );
+        let key = Some("fedcba9876543210");
         assert_eq!(
             game(
                 &request("POST", "/gsi/quake", GAME_STATE),

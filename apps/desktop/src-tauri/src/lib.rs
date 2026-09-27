@@ -1597,6 +1597,7 @@ pub fn run() {
             signals::send_signal,
             signals::erase_signal,
             signals::list_games,
+            signals::set_valve_games,
             signals::connect_game,
             signals::disconnect_game,
             idle::idle_available,

@@ -134,6 +134,10 @@ pub struct Manifest {
     /// analysed (#107).
     #[serde(default)]
     pub reads_audio: bool,
+    /// The game it is for, `cs2`: the gallery keeps it with the game's rather
+    /// than among the others (`docs/design/game-state-integration.md` §5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<String>,
 }
 
 /// Kind of effect: shipped with the application, or the user's.
@@ -1251,7 +1255,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 ///   sorted by key.
 /// - 2: whether it reads signals (#108).
 /// - 3: whether it reads the sound playing (#107).
-const CACHE_FORMAT: u32 = 3;
+/// - 4: the game it is for.
+const CACHE_FORMAT: u32 = 4;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1282,6 +1287,8 @@ struct CacheRecord {
     reads_signals: bool,
     #[serde(default)]
     reads_audio: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    game: Option<String>,
     #[serde(default)]
     swatch: Swatch,
     /// Why the module does not load, when it does not.
@@ -2182,6 +2189,7 @@ fn library_entry(
                 reads_clock: r.reads_clock,
                 reads_signals: r.reads_signals,
                 reads_audio: r.reads_audio,
+                game: r.game,
             },
         ),
     };
@@ -2209,6 +2217,7 @@ fn library_entry(
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
+            game: declared.game,
         },
     }
 }
@@ -2235,6 +2244,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
+            game: declared.game,
             // The default layout, never the one of the plugged-in keyboard: a
             // swatch that depended on the hardware present would be comparable
             // neither from one effect to another, nor from one machine to another.
@@ -2252,6 +2262,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            game: None,
             swatch: Swatch::new(),
             error: Some(error),
         },
@@ -2288,6 +2299,7 @@ struct Declared {
     reads_clock: bool,
     reads_signals: bool,
     reads_audio: bool,
+    game: Option<String>,
 }
 
 impl Declared {
@@ -2301,6 +2313,7 @@ impl Declared {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            game: None,
         }
     }
 }
@@ -2345,6 +2358,11 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
         reads_clock: declares("clock"),
         reads_signals: declares("signals"),
         reads_audio: declares("audio"),
+        game: value
+            .get("game")
+            .and_then(|g| g.as_str())
+            .filter(|g| !g.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -4316,6 +4334,7 @@ mod tests {
                 token: "0f".repeat(32),
                 interfaces: vec!["Wi-Fi".into()],
                 game_token: "ab".repeat(32),
+                valve_games: true,
             },
             sound: crate::audio::analysis::Tuning {
                 gain: 1.5,
@@ -5049,6 +5068,7 @@ mod tests {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            game: None,
         }
     }
 
