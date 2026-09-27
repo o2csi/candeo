@@ -848,6 +848,12 @@ sends: the DeathStalker V2 Pro does not check that byte, which other models may.
 One confirmed on the device, with frames captured there, joins the built-in
 ones.
 
+They come in two degrees. The Razer ones only change what a verified sibling
+already sends; a family with no verified member — SteelSeries' Apex, written by
+`steelseries.mjs` from OpenRGB's reading of its protocol — has its protocol to
+verify too, and the site lists it apart. Each family's generator reads a facts
+file beside it: `variants.json` for Razer, `<family>.facts.json` for the others.
+
 Both kinds open in the application's editor, checked against the schema as they
 are typed. A built-in one is read only: *Copy to yours* puts it in the folder
 and chooses the copy, since a copy is made to be changed. Saving one of yours
