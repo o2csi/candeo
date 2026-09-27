@@ -44,6 +44,7 @@ export const KEYS = {
 /** Lights that are not keys: a name, and a place of their own. */
 export const OTHERS = {
   m1: ['M1'], m2: ['M2'], m3: ['M3'], m4: ['M4'], m5: ['M5'], m6: ['M6'], dial: ['Dial', 'disc'],
+  g1: ['G1'], g2: ['G2'], g3: ['G3'], g4: ['G4'], g5: ['G5'], brightness: ['Brightness key'],
   media: ['Media keys', 'rect', [18.5, 0, 2, 1]],
   voldial: ['Volume dial', 'disc', [20.5, 0, 1, 1]],
   gamebar: ['Game Bar key', 'rect'],
@@ -55,7 +56,7 @@ export const OTHERS = {
 const UPPER_ARM = ['1c', 13.5, 1.5]
 
 /** The macro keys make a column of their own, left of Esc. */
-const MACRO = new Set(['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'dial'])
+const MACRO = new Set(['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'dial', 'g1', 'g2', 'g3', 'g4', 'g5'])
 
 /** A row's height on the board: the function row, a gap, then the others. */
 const top = (row) => (row === 0 ? 0 : row + 0.5)
