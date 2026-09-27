@@ -106,7 +106,8 @@ export default defineEffect({
     en: 'Curtains of colour swaying like northern lights, moved by the music',
     fr: 'Des voiles de couleur qui ondulent comme une aurore boréale, portés par la musique',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   inputs: ['audio'],
   params: {
     low: { kind: 'color', label: { en: 'Low music', fr: 'Musique grave' }, default: LOW },

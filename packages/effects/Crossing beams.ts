@@ -22,7 +22,8 @@ export default defineEffect({
     en: 'Two beams sweep the keyboard across each other',
     fr: 'Deux faisceaux balaient le clavier en se croisant',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     first: { kind: 'color', label: { en: 'Vertical beam', fr: 'Faisceau vertical' }, default: DEFAULT_FIRST },
     second: { kind: 'color', label: { en: 'Horizontal beam', fr: 'Faisceau horizontal' }, default: DEFAULT_SECOND },

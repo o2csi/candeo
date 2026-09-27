@@ -61,7 +61,8 @@ import { defineEffect, hsv } from '@candeo/effects-api'
 
 export default defineEffect({
   description: { en: 'A hue wave spreading in circles', fr: 'Une onde de teinte en cercles' },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
   },
@@ -73,11 +74,17 @@ export default defineEffect({
   `label` (`{ value, label }`, or a plain string shown as it is) — accept a
   string or a map of languages. The display picks the current language, then
   English, then the first entry. The name is not translated: it is a file name.
-- **`kinds`** declares the device kinds the effect is meant for, as decided in
-  #44 §5 and `device-sdk.md` §2 (`['keyboard']`, `'all'`…). Shipped effects
-  declare it now. Only keyboards exist today, so a missing `kinds` is read as
-  `['keyboard']`; the obligation and the gallery filter come with the second
-  kind.
+- **`kinds`** says which lights the effect makes sense on: `['keys']`,
+  `['zones']`, both, or `'all'` (`device-sdk.md` §2). A missing `kinds` is read
+  as `['keys']`, what every effect was written for before zones existed, and the
+  older `'keyboard'` as `'keys'`.
+- **`requires`** says what it needs of a device to work: `'matrix'`, lights in
+  rows and columns, for an effect reading `row` or `col`; `'geometry'`, each
+  light's rectangle, for one using `center` or `bounds` (§3). A kind or a
+  capability nobody knows is refused when the effect loads, with a sentence.
+- **The gallery and the tray offer an effect only where it applies**: its kind
+  of lights one it makes sense on, what it requires there, and keys to press
+  when it reads them (#288).
 - `author` and `version`, proposed in #44 §1 as optional, are not implemented
   yet: see #44.
 - `name` in an existing source is **ignored**. `EffectModule` keeps it as a
@@ -263,7 +270,6 @@ import step that shows what an effect declares before it first runs.
 
 - Watching the folder for changes.
 - An "update available" mark for modified shipped effects.
-- The `kinds` filter and obligation (with the second device kind, #34).
 - The OpenRGB Effects Plugin reimplementations: written directly in this format
   once it lands.
 

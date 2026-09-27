@@ -47,7 +47,8 @@ export default defineEffect({
     en: 'Two colors drifting over the keyboard like slow clouds',
     fr: 'Deux couleurs qui dérivent sur le clavier comme des nuages lents',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     from: { kind: 'color', label: { en: 'First color', fr: 'Première couleur' }, default: DEFAULT_FROM },
     to: { kind: 'color', label: { en: 'Second color', fr: 'Seconde couleur' }, default: DEFAULT_TO },

@@ -21,7 +21,8 @@ export default defineEffect({
     en: 'A motionless gradient between two colors',
     fr: 'Un dégradé entre deux couleurs, immobile',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix'],
   params: {
     from: { kind: 'color', label: { en: 'Start color', fr: 'Couleur de départ' }, default: DEFAULT_FROM },
     to: { kind: 'color', label: { en: 'End color', fr: "Couleur d'arrivée" }, default: DEFAULT_TO },

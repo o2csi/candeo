@@ -20,7 +20,7 @@ export default defineEffect({
     en: 'Keys twinkle here and there over a dark sky',
     fr: "Des touches scintillent çà et là sur un ciel sombre",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
   params: {
     sky: { kind: 'color', label: { en: 'Sky', fr: 'Ciel' }, default: DEFAULT_SKY },
     density: { kind: 'number', label: { en: 'Stars', fr: 'Étoiles' }, min: 0.05, max: 1, step: 0.05, default: 0.35 },

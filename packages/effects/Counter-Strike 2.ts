@@ -20,6 +20,8 @@ export default defineEffect({
     en: 'Your health, ammo, flashes and the bomb in Counter-Strike 2, once connected in Games',
     fr: 'Votre vie, vos munitions, les flashs et la bombe dans Counter-Strike 2, une fois connecté dans Jeux',
   },
+  kinds: 'all',
+  requires: ['matrix'],
   inputs: ['signals'],
   game: 'cs2',
   params: {

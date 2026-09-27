@@ -53,6 +53,8 @@ export default defineEffect({
     en: 'One key of the top row per signal received, green, amber or red by what it says',
     fr: 'Une touche de la rangée du haut par signal reçu, verte, ambre ou rouge selon ce qu’il dit',
   },
+  kinds: 'all',
+  requires: ['matrix'],
   inputs: ['signals'],
   params: {
     good: { kind: 'color', label: { en: 'Going well', fr: 'Tout va bien' }, default: GOOD },

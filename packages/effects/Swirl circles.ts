@@ -11,7 +11,8 @@ export default defineEffect({
     en: 'Two glowing circles orbit the center of the keyboard',
     fr: 'Deux cercles lumineux tournent autour du centre du clavier',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     speed: { kind: 'number', label: { en: 'Turns per second', fr: 'Tours par seconde' }, min: 0, max: 2, step: 0.05, default: 0.25 },
     radius: { kind: 'number', label: { en: 'Glow (keys)', fr: 'Halo (touches)' }, min: 1, max: 8, step: 0.5, default: 4.5 },

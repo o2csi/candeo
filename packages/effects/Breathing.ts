@@ -13,7 +13,7 @@ export default defineEffect({
     en: 'The whole keyboard breathes, in a single color',
     fr: "Tout le clavier respire, d'une seule couleur",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
   params: {
     color: { kind: 'color', label: { en: 'Color', fr: 'Couleur' }, default: DEFAULT_COLOR },
     period: { kind: 'number', label: { en: 'Period (s)', fr: 'Période (s)' }, min: 1, max: 20, step: 0.5, default: 5 },

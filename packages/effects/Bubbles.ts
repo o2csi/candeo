@@ -19,7 +19,8 @@ export default defineEffect({
     en: 'Rings grow from random points and fade as they widen',
     fr: "Des anneaux naissent au hasard et s'effacent en grandissant",
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     count: { kind: 'number', label: { en: 'Bubbles', fr: 'Bulles' }, min: 1, max: 8, step: 1, default: 4 },
     speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0.1, max: 2, step: 0.1, default: 0.5 },

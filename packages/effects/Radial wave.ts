@@ -16,7 +16,8 @@ export default defineEffect({
     en: 'A hue wave spreads in circles, at the physical distance of the keys',
     fr: 'Une onde de teinte se propage en cercles, à la distance physique des touches',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
     scale: { kind: 'number', label: { en: 'Scale', fr: 'Échelle' }, min: 1, max: 60, default: 18 },

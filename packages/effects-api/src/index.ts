@@ -334,7 +334,21 @@ export type ParamSpec =
   | { kind: 'text'; label: Text; default: string; maxLength?: number }
 
 /** A kind of device an effect can target. The list grows with the devices. */
-export type DeviceKind = 'keyboard'
+/**
+ * The lights an effect makes sense on: `keys`, which are pressed and sit in rows,
+ * or `zones` — a ring, a logo, a strip — lit and never typed on.
+ */
+export type LightsKind = 'keys' | 'zones'
+
+/** @deprecated The kind before lights had kinds: read as `'keys'`. */
+export type DeviceKind = LightsKind | 'keyboard'
+
+/**
+ * What an effect needs of a device to work at all (`docs/design/device-sdk.md` §3):
+ * `matrix`, lights in rows and columns where `row` and `col` mean something;
+ * `geometry`, each light's rectangle, which {@link center} and {@link bounds} read.
+ */
+export type Capability = 'matrix' | 'geometry'
 
 export interface EffectModule<P = undefined> {
   /**
@@ -351,11 +365,19 @@ export interface EffectModule<P = undefined> {
    */
   readonly apiVersion?: number
   /**
-   * The kinds of device this effect is meant for. Only keyboards exist today, so
-   * an effect that says nothing is read as `['keyboard']`; saying it is what
-   * keeps the effect right the day a second kind arrives.
+   * The lights this effect makes sense on: `['keys']`, `['zones']`, both, or
+   * `'all'`. An effect that says nothing is read as `['keys']`, what every
+   * effect was written for before zones existed. The gallery offers an effect
+   * only where it makes sense.
    */
   readonly kinds?: readonly DeviceKind[] | 'all'
+  /**
+   * What the effect needs to work, checked against each device: an effect
+   * reading `row` requires `'matrix'`, one placing lights with {@link center}
+   * requires `'geometry'`. A device without it is not offered the effect, which
+   * would otherwise show nothing, or a single degenerate row.
+   */
+  readonly requires?: readonly Capability[]
   /**
    * What the effect reads besides time and its parameters. `['keys']` gives it
    * {@link EffectContext.presses}; key presses are read only while such an

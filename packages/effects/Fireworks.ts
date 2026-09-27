@@ -32,7 +32,8 @@ export default defineEffect({
     en: 'Bursts of light on random keys at each beat of the sound, more when it is loud',
     fr: 'Des gerbes de lumière sur des touches au hasard à chaque temps fort, plus nombreuses quand c’est fort',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   inputs: ['audio'],
   params: {
     background: { kind: 'color', label: { en: 'Background', fr: 'Fond' }, default: BACKGROUND },

@@ -41,7 +41,8 @@ export default defineEffect({
     en: 'The sound playing as it goes by, sliding from right to left, a row per pitch',
     fr: 'Le son joué qui défile de droite à gauche, une rangée par hauteur',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['matrix', 'geometry'],
   inputs: ['audio'],
   params: {
     quiet: { kind: 'color', label: { en: 'Quiet', fr: 'Faible' }, default: QUIET },

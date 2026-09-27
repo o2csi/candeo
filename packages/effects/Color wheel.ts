@@ -12,7 +12,8 @@ export default defineEffect({
     en: 'Every hue around the center of the keyboard, turning',
     fr: 'Toutes les teintes autour du centre du clavier, qui tournent',
   },
-  kinds: ['keyboard'],
+  kinds: 'all',
+  requires: ['geometry'],
   params: {
     speed: { kind: 'number', label: { en: 'Speed (°/s)', fr: 'Vitesse (°/s)' }, min: 0, max: 360, default: 90 },
     reverse: { kind: 'boolean', label: { en: 'Reverse', fr: 'Sens inverse' }, default: false },
