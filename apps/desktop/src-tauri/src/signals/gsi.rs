@@ -23,15 +23,17 @@ pub const FILE: &str = "gamestate_integration_candeo.cfg";
 #[serde(rename_all = "camelCase")]
 pub enum Game {
     Cs2,
+    Dota2,
 }
 
 impl Game {
-    pub const ALL: [Game; 1] = [Game::Cs2];
+    pub const ALL: [Game; 2] = [Game::Cs2, Game::Dota2];
 
     /// In the route, the signals' names and the window: `cs2`.
     pub fn id(self) -> &'static str {
         match self {
             Game::Cs2 => "cs2",
+            Game::Dota2 => "dota2",
         }
     }
 
@@ -43,6 +45,7 @@ impl Game {
     pub fn name(self) -> &'static str {
         match self {
             Game::Cs2 => "Counter-Strike 2",
+            Game::Dota2 => "Dota 2",
         }
     }
 
@@ -50,13 +53,33 @@ impl Game {
     fn app(self) -> &'static str {
         match self {
             Game::Cs2 => "730",
+            Game::Dota2 => "570",
         }
     }
 
-    /// Its `cfg` folder, from a library's root.
+    /// Its `cfg` folder, from a library's root: there when the game is installed.
     fn cfg(self) -> &'static str {
         match self {
             Game::Cs2 => "steamapps/common/Counter-Strike Global Offensive/game/csgo/cfg",
+            Game::Dota2 => "steamapps/common/dota 2 beta/game/dota/cfg",
+        }
+    }
+
+    /// Where in its `cfg` folder it looks for the file: Dota 2 in a folder of
+    /// its own, which a fresh install does not have yet.
+    fn place(self) -> Option<&'static str> {
+        match self {
+            Game::Cs2 => None,
+            Game::Dota2 => Some("gamestate_integration"),
+        }
+    }
+
+    /// The launch option without which it reads no file: Dota 2 asks for one
+    /// since 2022, the integration costing it time on every frame.
+    pub fn launch_option(self) -> Option<&'static str> {
+        match self {
+            Game::Cs2 => None,
+            Game::Dota2 => Some("-gamestateintegration"),
         }
     }
 
@@ -70,6 +93,7 @@ impl Game {
                 "player_state",
                 "player_weapons",
             ],
+            Game::Dota2 => &["provider", "map", "player", "hero"],
         }
     }
 }
@@ -85,6 +109,7 @@ pub fn token(body: &Value) -> Option<&str> {
 pub fn translate(game: Game, body: &Value) -> Map<String, Value> {
     match game {
         Game::Cs2 => cs2(body),
+        Game::Dota2 => dota2(body),
     }
 }
 
@@ -144,6 +169,61 @@ fn cs2(body: &Value) -> Map<String, Value> {
             "bomb",
             Value::from(round["bomb"].as_str().unwrap_or("none")),
         );
+    }
+    out
+}
+
+/// What the hero at the keyboard is in.
+const DOTA2_HERO: [&str; 6] = ["health", "mana", "respawn", "stunned", "silenced", "smoked"];
+
+fn dota2(body: &Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    let mut put = |name: &str, value: Value| {
+        out.insert(format!("dota2.{name}"), value);
+    };
+    let percent = |value: &Value| value.as_i64().map(|v| Value::from(v.clamp(0, 100)));
+    // A state that holds while it lasts, and goes with it: a rule reads it as
+    // *set*.
+    let flag = |on: bool| Value::from(if on { "yes" } else { "" });
+
+    let hero = &body["hero"];
+    // Spectating, `hero` describes the players of both teams: nothing of it is
+    // yours, and your values go rather than stay frozen.
+    if let Some(health) = percent(&hero["health_percent"]) {
+        put("health", health);
+        if let Some(mana) = percent(&hero["mana_percent"]) {
+            put("mana", mana);
+        }
+        let dead = hero["alive"].as_bool() == Some(false);
+        put(
+            "respawn",
+            match hero["respawn_seconds"].as_i64() {
+                Some(seconds) if dead => Value::from(seconds.max(0)),
+                _ if dead => Value::from(0),
+                _ => Value::from(""),
+            },
+        );
+        for name in ["stunned", "silenced", "smoked"] {
+            put(name, flag(hero[name].as_bool() == Some(true)));
+        }
+    } else if hero.is_object() {
+        for name in DOTA2_HERO {
+            put(name, Value::from(""));
+        }
+    }
+
+    let map = &body["map"];
+    if map.is_object() {
+        if let Some(state) = map["game_state"].as_str() {
+            let phase = state
+                .trim_start_matches("DOTA_GAMERULES_STATE_")
+                .to_lowercase();
+            put("phase", Value::from(phase));
+        }
+        if let Some(day) = map["daytime"].as_bool() {
+            let night = !day || map["nightstalker_night"].as_bool() == Some(true);
+            put("daytime", Value::from(if night { "night" } else { "day" }));
+        }
     }
     out
 }
@@ -265,13 +345,23 @@ fn library_of(vdf: &str, app: &str) -> Option<PathBuf> {
         })
 }
 
-/// The `cfg` folder of `game` as installed here, or `None` when Steam does not
-/// have it.
+/// The folder where `game` looks for the file, or `None` when Steam does not
+/// have the game. It may not exist yet: [`write`] makes it.
 pub fn folder(game: Game) -> Option<PathBuf> {
     let steam = steam()?;
     let vdf = std::fs::read_to_string(steam.join("steamapps").join("libraryfolders.vdf")).ok()?;
-    let folder = library_of(&vdf, game.app())?.join(game.cfg());
-    folder.is_dir().then_some(folder)
+    let cfg = library_of(&vdf, game.app())?.join(game.cfg());
+    cfg.is_dir().then(|| match game.place() {
+        Some(place) => cfg.join(place),
+        None => cfg,
+    })
+}
+
+/// Writes the file into `folder`, making the folder first where the game has
+/// none yet.
+pub fn write(folder: &Path, text: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    std::fs::write(folder.join(FILE), text)
 }
 
 /// Whether the file in `folder` is there, and says what Candeo expects now.
@@ -397,6 +487,78 @@ mod tests {
         let parsed = parse(&text);
         let data = parsed.get("Candeo").and_then(|c| c.get("data")).unwrap();
         assert_eq!(data.entries().len(), Game::Cs2.data().len());
+    }
+
+    /// A payload as Dota 2 posts it during a match, trimmed to what is read.
+    fn dota2_payload() -> Value {
+        json!({
+            "provider": { "name": "Dota 2", "appid": 570 },
+            "map": {
+                "game_state": "DOTA_GAMERULES_STATE_GAME_IN_PROGRESS",
+                "daytime": true,
+                "nightstalker_night": false
+            },
+            "player": { "steamid": ME, "kills": 3 },
+            "hero": {
+                "alive": true, "respawn_seconds": 0,
+                "health_percent": 64, "mana_percent": 30,
+                "stunned": true, "silenced": false, "smoked": false
+            }
+        })
+    }
+
+    #[test]
+    fn a_dota2_payload_becomes_the_heros_signals() {
+        let signals = translate(Game::Dota2, &dota2_payload());
+        assert_eq!(
+            Value::Object(signals),
+            json!({
+                "dota2.health": 64, "dota2.mana": 30, "dota2.respawn": "",
+                "dota2.stunned": "yes", "dota2.silenced": "", "dota2.smoked": "",
+                "dota2.phase": "game_in_progress", "dota2.daytime": "day"
+            })
+        );
+    }
+
+    #[test]
+    fn a_dead_hero_waits_and_nightstalker_brings_the_night() {
+        let mut body = dota2_payload();
+        body["hero"]["alive"] = json!(false);
+        body["hero"]["respawn_seconds"] = json!(23);
+        body["map"]["nightstalker_night"] = json!(true);
+        let signals = translate(Game::Dota2, &body);
+        assert_eq!(signals["dota2.respawn"], json!(23));
+        assert_eq!(signals["dota2.daytime"], json!("night"));
+    }
+
+    #[test]
+    fn a_spectated_match_erases_your_hero() {
+        let mut body = dota2_payload();
+        body["hero"] = json!({ "team2": { "player0": { "health_percent": 90 } } });
+        let signals = translate(Game::Dota2, &body);
+        for name in DOTA2_HERO {
+            assert_eq!(signals[&format!("dota2.{name}")], json!(""), "{name}");
+        }
+        assert_eq!(signals["dota2.phase"], json!("game_in_progress"));
+    }
+
+    #[test]
+    fn dota2_asks_for_its_launch_option_and_a_folder_of_its_own() {
+        let text = file_text(Game::Dota2, 7317, "abc");
+        assert!(
+            text.contains("\"uri\" \"http://127.0.0.1:7317/gsi/dota2\""),
+            "{text}"
+        );
+        assert_eq!(Game::Dota2.launch_option(), Some("-gamestateintegration"));
+        assert_eq!(Game::Cs2.launch_option(), None);
+        assert_eq!(Game::from_id("dota2"), Some(Game::Dota2));
+
+        let folder = std::env::temp_dir()
+            .join(format!("candeo-gsi-{}", std::process::id()))
+            .join("gamestate_integration");
+        write(&folder, &text).unwrap();
+        assert_eq!(file_state(&folder, &text), (true, true));
+        std::fs::remove_dir_all(folder.parent().unwrap()).unwrap();
     }
 
     /// `libraryfolders.vdf` as Steam writes it, paths escaped, two libraries.

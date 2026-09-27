@@ -546,6 +546,7 @@
     "reconnect": "Connect again",
     "disconnect": "Disconnect",
     "restart": "{game} reads it when it starts: restart it if it is running.",
+    "launchOption": "{game} reads it only when started with {option}: add it to its launch options, in its properties in Steam.",
     "values": "What it says now",
     "quiet": "Nothing yet: start a match.",
     "duringMatch": "During a match",

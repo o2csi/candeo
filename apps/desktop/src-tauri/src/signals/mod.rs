@@ -449,6 +449,8 @@ pub struct GameView {
     pub id: &'static str,
     pub name: &'static str,
     pub state: GameState,
+    /// What its launch options must carry for it to read the file at all.
+    pub launch_option: Option<&'static str>,
 }
 
 fn games(config: &SignalsConfig) -> Vec<GameView> {
@@ -472,6 +474,7 @@ fn games(config: &SignalsConfig) -> Vec<GameView> {
                 id: game.id(),
                 name: game.name(),
                 state,
+                launch_option: game.launch_option(),
             }
         })
         .collect()
@@ -527,7 +530,7 @@ pub fn connect_game(app: AppHandle, game: String) -> CmdResult<Vec<GameView>> {
     let turned_on = !config.enabled;
     config.enabled = true;
     let text = gsi::file_text(game, config.port, &config.game_token);
-    std::fs::write(folder.join(gsi::FILE), text).map_err(|e| {
+    gsi::write(&folder, &text).map_err(|e| {
         Failure::unexpected(format!(
             "cannot write the file in {}'s folder: {e}",
             game.name()

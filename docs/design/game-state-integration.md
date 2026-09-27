@@ -55,6 +55,17 @@ Counter-Strike 2:
 | `cs2.bomb` | `none`, `planted`, `defused` or `exploded` |
 | `cs2.phase` | `freezetime`, `live` or `over` |
 
+Dota 2 — the hero's values go the same way while you spectate, `hero` then
+describing both teams rather than yours:
+
+| Signal | Value |
+|---|---|
+| `dota2.health`, `dota2.mana` | 0 to 100 |
+| `dota2.respawn` | the seconds left before respawning, while dead; erased alive |
+| `dota2.stunned`, `dota2.silenced`, `dota2.smoked` | `yes` while it lasts, erased after |
+| `dota2.daytime` | `day` or `night`, Night Stalker's night included |
+| `dota2.phase` | the match's state, `DOTA_GAMERULES_STATE_` left out: `hero_selection`, `pre_game`, `game_in_progress`, `post_game`… |
+
 ## 3. Authentication
 
 The game cannot set a header: the file's `auth` block is sent in the body, as
@@ -130,8 +141,17 @@ where someone picks the lighting of their desk. So:
 ## 6. Adding a game
 
 Another of Valve's game state integrations is a translation table and a
-folder: Dota 2 first — health, mana, the day and night cycle, Roshan. Nothing
-else changes.
+folder. Dota 2 was the second, on 2026-09-27, with two differences from
+Counter-Strike 2:
+
+- **its file goes in a folder of its own**, `game/dota/cfg/gamestate_integration/`,
+  which a fresh install does not have: *Connect* makes it;
+- **it reads no file unless started with `-gamestateintegration`**, a launch
+  option Valve made necessary in March 2022, the integration costing time on
+  every frame. Candeo does not edit Steam's launch options, which Steam
+  rewrites while it runs: the card says to add it.
+
+Roshan is not in what a player's integration posts, and is left out.
 
 Games without it are another mechanism, decided when asked: League of Legends
 serves its state locally over HTTPS, to be polled. Screen analysis and memory
