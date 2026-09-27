@@ -39,6 +39,7 @@ const layoutOf = (pid: number): LayoutInfo => ({
   keys: [],
   firmwareEffects: [],
   lights: 'keys',
+  capabilities: ['matrix', 'geometry'],
   outline: [],
 })
 
