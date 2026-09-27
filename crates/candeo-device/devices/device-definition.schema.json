@@ -25,7 +25,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["vid", "pid"],
-      "description": "How the device is found among the system's HID devices. Name either the interface or the collection that carries the lighting: opening the wrong one gives a handle on which every write is lost.",
+      "description": "How the device is found among the system's HID devices. Name the interface or the collection that carries the lighting, or both where a collection repeats on several interfaces: opening the wrong one gives a handle on which every write is lost.",
       "properties": {
         "vid": { "$ref": "#/$defs/hex16", "description": "Vendor id, four hexadecimal digits: `1532`." },
         "pid": { "$ref": "#/$defs/hex16", "description": "Product id, four hexadecimal digits: `0292`." },
@@ -38,10 +38,8 @@
         "usagePage": { "$ref": "#/$defs/hex16", "description": "The collection's usage page, when several collections share one interface: `ff00`." },
         "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`." }
       },
-      "oneOf": [
-        { "required": ["interface"], "not": { "anyOf": [{ "required": ["usagePage"] }, { "required": ["usage"] }] } },
-        { "required": ["usagePage", "usage"], "not": { "required": ["interface"] } }
-      ]
+      "dependentRequired": { "usagePage": ["usage"], "usage": ["usagePage"] },
+      "anyOf": [{ "required": ["interface"] }, { "required": ["usagePage", "usage"] }]
     },
     "surveyed": {
       "type": "string",

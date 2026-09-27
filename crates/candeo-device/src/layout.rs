@@ -160,6 +160,14 @@ pub enum Port {
     /// One collection of an interface, by usage page and usage: a laptop
     /// keyboard puts several on the same interface, and only one of them lights.
     Collection { usage_page: u16, usage: u16 },
+    /// One collection of one interface: a device repeating the same usage page
+    /// on several interfaces, where only one of them lights — SteelSeries'
+    /// wireless Apex, per OpenRGB (`docs/design/other-keyboards.md` §2).
+    InterfaceCollection {
+        interface: u8,
+        usage_page: u16,
+        usage: u16,
+    },
 }
 
 /// Layout of a device: identification, transport and matrix.
@@ -256,6 +264,11 @@ impl Layout {
                 usage_page: page,
                 usage: which,
             } => usage_page == page && usage == which,
+            Port::InterfaceCollection {
+                interface: number,
+                usage_page: page,
+                usage: which,
+            } => interface == i32::from(number) && usage_page == page && usage == which,
         }
     }
 

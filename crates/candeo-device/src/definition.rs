@@ -997,7 +997,12 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
             usage: hex_u16(usage, "usage")?,
         },
         (None, None, Some(interface)) => Port::Interface(interface),
-        _ => return Err("match an interface, or a usage page and a usage".into()),
+        (Some(page), Some(usage), Some(interface)) => Port::InterfaceCollection {
+            interface,
+            usage_page: hex_u16(page, "usage page")?,
+            usage: hex_u16(usage, "usage")?,
+        },
+        _ => return Err("match an interface, a usage page and a usage, or all three".into()),
     };
 
     let layout = Layout {
