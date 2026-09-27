@@ -1133,6 +1133,27 @@ mod tests {
         assert_eq!(morph.unwrap().name, Some(Text::One("Morph".into())));
     }
 
+    /// The unverified definitions (`device-sdk.md` §9) load, and give the
+    /// frames `derive.mjs` worked out for them byte by byte: the files say what
+    /// their facts say. Whether the devices answer, only they can tell.
+    #[test]
+    fn unverified_definitions_load_and_replay_their_derived_frames() {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("devices/unverified");
+        let mut read = 0;
+        for entry in std::fs::read_dir(&folder).expect("the unverified definitions") {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".json") || name == "variants.json" {
+                continue;
+            }
+            let json = std::fs::read_to_string(&path).unwrap();
+            load(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            replay(&json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            read += 1;
+        }
+        assert!(read >= 4, "{read} unverified definitions");
+    }
+
     /// What *Copy to yours* and the editor start from: the text shipped.
     #[test]
     fn a_built_in_definition_is_found_by_its_file_name() {

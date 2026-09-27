@@ -502,7 +502,10 @@ hex dump, and the byte positions give the component order without inferring it.
 - [x] **Read back the current effect** — `0x0f`/`0x82`, which makes it possible to verify without the eye
 - [x] **Which effect identifiers the device accepts** — the six from the SDK; `0x05` and `0x07` are refused
 - [ ] Meaning of arguments 0 and 1 (offsets 8 and 9), constant at `0x00` — a third-party driver names them *variable storage* and *LED identifier*, unverified
-- [ ] Is the transaction identifier (`0x9f`) checked by the device?
+- [ ] Is the transaction identifier (`0x9f`) checked by the device? OpenRazer
+  sends this model's frames with `0x3f` (commit `6820f9da`, 2026-07-05), and
+  `0x9f` works here on firmware v1.5: the device apparently accepts either.
+  `0x3f` was not tried on it (2026-09-27).
 - [ ] Actual range of the `Wave` speed; the direction is bounded to `00`–`02`
 - [ ] Effect identifier `0x06`: never tried
 - [x] **Maximum throughput accepted before the device drops out** — see below

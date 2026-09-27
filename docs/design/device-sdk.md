@@ -832,6 +832,17 @@ may define a device, a variant each; none takes over by being in the folder.
   says so in one line. The reason is listed with your definitions and shown in
   the editor.
 
+**Unverified definitions** are the third kind: written without the device,
+from facts published elsewhere, and never tried on the hardware. They are not
+built in — the tests could only replay frames derived from the same facts,
+which proves the file's shape, not the device's answer. They live in
+`crates/candeo-device/devices/unverified/`, derived by a script from a verified
+definition of the same family and the facts that differ (product id, interface,
+transaction byte, matrix), each with its source and date in its `notes`; the
+site lists them to download into your folder, with an issue form to say whether
+it lights. One confirmed on the device, with frames captured there, joins the
+built-in ones.
+
 Both kinds open in the application's editor, checked against the schema as they
 are typed. A built-in one is read only: *Copy to yours* puts it in the folder
 and chooses the copy, since a copy is made to be changed. Saving one of yours

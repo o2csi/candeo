@@ -1,0 +1,43 @@
+{
+  "from": "razer-deathstalker-v2-pro.json",
+  "source": "OpenRazer, https://github.com/openrazer/openrazer, commit 6820f9da (2026-07-05): driver/razerkbd_driver.c and daemon/openrazer_daemon/hardware/keyboards.py",
+  "derived": "2026-09-27",
+  "variants": [
+    {
+      "file": "razer-deathstalker-v2-pro-wireless.json",
+      "name": "Razer DeathStalker V2 Pro (wireless)",
+      "pid": "0290",
+      "interface": 2,
+      "transaction": "9f",
+      "cols": 22,
+      "connection": "HyperSpeed wireless dongle"
+    },
+    {
+      "file": "razer-deathstalker-v2.json",
+      "name": "Razer DeathStalker V2",
+      "pid": "0295",
+      "interface": 3,
+      "transaction": "3f",
+      "cols": 22,
+      "connection": "wired"
+    },
+    {
+      "file": "razer-deathstalker-v2-pro-tkl.json",
+      "name": "Razer DeathStalker V2 Pro TKL",
+      "pid": "0298",
+      "interface": 3,
+      "transaction": "3f",
+      "cols": 17,
+      "connection": "wired"
+    },
+    {
+      "file": "razer-deathstalker-v2-pro-tkl-wireless.json",
+      "name": "Razer DeathStalker V2 Pro TKL (wireless)",
+      "pid": "0296",
+      "interface": 2,
+      "transaction": "9f",
+      "cols": 17,
+      "connection": "HyperSpeed wireless dongle"
+    }
+  ]
+}
