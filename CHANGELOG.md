@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/o2csi/candeo/compare/v0.18.0...v0.19.0) (2026-09-28)
+
+
+### Features
+
+* **devices:** one list, and Control or Release on each device ([ab4b9d3](https://github.com/o2csi/candeo/commit/ab4b9d3601874a1bcd94c61b5064e346917cb3dc))
+* **effects:** the pickers of Automations and Games offer what applies ([d45bf9b](https://github.com/o2csi/candeo/commit/d45bf9b572359720f3fd09bfe240e66df776f8f8))
+
+
+### Documentation
+
+* quit an installed Candeo before the first tauri dev ([1dc034b](https://github.com/o2csi/candeo/commit/1dc034bfe737543373b1bcf243d042a2a98f9b79))
+
 ## [0.18.0](https://github.com/o2csi/candeo/compare/v0.17.0...v0.18.0) (2026-09-27)
 
 
