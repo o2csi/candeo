@@ -227,6 +227,8 @@ export interface EffectManifest {
   readsSignals?: boolean
   /** Declares `inputs: ['audio']`: the sound playing is captured while it runs. */
   readsAudio?: boolean
+  /** Declares `inputs: ['system']`: what the computer is doing is sampled while it runs. */
+  readsSystem?: boolean
   /** The game it is for, `cs2`: the gallery keeps it apart. */
   game?: string
   /**
@@ -1175,6 +1177,48 @@ export interface SoundNow {
 
 export function soundNow(): Promise<SoundNow> {
   return invoke('sound_now')
+}
+
+/**
+ * Which of the computer's sources this computer offers, read without a driver
+ * or administrator rights (§2.4). Mirror of `Offers`, in `src-tauri/src/system`.
+ */
+export interface SystemOffers {
+  cpu: boolean
+  memory: boolean
+  gpu: boolean
+  cpuTemp: boolean
+  gpuTemp: boolean
+  cpuPower: boolean
+}
+
+export function systemOffers(): Promise<SystemOffers> {
+  return invoke('system_offers')
+}
+
+/** Holds the sampler on while Settings shows its readout, or lets it go. */
+export function watchSystem(on: boolean): Promise<void> {
+  return invoke('watch_system', { on })
+}
+
+/**
+ * What Settings shows, each value in its unit: loads and memory 0..1, degrees
+ * Celsius, watts; `null` when it cannot be read. Mirror of `SystemNow`.
+ */
+export interface SystemNow {
+  offers: SystemOffers
+  /** Two samples read: before, a missing load means "not yet". */
+  settled: boolean
+  cpu: number | null
+  memory: number | null
+  gpu: number | null
+  cpuCelsius: number | null
+  gpuCelsius: number | null
+  cpuWatts: number | null
+}
+
+export function systemNow(): Promise<SystemNow> {
+  return invoke('system_now')
 }
 
 export function getSignalsApi(): Promise<SignalsApi> {

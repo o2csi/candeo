@@ -30,6 +30,7 @@
     "percent": "{n}%",
     "brightnessFollows": "Follows",
     "brightnessSound": "Sound the brightness follows",
+    "brightnessSystem": "System value the brightness follows",
     "brightnessSignal": "Signal the brightness follows",
     "brightnessFloor": "Floor",
     "brightnessFirmware": "A hardware effect keeps the slider's brightness.",
@@ -130,11 +131,13 @@
       "on": "on",
       "off": "off",
       "reset": "Restore the effect's values",
-      "source": "{name}: value, signal or sound",
+      "source": "{name}: value, signal, sound or system",
       "fromValue": "Value",
       "fromSignal": "Signal",
       "fromSound": "Sound",
+      "fromSystem": "System",
       "soundOf": "Sound followed by {name}",
+      "systemOf": "System value followed by {name}",
       "sound": {
         "volume": "Volume",
         "beat": "Beat",
@@ -142,6 +145,14 @@
         "mids": "Mids",
         "highs": "Highs",
         "tone": "Tone, low to high"
+      },
+      "system": {
+        "cpu": "CPU load",
+        "memory": "Memory in use",
+        "gpu": "GPU load",
+        "cpuTemp": "CPU temperature",
+        "gpuTemp": "GPU temperature",
+        "cpuPower": "CPU power"
       },
       "signalName": "signal name",
       "signalOf": "Signal read by {name}",
@@ -417,6 +428,14 @@
       "sensitivity": "Beat sensitivity",
       "sensitivityValue": "{value}%",
       "unavailable": "The sound playing cannot be captured on this computer."
+    },
+    "system": {
+      "title": "System",
+      "notReadable": "not readable on this computer",
+      "waiting": "…",
+      "percent": "{n}%",
+      "celsius": "{n} °C",
+      "watts": "{n} W"
     },
     "signals": {
       "title": "Signals",

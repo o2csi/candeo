@@ -5,8 +5,10 @@ import {
   dimmingMode,
   dimmingSignal,
   dimmingSound,
+  dimmingSystem,
   followingSignal,
   followingSound,
+  followingSystem,
   withFloor,
 } from './dimming'
 
@@ -21,6 +23,16 @@ describe('dimming', () => {
     expect(dimmingSound({ source: 'sound:bass', floor: 10 })).toBe('bass')
     expect(dimmingMode({ source: 'signal:lux', floor: 10 })).toBe('signal')
     expect(dimmingSignal({ source: 'signal:lux', floor: 10 })).toBe('lux')
+  })
+
+  it('tells the computer from the sound', () => {
+    expect(dimmingMode({ source: 'system:cpuTemp', floor: 10 })).toBe('system')
+    expect(dimmingSystem({ source: 'system:cpuTemp', floor: 10 })).toBe('cpuTemp')
+    expect(dimmingSystem({ source: 'sound:bass', floor: 10 })).toBeNull()
+    expect(followingSystem({ source: 'sound:bass', floor: 35 }, 'gpu')).toEqual({
+      source: 'system:gpu',
+      floor: 35,
+    })
   })
 
   it('reads a source Rust would refuse as none', () => {

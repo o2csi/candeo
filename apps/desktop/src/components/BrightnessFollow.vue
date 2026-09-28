@@ -1,26 +1,34 @@
 <script setup lang="ts">
 /**
- * What a device's brightness follows, under its slider: nothing, a signal or
- * the sound, and the floor it never goes under
- * (`docs/design/inputs-and-automations.md` §2.2.2).
+ * What a device's brightness follows, under its slider: nothing, a signal, the
+ * sound or the computer, and the floor it never goes under
+ * (`docs/design/inputs-and-automations.md` §2.2.2, §2.4).
  *
  * The same switch as an effect setting's, so the two read alike. The parent
  * keeps the value and sends it on; this only holds a *Signal* waiting for its
  * name, which is not a dimming yet.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
-import type { Dimming, HeldSignal } from '../api/candeo'
-import { SOUND_SOURCES, type SoundSource } from '../composables/bindings'
+import type { Dimming, HeldSignal, SystemOffers } from '../api/candeo'
+import {
+  SOUND_SOURCES,
+  SYSTEM_SOURCES,
+  type SoundSource,
+  type SystemSource,
+} from '../composables/bindings'
 import {
   dimmingMode,
   dimmingSignal,
   dimmingSound,
+  dimmingSystem,
   followingSignal,
   followingSound,
+  followingSystem,
   withFloor,
   type DimmingMode,
 } from '../composables/dimming'
+import { offered, offeredSources, SYSTEM_LABELS } from '../composables/systemSources'
 import { signalText } from '../composables/signals'
 import { t } from '../i18n'
 
@@ -63,6 +71,15 @@ watch(
 
 const mode = computed<DimmingMode>(() => (waiting.value ? 'signal' : dimmingMode(props.dimming)))
 const sound = computed<SoundSource>(() => dimmingSound(props.dimming) ?? 'beat')
+
+/** Which of the computer's sources this computer offers; all, until Rust says. */
+const offers = ref<SystemOffers | null>(null)
+onMounted(() => void offeredSources().then((o) => (offers.value = o)))
+
+/** The first the computer offers: the CPU's load on any computer. */
+const firstOffered = (): SystemSource =>
+  SYSTEM_SOURCES.find((s) => offered(offers.value, s)) ?? SYSTEM_SOURCES[0]
+const system = computed<SystemSource>(() => dimmingSystem(props.dimming) ?? firstOffered())
 const refused = computed(() => name.value.trim() !== '' && followingSignal(null, name.value) === null)
 
 const SOUND_LABELS = {
@@ -85,6 +102,16 @@ function toSound(): void {
   if (mode.value !== 'sound') emit('change', followingSound(props.dimming, 'beat'), true)
 }
 
+function toSystem(): void {
+  waiting.value = false
+  if (mode.value !== 'system') emit('change', followingSystem(props.dimming, firstOffered()), true)
+}
+
+function onSystem(e: Event): void {
+  const chosen = SYSTEM_SOURCES.find((s) => s === (e.target as HTMLSelectElement).value)
+  if (chosen) emit('change', followingSystem(props.dimming, chosen), true)
+}
+
 function toSignal(): void {
   if (mode.value === 'signal') return
   const known = followingSignal(props.dimming, name.value)
@@ -92,7 +119,7 @@ function toSignal(): void {
     emit('change', known, true)
     return
   }
-  // Off the sound first: the brightness waits for a name at the slider's level.
+  // Off the sound or the computer first: the brightness waits for a name at the slider's level.
   if (props.dimming !== null) emit('change', null, true)
   waiting.value = true
 }
@@ -136,6 +163,9 @@ function onFloor(e: Event, commit: boolean): void {
         <button type="button" class="seg" :aria-pressed="mode === 'sound'" :disabled="firmware" @click="toSound">
           {{ t('effects.params.fromSound') }}
         </button>
+        <button type="button" class="seg" :aria-pressed="mode === 'system'" :disabled="firmware" @click="toSystem">
+          {{ t('effects.params.fromSystem') }}
+        </button>
       </span>
     </div>
 
@@ -148,6 +178,19 @@ function onFloor(e: Event, commit: boolean): void {
       @change="onSound"
     >
       <option v-for="s in SOUND_SOURCES" :key="s" :value="s">{{ t(SOUND_LABELS[s]) }}</option>
+    </select>
+
+    <select
+      v-if="mode === 'system'"
+      class="field"
+      :aria-label="t('effects.brightnessSystem')"
+      :value="system"
+      :disabled="firmware"
+      @change="onSystem"
+    >
+      <option v-for="s in SYSTEM_SOURCES" :key="s" :value="s" :disabled="!offered(offers, s)">
+        {{ t(SYSTEM_LABELS[s]) }}
+      </option>
     </select>
 
     <template v-if="mode === 'signal'">
@@ -221,12 +264,16 @@ function onFloor(e: Event, commit: boolean): void {
   font-variant-numeric: tabular-nums;
 }
 
+/* On a line of its own, in equal parts: four positions do not fit beside the label in a device card. */
 .source {
-  display: inline-flex;
+  display: flex;
+  flex-basis: 100%;
 }
 
 .seg {
-  padding: 1px 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
   border: 1px solid var(--line-strong);
   color: var(--text-faint);
   font-size: 11px;

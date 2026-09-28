@@ -30,6 +30,7 @@
     "percent": "{n} %",
     "brightnessFollows": "Suit",
     "brightnessSound": "Son suivi par la luminosité",
+    "brightnessSystem": "Valeur système suivie par la luminosité",
     "brightnessSignal": "Signal suivi par la luminosité",
     "brightnessFloor": "Plancher",
     "brightnessFirmware": "Un effet matériel garde la luminosité du curseur.",
@@ -130,11 +131,13 @@
       "on": "activé",
       "off": "désactivé",
       "reset": "Rétablir les valeurs de l'effet",
-      "source": "{name} : valeur, signal ou son",
+      "source": "{name} : valeur, signal, son ou système",
       "fromValue": "Valeur",
       "fromSignal": "Signal",
       "fromSound": "Son",
+      "fromSystem": "Système",
       "soundOf": "Son suivi par {name}",
+      "systemOf": "Valeur système suivie par {name}",
       "sound": {
         "volume": "Volume",
         "beat": "Temps fort",
@@ -142,6 +145,14 @@
         "mids": "Médiums",
         "highs": "Aigus",
         "tone": "Tonalité, grave à aiguë"
+      },
+      "system": {
+        "cpu": "Charge du processeur",
+        "memory": "Mémoire utilisée",
+        "gpu": "Charge du GPU",
+        "cpuTemp": "Température du processeur",
+        "gpuTemp": "Température du GPU",
+        "cpuPower": "Puissance du processeur"
       },
       "signalName": "nom du signal",
       "signalOf": "Signal lu par {name}",
@@ -417,6 +428,14 @@
       "sensitivity": "Sensibilité aux temps forts",
       "sensitivityValue": "{value} %",
       "unavailable": "Le son joué ne peut pas être capté sur cet ordinateur."
+    },
+    "system": {
+      "title": "Système",
+      "notReadable": "illisible sur cet ordinateur",
+      "waiting": "…",
+      "percent": "{n} %",
+      "celsius": "{n} °C",
+      "watts": "{n} W"
     },
     "signals": {
       "title": "Signaux",

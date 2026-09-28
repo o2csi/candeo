@@ -43,20 +43,26 @@
  * signal is absent or does not fit.
  */
 
-import { computed, nextTick, onBeforeUnmount, reactive, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
-import type { Bindings, EffectParams, HeldSignal } from '../api/candeo'
+import type { Bindings, EffectParams, HeldSignal, SystemOffers } from '../api/candeo'
 import {
   bindingState,
   boundSignal,
   boundSound,
+  boundSystem,
   signalSource,
   soundSource,
   SOUND_SOURCES,
+  systemSource,
+  SYSTEM_SOURCES,
   takesSound,
+  takesSystem,
   type BindingState,
   type SoundSource,
+  type SystemSource,
 } from '../composables/bindings'
+import { offered, offeredSources, SYSTEM_LABELS } from '../composables/systemSources'
 import { validSignalName } from '../composables/rules'
 import { signalText } from '../composables/signals'
 import { sameValue, textLimit } from '../composables/useSettings'
@@ -204,6 +210,18 @@ const SOUND_LABELS = {
   tone: 'effects.params.sound.tone',
 } as const satisfies Record<SoundSource, string>
 
+/** What of the computer a row follows, or `null` while it does not (§2.4). */
+function systemBy(id: string): SystemSource | null {
+  const source = props.bindable ? props.bindings[id] : undefined
+  return source === undefined ? null : boundSystem(source)
+}
+
+/** Which of the computer's sources this computer offers; all, until Rust says. */
+const offers = ref<SystemOffers | null>(null)
+onMounted(() => {
+  if (props.bindable) void offeredSources().then((o) => (offers.value = o))
+})
+
 function reads(state: BindingState, name: string): string | null {
   switch (state.kind) {
     case 'absent':
@@ -229,12 +247,14 @@ interface Common {
   label: string
   /** The current value, spelled out. */
   shown: string
-  /** What holds the parameter: its value, a signal or the sound. The value is shown disabled otherwise. */
-  source: 'value' | 'signal' | 'sound'
-  /** Whether the sound is offered: a number, a flag or a colour. */
+  /** What holds the parameter: its value, a signal, the sound or the computer. The value is shown disabled otherwise. */
+  source: 'value' | 'signal' | 'sound' | 'system'
+  /** Whether the sound and the computer are offered: a number, a flag or a colour. */
   sounds: boolean
   /** What of the sound the row follows, or would. */
   sound: SoundSource
+  /** What of the computer the row follows, or would. */
+  system: SystemSource
   /** The name in the signal field. */
   name: string
   /** What the signal read holds now, spelled out; `null` while none is read. */
@@ -259,11 +279,14 @@ const fields = computed<Field[]>(() =>
       source:
         soundBy(id) !== null
           ? ('sound' as const)
-          : signalChosen(id)
-            ? ('signal' as const)
-            : ('value' as const),
-      sounds: takesSound(spec),
+          : systemBy(id) !== null
+            ? ('system' as const)
+            : signalChosen(id)
+              ? ('signal' as const)
+              : ('value' as const),
+      sounds: takesSound(spec) && takesSystem(spec),
       sound: soundBy(id) ?? SOUND_SOURCES[0],
+      system: systemBy(id) ?? firstOffered(),
       name: drafts[id] ?? signal ?? '',
       reads: signal === null ? null : reads(bindingState(spec, signal, props.signals), signal),
       refused: refused.has(id),
@@ -384,7 +407,7 @@ function onTextEnd(id: string, e: Event) {
 function toValue(id: string): void {
   pending.delete(id)
   refused.delete(id)
-  if (soundBy(id) !== null) {
+  if (soundBy(id) !== null || systemBy(id) !== null) {
     emit('bind', id, null)
     return
   }
@@ -413,14 +436,35 @@ function onSound(id: string, e: Event) {
   if (chosen) emit('bind', id, soundSource(chosen))
 }
 
+/** The first source this computer offers: the CPU's load on any computer. */
+function firstOffered(): SystemSource {
+  return SYSTEM_SOURCES.find((s) => offered(offers.value, s)) ?? SYSTEM_SOURCES[0]
+}
+
+/** To the computer: the first source it offers; the list next to it picks another. */
+function toSystem(id: string): void {
+  if (systemBy(id) !== null) return
+  pending.delete(id)
+  refused.delete(id)
+  const signal = readBy(id)
+  if (signal !== null) drafts[id] ??= signal
+  emit('bind', id, systemSource(firstOffered()))
+}
+
+function onSystem(id: string, e: Event) {
+  const name = (e.target as HTMLSelectElement).value
+  const chosen = SYSTEM_SOURCES.find((s) => s === name)
+  if (chosen) emit('bind', id, systemSource(chosen))
+}
+
 /**
  * To a signal: the name the row had, when it has one, is read again at once;
  * otherwise the field waits for one, and the value holds meanwhile.
  */
 function toSignal(id: string): void {
   if (signalChosen(id)) return
-  // Off the sound first: the row waits for a name on its own value.
-  if (soundBy(id) !== null) emit('bind', id, null)
+  // Off the sound or the computer first: the row waits for a name on its own value.
+  if (soundBy(id) !== null || systemBy(id) !== null) emit('bind', id, null)
   const name = (drafts[id] ?? '').trim()
   if (validSignalName(name)) {
     delete drafts[id]
@@ -559,6 +603,15 @@ function onReset() {
               >
                 {{ t('effects.params.fromSound') }}
               </button>
+              <button
+                v-if="f.sounds"
+                type="button"
+                class="seg"
+                :aria-pressed="f.source === 'system'"
+                @click="toSystem(f.id)"
+              >
+                {{ t('effects.params.fromSystem') }}
+              </button>
             </span>
           </div>
 
@@ -652,6 +705,25 @@ function onReset() {
               @change="onSound(f.id, $event)"
             >
               <option v-for="s in SOUND_SOURCES" :key="s" :value="s">{{ t(SOUND_LABELS[s]) }}</option>
+            </select>
+          </div>
+
+          <!-- What this computer cannot read is listed, disabled: Settings › System says why. -->
+          <div v-if="f.source === 'system'" class="bind">
+            <select
+              class="choice"
+              :aria-label="t('effects.params.systemOf', { name: f.label })"
+              :value="f.system"
+              @change="onSystem(f.id, $event)"
+            >
+              <option
+                v-for="s in SYSTEM_SOURCES"
+                :key="s"
+                :value="s"
+                :disabled="!offered(offers, s)"
+              >
+                {{ t(SYSTEM_LABELS[s]) }}
+              </option>
             </select>
           </div>
 
