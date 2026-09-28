@@ -295,19 +295,12 @@
       "controlled": "no device controlled | 1 device controlled | {n} devices controlled",
       "unreachable": "{summary} · {n} unreachable"
     },
-    "state": {
-      "adopted": "Controlled",
-      "detected": "Detected",
-      "ignored": "Ignored"
-    },
-    "plugged": "Plugged in",
-    "unplugged": "Unplugged",
     "firmware": "firmware {version} · layout surveyed on {surveyed}",
     "firmwareNotRead": "not read",
     "firmwareNotReadClosed": "not read, device closed",
     "matrix": "matrix {rows} × {cols} · frame of {frameLen} colors · {keys} lit keys",
     "control": "Control",
-    "ignore": "Ignore",
+    "release": "Release",
     "none": "No known layout.",
     "neverSeen": "A device never seen before is listed but not controlled: the decision is made once, then remembered.",
     "warnings": {
@@ -322,7 +315,6 @@
       }
     },
     "groups": {
-      "all": "All",
       "builtIn": "Built-in",
       "yours": "Yours"
     },
@@ -330,20 +322,11 @@
     "yoursNone": "No definition of yours.",
     "yoursNote": "Nobody reviewed your definitions: they send your devices exactly what they say.",
     "pluggedIn": "Plugged in · {n}",
+    "all": "All · {n}",
+    "shown": "Devices shown",
     "nothingPlugged": "No device Candeo knows is plugged in.",
-    "known": "Recognised devices · {n}",
     "filter": "Filter by name or ids",
     "noMatch": "No device matches.",
-    "columns": {
-      "device": "Device",
-      "kind": "Kind",
-      "origin": "Origin",
-      "here": "Here"
-    },
-    "kinds": {
-      "keys": "keys",
-      "zones": "zones"
-    },
     "count": {
       "keys": "{n} key | {n} keys",
       "zones": "{n} zone | {n} zones"

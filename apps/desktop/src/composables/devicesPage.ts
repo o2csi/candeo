@@ -4,18 +4,32 @@
 import type { DefinitionProblem } from '../api/candeo'
 import type { DeviceInfo } from '../api/types'
 
-/** Which definitions the list of known devices shows. */
-export type OriginFilter = 'all' | 'builtIn' | 'yours'
+/**
+ * Which devices the list shows: those plugged in, what someone came to act on,
+ * or every one Candeo knows. Not the controlled ones alone: a keyboard just
+ * plugged in, not controlled yet, would be hidden from whoever came to control it.
+ */
+export type Shown = 'plugged' | 'all'
+
+/** Past this many devices known, *All* offers a text to filter them by. */
+export const FILTER_PAST = 10
 
 const byName = (a: DeviceInfo, b: DeviceInfo) => a.name.localeCompare(b.name)
 
 /**
- * The devices plugged in, first on the page: what someone came to act on. The
- * controlled ones lead, then those waiting for a decision, then the ignored.
+ * The page's one list: the devices plugged in first; under *All*, those known
+ * but not plugged in after them, filtered by a text — a name, a maker, or its
+ * `vid:pid` — once there are enough to need it. By name, not by state: a card
+ * moving when it is controlled or released would bring another's button under
+ * the pointer.
  */
-export function pluggedIn(devices: readonly DeviceInfo[]): DeviceInfo[] {
-  const rank = (d: DeviceInfo) => (d.state === 'adopted' ? 0 : d.state === 'ignored' ? 2 : 1)
-  return devices.filter((d) => d.present).sort((a, b) => rank(a) - rank(b) || byName(a, b))
+export function listed(devices: readonly DeviceInfo[], shown: Shown, text: string): DeviceInfo[] {
+  const wanted = shown === 'all' && devices.length > FILTER_PAST ? text.trim().toLowerCase() : ''
+  const rank = (d: DeviceInfo) => (d.present ? 0 : 1)
+  return devices
+    .filter((d) => shown === 'all' || d.present)
+    .filter((d) => !wanted || d.name.toLowerCase().includes(wanted) || ids(d).includes(wanted))
+    .sort((a, b) => rank(a) - rank(b) || byName(a, b))
 }
 
 /**
@@ -58,21 +72,4 @@ export function yourFiles(
 export function ids(d: Pick<DeviceInfo, 'vid' | 'pid'>): string {
   const hex = (n: number) => n.toString(16).padStart(4, '0')
   return `${hex(d.vid)}:${hex(d.pid)}`
-}
-
-/**
- * Every device Candeo knows, whatever is plugged in, filtered by a text — a
- * name, a maker, or its `vid:pid` — and by whose definition it is. The list
- * grows with each device described: this is what keeps it usable.
- */
-export function known(
-  devices: readonly DeviceInfo[],
-  text: string,
-  origin: OriginFilter,
-): DeviceInfo[] {
-  const wanted = text.trim().toLowerCase()
-  return devices
-    .filter((d) => origin === 'all' || d.origin === origin)
-    .filter((d) => !wanted || d.name.toLowerCase().includes(wanted) || ids(d).includes(wanted))
-    .sort(byName)
 }

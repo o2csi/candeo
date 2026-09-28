@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DeviceInfo } from '../api/types'
-import { definitionChoice, ids, known, pluggedIn, yourFiles } from './devicesPage'
+import { FILTER_PAST, definitionChoice, ids, listed, yourFiles } from './devicesPage'
 
 function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
   return {
@@ -26,14 +26,22 @@ function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
 }
 
 describe('devices page', () => {
-  it('puts the controlled devices plugged in first, the ignored last', () => {
+  it('shows what is plugged in by name, whatever its state, and under All the others after', () => {
     const list = [
       device('Zeta', { present: true, state: 'ignored' }),
       device('Beta', { present: true }),
       device('Alpha'),
       device('Gamma', { present: true, state: 'adopted' }),
+      device('Delta', { state: 'adopted' }),
     ]
-    expect(pluggedIn(list).map((d) => d.name)).toEqual(['Gamma', 'Beta', 'Zeta'])
+    expect(listed(list, 'plugged', '').map((d) => d.name)).toEqual(['Beta', 'Gamma', 'Zeta'])
+    expect(listed(list, 'all', '').map((d) => d.name)).toEqual([
+      'Beta',
+      'Gamma',
+      'Zeta',
+      'Alpha',
+      'Delta',
+    ])
   })
 
   it('offers a choice only between several definitions, or a broken one chosen', () => {
@@ -73,20 +81,20 @@ describe('devices page', () => {
     expect(ids({ vid: 0x187c, pid: 0x551 })).toBe('187c:0551')
   })
 
-  it('filters what it knows by name, by ids and by origin', () => {
-    const list = [
+  it('filters All by name or ids, once there are enough devices to need it', () => {
+    const few = [
       device('Razer DeathStalker V2 Pro'),
-      device('Alienware m18 R1', { vid: 0x0d62, pid: 0xaab0 }),
-      device('Alienware m18 R1 zones', { vid: 0x187c, pid: 0x0551, origin: 'yours' }),
+      device('Alienware m18 R1 zones', { vid: 0x187c, pid: 0x0551, present: true }),
     ]
-    expect(known(list, '', 'all').map((d) => d.name)).toEqual([
-      'Alienware m18 R1',
-      'Alienware m18 R1 zones',
-      'Razer DeathStalker V2 Pro',
-    ])
-    expect(known(list, ' alienWARE ', 'builtIn').map((d) => d.name)).toEqual(['Alienware m18 R1'])
-    expect(known(list, '187c', 'all').map((d) => d.name)).toEqual(['Alienware m18 R1 zones'])
-    expect(known(list, '', 'yours')).toHaveLength(1)
-    expect(known(list, 'corsair', 'all')).toEqual([])
+    expect(listed(few, 'all', 'corsair')).toHaveLength(2)
+
+    const many = [
+      ...few,
+      ...Array.from({ length: FILTER_PAST }, (_, i) => device(`Keyboard ${i}`, { pid: i })),
+    ]
+    expect(listed(many, 'all', ' alienWARE ').map((d) => d.name)).toEqual(['Alienware m18 R1 zones'])
+    expect(listed(many, 'all', '187c').map((d) => d.name)).toEqual(['Alienware m18 R1 zones'])
+    expect(listed(many, 'all', 'corsair')).toEqual([])
+    expect(listed(many, 'plugged', 'corsair')).toHaveLength(1)
   })
 })

@@ -295,19 +295,12 @@
       "controlled": "aucun appareil piloté | 1 appareil piloté | {n} appareils pilotés",
       "unreachable": "{summary} · {n} injoignable | {summary} · {n} injoignable | {summary} · {n} injoignables"
     },
-    "state": {
-      "adopted": "Piloté",
-      "detected": "Détecté",
-      "ignored": "Ignoré"
-    },
-    "plugged": "Branché",
-    "unplugged": "Débranché",
     "firmware": "micrologiciel {version} · gabarit relevé sur {surveyed}",
     "firmwareNotRead": "non lu",
     "firmwareNotReadClosed": "non lu, appareil fermé",
     "matrix": "matrice {rows} × {cols} · image de {frameLen} couleurs · {keys} touches éclairées",
     "control": "Piloter",
-    "ignore": "Ignorer",
+    "release": "Libérer",
     "none": "Aucun gabarit connu.",
     "neverSeen": "Un appareil jamais vu est listé mais non piloté : la décision se prend une fois, puis se retient.",
     "warnings": {
@@ -322,7 +315,6 @@
       }
     },
     "groups": {
-      "all": "Tous",
       "builtIn": "Intégrés",
       "yours": "À vous"
     },
@@ -330,20 +322,11 @@
     "yoursNone": "Aucune définition à vous.",
     "yoursNote": "Personne n'a relu vos définitions : elles envoient à vos appareils exactement ce qu'elles disent.",
     "pluggedIn": "Branchés · {n}",
+    "all": "Tous · {n}",
+    "shown": "Appareils affichés",
     "nothingPlugged": "Aucun appareil connu de Candeo n’est branché.",
-    "known": "Appareils reconnus · {n}",
     "filter": "Filtrer par nom ou identifiants",
     "noMatch": "Aucun appareil ne correspond.",
-    "columns": {
-      "device": "Appareil",
-      "kind": "Type",
-      "origin": "Origine",
-      "here": "Ici"
-    },
-    "kinds": {
-      "keys": "touches",
-      "zones": "zones"
-    },
     "count": {
       "keys": "{n} touche | {n} touches",
       "zones": "{n} zone | {n} zones"
