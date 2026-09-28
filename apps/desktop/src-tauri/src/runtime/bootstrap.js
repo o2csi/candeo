@@ -60,6 +60,10 @@ globalThis.__candeo_reads_signals = READS_SIGNALS
 const READS_AUDIO = Array.isArray(effect.inputs) && effect.inputs.includes('audio')
 globalThis.__candeo_reads_audio = READS_AUDIO
 
+// And what the computer is doing: sampled only while something reads it (§2.4).
+const READS_SYSTEM = Array.isArray(effect.inputs) && effect.inputs.includes('system')
+globalThis.__candeo_reads_system = READS_SYSTEM
+
 // The declared parameters, against which a bound value is converted.
 const SPECS = effect.params ?? {}
 
@@ -90,6 +94,20 @@ const NO_AUDIO = Object.freeze({
   bands: Object.freeze(new Array(16).fill(0)),
   beat: false,
   onset: 0,
+})
+
+// And for the system: nothing read, which is also what an effect reading it gets
+// for a value this computer does not offer.
+const NO_SYSTEM = Object.freeze({
+  cpu: null,
+  memory: null,
+  gpu: null,
+  cpuTemp: null,
+  gpuTemp: null,
+  cpuPower: null,
+  cpuCelsius: null,
+  gpuCelsius: null,
+  cpuWatts: null,
 })
 
 // Buffer reused from one frame to the next: allocating it 30 times per second
@@ -174,13 +192,22 @@ function audio(audioJson) {
   return Object.freeze(heard)
 }
 
+// `systemJson` is what the computer is doing now, or empty.
+function system(systemJson) {
+  if (!READS_SYSTEM || !systemJson) return NO_SYSTEM
+  return Object.freeze({ ...NO_SYSTEM, ...JSON.parse(systemJson) })
+}
+
 // A bound value, raw as a sender sent it, converted against the parameter's
 // spec: `undefined` when it does not fit, and the configured value then stays.
 // Here and not in Rust, which keeps parameter values untyped on purpose — the
 // specs are only here (§2.3.1).
 function converted(spec, raw, current) {
   if (raw !== null && typeof raw === 'object' && typeof raw.sound === 'number') {
-    return fromSound(spec, raw.sound, current)
+    return fromLevel(spec, raw.sound, current)
+  }
+  if (raw !== null && typeof raw === 'object' && typeof raw.system === 'number') {
+    return fromLevel(spec, raw.system, current)
   }
   switch (spec?.kind) {
     case 'number': {
@@ -215,11 +242,11 @@ function textLimit(spec) {
   return Math.min(declared, 256)
 }
 
-// A sound source, 0..1, across what the setting takes (§2.2.1): a number over
-// its whole range, silence at its minimum; a flag on past half; a colour turned
-// around the wheel from the one set, so silence leaves it as it is. A list or a
-// text does not follow the sound.
-function fromSound(spec, value, current) {
+// A sound or system source, 0..1, across what the setting takes (§2.2.1, §2.4):
+// a number over its whole range, silence or idle at its minimum; a flag on past
+// half; a colour turned around the wheel from the one set, so 0 leaves it as it
+// is. A list or a text follows neither.
+function fromLevel(spec, value, current) {
   const v = Math.min(1, Math.max(0, value))
   switch (spec?.kind) {
     case 'number':
@@ -288,6 +315,7 @@ globalThis.__candeo_render = (
   boundJson,
   signalsJson,
   audioJson,
+  systemJson,
 ) => {
   // Every frame starts again from black: a frame is complete by definition, and
   // an effect that writes only part of the keyboard must not silently inherit
@@ -304,6 +332,7 @@ globalThis.__candeo_render = (
     clock: clock(clockMs),
     signals: signals(signalsJson),
     audio: audio(audioJson),
+    system: system(systemJson),
   })
 
   return buf

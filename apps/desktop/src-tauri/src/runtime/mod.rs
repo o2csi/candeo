@@ -533,6 +533,8 @@ pub struct Engine {
     signals: crate::signals::SharedStore,
     /// The sound playing, captured while a loop runs an effect declaring it.
     sound: Arc<crate::audio::Sound>,
+    /// What the computer is doing, sampled while something reads it (§2.4).
+    system: Arc<crate::system::System>,
     /// What each device's brightness follows (§2.2.2). Here rather than in a
     /// loop's [`Shared`]: it belongs to the device, and outlives the effect.
     dimming: dimming::Table,
@@ -974,6 +976,11 @@ impl Engine {
         Arc::clone(&self.sound)
     }
 
+    /// What the computer is doing, for Settings to show.
+    pub fn system(&self) -> Arc<crate::system::System> {
+        Arc::clone(&self.system)
+    }
+
     /// The signal store the loops read, for [`crate::signals`] to hold.
     pub fn signals(&self) -> crate::signals::SharedStore {
         Arc::clone(&self.signals)
@@ -984,6 +991,7 @@ impl Engine {
             presses: Arc::clone(&self.presses),
             signals: Arc::clone(&self.signals),
             sound: Arc::clone(&self.sound),
+            system: Arc::clone(&self.system),
             dimming: Arc::clone(&self.dimming),
         }
     }
@@ -1066,6 +1074,7 @@ fn render_loop(
         presses,
         signals,
         sound,
+        system,
         dimming,
     } = inputs;
     // **The span, and it is the reason `tracing` was chosen.** There is one
@@ -1137,6 +1146,12 @@ fn render_loop(
     // Held while the effect declares it or a setting follows the sound; the
     // bindings change while the loop runs, so it is taken and let go per frame.
     let mut hearing = reads_audio.then(|| sound.lease());
+    // What the computer is doing, for an effect declaring it: sampled while at
+    // least one reader holds it, and held the same way (§2.4).
+    let reads_system = ctx
+        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_system"))
+        .unwrap_or(false);
+    let mut watching = reads_system.then(|| system.lease());
     let reads_private = reads_keys || reads_signals;
     shared.reads_private.store(reads_private, Ordering::Relaxed);
     let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
@@ -1186,11 +1201,29 @@ fn render_loop(
         }
         let heard_now = (follows_sound || dims_by_sound).then(|| sound.frame());
         if let (true, Some(frame)) = (follows_sound, &heard_now) {
-            bound = with_sound(&bound, sound_bound(&bindings, frame));
+            bound = with_levels(&bound, sound_bound(&bindings, frame));
+        }
+        let follows_system = bindings
+            .values()
+            .any(|s| crate::system::Source::parse(s).is_some());
+        let dims_by_system = dims.as_ref().is_some_and(|d| d.system().is_some());
+        match (
+            reads_system || follows_system || dims_by_system,
+            watching.is_some(),
+        ) {
+            (true, false) => watching = Some(system.lease()),
+            (false, true) => watching = None,
+            _ => {}
+        }
+        if follows_system {
+            bound = with_levels(&bound, system_bound(&bindings, &system));
         }
         let factor = match (&dims, &heard_now) {
             (None, _) => 1.0,
             (Some(d), Some(frame)) if dims_by_sound => d.sound_factor(frame),
+            (Some(d), _) if dims_by_system => {
+                d.level_factor(d.system().and_then(|s| system.level(s)))
+            }
             (Some(d), _) => {
                 let store = signals.lock().unwrap();
                 d.signal_factor(
@@ -1203,6 +1236,11 @@ fn render_loop(
         let time = now.duration_since(started).as_secs_f64();
         let heard = if reads_audio {
             sound.latest()
+        } else {
+            String::new()
+        };
+        let busy = if reads_system {
+            system.to_json()
         } else {
             String::new()
         };
@@ -1229,6 +1267,7 @@ fn render_loop(
                 bound: &bound,
                 signals: &held,
                 audio: &heard,
+                system: &busy,
             },
             frame_len,
         ) {
@@ -1514,6 +1553,7 @@ fn render_with_inputs(
             bound: "",
             signals: "",
             audio: "",
+            system: "",
         },
         frame_len,
     )
@@ -1532,6 +1572,8 @@ struct FrameInputs<'a> {
     signals: &'a str,
     /// The latest analysis of the sound playing, for an effect declaring `audio`.
     audio: &'a str,
+    /// What the computer is doing now, for an effect declaring `system`.
+    system: &'a str,
 }
 
 /// What a loop reads besides its parameters: key presses and signals, shared
@@ -1540,6 +1582,7 @@ struct Inputs {
     presses: Arc<Presses>,
     signals: crate::signals::SharedStore,
     sound: Arc<crate::audio::Sound>,
+    system: Arc<crate::system::System>,
     dimming: dimming::Table,
 }
 
@@ -1557,8 +1600,8 @@ fn render_with(
             .map_err(|_| "the render function is gone from the context".to_string())?;
 
         // A list rather than a tuple: rquickjs takes tuples of seven at most,
-        // and the sound made eight (#107).
-        let mut args = Args::new(ctx.clone(), 8);
+        // and the sound made eight (#107), the system nine (§2.4).
+        let mut args = Args::new(ctx.clone(), 9);
         let pushed = (|| {
             args.push_arg(time)?;
             args.push_arg(frame_index)?;
@@ -1567,7 +1610,8 @@ fn render_with(
             args.push_arg(inputs.clock_ms)?;
             args.push_arg(inputs.bound)?;
             args.push_arg(inputs.signals)?;
-            args.push_arg(inputs.audio)
+            args.push_arg(inputs.audio)?;
+            args.push_arg(inputs.system)
         })();
         pushed.map_err(|e| format!("the frame's inputs could not be handed over: {e}"))?;
         let out: Vec<u8> = render
@@ -2113,7 +2157,7 @@ pub fn set_effect_bindings(
 }
 
 /// Bindings as the interface or a rule sends them, checked: each source must
-/// name a signal the way `signal:<name>` does. A parameter the effect does not
+/// name something a setting can follow ([`is_source`]). A parameter the effect does not
 /// declare is let through — the bootstrap ignores it, as it ignores a stored
 /// value for a parameter an effect no longer has.
 pub(crate) fn checked_bindings(bindings: Bindings) -> CmdResult<Bindings> {
@@ -2127,8 +2171,9 @@ pub(crate) fn checked_bindings(bindings: Bindings) -> CmdResult<Bindings> {
     Ok(bindings)
 }
 
-/// The bound values the signals gave, with the sound's added.
-fn with_sound(bound: &str, sound: serde_json::Map<String, serde_json::Value>) -> String {
+/// The bound values the signals gave, with the levels of the sound or the system
+/// added.
+fn with_levels(bound: &str, sound: serde_json::Map<String, serde_json::Value>) -> String {
     let mut all: serde_json::Map<String, serde_json::Value> = if bound.is_empty() {
         serde_json::Map::new()
     } else {
@@ -2138,11 +2183,30 @@ fn with_sound(bound: &str, sound: serde_json::Map<String, serde_json::Value>) ->
     serde_json::Value::Object(all).to_string()
 }
 
-/// Whether a binding names something a setting can follow: a signal, or the
-/// sound playing (§2.2.1).
+/// Whether a binding names something a setting can follow: a signal, the
+/// sound playing (§2.2.1), or what the computer is doing (§2.4).
 pub(crate) fn is_source(source: &str) -> bool {
     crate::signals::store::bound_signal(source).is_some()
         || crate::audio::analysis::Source::parse(source).is_some()
+        || crate::system::Source::parse(source).is_some()
+}
+
+/// The values of the settings following what the computer is doing, as the
+/// bootstrap converts them: `{"hue": {"system": 0.42}}`, each 0..1. A source
+/// this computer cannot read is left out, and the setting keeps its value, as
+/// one following an absent signal does.
+fn system_bound(
+    bindings: &Bindings,
+    system: &crate::system::System,
+) -> serde_json::Map<String, serde_json::Value> {
+    bindings
+        .iter()
+        .filter_map(|(param, source)| {
+            let level = system.level(crate::system::Source::parse(source)?)?;
+            let value = (f64::from(level) * 1000.0).round() / 1000.0;
+            Some((param.clone(), serde_json::json!({ "system": value })))
+        })
+        .collect()
 }
 
 /// The values of the settings following the sound, as the bootstrap converts
@@ -3942,6 +4006,7 @@ mod signal_tests {
                 bound,
                 signals,
                 audio: "",
+                system: "",
             },
             layout.led_count(),
         )
@@ -4012,6 +4077,26 @@ mod signal_tests {
         );
     }
 
+    /// A setting following the system takes it as it takes the sound (§2.4).
+    #[test]
+    fn a_setting_following_the_system_takes_it_by_its_kind() {
+        let drawn = frame(
+            r#"{"level":{"system":0.25},"on":{"system":0.6},"mode":{"system":1}}"#,
+            "",
+        );
+        assert_eq!(key(&drawn, 1), [25, 255, 0]);
+        assert!(is_source("system:gpuTemp") && !is_source("system:network"));
+    }
+
+    /// A system source nobody has read yet is left out: the setting keeps its
+    /// value, as one following an absent signal does.
+    #[test]
+    fn a_system_source_not_read_leaves_the_setting_as_set() {
+        let bindings: Bindings = [("speed".to_string(), "system:cpu".to_string())].into();
+        let system = crate::system::System::default();
+        assert!(system_bound(&bindings, &system).is_empty());
+    }
+
     /// The loop turns a sound binding into its value, beside the signals'.
     #[test]
     fn sound_bindings_become_values_beside_the_signals() {
@@ -4024,7 +4109,7 @@ mod signal_tests {
             ("colour".to_string(), "signal:status".to_string()),
         ]
         .into();
-        let merged = with_sound(r##"{"colour":"#ff0000"}"##, sound_bound(&bindings, &frame));
+        let merged = with_levels(r##"{"colour":"#ff0000"}"##, sound_bound(&bindings, &frame));
         let json: serde_json::Value = serde_json::from_str(&merged).unwrap();
         assert_eq!(json["speed"]["sound"], 0.5);
         assert_eq!(json["flash"]["sound"], 1.0);
@@ -4070,6 +4155,7 @@ mod signal_tests {
                     bound,
                     signals: "",
                     audio: "",
+                    system: "",
                 },
                 layout.led_count(),
             )
@@ -4125,6 +4211,7 @@ mod signal_tests {
                 bound: "",
                 signals: r#"{"tests":"running","build":"failed","deploy":"ok","cpu":1}"#,
                 audio: "",
+                system: "",
             },
             layout.led_count(),
         )
@@ -4153,6 +4240,7 @@ mod signal_tests {
                 bound: "",
                 signals: r#"{"build":"failed","ci.tests":"ok","ci.build":"failed"}"#,
                 audio: "",
+                system: "",
             },
             layout.led_count(),
         )
@@ -4176,6 +4264,7 @@ mod signal_tests {
                 bound: "",
                 signals: "",
                 audio,
+                system: "",
             },
             layout.led_count(),
         )
@@ -4211,6 +4300,47 @@ mod signal_tests {
         assert_eq!(key(&heard(&ctx, 0.0, &loud), 0), [50, 25, 255]);
         let (_rt, ctx) = prepare(&paints(false), crate::default_layout()).expect("load");
         assert_eq!(key(&heard(&ctx, 0.0, &loud), 0), [0, 0, 0]);
+    }
+
+    /// An effect declaring `system` reads what the computer is doing; one that
+    /// does not gets nothing read.
+    #[test]
+    fn only_an_effect_declaring_system_is_given_it() {
+        let paints = |declares: bool| {
+            format!(
+                "export default {{
+                    {}
+                    render({{ layout, system, frame }}) {{
+                        frame.set(layout.keys[0], {{ r: (system.cpu ?? 0) * 100, g: system.gpuCelsius ?? 0, b: system.cpuTemp === null ? 255 : 0 }})
+                    }},
+                }}",
+                if declares { "inputs: ['system']," } else { "" }
+            )
+        };
+        let busy = r#"{"cpu":0.5,"gpuCelsius":51,"cpuTemp":null}"#;
+        let layout = crate::default_layout();
+        let drawn = |js: &str| {
+            let (_rt, ctx) = prepare(js, layout).expect("load");
+            let bytes = render_with(
+                &ctx,
+                0.0,
+                0,
+                &FrameInputs {
+                    params: "{}",
+                    presses: "",
+                    clock_ms: 0.0,
+                    bound: "",
+                    signals: "",
+                    audio: "",
+                    system: busy,
+                },
+                layout.led_count(),
+            )
+            .expect("render");
+            key(&bytes, 0)
+        };
+        assert_eq!(drawn(&paints(true)), [50, 51, 255]);
+        assert_eq!(drawn(&paints(false)), [0, 0, 255]);
     }
 
     /// The shipped Equalizer: loud everywhere lights the keyboard up to the
@@ -4272,6 +4402,7 @@ mod signal_tests {
                     bound: "",
                     signals: "",
                     audio,
+                    system: "",
                 },
                 layout.led_count(),
             )
@@ -4317,6 +4448,7 @@ mod signal_tests {
                 bound: "",
                 signals: "",
                 audio,
+                system: "",
             },
             crate::default_layout().led_count(),
         )

@@ -203,6 +203,35 @@ export interface EffectContext<P = undefined> {
    * recorded (`docs/design/inputs-and-automations.md` §2.2).
    */
   readonly audio: Audio
+  /**
+   * What the computer is doing, each value eased between samples read once a
+   * second. Every value `null` unless the effect declares `inputs: ['system']`,
+   * and `null` too for one this computer does not offer without a driver or
+   * administrator rights (`docs/design/inputs-and-automations.md` §2.4).
+   */
+  readonly system: SystemNow
+}
+
+/** What the computer is doing. See {@link EffectContext.system}. */
+export interface SystemNow {
+  /** The processor's load, 0 to 1, as Task Manager shows it. */
+  readonly cpu: number | null
+  /** The share of memory in use, 0 to 1. */
+  readonly memory: number | null
+  /** The graphics card's busiest engine, 0 to 1. */
+  readonly gpu: number | null
+  /** The processor's temperature over 40 to 95 °C, 0 to 1. */
+  readonly cpuTemp: number | null
+  /** The graphics card's temperature over 30 to 85 °C, 0 to 1. */
+  readonly gpuTemp: number | null
+  /** The processor's power against the most it has drawn, 0 to 1. */
+  readonly cpuPower: number | null
+  /** The processor's temperature in degrees Celsius, for a range of your own. */
+  readonly cpuCelsius: number | null
+  /** The graphics card's temperature in degrees Celsius. */
+  readonly gpuCelsius: number | null
+  /** The processor's power in watts. */
+  readonly cpuWatts: number | null
 }
 
 /** The sound playing. See {@link EffectContext.audio}. */
@@ -253,7 +282,7 @@ export interface Clock {
 }
 
 /** What an effect reads besides time and its parameters. */
-export type Input = 'keys' | 'clock' | 'signals' | 'audio'
+export type Input = 'keys' | 'clock' | 'signals' | 'audio' | 'system'
 
 /** An effect renders a frame at each call. */
 export type Effect = (ctx: EffectContext) => void
@@ -387,7 +416,8 @@ export interface EffectModule<P = undefined> {
    * (`docs/design/inputs-and-automations.md` §2.1). `['signals']` gives it
    * {@link EffectContext.signals}. `['audio']` gives it
    * {@link EffectContext.audio}: the sound playing is captured only while such
-   * an effect runs, and the gallery says so.
+   * an effect runs, and the gallery says so. `['system']` gives it
+   * {@link EffectContext.system}: sampled only while such an effect runs.
    */
   readonly inputs?: readonly Input[]
   /**
