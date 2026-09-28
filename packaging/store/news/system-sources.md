@@ -1,0 +1,2 @@
+en: Settings and brightness can follow the computer — CPU and GPU load, memory, GPU temperature, CPU power — read without a driver, and a new Temperature effect goes from cool to hot.
+fr: Les réglages et la luminosité peuvent suivre l'ordinateur — charge du processeur et du GPU, mémoire, température du GPU, puissance du processeur — lus sans pilote, et un nouvel effet Temperature passe du froid au chaud.
