@@ -29,6 +29,15 @@ Composables with lifecycle hooks run through `src/test/withSetup.ts`.
 Run the app with `pnpm tauri dev`. Test a change in the running app, not only
 through the test suite, before opening a pull request.
 
+**Before the first `pnpm tauri dev` of a session, quit any installed Candeo.**
+The Store, MSI and NSIS builds share its identifier: one instance at a time, so
+a dev launch while `candeo.exe` runs only brings the installed window forward
+and exits (`src-tauri/src/single_instance.rs`). Check with
+`Get-Process candeo -ErrorAction SilentlyContinue`; if it runs, ask whoever sits
+at the computer to quit it from the notification area rather than killing it.
+Both builds also share `settings.json` (`docs/design/msix.md` §2), and an older
+installed build drops the settings it does not know when it writes the file.
+
 ## Languages
 
 **English everywhere, except text shown to the user.**
