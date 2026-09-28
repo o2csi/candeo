@@ -48,6 +48,7 @@ import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
+import { offeredFor } from '../composables/applies'
 import { declaredBindings, ruleReadsSignal, withBinding } from '../composables/bindings'
 import { hardwareEffectsFor, named, type HardwareEffect } from '../composables/useEffects'
 import {
@@ -333,6 +334,16 @@ function effectLabel(rule: Rule): string {
  * The firmware effects of the rule's **first device**: a mode its firmware does
  * not know has no place in the sentence.
  */
+/**
+ * The library effects offered for a rule: those that apply to its device, as
+ * the gallery offers them (#288), and the one it shows.
+ */
+function offered(rule: Rule, list: readonly EffectEntry[]): EffectEntry[] {
+  const target = rule.devices[0]
+  const layout = target ? layouts[deviceKey(target)] : undefined
+  return offeredFor(list, layout ? [layout] : [], rule.show.effect)
+}
+
 function hardwareFor(rule: Rule): readonly HardwareEffect[] {
   const target = rule.devices[0]
   return hardwareEffectsFor(target ? layouts[deviceKey(target)] : null)
@@ -486,10 +497,14 @@ function onDrop(to: number): void {
                 </option>
               </optgroup>
               <optgroup :label="t('automations.builtin')">
-                <option v-for="e in builtins" :key="e.id" :value="e.id">{{ e.name }}</option>
+                <option v-for="e in offered(raw, builtins)" :key="e.id" :value="e.id">
+                  {{ e.name }}
+                </option>
               </optgroup>
-              <optgroup v-if="yours.length" :label="t('automations.user')">
-                <option v-for="e in yours" :key="e.id" :value="e.id">{{ e.name }}</option>
+              <optgroup v-if="offered(raw, yours).length" :label="t('automations.user')">
+                <option v-for="e in offered(raw, yours)" :key="e.id" :value="e.id">
+                  {{ e.name }}
+                </option>
               </optgroup>
               <option v-if="missing(raw)" :value="raw.show.effect">{{ raw.show.effect }}</option>
             </select>

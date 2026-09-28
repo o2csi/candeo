@@ -82,9 +82,10 @@ export default defineEffect({
   rows and columns, for an effect reading `row` or `col`; `'geometry'`, each
   light's rectangle, for one using `center` or `bounds` (§3). A kind or a
   capability nobody knows is refused when the effect loads, with a sentence.
-- **The gallery and the tray offer an effect only where it applies**: its kind
-  of lights one it makes sense on, what it requires there, and keys to press
-  when it reads them (#288).
+- **The gallery, the tray and the pickers of Automations and Games offer an
+  effect only where it applies**: its kind of lights one it makes sense on,
+  what it requires there, and keys to press when it reads them (#288). A picker
+  still lists the effect already chosen, so that it can show it.
 - `author` and `version`, proposed in #44 §1 as optional, are not implemented
   yet: see #44.
 - `name` in an existing source is **ignored**. `EffectModule` keeps it as a

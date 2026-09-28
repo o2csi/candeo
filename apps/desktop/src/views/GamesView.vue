@@ -27,6 +27,7 @@ import { message } from '../api/journal'
 import type { DeviceInfo } from '../api/types'
 import DevicesChip from '../components/DevicesChip.vue'
 import FailureNote from '../components/FailureNote.vue'
+import { applies, devicesFor, wants } from '../composables/applies'
 import { gameRule, gameSignals, playing, withGameConnected, withGameRule } from '../composables/games'
 import { signalText } from '../composables/signals'
 import { useDevice } from '../composables/useDevice'
@@ -90,7 +91,9 @@ const connect = (game: GameView) =>
     games.value = await connectGame(game.id)
     restart.value = game.name
     const name = t('games.ruleName', { game: game.name })
-    await keep(withGameConnected(rules.value, game.id, name, effectsFor(game.id)[0]?.id, refs(controlled.value)))
+    const effect = effectsFor(game.id)[0]?.id
+    const devices = effect ? whereItGoes(effect, controlled.value) : []
+    await keep(withGameConnected(rules.value, game.id, name, effect, refs(devices)))
   })
 
 /** A disconnected game plays no match: its rule goes with it. */
@@ -107,10 +110,35 @@ function stateOf(game: GameView): string {
   return t(`games.state.${game.state}`)
 }
 
-/** The effects offered during a match: those made for the game first. */
+/**
+ * The effects offered during a match: those made for the game first, and only
+ * those that apply to a device Candeo controls, as the gallery offers them.
+ */
 function effectsFor(game: string): EffectEntry[] {
-  const mine = effects.value.filter((e) => e.game === game)
-  return [...mine, ...effects.value.filter((e) => e.game !== game)]
+  const somewhere = effects.value.filter((e) => controlled.value.some((d) => applies(wants(e), d)))
+  const mine = somewhere.filter((e) => e.game === game)
+  return [...mine, ...somewhere.filter((e) => e.game !== game)]
+}
+
+/** What the effect named says of where it goes; `null` when it is not in the library. */
+function wantsOf(effect: string) {
+  const entry = effects.value.find((e) => e.id === effect)
+  return entry ? wants(entry) : null
+}
+
+/**
+ * The devices an effect goes to during a match: of those wanted, where it
+ * applies, or every controlled one where it does. The ring around a laptop
+ * does not get an effect drawn on rows of keys.
+ */
+function whereItGoes(effect: string, wanted: DeviceInfo[]): DeviceInfo[] {
+  return devicesFor(wantsOf(effect), wanted, controlled.value)
+}
+
+/** The devices the card offers for its effect: the controlled ones where it applies. */
+function offeredDevices(effect: string): DeviceInfo[] {
+  const wanted = wantsOf(effect)
+  return wanted ? controlled.value.filter((d) => applies(wanted, d)) : controlled.value
 }
 
 /** Saves the game's *while playing* as chosen on its card. */
@@ -132,7 +160,7 @@ function whilePlaying(game: GameView, wanted: { effect: string; devices: DeviceI
 function useDuringMatch(game: GameView): Promise<void> {
   const effect = effectsFor(game.id)[0]?.id
   if (!effect) return Promise.resolve()
-  return whilePlaying(game, { effect, devices: controlled.value })
+  return whilePlaying(game, { effect, devices: whereItGoes(effect, controlled.value) })
 }
 
 function ruleDevices(rule: Rule): DeviceInfo[] {
@@ -140,7 +168,7 @@ function ruleDevices(rule: Rule): DeviceInfo[] {
 }
 
 function setEffect(game: GameView, rule: Rule, effect: string): Promise<void> {
-  return whilePlaying(game, { effect, devices: ruleDevices(rule) })
+  return whilePlaying(game, { effect, devices: whereItGoes(effect, ruleDevices(rule)) })
 }
 
 function setDevices(game: GameView, rule: Rule, devices: DeviceInfo[]): Promise<void> {
@@ -221,7 +249,7 @@ onBeforeUnmount(() => unlisten?.())
             </label>
             <span>{{ t('games.on') }}</span>
             <DevicesChip
-              :devices="controlled"
+              :devices="offeredDevices(gameRule(rules, game.id)!.show.effect)"
               :chosen="gameRule(rules, game.id)!.devices"
               :disabled="busy"
               @change="(chosen) => setDevices(game, gameRule(rules, game.id)!, chosen)"
