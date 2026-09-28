@@ -404,11 +404,87 @@ device or an effect. The effects API documents it as an author's tool. The bag
 is frozen, like presses; an effect declaring it gets its error text kept out of
 the log, as one reading key presses does, since a value can end up in it.
 
-### 2.4 Later, if asked
+### 2.4 The computer's own activity (#241, #242)
+
+```ts
+render({ system }) // { cpu, memory, gpu, cpuTemp, gpuTemp, cpuPower, … }
+```
+
+What the computer is doing reaches effects and settings the way the sound does:
+an input for effects, a fourth position for settings and a device's brightness.
+Temperatures are what people ask for most, as a colour from cool to hot, a bar
+along the function row or a warning when something overheats; load comes next.
+
+**Read without a driver and without administrator rights**, or not at all.
+Every tool that reads a CPU temperature on Windows either installs a kernel
+driver (WinRing0, flagged by Windows Defender since March 2025; PawnIO; each
+vendor's own) or runs elevated to reach the vendor's WMI (Dell's AWCC, Intel's
+ESIF, `MSAcpi_ThermalZoneTemperature`). Candeo does neither: an application
+that lights a keyboard has no business in the kernel, and a Store package does
+not run elevated. What that leaves, measured on the Alienware m18 R1 (Windows
+11, not elevated, 2026-09-29):
+
+| Source | 0..1 | Windows | Linux | On the m18 R1 |
+|---|---|---|---|---|
+| `cpu`, CPU load | the percentage | PDH `Processor Information(_Total)\% Processor Utility`, as Task Manager | `/proc/stat` | read |
+| `memory`, memory in use | the share in use | `GlobalMemoryStatusEx` | `/proc/meminfo` | read |
+| `gpu`, GPU load | the busiest engine | PDH `GPU Engine(*)\Utilization Percentage`, summed per adapter and engine as Task Manager does | amdgpu's `gpu_busy_percent` | read |
+| `gpuTemp`, GPU temperature | 30 → 85 °C | `D3DKMTQueryAdapterInfo`, `KMTQAITYPE_ADAPTERPERFDATA`, in tenths of a degree: what Task Manager shows, any vendor, WDDM 2.4 | amdgpu's `hwmon` | read, 50.9 °C where `nvidia-smi` said 51 |
+| `cpuTemp`, CPU temperature | 40 → 95 °C | the ACPI thermal zones, PDH `Thermal Zone Information(*)\High Precision Temperature` | `hwmon`: `coretemp`, `k10temp` | **not readable**: the firmware declares no thermal zone |
+| `cpuPower`, CPU package power | against the highest seen, 45 W at least | PDH `Energy Meter(RAPL_Package0_PKG)\Power`, in milliwatts | not readable: RAPL is root only | read, 60 W under load |
+
+- **CPU power stands in for its temperature** where the temperature cannot be
+  read: it follows load and heat within a second, and it is read on every recent
+  Intel and AMD processor. It has no natural maximum, so it is scaled against the
+  highest value seen since Candeo started, never less than 45 W, so an idle
+  computer is not at the top of its range.
+- **Counter names are localised** (*Informations de zone thermique* on a French
+  Windows): they are opened by their English names, `PdhAddEnglishCounterW`.
+- **A source that cannot be read is `null`** for an effect, which draws what it
+  draws without it. A setting following it keeps the value set, as one following
+  an absent signal does, and a brightness following it stays at the ceiling.
+- **Temperatures map to 0..1 over a fixed range**, from a cool computer to one
+  close to throttling. Effects also receive the degrees and the watts, for an
+  author who wants their own range: `cpuCelsius`, `gpuCelsius`, `cpuWatts`.
+- **Not read, and why:** the vendor WMI and `MSAcpi_ThermalZoneTemperature`
+  need administrator rights; the drivers are what this section refuses; the
+  monitors people run beside (LibreHardwareMonitor's web server, HWiNFO's shared
+  memory, which its free version turns off after twelve hours) would make Candeo
+  depend on another program being set up. Any of them can come back if people
+  ask, as another source of the same values.
+- **Network rates** (#241) wait: a rate has no natural maximum, and scaling it
+  against the highest seen makes a download look the same on any connection.
+
+#### 2.4.1 How it runs
+
+- **One sampler, leased**, like the sound capture (§2.2.1): a thread of its own
+  starts when the first reader appears — a loop running an effect that declares
+  `system`, a setting or a brightness following a system source, the readout in
+  Settings — and stops after the last one. Nothing is read while nobody looks.
+- **Once a second.** PDH needs two samples a second apart for a rate, and a
+  temperature or a load moves no faster. Between two samples a loop eases each
+  value over the second, so a setting following it does not step.
+- **A sleeping GPU:** a hybrid laptop turns its dedicated GPU off when nothing
+  uses it, and waking it to read a temperature would cost battery for a value
+  nobody needs then. The query is the one Task Manager makes every second for
+  its own display, and an adapter that does not answer is `null`. Whether it
+  keeps a dedicated GPU awake is not measured yet: the m18 R1 drives its screen
+  from its dedicated GPU, which never sleeps.
+- **Choosing it:** *System* is a fourth position beside *Value*, *Signal* and
+  *Sound*, for a setting, a rule's setting and a device's brightness, with a list
+  of the six sources. A source this computer cannot read is listed disabled.
+  A setting takes a source as it takes the sound: a number across its range, a
+  flag past half, a colour turned around the wheel.
+- **Settings › System** shows each source's value live, or *not readable on this
+  computer*: the one place that says what this computer offers, and why a
+  setting following a source there does nothing.
+- **Privacy:** numbers only, read on this computer and sent nowhere: no process
+  names, no adapter names, no serial.
+
+### 2.5 Later, if asked
 
 | Source | What an effect would see | Why later |
 |---|---|---|
-| System | CPU load per core, memory, network rates (`sysinfo`, once a second) | easy; temperatures and GPU need WMI or NVML, sometimes rights |
 | Screen colors | average colors along the screen's edges | screen capture (Windows Graphics Capture, a PipeWire portal): costly, and the most sensitive input there is |
 | Games | health, ammunition, round state | per-game integrations (CS2 and Dota "Game State Integration" post JSON locally): signals (§2.3) can carry them first |
 
