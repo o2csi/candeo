@@ -4343,6 +4343,49 @@ mod signal_tests {
         assert_eq!(drawn(&paints(false)), [0, 0, 255]);
     }
 
+    /// The shipped Temperature: the cool colour when cool, the hot one when hot;
+    /// the processor's power where its temperature cannot be read; the cool
+    /// colour dimmed when nothing is read, rather than black.
+    #[test]
+    fn the_temperature_goes_from_cool_to_hot() {
+        let layout = crate::default_layout();
+        let (_rt, ctx) = prepare(crate::shipped::source("Temperature"), layout).expect("load");
+        let drawn = |params: &str, system: &str| {
+            let bytes = render_with(
+                &ctx,
+                0.0,
+                0,
+                &FrameInputs {
+                    params,
+                    presses: "",
+                    clock_ms: 0.0,
+                    bound: "",
+                    signals: "",
+                    audio: "",
+                    system,
+                },
+                layout.led_count(),
+            )
+            .expect("render");
+            key(&bytes, 0)
+        };
+        let gpu = r#"{"follows":"gpu","cool":{"r":0,"g":0,"b":200},"hot":{"r":200,"g":0,"b":0}}"#;
+        assert_eq!(drawn(gpu, r#"{"gpuTemp":0}"#), [0, 0, 200]);
+        assert_eq!(drawn(gpu, r#"{"gpuTemp":1}"#), [200, 0, 0]);
+        assert_eq!(drawn(gpu, r#"{"gpuTemp":0.5}"#), [100, 0, 100]);
+        assert_eq!(
+            drawn(gpu, ""),
+            [0, 0, 60],
+            "nothing read: the cool colour, dimmed"
+        );
+        let cpu = gpu.replace("\"gpu\"", "\"cpu\"");
+        assert_eq!(
+            drawn(&cpu, r#"{"cpuTemp":null,"cpuPower":1}"#),
+            [200, 0, 0],
+            "the power stands in for the temperature"
+        );
+    }
+
     /// The shipped Equalizer: loud everywhere lights the keyboard up to the
     /// top; only the lowest band lights the left side only.
     #[test]
