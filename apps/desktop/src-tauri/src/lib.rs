@@ -140,7 +140,28 @@ pub struct DeviceInfo {
     pub unloaded_choice: Option<String>,
     /// What its lights are, `keys` or `zones`, and how many.
     pub lights: &'static str,
+    /// What an effect may require that it has, as [`LayoutInfo::capabilities`]:
+    /// the pickers of Automations and Games offer only the effects that apply.
+    pub capabilities: Vec<&'static str>,
     pub light_count: usize,
+}
+
+/// `keys` or `zones`, as the manifest's `kinds` name them.
+fn lights_kind(l: &Layout) -> &'static str {
+    match l.lights {
+        candeo_device::Lights::Keys => "keys",
+        candeo_device::Lights::Zones => "zones",
+    }
+}
+
+/// What an effect may require that a device has: `matrix` where its lights
+/// form a grid, `geometry` always (`docs/design/device-sdk.md` §3).
+fn capabilities(l: &Layout) -> Vec<&'static str> {
+    if l.grid {
+        vec!["matrix", "geometry"]
+    } else {
+        vec!["geometry"]
+    }
 }
 
 /// A key, as the simulator must draw it.
@@ -331,15 +352,8 @@ impl From<&'static Layout> for LayoutInfo {
                 .iter()
                 .map(FirmwareEffectInfo::from)
                 .collect(),
-            lights: match l.lights {
-                candeo_device::Lights::Keys => "keys",
-                candeo_device::Lights::Zones => "zones",
-            },
-            capabilities: if l.grid {
-                vec!["matrix", "geometry"]
-            } else {
-                vec!["geometry"]
-            },
+            lights: lights_kind(l),
+            capabilities: capabilities(l),
             outline: l
                 .outline
                 .iter()
@@ -994,10 +1008,8 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                     })
                     .collect(),
                 unloaded_choice: catalog.unloaded_choice(l).map(str::to_owned),
-                lights: match l.lights {
-                    candeo_device::Lights::Keys => "keys",
-                    candeo_device::Lights::Zones => "zones",
-                },
+                lights: lights_kind(l),
+                capabilities: capabilities(l),
                 light_count: l.lit_count(),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),

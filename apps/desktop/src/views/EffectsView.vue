@@ -100,7 +100,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
-import { applies } from '../composables/applies'
+import { applies, wants } from '../composables/applies'
 import { valveGames } from '../composables/games'
 import { isLook } from '../keyboard/illustration'
 import {
@@ -276,8 +276,8 @@ interface Choice {
   /** The game it is for: its group is the games', shown only while they are on. */
   game: string | null
   /** The lights it makes sense on, and what it needs: see `applies`. */
-  kinds: string[]
-  requires: string[]
+  kinds: readonly string[]
+  requires: readonly string[]
 }
 
 const library = ref<EffectEntry[]>([])
@@ -300,13 +300,11 @@ function fromEntry(e: EffectEntry): Choice {
     state: e.state,
     error: e.error ?? null,
     modified: e.modified,
-    readsKeys: e.readsKeys ?? false,
     readsClock: e.readsClock ?? false,
     readsSignals: e.readsSignals ?? false,
     readsAudio: e.readsAudio ?? false,
     game: e.game ?? null,
-    kinds: e.kinds ?? ['keys'],
-    requires: e.requires ?? [],
+    ...wants(e),
   }
 }
 

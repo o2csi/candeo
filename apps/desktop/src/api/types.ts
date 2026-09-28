@@ -94,6 +94,8 @@ export interface DeviceInfo {
   unloadedChoice: string | null
   /** What its lights are, and how many. */
   lights: 'keys' | 'zones'
+  /** What an effect may require that it has: see {@link LayoutInfo.capabilities}. */
+  capabilities: readonly string[]
   lightCount: number
 }
 

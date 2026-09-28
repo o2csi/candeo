@@ -107,8 +107,10 @@ Most people using Candeo do not play, and their screens stay as they are:
     switched off there it would leave the card showing a lighting that never
     comes.
     Connecting a game is wanting its lighting during a match, so **Connect**
-    makes it, with the game's effect on the devices Candeo controls, and
-    **Disconnect** removes it; the card changes its effect and devices. A game
+    makes it, with the game's effect on the devices Candeo controls where it
+    applies (`effects-library.md`), and **Disconnect** removes it; the card
+    changes its effect and devices, offering only the devices where the effect
+    applies. A game
     connected without it — no device controlled then, or the rule deleted in
     *Automations* — says its lighting stays as it is, and makes it on request.
     There is no box to tick: without the rule, a connected game would light
