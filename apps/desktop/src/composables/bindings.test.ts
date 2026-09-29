@@ -11,6 +11,7 @@ import {
   boundSystem,
   readsSignal,
   readsSound,
+  readsSystem,
   rebound,
   ruleReadsSignal,
   signalSource,
@@ -228,6 +229,13 @@ describe('system', () => {
     expect(boundSystem('system:cpu')).toBe('cpu')
     expect(boundSystem('system:network')).toBeNull()
     expect(boundSystem('sound:cpu')).toBeNull()
+  })
+
+  it('tells the computer from the sound', () => {
+    expect(readsSystem(false, { speed: 'system:cpu' })).toBe(true)
+    expect(readsSound(false, { speed: 'system:cpu' })).toBe(false)
+    expect(readsSystem(false, { speed: 'sound:beat' })).toBe(false)
+    expect(readsSystem(true, {})).toBe(true)
   })
 
   it('keeps a system binding only where the parameter can take a level', () => {

@@ -55,6 +55,7 @@
     "readsClock": "lit l'horloge",
     "readsSignals": "lit les signaux",
     "readsAudio": "réagit au son",
+    "readsSystem": "réagit à l'ordinateur",
     "soundUnavailable": "Le son joué ne peut pas être capté sur cet ordinateur.",
     "signalsOff": "Les signaux ne sont pas reçus : activez-les dans Réglages.",
     "interruptedFor": "{rule} — encore {seconds} s, puis {applied}",

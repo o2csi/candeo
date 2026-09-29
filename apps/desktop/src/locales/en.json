@@ -55,6 +55,7 @@
     "readsClock": "reads the clock",
     "readsSignals": "reads signals",
     "readsAudio": "reacts to sound",
+    "readsSystem": "reacts to the computer",
     "soundUnavailable": "The sound playing cannot be captured on this computer.",
     "signalsOff": "Signals are not received: turn them on in Settings.",
     "interruptedFor": "{rule} — for {seconds} s, then {applied}",

@@ -185,6 +185,15 @@ export function readsSound(declared: boolean | undefined, bindings: Bindings): b
   return declared === true || Object.values(bindings).some((s) => boundSound(s) !== null)
 }
 
+/**
+ * Whether an effect reads what the computer is doing: a parameter following it,
+ * or all of it through its declared `inputs: ['system']`. It is sampled while
+ * such an effect runs, which the gallery marks (§2.4).
+ */
+export function readsSystem(declared: boolean | undefined, bindings: Bindings): boolean {
+  return declared === true || Object.values(bindings).some((s) => boundSystem(s) !== null)
+}
+
 /** Whether a rule needs signals: to start, or for the effect it shows. */
 export function ruleReadsSignal(
   rule: Rule,
