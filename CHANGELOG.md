@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.21.0](https://github.com/o2csi/candeo/compare/v0.20.0...v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **devices:** All lists the models an unverified definition describes ([372f2a4](https://github.com/o2csi/candeo/commit/372f2a4b98f9b2699ede029c12f0ef250ba5aea2))
+* **devices:** try an unverified definition, and report how it lights ([6ced501](https://github.com/o2csi/candeo/commit/6ced501667fa4431eb8da8730bf65450de299461))
+* **site:** answer whether a definition lights in one click ([74fc2cf](https://github.com/o2csi/candeo/commit/74fc2cf5550953cd0b0389d9f87d52c7bc68ac2e))
+
+
+### Documentation
+
+* the application leads to the unverified definitions ([eea59d0](https://github.com/o2csi/candeo/commit/eea59d04d94016b03c415d3aa7754d77964b17b1))
+* the What's new line mentions All ([a2a9c66](https://github.com/o2csi/candeo/commit/a2a9c662337e39b47f72e7f979ce614d7dcef0e3))
+
 ## [0.20.0](https://github.com/o2csi/candeo/compare/v0.19.0...v0.20.0) (2026-09-29)
 
 
