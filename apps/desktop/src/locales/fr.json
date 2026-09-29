@@ -502,7 +502,8 @@
       "newer": "La version {version} est disponible.",
       "unreadable": "La dernière version, {version}, ne peut pas être comparée à celle-ci.",
       "failed": "Vérification impossible.",
-      "openRelease": "Ouvrir la page de la version"
+      "openRelease": "Ouvrir la page de la version",
+      "support": "Soutenir Candeo sur GitHub Sponsors"
     },
     "log": {
       "title": "Journal",
