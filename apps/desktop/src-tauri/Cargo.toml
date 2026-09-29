@@ -100,6 +100,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_Storage_Packaging_Appx",
   # How long the session has been idle, with `GetLastInputInfo` (`src/idle.rs`).
   "Win32_System_SystemInformation",
+  # What the computer is doing (`src/system/windows.rs`, #242): performance
+  # counters, and the GPU's temperature as Task Manager reads it. Neither needs
+  # administrator rights nor a driver.
+  "Win32_System_Performance",
+  "Wdk_Graphics_Direct3D",
   "Win32_UI_Input",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",

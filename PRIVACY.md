@@ -19,7 +19,7 @@ Everything the application writes stays on the computer it runs on:
 
 None of it is sent anywhere. There is no account to create, no identifier
 assigned, and no telemetry: the application does not count launches, does not
-report which effects run, and does not measure anything about the computer.
+report which effects run, and sends nothing it reads about the computer.
 
 **A keyboard's serial number is never written down.** The log identifies a unit
 by a fingerprint derived from it, so two keyboards of the same model can be told
@@ -36,6 +36,15 @@ meter — and then only what goes to the speakers, never the microphone. It is t
 how much bass or treble, whether a beat lands) for the effect being drawn. The
 sound itself is not recorded, not written to disk, and never leaves the computer;
 the log says only when capture starts and stops.
+
+**What the computer is doing is not read**, except while an effect that reacts
+to it runs, a setting or a brightness follows it, or Settings › System shows it
+— and then only a few totals, once a second: how busy the processor and the
+graphics card are, how much memory is in use, their temperatures and the
+processor's power. They are read without a driver and without administrator
+rights, kept in memory for the effect being drawn, never written to disk and
+never sent anywhere. Which program uses the processor or the graphics card is
+not kept; the log says only when reading starts and stops.
 
 ## The one request the application can make
 

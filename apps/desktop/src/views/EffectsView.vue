@@ -91,7 +91,7 @@ import { message } from '../api/journal'
 import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
 import BrightnessFollow from '../components/BrightnessFollow.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
-import { readsSignal, readsSound } from '../composables/bindings'
+import { readsSignal, readsSound, readsSystem } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -273,6 +273,8 @@ interface Choice {
   readsSignals: boolean
   /** It is given the sound playing: captured while it runs, said on screen. */
   readsAudio: boolean
+  /** It is given what the computer is doing: sampled while it runs, said on screen. */
+  readsSystem: boolean
   /** The game it is for: its group is the games', shown only while they are on. */
   game: string | null
   /** The lights it makes sense on, and what it needs: see `applies`. */
@@ -303,6 +305,7 @@ function fromEntry(e: EffectEntry): Choice {
     readsClock: e.readsClock ?? false,
     readsSignals: e.readsSignals ?? false,
     readsAudio: e.readsAudio ?? false,
+    readsSystem: e.readsSystem ?? false,
     game: e.game ?? null,
     ...wants(e),
   }
@@ -326,6 +329,7 @@ function fromHardware(e: HardwareEffect): Choice {
     readsClock: false,
     readsSignals: false,
     readsAudio: false,
+    readsSystem: false,
     game: null,
     // The device's own: it goes where its firmware runs it.
     kinds: ['all'],
@@ -1067,12 +1071,18 @@ function readsSoundHere(c: Choice): boolean {
   return !c.hardware && readsSound(c.readsAudio, bindingsFor(selectedDevice.value, c.id, c.params))
 }
 
+/** Whether an effect reads the computer on this device: declared, or a setting following it. */
+function readsSystemHere(c: Choice): boolean {
+  return !c.hardware && readsSystem(c.readsSystem, bindingsFor(selectedDevice.value, c.id, c.params))
+}
+
 /** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
 function entryLabel(c: Choice): string {
   const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
   const marks = [
     c.readsKeys ? t('effects.readsKeys') : null,
     readsSoundHere(c) ? t('effects.readsAudio') : null,
+    readsSystemHere(c) ? t('effects.readsSystem') : null,
     readsSignalHere(c) ? t('effects.entrySignal') : null,
   ]
   return [name, ...marks.filter((mark) => mark !== null)].join(' · ')
@@ -1582,6 +1592,26 @@ onBeforeUnmount(() => {
                 <path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" />
                 <path d="M11 5.5a3.5 3.5 0 0 1 0 5" />
               </svg>
+              <!-- A processor, pins on four sides: what the computer is doing. -->
+              <svg
+                v-if="readsSystemHere(c)"
+                class="fx-system"
+                viewBox="0 0 16 16"
+                width="14"
+                height="14"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <title>{{ t('effects.readsSystem') }}</title>
+                <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" />
+                <path
+                  d="M6.5 2v2.5M9.5 2v2.5M6.5 11.5V14M9.5 11.5V14M2 6.5h2.5M2 9.5h2.5M11.5 6.5H14M11.5 9.5H14"
+                />
+              </svg>
               <svg
                 v-if="readsSignalHere(c)"
                 class="fx-signal"
@@ -1730,6 +1760,9 @@ onBeforeUnmount(() => {
           }}</span>
           <span v-if="selectedEffect.readsAudio" class="badge keys">{{
             t('effects.readsAudio')
+          }}</span>
+          <span v-if="selectedEffect.readsSystem" class="badge keys">{{
+            t('effects.readsSystem')
           }}</span>
         </header>
 
@@ -2168,6 +2201,7 @@ onBeforeUnmount(() => {
 
 .fx-keys,
 .fx-sound,
+.fx-system,
 .fx-signal {
   flex: none;
   color: var(--text-faint);

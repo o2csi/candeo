@@ -44,6 +44,28 @@ export function takesSound(spec: ParamSpec | undefined): boolean {
   return spec?.kind === 'number' || spec?.kind === 'boolean' || spec?.kind === 'color'
 }
 
+/** How a source names what the computer is doing (§2.4). */
+const SYSTEM = 'system:'
+
+/** What a setting can follow of the computer, in the order the list offers them. */
+export const SYSTEM_SOURCES = ['cpu', 'memory', 'gpu', 'cpuTemp', 'gpuTemp', 'cpuPower'] as const
+export type SystemSource = (typeof SYSTEM_SOURCES)[number]
+
+/** The source that follows `name` of what the computer is doing. */
+export function systemSource(name: SystemSource): string {
+  return `${SYSTEM}${name}`
+}
+
+/** What of the computer a source follows, or `null` when Rust would refuse it. */
+export function boundSystem(source: string): SystemSource | null {
+  if (!source.startsWith(SYSTEM)) return null
+  const name = source.slice(SYSTEM.length)
+  return SYSTEM_SOURCES.find((s) => s === name) ?? null
+}
+
+/** A parameter follows the computer as it follows the sound: a level, 0..1. */
+export const takesSystem = takesSound
+
 /** The source that reads the signal `name`. */
 export function signalSource(name: string): string {
   return `${SIGNAL}${name}`
@@ -69,7 +91,10 @@ export function boundSignal(source: string): string | null {
 export function declaredBindings(specs: Record<string, ParamSpec>, kept: Bindings): Bindings {
   const out: Bindings = {}
   for (const [id, source] of Object.entries(kept)) {
-    const reads = boundSignal(source) !== null || (boundSound(source) !== null && takesSound(specs[id]))
+    const reads =
+      boundSignal(source) !== null ||
+      (boundSound(source) !== null && takesSound(specs[id])) ||
+      (boundSystem(source) !== null && takesSystem(specs[id]))
     if (id in specs && reads) out[id] = source
   }
   return out
@@ -158,6 +183,15 @@ export function readsSignal(declared: boolean | undefined, bindings: Bindings): 
  */
 export function readsSound(declared: boolean | undefined, bindings: Bindings): boolean {
   return declared === true || Object.values(bindings).some((s) => boundSound(s) !== null)
+}
+
+/**
+ * Whether an effect reads what the computer is doing: a parameter following it,
+ * or all of it through its declared `inputs: ['system']`. It is sampled while
+ * such an effect runs, which the gallery marks (§2.4).
+ */
+export function readsSystem(declared: boolean | undefined, bindings: Bindings): boolean {
+  return declared === true || Object.values(bindings).some((s) => boundSystem(s) !== null)
 }
 
 /** Whether a rule needs signals: to start, or for the effect it shows. */

@@ -36,6 +36,7 @@ mod single_instance;
 #[cfg(test)]
 mod sonde;
 mod storage;
+mod system;
 mod taskbar;
 mod tray;
 mod update;
@@ -1498,6 +1499,7 @@ pub fn run() {
             // rule interrupts the device.
             app.manage(automations::Automations::default());
             app.manage(audio::Meter::default());
+            app.manage(system::Watch::default());
             // Before the automations start: a tick reads what is held.
             // The store the engine's loops read bound values from: one for both.
             let store = app.state::<AppState>().engine.signals();
@@ -1609,6 +1611,9 @@ pub fn run() {
             audio::set_sound_settings,
             audio::watch_sound,
             audio::sound_now,
+            system::watch_system,
+            system::system_now,
+            system::system_offers,
             signals::get_signals_api,
             signals::set_signals_api,
             signals::renew_signals_token,

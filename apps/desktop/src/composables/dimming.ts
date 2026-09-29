@@ -1,18 +1,28 @@
-// What the device card computes about a brightness following the sound or a
-// signal (`docs/design/inputs-and-automations.md` §2.2.2). Pure, so what the
+// What the device card computes about a brightness following the sound, the
+// computer or a signal (`docs/design/inputs-and-automations.md` §2.2.2, §2.4). Pure, so what the
 // switch shows and what goes to Rust are tested without a DOM.
 
 import { DIMMING_FLOOR_DEFAULT, type Dimming } from '../api/candeo'
-import { boundSignal, boundSound, signalSource, soundSource, type SoundSource } from './bindings'
+import {
+  boundSignal,
+  boundSound,
+  boundSystem,
+  signalSource,
+  soundSource,
+  systemSource,
+  type SoundSource,
+  type SystemSource,
+} from './bindings'
 import { validSignalName } from './rules'
 
-/** What holds a device's brightness: the slider alone, a signal or the sound. */
-export type DimmingMode = 'value' | 'signal' | 'sound'
+/** What holds a device's brightness: the slider alone, a signal, the sound or the computer. */
+export type DimmingMode = 'value' | 'signal' | 'sound' | 'system'
 
 /** The mode a stored dimming says; a source Rust would refuse reads as none. */
 export function dimmingMode(dimming: Dimming | null): DimmingMode {
   if (dimming === null) return 'value'
   if (boundSound(dimming.source) !== null) return 'sound'
+  if (boundSystem(dimming.source) !== null) return 'system'
   if (boundSignal(dimming.source) !== null) return 'signal'
   return 'value'
 }
@@ -20,6 +30,11 @@ export function dimmingMode(dimming: Dimming | null): DimmingMode {
 /** What of the sound it follows, or `null`. */
 export function dimmingSound(dimming: Dimming | null): SoundSource | null {
   return dimming === null ? null : boundSound(dimming.source)
+}
+
+/** What of the computer it follows, or `null`. */
+export function dimmingSystem(dimming: Dimming | null): SystemSource | null {
+  return dimming === null ? null : boundSystem(dimming.source)
 }
 
 /** The signal it follows, or `null`. */
@@ -35,6 +50,11 @@ export function dimmingFloor(dimming: Dimming | null): number {
 /** Following `sound`, the floor kept from what it followed before. */
 export function followingSound(before: Dimming | null, sound: SoundSource): Dimming {
   return { source: soundSource(sound), floor: dimmingFloor(before) }
+}
+
+/** Following `source` of the computer, the floor kept. */
+export function followingSystem(before: Dimming | null, source: SystemSource): Dimming {
+  return { source: systemSource(source), floor: dimmingFloor(before) }
 }
 
 /**

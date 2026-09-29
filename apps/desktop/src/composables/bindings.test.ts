@@ -8,12 +8,15 @@ import {
   converts,
   declaredBindings,
   boundSound,
+  boundSystem,
   readsSignal,
   readsSound,
+  readsSystem,
   rebound,
   ruleReadsSignal,
   signalSource,
   soundSource,
+  systemSource,
   takesSound,
   withBinding,
 } from './bindings'
@@ -217,5 +220,27 @@ describe('sound', () => {
     expect(readsSound(false, { speed: 'sound:beat' })).toBe(true)
     expect(readsSignal(false, both) && readsSound(false, both)).toBe(true)
     expect(readsSound(true, {})).toBe(true)
+  })
+})
+
+describe('system', () => {
+  it('names a source of the computer the way Rust reads it back', () => {
+    expect(systemSource('gpuTemp')).toBe('system:gpuTemp')
+    expect(boundSystem('system:cpu')).toBe('cpu')
+    expect(boundSystem('system:network')).toBeNull()
+    expect(boundSystem('sound:cpu')).toBeNull()
+  })
+
+  it('tells the computer from the sound', () => {
+    expect(readsSystem(false, { speed: 'system:cpu' })).toBe(true)
+    expect(readsSound(false, { speed: 'system:cpu' })).toBe(false)
+    expect(readsSystem(false, { speed: 'sound:beat' })).toBe(false)
+    expect(readsSystem(true, {})).toBe(true)
+  })
+
+  it('keeps a system binding only where the parameter can take a level', () => {
+    expect(
+      declaredBindings(specs, { speed: 'system:cpu', mode: 'system:gpu', colour: 'system:disk' }),
+    ).toEqual({ speed: 'system:cpu' })
   })
 })

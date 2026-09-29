@@ -134,6 +134,10 @@ pub struct Manifest {
     /// analysed (#107).
     #[serde(default)]
     pub reads_audio: bool,
+    /// The effect declares `inputs: ['system']`: it is given what the computer
+    /// is doing (§2.4).
+    #[serde(default)]
+    pub reads_system: bool,
     /// The game it is for, `cs2`: the gallery keeps it with the game's rather
     /// than among the others (`docs/design/game-state-integration.md` §5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1297,7 +1301,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// - 3: whether it reads the sound playing (#107).
 /// - 4: the game it is for.
 /// - 5: the lights it makes sense on, and what it requires.
-const CACHE_FORMAT: u32 = 5;
+/// - 6: whether it reads what the computer is doing.
+const CACHE_FORMAT: u32 = 6;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1328,6 +1333,8 @@ struct CacheRecord {
     reads_signals: bool,
     #[serde(default)]
     reads_audio: bool,
+    #[serde(default)]
+    reads_system: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     game: Option<String>,
     #[serde(default = "keys_only")]
@@ -2234,6 +2241,7 @@ fn library_entry(
                 reads_clock: r.reads_clock,
                 reads_signals: r.reads_signals,
                 reads_audio: r.reads_audio,
+                reads_system: r.reads_system,
                 game: r.game,
                 kinds: r.kinds,
                 requires: r.requires,
@@ -2264,6 +2272,7 @@ fn library_entry(
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
+            reads_system: declared.reads_system,
             game: declared.game,
             kinds: declared.kinds,
             requires: declared.requires,
@@ -2293,6 +2302,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_clock: declared.reads_clock,
             reads_signals: declared.reads_signals,
             reads_audio: declared.reads_audio,
+            reads_system: declared.reads_system,
             game: declared.game,
             kinds: declared.kinds,
             requires: declared.requires,
@@ -2313,6 +2323,7 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            reads_system: false,
             game: None,
             kinds: keys_only(),
             requires: Vec::new(),
@@ -2352,6 +2363,7 @@ struct Declared {
     reads_clock: bool,
     reads_signals: bool,
     reads_audio: bool,
+    reads_system: bool,
     game: Option<String>,
     kinds: Vec<String>,
     requires: Vec<String>,
@@ -2368,6 +2380,7 @@ impl Declared {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            reads_system: false,
             game: None,
             kinds: keys_only(),
             requires: Vec::new(),
@@ -2448,6 +2461,7 @@ fn declared_fields(raw: &str) -> Result<Declared, String> {
         reads_clock: declares("clock"),
         reads_signals: declares("signals"),
         reads_audio: declares("audio"),
+        reads_system: declares("system"),
         game: value
             .get("game")
             .and_then(|g| g.as_str())
@@ -5232,6 +5246,7 @@ mod tests {
             reads_clock: false,
             reads_signals: false,
             reads_audio: false,
+            reads_system: false,
             game: None,
             kinds: keys_only(),
             requires: Vec::new(),

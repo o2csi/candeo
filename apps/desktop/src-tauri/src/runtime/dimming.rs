@@ -61,9 +61,24 @@ impl Dimming {
         Source::parse(&self.source)
     }
 
+    /// What the computer is doing that it follows, if that is what it follows.
+    pub fn system(&self) -> Option<crate::system::Source> {
+        crate::system::Source::parse(&self.source)
+    }
+
     /// The signal it follows, or `None` when it follows the sound.
     pub fn signal(&self) -> Option<&str> {
         bound_signal(&self.source)
+    }
+
+    /// The factor a level in 0..1 gives, from the floor to 1. A value that cannot
+    /// be read leaves the brightness the slider sets (§2.4).
+    pub fn level_factor(&self, level: Option<f32>) -> f32 {
+        let Some(level) = level else {
+            return 1.0;
+        };
+        let floor = self.floor();
+        floor + (1.0 - floor) * level.clamp(0.0, 1.0)
     }
 
     /// The factor the sound gives: the floor in silence, 1 at full, as a number
@@ -191,5 +206,20 @@ mod tests {
         let mut frame = [255, 1, 2];
         dim(&mut frame, 1.0);
         assert_eq!(frame, [255, 1, 2]);
+    }
+
+    /// A level from the system goes from the floor to full; one not read leaves
+    /// the brightness the slider sets (§2.4).
+    #[test]
+    fn a_system_level_goes_from_the_floor_to_full() {
+        let d = Dimming {
+            source: "system:cpuTemp".into(),
+            floor: 20,
+        };
+        assert_eq!(d.system(), Some(crate::system::Source::CpuTemp));
+        assert!(d.sound().is_none() && d.signal().is_none());
+        assert_eq!(d.level_factor(Some(0.0)), 0.2);
+        assert_eq!(d.level_factor(Some(1.0)), 1.0);
+        assert_eq!(d.level_factor(None), 1.0);
     }
 }
