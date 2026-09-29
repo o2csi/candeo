@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0](https://github.com/o2csi/candeo/compare/v0.19.0...v0.20.0) (2026-09-29)
+
+
+### Features
+
+* **effects:** a Temperature effect, from cool to hot ([32f903d](https://github.com/o2csi/candeo/commit/32f903d87f4483a55d536d858f3970f3937b1a1f))
+* **effects:** the gallery marks an effect following the computer ([cb244c9](https://github.com/o2csi/candeo/commit/cb244c9181b0088fbdd511fd2142b06c0e338ef3))
+* **settings:** settings and brightness follow the computer ([6cb8962](https://github.com/o2csi/candeo/commit/6cb896260f318112c2d54bc394ff2abeae27113c))
+* **system:** read what the computer is doing, for effects and settings ([a1f73aa](https://github.com/o2csi/candeo/commit/a1f73aa7610f9f7abe5bc6a38a83459cf0959c1c))
+
+
+### Documentation
+
+* the computer's activity, read without a driver ([812c55e](https://github.com/o2csi/candeo/commit/812c55edbfc86202748431e8c05381575e7ce813))
+* the privacy policy says what is read of the computer ([87cd529](https://github.com/o2csi/candeo/commit/87cd5299a90ebe68b562fa2bebe2923015985ce0))
+
 ## [0.19.0](https://github.com/o2csi/candeo/compare/v0.18.0...v0.19.0) (2026-09-28)
 
 
