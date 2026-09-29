@@ -83,13 +83,20 @@ export interface DeviceInfo {
   warnings: readonly string[]
   /**
    * Whose definition it is known by: built in — reviewed, and replayed by the
-   * tests — or a file of yours (`docs/design/device-sdk.md` §9).
+   * tests — a file of yours, or an unverified one embedded, not tried yet: then
+   * the device is plugged in and only listed to be tried
+   * (`docs/design/device-sdk.md` §9, #300).
    */
-  origin: 'builtIn' | 'yours'
-  /** The file of yours it is known by, for *Open*; `null` for a built-in one. */
+  origin: 'builtIn' | 'yours' | 'unverified'
+  /** The file it is known by, for *Definition*, or to try. */
   file: string | null
   /** Every definition of it, to choose from: the built-in one first. */
-  definitions: readonly { file: string; origin: 'builtIn' | 'yours' }[]
+  definitions: readonly { file: string; origin: 'builtIn' | 'yours' | 'unverified' }[]
+  /**
+   * Nobody has verified its definition on the device: an unverified one not
+   * tried yet, or a file of yours tried from one, which offers *Report*.
+   */
+  unverified: boolean
   /** The file of yours chosen for it when another drives it: it does not load. */
   unloadedChoice: string | null
   /** What its lights are, and how many. */

@@ -536,6 +536,11 @@ pre {
   font-weight: 500;
 }
 
+/* Two answers, kept on one line: each opens the report form already answered. */
+.devices td.answers {
+  white-space: nowrap;
+}
+
 .scroller th:last-child,
 .scroller td:last-child {
   padding-right: 0;

@@ -25,6 +25,7 @@ function device(pid: number, part: Partial<DeviceInfo> = {}): DeviceInfo {
     file: null,
     definitions: [],
     unloadedChoice: null,
+    unverified: false,
     lights: 'keys',
     lightCount: 1,
     capabilities: ['matrix', 'geometry'],

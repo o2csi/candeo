@@ -867,6 +867,22 @@ already sends; a family with no verified member — SteelSeries' Apex, written b
 verify too, and the site lists it apart. Each family's generator reads a facts
 file beside it: `variants.json` for Razer, `<family>.facts.json` for the others.
 
+**The application knows them, to lead to them (#300).** They are embedded, as
+the built-in ones are, and read for one thing only: telling that a device
+plugged in is one of theirs. Such a device, which no built-in definition nor
+one of yours describes, is listed in *Devices* as *not verified*, with **Try**:
+the definition is copied into your folder, chosen, and the device controlled —
+what downloading it from the site did, without leaving the window. Until then it
+drives nothing and joins nothing: not the tray, not *All*, not the firmware
+effects offered. The card says once that nobody has verified it on this device.
+
+A device driven by a file of yours that bears an unverified definition's name
+offers **Report**: the issue form opens in the browser with the definition, the
+firmware read and Candeo's version and system filled in, and the person says
+whether it lights and sends it. Candeo sends nothing, and the form carries no
+serial and no path. The site's list offers the same form from each definition,
+*It lights* or *It doesn't* already chosen.
+
 Both kinds open in the application's editor, checked against the schema as they
 are typed. A built-in one is read only: *Copy to yours* puts it in the folder
 and chooses the copy, since a copy is made to be changed. Saving one of yours

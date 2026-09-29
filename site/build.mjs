@@ -135,6 +135,23 @@ function toVerify(repo) {
   return degrees.map((d) => `        <h3>${d.heading}</h3>\n${familyTable(repo, d)}`).join('\n')
 }
 
+/**
+ * The report form for a definition, the answer already given (#300): in the
+ * title, which GitHub always fills, and in the form's own list, which it fills
+ * when it takes the value from the address.
+ */
+function report(repo, v, lights) {
+  const answer = lights ? 'Yes, every key follows the effect' : 'No, nothing changes'
+  const title = `Device: ${v.name}, ${lights ? 'it lights' : 'it does not light'}`
+  const query = [
+    'template=device-report.yml',
+    `title=${encodeURIComponent(title)}`,
+    `definition=${encodeURIComponent(v.file)}`,
+    `result=${encodeURIComponent(answer)}`,
+  ].join('&amp;')
+  return `${repo}/issues/new?${query}`
+}
+
 function familyTable(repo, family) {
   const rows = family.variants
     .map(
@@ -143,7 +160,7 @@ function familyTable(repo, family) {
               <td class="mono">${v.vid}:${v.pid}</td>
               <td>${v.connection}</td>
               <td><a href="devices/${v.file}" download>${v.file}</a></td>
-              <td><a href="${repo}/issues/new?template=device-report.yml&amp;title=Device:%20${encodeURIComponent(v.name)}">Report</a></td>
+              <td class="answers"><a href="${report(repo, v, true)}">It lights</a> · <a href="${report(repo, v, false)}">It doesn't</a></td>
             </tr>`,
     )
     .join('\n')

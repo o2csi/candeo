@@ -764,7 +764,7 @@ pub fn open_log_dir(app: AppHandle) -> CmdResult<()> {
 /// Windows, read from the registry because `ProductName` still says "Windows 10"
 /// on Windows 11.
 #[cfg(windows)]
-fn os_version() -> String {
+pub(crate) fn os_version() -> String {
     use windows_sys::Win32::System::Registry::{
         RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
     };
@@ -821,7 +821,7 @@ fn os_version() -> String {
 
 /// The distribution and the kernel.
 #[cfg(not(windows))]
-fn os_version() -> String {
+pub(crate) fn os_version() -> String {
     let distribution = std::fs::read_to_string("/etc/os-release")
         .ok()
         .and_then(|content| pretty_name(&content))

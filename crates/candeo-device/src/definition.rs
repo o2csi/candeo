@@ -36,6 +36,11 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ),
 ];
 
+// The unverified definitions, by file name (`docs/design/device-sdk.md` §9):
+// embedded to recognise a device plugged in and lead to them, never to drive
+// one until it is tried. Listed by `build.rs`.
+include!(concat!(env!("OUT_DIR"), "/unverified.rs"));
+
 /// The id the gallery gives *Off*, offered on every device: a definition says
 /// which of its firmware's kinds it is, or *Off* is a black frame.
 const OFF: &str = "hardware:off";
@@ -670,6 +675,32 @@ pub fn builtin_text(file: &str) -> Option<&'static str> {
         .map(|(_, json)| *json)
 }
 
+/// An unverified definition's text, by its file name: what *Try* copies into
+/// your folder.
+pub fn unverified_text(file: &str) -> Option<&'static str> {
+    UNVERIFIED
+        .iter()
+        .find(|(name, _)| *name == file)
+        .map(|(_, json)| *json)
+}
+
+/// The unverified definitions, read once, by file name: what tells a device
+/// plugged in that one of them describes it.
+///
+/// Read on first use, not at startup: most people never plug in one of these
+/// devices, and sixty definitions checked against the schema are not free. One
+/// that does not load is left out — the tests load every one.
+pub fn unverified() -> &'static [(&'static str, &'static Layout)] {
+    static ALL: std::sync::OnceLock<Vec<(&'static str, &'static Layout)>> =
+        std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        UNVERIFIED
+            .iter()
+            .filter_map(|(name, json)| load(json).ok().map(|layout| (*name, layout)))
+            .collect()
+    })
+}
+
 /// The built-in definitions, read once, in [`BUILTIN`]'s order: the DeathStalker
 /// first, the layout used when no device is connected.
 ///
@@ -1146,7 +1177,7 @@ mod tests {
     }
 
     /// The unverified definitions' files, by name (`device-sdk.md` §9).
-    fn unverified() -> Vec<(String, String)> {
+    fn unverified_files() -> Vec<(String, String)> {
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("devices/unverified");
         let mut files: Vec<_> = std::fs::read_dir(&folder)
             .expect("the unverified definitions")
@@ -1167,12 +1198,31 @@ mod tests {
         files
     }
 
+    /// Every unverified definition in the folder is embedded, and loads: the
+    /// application recognises every device they describe (#300).
+    #[test]
+    fn every_unverified_definition_is_embedded() {
+        let files: Vec<String> = unverified_files()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        let embedded: Vec<&str> = UNVERIFIED.iter().map(|(name, _)| *name).collect();
+        assert_eq!(files, embedded);
+        assert_eq!(super::unverified().len(), UNVERIFIED.len());
+        assert_eq!(unverified_text(&files[0]), Some(UNVERIFIED[0].1));
+        assert_eq!(
+            unverified_text("razer-deathstalker-v2-pro.json"),
+            None,
+            "built in, not unverified"
+        );
+    }
+
     /// The unverified definitions load, and give the frames `derive.mjs`
     /// worked out for them byte by byte: the files say what their facts say.
     /// Whether the devices answer, only they can tell.
     #[test]
     fn unverified_definitions_load_and_replay_their_derived_frames() {
-        let files = unverified();
+        let files = unverified_files();
         for (name, json) in &files {
             load(json).unwrap_or_else(|e| panic!("{name}: {e}"));
             replay(json).unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -1234,7 +1284,7 @@ mod tests {
     #[test]
     fn every_definition_is_consistent() {
         let built_in = BUILTIN.iter().map(|(n, j)| (n.to_string(), j.to_string()));
-        for (name, json) in built_in.chain(unverified()) {
+        for (name, json) in built_in.chain(unverified_files()) {
             let l = load(&json).unwrap();
             let mut seen = std::collections::BTreeSet::new();
             for key in l.keys {

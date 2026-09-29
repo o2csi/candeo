@@ -13,6 +13,8 @@ import {
   openDevicesDir,
   openSiteDevices,
   reloadDeviceDefinitions,
+  reportDeviceDefinition,
+  tryDeviceDefinition,
   type DefinitionProblem,
 } from '../api/candeo'
 import { message } from '../api/journal'
@@ -94,6 +96,28 @@ async function choose(d: DeviceInfo, value: string): Promise<void> {
   await refresh()
 }
 
+/**
+ * Which unverified definition *Try* uses, per device: the first, unless another
+ * firmware's variant is picked (#300).
+ */
+const picked = reactive<Record<string, string>>({})
+
+/**
+ * Tries it: the definition goes into your folder and drives the device, which
+ * is controlled; the list is read again, where it is now yours.
+ */
+async function tryIt(d: DeviceInfo): Promise<void> {
+  const file = picked[ids(d)] ?? d.file
+  if (file === null) return
+  await attempt(() => tryDeviceDefinition(file))
+  await reread()
+}
+
+/** The report form, in the browser: what it looks like is the person's to say. */
+function report(d: DeviceInfo): Promise<void> {
+  return attempt(() => reportDeviceDefinition(d.vid, d.pid))
+}
+
 /** The definition in use when the file chosen does not load. */
 function unloaded(d: DeviceInfo): string {
   const file = d.unloadedChoice ?? ''
@@ -168,6 +192,9 @@ onMounted(reread)
             <span class="name">
               {{ d.name }}
               <span v-if="d.origin === 'yours'" class="tag yours">{{ t('devices.groups.yours') }}</span>
+              <span v-else-if="d.origin === 'unverified'" class="tag yours">{{
+                t('devices.groups.unverified')
+              }}</span>
             </span>
             <span class="sub">
               <span class="mono">{{ ids(d) }}</span> · {{ count(d) }}
@@ -180,7 +207,22 @@ onMounted(reread)
             or a file of yours for the same ids. None takes over by being in
             the folder (`docs/design/device-sdk.md` §9).
           -->
-          <label v-if="d.present && definitionChoice(d) !== null" class="choice">
+          <!-- Two unverified files for one model are firmware variants: which to try. -->
+          <label v-if="d.origin === 'unverified' && d.definitions.length > 1" class="choice">
+            <span class="sr-only">{{ t('devices.definition') }}</span>
+            <select
+              :value="picked[ids(d)] ?? d.file ?? ''"
+              :disabled="busy"
+              :title="t('devices.definition')"
+              @change="picked[ids(d)] = ($event.target as HTMLSelectElement).value"
+            >
+              <option v-for="o in d.definitions" :key="o.file" :value="o.file">{{ o.file }}</option>
+            </select>
+          </label>
+          <label
+            v-else-if="d.present && d.origin !== 'unverified' && definitionChoice(d) !== null"
+            class="choice"
+          >
             <span class="sr-only">{{ t('devices.definition') }}</span>
             <select
               :value="definitionChoice(d)"
@@ -202,7 +244,7 @@ onMounted(reread)
           </label>
 
           <!-- Not *Open*: on a device, it would read as its state, *not open*. -->
-          <button v-if="d.file" class="ghost" @click="edit(d.origin, d.file)">
+          <button v-if="d.file && d.origin !== 'unverified'" class="ghost" @click="edit(d.origin, d.file)">
             {{ t('devices.definition') }}
           </button>
 
@@ -213,7 +255,11 @@ onMounted(reread)
             *Control* targets another unit of the same model, its serial read
             on open. Released and never decided look alike: neither is opened.
           -->
-          <template v-if="d.present">
+          <!-- Not verified: nothing drives it yet, trying it is the one action. -->
+          <button v-if="d.origin === 'unverified'" class="solid" :disabled="busy" @click="tryIt(d)">
+            {{ t('devices.try') }}
+          </button>
+          <template v-else-if="d.present">
             <button v-if="d.state === 'adopted'" class="ghost" :disabled="busy" @click="ignore(d)">
               {{ t('devices.release') }}
             </button>
@@ -274,13 +320,23 @@ onMounted(reread)
             lead, and nobody would go looking for it.
           -->
           <p v-for="w in d.warnings" :key="w" class="warn" role="status">{{ w }}</p>
+          <!-- Said once, on its card: what trying it means (#300). -->
+          <p v-if="d.origin === 'unverified'" class="warn" role="status">{{ t('devices.tryNote') }}</p>
+          <!-- Tried from an unverified definition: the one place to say how it lights. -->
+          <p v-else-if="d.unverified" class="elsewhere">
+            {{ t('devices.reportNote') }}
+            <button type="button" class="ghost small" @click="report(d)">{{ t('devices.report') }}</button>
+          </p>
         </template>
       </li>
     </ul>
     <p v-else class="note">
       {{ shown === 'plugged' ? t('devices.nothingPlugged') : t('devices.noMatch') }}
     </p>
-    <p v-if="list.some((d) => d.present && d.state === 'detected')" class="note">
+    <p
+      v-if="list.some((d) => d.present && d.state === 'detected' && d.origin !== 'unverified')"
+      class="note"
+    >
       {{ t('devices.neverSeen') }}
     </p>
     <!--
