@@ -18,14 +18,14 @@ const byName = (a: DeviceInfo, b: DeviceInfo) => a.name.localeCompare(b.name)
 
 /**
  * The page's one list: the devices plugged in first; under *All*, those known
- * but not plugged in after them, filtered by a text — a name, a maker, or its
- * `vid:pid` — once there are enough to need it. By name, not by state: a card
- * moving when it is controlled or released would bring another's button under
- * the pointer.
+ * but not plugged in after them, and last those only an unverified definition
+ * describes (#300), filtered by a text — a name, a maker, or its `vid:pid` —
+ * once there are enough to need it. By name, not by state: a card moving when
+ * it is controlled or released would bring another's button under the pointer.
  */
 export function listed(devices: readonly DeviceInfo[], shown: Shown, text: string): DeviceInfo[] {
   const wanted = shown === 'all' && devices.length > FILTER_PAST ? text.trim().toLowerCase() : ''
-  const rank = (d: DeviceInfo) => (d.present ? 0 : 1)
+  const rank = (d: DeviceInfo) => (d.present ? 0 : d.origin === 'unverified' ? 2 : 1)
   return devices
     .filter((d) => shown === 'all' || d.present)
     .filter((d) => !wanted || d.name.toLowerCase().includes(wanted) || ids(d).includes(wanted))

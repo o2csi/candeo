@@ -873,8 +873,10 @@ plugged in is one of theirs. Such a device, which no built-in definition nor
 one of yours describes, is listed in *Devices* as *not verified*, with **Try**:
 the definition is copied into your folder, chosen, and the device controlled —
 what downloading it from the site did, without leaving the window. Until then it
-drives nothing and joins nothing: not the tray, not *All*, not the firmware
-effects offered. The card says once that nobody has verified it on this device.
+drives nothing: not in the tray, not among the firmware effects offered. *All*
+lists every model they describe after the devices this computer knows, so that
+it answers "does Candeo know my keyboard?" without the site. The card of one
+plugged in says once that nobody has verified it on this device.
 
 A device driven by a file of yours that bears an unverified definition's name
 offers **Report**: the issue form opens in the browser with the definition, the
