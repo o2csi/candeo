@@ -1043,37 +1043,39 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
             }
         })
         .collect();
-    devices.extend(unverified_plugged(&api, &catalog.layouts));
+    devices.extend(unverified_devices(&api, &catalog.layouts));
     Ok(devices)
 }
 
-/// The devices plugged in that only an unverified definition describes, one per
-/// model, listed so they can be tried (#300). Nothing opens them: they are
-/// `detected`, driven by nothing until tried.
-fn unverified_plugged(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<DeviceInfo> {
+/// The devices only an unverified definition describes, one per model: listed
+/// under *All* with the others known, and tried from their card once plugged in
+/// (#300). Nothing opens them: they are `detected`, driven by nothing until
+/// tried.
+fn unverified_devices(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<DeviceInfo> {
     let unverified = candeo_device::definition::unverified();
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for (file, l) in unverified {
+    for (_, l) in unverified {
         let model = (l.vid, l.pid);
-        if known.iter().any(|k| (k.vid, k.pid) == model) || seen.contains(&model) {
+        if known.iter().any(|k| (k.vid, k.pid) == model) || !seen.insert(model) {
             continue;
         }
-        if plugged(api, l).is_none() {
-            continue;
-        }
-        seen.insert(model);
+        // Two files for one model are firmware variants: the one plugged in, if
+        // any, is the one offered; the card lets you pick the other.
+        let files: Vec<&(&str, &Layout)> = unverified
+            .iter()
+            .filter(|(_, u)| (u.vid, u.pid) == model)
+            .collect();
+        let plugged_in = files.iter().find(|(_, u)| plugged(api, u).is_some());
+        let (file, l) = plugged_in.copied().unwrap_or(files[0]);
         out.push(DeviceInfo {
             name: l.name.to_string(),
             vid: l.vid,
             pid: l.pid,
             origin: catalog::Origin::Unverified,
             file: Some((*file).to_string()),
-            // Two files for one model are firmware variants: the card lets you
-            // pick the one to try.
-            definitions: unverified
+            definitions: files
                 .iter()
-                .filter(|(_, u)| (u.vid, u.pid) == model)
                 .map(|(f, _)| DefinitionInfo {
                     file: (*f).to_string(),
                     origin: catalog::Origin::Unverified,
@@ -1084,7 +1086,7 @@ fn unverified_plugged(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<De
             lights: lights_kind(l),
             capabilities: capabilities(l),
             light_count: l.lit_count(),
-            present: true,
+            present: plugged_in.is_some(),
             state: DeviceState::Detected,
             open: false,
             error: None,

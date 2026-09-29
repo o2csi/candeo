@@ -28,21 +28,25 @@ function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
 }
 
 describe('devices page', () => {
-  it('shows what is plugged in by name, whatever its state, and under All the others after', () => {
+  it('shows what is plugged in by name, whatever its state, and under All the others after, unverified last', () => {
     const list = [
       device('Zeta', { present: true, state: 'ignored' }),
       device('Beta', { present: true }),
       device('Alpha'),
       device('Gamma', { present: true, state: 'adopted' }),
       device('Delta', { state: 'adopted' }),
+      device('Aardvark', { origin: 'unverified', unverified: true }),
+      device('Omega', { origin: 'unverified', unverified: true, present: true }),
     ]
-    expect(listed(list, 'plugged', '').map((d) => d.name)).toEqual(['Beta', 'Gamma', 'Zeta'])
+    expect(listed(list, 'plugged', '').map((d) => d.name)).toEqual(['Beta', 'Gamma', 'Omega', 'Zeta'])
     expect(listed(list, 'all', '').map((d) => d.name)).toEqual([
       'Beta',
       'Gamma',
+      'Omega',
       'Zeta',
       'Alpha',
       'Delta',
+      'Aardvark',
     ])
   })
 

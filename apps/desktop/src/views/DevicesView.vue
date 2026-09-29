@@ -208,7 +208,10 @@ onMounted(reread)
             the folder (`docs/design/device-sdk.md` §9).
           -->
           <!-- Two unverified files for one model are firmware variants: which to try. -->
-          <label v-if="d.origin === 'unverified' && d.definitions.length > 1" class="choice">
+          <label
+            v-if="d.origin === 'unverified' && d.present && d.definitions.length > 1"
+            class="choice"
+          >
             <span class="sr-only">{{ t('devices.definition') }}</span>
             <select
               :value="picked[ids(d)] ?? d.file ?? ''"
@@ -255,11 +258,16 @@ onMounted(reread)
             *Control* targets another unit of the same model, its serial read
             on open. Released and never decided look alike: neither is opened.
           -->
-          <!-- Not verified: nothing drives it yet, trying it is the one action. -->
-          <button v-if="d.origin === 'unverified'" class="solid" :disabled="busy" @click="tryIt(d)">
+          <!-- Not verified: nothing drives it yet, trying it is the one action, once plugged in. -->
+          <button
+            v-if="d.origin === 'unverified' && d.present"
+            class="solid"
+            :disabled="busy"
+            @click="tryIt(d)"
+          >
             {{ t('devices.try') }}
           </button>
-          <template v-else-if="d.present">
+          <template v-else-if="d.present && d.origin !== 'unverified'">
             <button v-if="d.state === 'adopted'" class="ghost" :disabled="busy" @click="ignore(d)">
               {{ t('devices.release') }}
             </button>
