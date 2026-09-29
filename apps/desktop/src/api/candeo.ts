@@ -345,6 +345,19 @@ export function copyDeviceDefinition(file: string): Promise<string> {
 }
 
 /**
+ * Tries an unverified definition on the device plugged in that it describes:
+ * copied into your folder, chosen, and the device controlled (#300).
+ */
+export function tryDeviceDefinition(file: string): Promise<LayoutInfo | null> {
+  return invoke('try_device_definition', { file })
+}
+
+/** Opens the report form in the browser, filled with what Candeo knows of the device. */
+export function reportDeviceDefinition(vid: number, pid: number): Promise<void> {
+  return invoke('report_device_definition', { vid, pid })
+}
+
+/**
  * Chooses which definition drives a device: a file of yours, or `null` for the
  * default. An open device opens again on it.
  */

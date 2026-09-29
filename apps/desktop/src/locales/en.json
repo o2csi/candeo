@@ -313,6 +313,10 @@
     "matrix": "matrix {rows} × {cols} · frame of {frameLen} colors · {keys} lit keys",
     "control": "Control",
     "release": "Release",
+    "try": "Try",
+    "tryNote": "Nobody has verified this definition on this device yet.",
+    "report": "Report",
+    "reportNote": "Does it light as it should? Say so, and it can join the verified ones.",
     "none": "No known layout.",
     "neverSeen": "A device never seen before is listed but not controlled: the decision is made once, then remembered.",
     "warnings": {
@@ -328,7 +332,8 @@
     },
     "groups": {
       "builtIn": "Built-in",
-      "yours": "Yours"
+      "yours": "Yours",
+      "unverified": "Not verified"
     },
     "openFolder": "Open the folder",
     "yoursNone": "No definition of yours.",

@@ -139,6 +139,10 @@ pub struct DeviceInfo {
     pub definitions: Vec<DefinitionInfo>,
     /// The file of yours chosen for it when another drives it: it does not load.
     pub unloaded_choice: Option<String>,
+    /// Its definition is one nobody has verified on the device: embedded and not
+    /// tried yet (`origin` says so), or a file of yours bearing an unverified
+    /// one's name, tried from it — which offers *Report* (#300).
+    pub unverified: bool,
     /// What its lights are, `keys` or `zones`, and how many.
     pub lights: &'static str,
     /// What an effect may require that it has, as [`LayoutInfo::capabilities`]:
@@ -984,7 +988,7 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
     // from.
     let catalog = catalog::current();
 
-    Ok(catalog
+    let mut devices: Vec<DeviceInfo> = catalog
         .layouts
         .iter()
         .map(|l| {
@@ -1009,6 +1013,10 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                     })
                     .collect(),
                 unloaded_choice: catalog.unloaded_choice(l).map(str::to_owned),
+                unverified: catalog.origin(l) == catalog::Origin::Yours
+                    && catalog.definition(l).is_some_and(|d| {
+                        candeo_device::definition::unverified_text(&d.file).is_some()
+                    }),
                 lights: lights_kind(l),
                 capabilities: capabilities(l),
                 light_count: l.lit_count(),
@@ -1034,7 +1042,148 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                     .unwrap_or_default(),
             }
         })
-        .collect())
+        .collect();
+    devices.extend(unverified_plugged(&api, &catalog.layouts));
+    Ok(devices)
+}
+
+/// The devices plugged in that only an unverified definition describes, one per
+/// model, listed so they can be tried (#300). Nothing opens them: they are
+/// `detected`, driven by nothing until tried.
+fn unverified_plugged(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<DeviceInfo> {
+    let unverified = candeo_device::definition::unverified();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (file, l) in unverified {
+        let model = (l.vid, l.pid);
+        if known.iter().any(|k| (k.vid, k.pid) == model) || seen.contains(&model) {
+            continue;
+        }
+        if plugged(api, l).is_none() {
+            continue;
+        }
+        seen.insert(model);
+        out.push(DeviceInfo {
+            name: l.name.to_string(),
+            vid: l.vid,
+            pid: l.pid,
+            origin: catalog::Origin::Unverified,
+            file: Some((*file).to_string()),
+            // Two files for one model are firmware variants: the card lets you
+            // pick the one to try.
+            definitions: unverified
+                .iter()
+                .filter(|(_, u)| (u.vid, u.pid) == model)
+                .map(|(f, _)| DefinitionInfo {
+                    file: (*f).to_string(),
+                    origin: catalog::Origin::Unverified,
+                })
+                .collect(),
+            unloaded_choice: None,
+            unverified: true,
+            lights: lights_kind(l),
+            capabilities: capabilities(l),
+            light_count: l.lit_count(),
+            present: true,
+            state: DeviceState::Detected,
+            open: false,
+            error: None,
+            surveyed_firmware: String::new(),
+            firmware: None,
+            warnings: Vec::new(),
+        });
+    }
+    out
+}
+
+/// The report form, filled with what Candeo knows of a device and the
+/// definition driving it (#300): its name in the title, the file, the firmware
+/// read, Candeo's version and system. What it looks like is the person's to say.
+/// No serial and no path: nothing that names the computer or its user.
+fn report_url(name: &str, file: &str, firmware: Option<&str>, candeo: &str) -> String {
+    let mut url = format!(
+        "{}/issues/new?template=device-report.yml&title={}&definition={}&candeo={}",
+        env!("CARGO_PKG_REPOSITORY"),
+        query(&format!("Device: {name}")),
+        query(file),
+        query(candeo),
+    );
+    if let Some(firmware) = firmware {
+        url.push_str(&format!("&firmware={}", query(firmware)));
+    }
+    url
+}
+
+/// A query parameter's value, every byte but the unreserved ones escaped.
+fn query(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+/// Opens the report form for a device driven by a definition tried from an
+/// unverified one: the person says whether it lights and sends it. Candeo sends
+/// nothing.
+#[tauri::command]
+fn report_device_definition(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    vid: u16,
+    pid: u16,
+) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let device = DeviceRef { vid, pid };
+    let layout = find_layout(device)?;
+    let file = catalog::current()
+        .definition(layout)
+        .map(|d| d.file.clone())
+        .unwrap_or_default();
+    let firmware = state
+        .inspection(device)
+        .and_then(|i| i.firmware.as_ref().ok().map(ToString::to_string));
+    let candeo = format!("{}, {}", app.package_info().version, journal::os_version());
+    let url = report_url(layout.name, &file, firmware.as_deref(), &candeo);
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| Failure::unexpected(format!("cannot open the report form: {e}")))
+}
+
+/// Tries an unverified definition on the device it describes (#300): copied
+/// into your folder, chosen, and the device controlled — what downloading it
+/// from the site did. A file of that name already there is kept, not
+/// overwritten: it is yours, perhaps corrected since.
+#[tauri::command]
+fn try_device_definition(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file: String,
+) -> CmdResult<Option<LayoutInfo>> {
+    let json = candeo_device::definition::unverified_text(&file)
+        .ok_or_else(|| Failure::unexpected(format!("no unverified definition {file:?}")))?;
+    let layout = candeo_device::definition::unverified()
+        .iter()
+        .find(|(name, _)| *name == file)
+        .map(|(_, layout)| *layout)
+        .ok_or_else(|| Failure::unexpected(format!("{file:?} does not load")))?;
+    let store = storage::store(&app)?;
+    let path = store.user_devices_dir()?.join(&file);
+    if !path.exists() {
+        std::fs::write(&path, json).map_err(|e| {
+            Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(&path)))
+        })?;
+    }
+    let mut settings = store.read_settings()?;
+    settings.choose_definition(layout.vid, layout.pid, Some(&file));
+    store.write_settings(&settings)?;
+    store.reload_catalog();
+    tracing::info!(file = %file, "unverified definition tried");
+    adopt_device(app, state, layout.vid, layout.pid)
 }
 
 /// Stores "controlled" for this device, and opens it if it is there.
@@ -1641,6 +1790,8 @@ pub fn run() {
             storage::open_site_devices,
             storage::reload_device_definitions,
             storage::copy_device_definition,
+            try_device_definition,
+            report_device_definition,
             firmware_effects,
             storage::choose_device_definition,
             storage::read_device_definition,
@@ -1703,6 +1854,26 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The report form comes filled and escaped, on this repository, with
+    /// nothing but what the person would type.
+    #[test]
+    fn the_report_form_is_filled_and_escaped() {
+        let url = report_url(
+            "Razer Huntsman V2",
+            "razer-huntsman-v2.json",
+            Some("v1.2"),
+            "0.20.0, Windows 11 24H2 (26100.1) · x86_64",
+        );
+        assert!(url
+            .starts_with("https://github.com/o2csi/candeo/issues/new?template=device-report.yml&"));
+        assert!(url.contains("&title=Device%3A%20Razer%20Huntsman%20V2&"));
+        assert!(url.contains("&definition=razer-huntsman-v2.json&"));
+        assert!(url
+            .contains("&candeo=0.20.0%2C%20Windows%2011%2024H2%20%2826100.1%29%20%C2%B7%20x86_64"));
+        assert!(url.ends_with("&firmware=v1.2"));
+        assert!(!report_url("A", "a.json", None, "0.20.0").contains("firmware"));
+    }
 
     #[test]
     fn a_device_warning_is_said_in_the_interface_language() {

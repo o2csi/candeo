@@ -313,6 +313,10 @@
     "matrix": "matrice {rows} × {cols} · image de {frameLen} couleurs · {keys} touches éclairées",
     "control": "Piloter",
     "release": "Libérer",
+    "try": "Essayer",
+    "tryNote": "Personne n'a encore vérifié cette définition sur cet appareil.",
+    "report": "Faire un retour",
+    "reportNote": "S'allume-t-il comme il faut ? Dites-le, et elle pourra rejoindre les vérifiées.",
     "none": "Aucun gabarit connu.",
     "neverSeen": "Un appareil jamais vu est listé mais non piloté : la décision se prend une fois, puis se retient.",
     "warnings": {
@@ -328,7 +332,8 @@
     },
     "groups": {
       "builtIn": "Intégrés",
-      "yours": "À vous"
+      "yours": "À vous",
+      "unverified": "Non vérifiée"
     },
     "openFolder": "Ouvrir le dossier",
     "yoursNone": "Aucune définition à vous.",

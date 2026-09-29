@@ -23,6 +23,9 @@ pub enum Origin {
     BuiltIn,
     /// A file of yours: nobody reviewed it.
     Yours,
+    /// Embedded, never tried on the device: it only says a device plugged in is
+    /// one it describes, until someone tries it (#300).
+    Unverified,
 }
 
 /// A file of yours that drives nothing, and why, in English: what its author
