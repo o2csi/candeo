@@ -10,8 +10,8 @@ after changing either script:
 
   pwsh packaging/windows/store-watch.ps1 -Register
 
-The task runs at logon, then every six hours. Each run looks at the latest
-release:
+The task runs once a day, or as soon as the computer is on after missing it.
+Each run looks at the latest release:
 
 - without its signed package, it runs store-package.ps1, which attaches nothing
   while the Store still serves the previous version;
@@ -20,8 +20,9 @@ release:
   once: a run that fails, or a pull request a moderator refuses, is for a
   person to follow.
 
-What it does, and why it waits, goes to store-watch.log next to the copies. A
-failure also shows a notification.
+What it does, and why it waits, goes to store-watch.log next to the copies, a
+line each time that changes. A failure also shows a notification, at every run
+until it is fixed.
 #>
 param(
   # Copies both scripts out of the checkout and registers the task to run them.
@@ -46,15 +47,13 @@ if ($Register) {
   $action = New-ScheduledTaskAction -Execute 'conhost.exe' -WorkingDirectory $copies `
     -Argument "--headless `"$pwsh`" -NoProfile -NonInteractive -File `"$script`" -Repository $Repository"
   $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-  $logon = New-ScheduledTaskTrigger -AtLogOn -User $user
-  # The network, and the account's token, are not ready at the first second.
-  $logon.Delay = 'PT10M'
-  $every = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 6)
+  # The Store certifies within days, and winget-pkgs reviews within weeks.
+  $daily = New-ScheduledTaskTrigger -Daily -At '12:00'
   $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
   # In the session: winget takes the Store's account from it, gh its sign-in.
   $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-  Register-ScheduledTask -TaskName $task -Action $action -Trigger $logon, $every `
+  Register-ScheduledTask -TaskName $task -Action $action -Trigger $daily `
     -Settings $settings -Principal $principal -Force | Out-Null
   Write-Host "'$task' registered: it runs $script."
   return
@@ -64,8 +63,11 @@ $env:GH_REPO = $Repository
 $log = Join-Path $PSScriptRoot 'store-watch.log'
 
 function Say([string]$text) {
-  "$(Get-Date -Format s)  $text" | Add-Content $log
   Write-Host $text
+  # A wait lasts weeks: the log keeps what changed, not every run.
+  $last = Get-Content $log -Tail 1 -ErrorAction SilentlyContinue
+  if ($last -and ($last -split '  ', 2)[1] -eq $text) { return }
+  "$(Get-Date -Format s)  $text" | Add-Content $log
 }
 
 function Alert([string]$text) {

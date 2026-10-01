@@ -148,7 +148,7 @@ and does not start it.
 
 **Unattended:** `store-watch.ps1` does both steps for the latest release, each
 as soon as it can. Registered once on that Windows, and again after changing
-either script, it runs at logon and every six hours:
+either script, it runs once a day:
 
 ```powershell
 pwsh packaging/windows/store-watch.ps1 -Register
@@ -157,9 +157,9 @@ pwsh packaging/windows/store-watch.ps1 -Register
 Without the signed package, it runs `store-package.ps1`, which waits for the
 certification. With it, it starts `winget.yml` once winget lists Candeo, the
 `WINGET_TOKEN` secret exists, and winget lacks the version; never twice for one
-tag, since a failed run or a refused pull request needs someone. It logs to
-`%LOCALAPPDATA%\candeo-store-watch\store-watch.log` and shows a notification when
-it fails, for instance when the account must sign in again.
+tag, since a failed run or a refused pull request needs someone. It logs each
+change to `%LOCALAPPDATA%\candeo-store-watch\store-watch.log` and shows a
+notification when it fails, for instance when the account must sign in again.
 
 The manifests are rendered by `packaging/winget/winget.mjs`:
 
