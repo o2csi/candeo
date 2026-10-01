@@ -19,9 +19,10 @@ For maintainers. Installing is in the README.
    - then `SHA256SUMS`, and the draft is published.
 5. **Once it is public, it goes to the Store**, which certifies and signs the
    package. Each step does nothing until what it needs is set up.
-6. **Once certified, a maintainer attaches the signed package** and sends it to
-   winget, with one command (below). Windows ships nothing else: no installer
-   of its own, which would need an Authenticode certificate (#305).
+6. **Once certified, the signed package is attached** and sent to winget, by a
+   scheduled task on a maintainer's Windows or with one command (below).
+   Windows ships nothing else: no installer of its own, which would need an
+   Authenticode certificate (#305).
 
 One version for the whole application, in `package.json`,
 `apps/desktop/package.json`, `packages/effects-api/package.json`,
@@ -144,6 +145,21 @@ application credentials, so no runner can do it. It also needs *disconnected
 **What it does not cover:** the package's first launch takes the Store's licence
 of a free app, so a Windows without the Store (LTSC, Windows Sandbox) installs it
 and does not start it.
+
+**Unattended:** `store-watch.ps1` does both steps for the latest release, each
+as soon as it can. Registered once on that Windows, and again after changing
+either script, it runs at logon and every six hours:
+
+```powershell
+pwsh packaging/windows/store-watch.ps1 -Register
+```
+
+Without the signed package, it runs `store-package.ps1`, which waits for the
+certification. With it, it starts `winget.yml` once winget lists Candeo, the
+`WINGET_TOKEN` secret exists, and winget lacks the version; never twice for one
+tag, since a failed run or a refused pull request needs someone. It logs to
+`%LOCALAPPDATA%\candeo-store-watch\store-watch.log` and shows a notification when
+it fails, for instance when the account must sign in again.
 
 The manifests are rendered by `packaging/winget/winget.mjs`:
 

@@ -17,14 +17,18 @@ refuses the download.
 
 The package is checked (version, Microsoft Marketplace signature), attached as
 `Candeo_X.Y.Z_x64.msix`, added to the release's `SHA256SUMS`, and `winget.yml`
-is started for the tag. Run again, it replaces what it attached.
+is started for the tag. Run again, it replaces what it attached. Run before the
+certification, it attaches nothing and exits with code 2, which store-watch.ps1
+tells apart from a failure.
 #>
 param(
   [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
   # The Store's product id, public on Candeo's Store page.
   [string]$ProductId = '9MXFM8QT1X7P',
   # Attaches the package without starting winget.yml.
-  [switch]$SkipWinget
+  [switch]$SkipWinget,
+  # Whether winget may open a sign-in window: never, from a scheduled task.
+  [ValidateSet('silent', 'silentPreferred', 'interactive')][string]$Authentication = 'silentPreferred'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +44,7 @@ if ($LASTEXITCODE -ne 0) { throw "No release $tag." }
 if ($draft -eq 'true') { throw "$tag is still a draft: publish it first." }
 
 winget download --id $ProductId -s msstore --skip-license -a x64 -d $work `
+  --authentication-mode $Authentication `
   --accept-source-agreements --accept-package-agreements | Out-Host
 if ($LASTEXITCODE -ne 0) { throw "winget download failed ($LASTEXITCODE)." }
 
@@ -48,7 +53,8 @@ if ($LASTEXITCODE -ne 0) { throw "winget download failed ($LASTEXITCODE)." }
 $package = Get-ChildItem $work -Filter '*.msix' | Select-Object -First 1
 if (-not $package) { throw 'The Store sent no MSIX package.' }
 if ($package.Name -notlike "*_$Version.0_*") {
-  throw "The Store serves $($package.Name), not $Version yet: wait for the certification."
+  Write-Host "The Store serves $($package.Name), not $Version yet: wait for the certification."
+  exit 2
 }
 
 $signature = Get-AuthenticodeSignature $package.FullName
