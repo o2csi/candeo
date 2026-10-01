@@ -14,12 +14,14 @@ For maintainers. Installing is in the README.
    tags the merge commit `vX.Y.Z`, opens a **draft** release carrying the
    changelog, and calls `release.yml`.
 4. **`release.yml` builds and publishes**:
-   - Windows: NSIS and MSI, and the Store's MSIX package;
+   - Windows: the Store's MSIX package, kept as an artifact of the run;
    - Linux: `.deb` and `.rpm`, each checked to contain the udev rule;
    - then `SHA256SUMS`, and the draft is published.
-5. **Once it is public, it goes to the stores**: the MSIX to the Microsoft Store,
-   the manifests to winget (below). Each step does nothing until what it needs
-   is set up.
+5. **Once it is public, it goes to the Store**, which certifies and signs the
+   package. Each step does nothing until what it needs is set up.
+6. **Once certified, a maintainer attaches the signed package** and sends it to
+   winget, with one command (below). Windows ships nothing else: no installer
+   of its own, which would need an Authenticode certificate (#305).
 
 One version for the whole application, in `package.json`,
 `apps/desktop/package.json`, `packages/effects-api/package.json`,
@@ -35,8 +37,9 @@ when one disagrees with the tag.
 - **A published release is never rebuilt.** Uploads replace one file at a time,
   so a rebuild would show a mix of old and new installers.
 - **Only this run's assets.** A reused draft loses every asset from earlier runs,
-  and publishing requires exactly the four installers and `SHA256SUMS`.
-- **Numbers-only versions.** The MSI refuses a pre-release version, so a tag like
+  and publishing requires exactly the two Linux packages and `SHA256SUMS`. The
+  signed package joins them after publishing, with its line in `SHA256SUMS`.
+- **Numbers-only versions.** An MSIX version is four numbers, so a tag like
   `v1.2.0-beta` is refused before anything is built.
 - **No cache.** What ships is built from nothing another run left behind.
 - **Least privilege.** Actions are pinned to a commit, and each job gets only the
@@ -117,20 +120,42 @@ nothing is submitted. A client secret expires: renew it before it does, or the
 job fails at the next release. A failed `store` job is re-run on its own from the
 run's page; the artifact stays with the run.
 
-## After publishing: Windows Package Manager
+## After certification: the signed package, and winget
 
-A release is what winget installs, so the manifests are rendered once it is
-published (#138), by `packaging/winget/winget.mjs`:
+Windows ships the package the Microsoft Store signs (#305): downloaded from the
+Store once certified, attached to the release, and installed by winget. Run on
+a Windows signed in with the Microsoft 365 account of the Partner Center tenant:
+
+```powershell
+pwsh packaging/windows/store-package.ps1 -Version X.Y.Z
+```
+
+It downloads the package with `winget download -s msstore`, checks its version
+and its Microsoft Marketplace signature, attaches it as `Candeo_X.Y.Z_x64.msix`,
+adds its line to `SHA256SUMS`, and starts `winget.yml`. Run before the
+certification ends, it stops: the Store still serves the previous version.
+
+**Why by hand:** the Store hands its signed package to an Entra ID user account
+only, which `winget download` reads from the Windows session; it takes no
+application credentials, so no runner can do it. It also needs *disconnected
+(offline) licensing* allowed in Partner Center (*Pricing and availability* →
+*Organizational licensing*), set once.
+
+**What it does not cover:** the package's first launch takes the Store's licence
+of a free app, so a Windows without the Store (LTSC, Windows Sandbox) installs it
+and does not start it.
+
+The manifests are rendered by `packaging/winget/winget.mjs`:
 
 ```powershell
 node packaging/winget/winget.mjs X.Y.Z
 winget validate --manifest target\winget\manifests\o\O2CSI\Candeo\X.Y.Z
 ```
 
-The checksums come from the `SHA256SUMS` of the release itself, never from a
-file downloaded and hashed again.
+The package's checksum comes from the `SHA256SUMS` of the release; the package
+is downloaded only for the hash of its signature, and checked against that line.
 
-`winget.yml` does this after every release (#180), then opens the pull request
+`winget.yml` does this when the script starts it (#180), then opens the pull request
 on [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) with
 `wingetcreate submit`. It needs a `WINGET_TOKEN` secret: a classic personal
 access token with the `public_repo` scope, from an account that has a fork of
@@ -143,9 +168,3 @@ released since:
 ```bash
 gh workflow run winget.yml -f tag=vX.Y.Z
 ```
-
-## Not yet
-
-- **Authenticode signing** (#145): Windows warns about an unknown publisher on
-  the files published here. The Microsoft Store signs the package it distributes
-  (#126), and that signature covers the package, not these files.

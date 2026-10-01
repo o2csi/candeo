@@ -2375,7 +2375,7 @@ mod tests {
             }
             let transient = self
                 .transient_failures
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
                 .is_ok();
             if transient || self.failing.load(Ordering::Relaxed) {
                 if abandon {

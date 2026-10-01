@@ -156,8 +156,10 @@ jobs:
   windows:
     needs: prepare
     runs-on: windows-latest
+    # It attaches nothing to the release any more: the Store package is an
+    # artifact, and the signed one joins the release by hand (#305).
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,40 +172,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with: { node-version: 24 }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @candeo/desktop exec tauri build --bundles nsis,msi
-      - name: Attach the installers
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          set -euo pipefail
-          built=(
-            "target/release/bundle/nsis/Candeo_${VERSION}_x64-setup.exe"
-            "target/release/bundle/msi/Candeo_${VERSION}_x64_en-US.msi"
-          )
-          # Tauri names installers after productName; release files keep the
-          # lowercase name. Copied to a folder of their own: renamed in place,
-          # the name differs only by case, the same file on Windows.
-          mkdir -p assets
-          files=()
-          for f in "${built[@]}"; do
-            if [ ! -f "$f" ]; then
-              echo "::error::$f was not built"
-              find target/release/bundle -maxdepth 2 -type f
-              exit 1
-            fi
-            files+=("assets/candeo${f##*/Candeo}")
-            cp "$f" "${files[-1]}"
-          done
-          gh release upload "$TAG" --clobber "${files[@]}"
+      # The executable alone: Windows ships the package the Store signs (#305),
+      # no installer of its own.
+      - run: pnpm --filter @candeo/desktop exec tauri build --no-bundle
 
       # The Store package, from the executable just built (docs/design/msix.md).
       # Not attached to the release: outside the Store, an unsigned MSIX does not
-      # install, and the Store signs what it distributes. The identity is public —
-      # every published package carries it — hence variables, not secrets.
+      # install. The package the Store signs joins the release once certified
+      # (packaging/windows/store-package.ps1). The identity is public — every
+      # published package carries it — hence variables, not secrets.
       - name: Build the Store package
         if: vars.MSIX_PUBLISHER != ''
         shell: bash
@@ -287,8 +264,6 @@ jobs:
         run: |
           set -euo pipefail
           expected=(
-            "candeo_${VERSION}_x64-setup.exe"
-            "candeo_${VERSION}_x64_en-US.msi"
             "candeo_${VERSION}_amd64.deb"
             "candeo-${VERSION}-1.x86_64.rpm"
           )
@@ -390,12 +365,6 @@ jobs:
           msstore submission update "$PRODUCT_ID" "$(cat "$RUNNER_TEMP/updated.json")"
           msstore submission publish "$PRODUCT_ID"
           echo "Submitted $VERSION to the Store for certification." >> "$GITHUB_STEP_SUMMARY"
-
-  winget:
-    needs: publish
-    permissions:
-      contents: read
-    uses: ./.github/workflows/winget.yml
-    with:
-      tag: ${{ inputs.tag }}
-    secrets: inherit
+          # What only a maintainer can do: the Store gives its signed package to a
+          # user account, never to a runner (#305).
+          echo "Once certified, attach the signed package and send it to winget: \`pwsh packaging/windows/store-package.ps1 -Version $VERSION\`" >> "$GITHUB_STEP_SUMMARY"
