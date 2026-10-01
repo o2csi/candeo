@@ -1,23 +1,15 @@
 name: winget
 
-# Sends a published release to the Windows Package Manager (#180). release.yml
-# calls it once a release is public; running it by hand sends a version
-# published before, such as the first one after the package is accepted.
+# Sends a published release to the Windows Package Manager (#180). What winget
+# installs is the package the Microsoft Store signed, which a maintainer attaches
+# to the release once certified: packaging/windows/store-package.ps1 starts this
+# workflow then (#305). Running it by hand sends a version attached before.
 #
 # The manifests are rendered by packaging/winget/winget.mjs from the release's
 # own SHA256SUMS, as when they are written by hand (docs/releasing.md), and
 # wingetcreate only opens the pull request. `wingetcreate update` would download
-# the installers and hash them again, which is what the script refuses to do.
+# the package and hash it again, which the script does only for its signature.
 on:
-  workflow_call:
-    inputs:
-      tag:
-        description: "Release tag, such as v0.1.0"
-        required: true
-        type: string
-    secrets:
-      WINGET_TOKEN:
-        required: false
   workflow_dispatch:
     inputs:
       tag:

@@ -2,9 +2,11 @@
 //
 //   node packaging/winget/winget.mjs 0.4.0
 //
-// The checksums are read from the `SHA256SUMS` published with the release, so
-// the manifests describe files that exist, with the hashes the release itself
-// declares — never a file downloaded again and hashed here.
+// What winget installs is the package the Microsoft Store signed, attached to
+// the release once certified (#305). Its checksum is read from the release's
+// `SHA256SUMS`, so the manifest describes a file that exists with the hash the
+// release declares; the package is downloaded only for the hash of its
+// signature, which `SHA256SUMS` cannot give, and checked against that line.
 //
 // It writes `target/winget/manifests/o/O2CSI/Candeo/<version>/`, the folder
 // layout winget-pkgs expects. Check it, then submit it:
@@ -13,9 +15,12 @@
 //
 // Submitting is copying that folder into a fork of microsoft/winget-pkgs and
 // opening a pull request there.
+import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { signatureSha256 } from './signature.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '../..')
@@ -95,14 +100,30 @@ function publisher() {
   return `https://github.com/${owner}`
 }
 
+/** The package's signature hash, from the file the release serves, checked against its line. */
+async function signature(name, declared) {
+  const url = `${repository()}/releases/download/v${version}/${name}`
+  const answer = await fetch(url)
+  if (!answer.ok) {
+    throw new Error(`${url} answered ${answer.status}`)
+  }
+  const msix = Buffer.from(await answer.arrayBuffer())
+  const hash = createHash('sha256').update(msix).digest('hex').toUpperCase()
+  if (hash !== declared) {
+    throw new Error(`${name} hashes to ${hash}, SHA256SUMS says ${declared}`)
+  }
+  return signatureSha256(msix)
+}
+
+const msix = `Candeo_${version}_x64.msix`
 const values = {
   version,
   repository: repository(),
   site: site(),
   publisher: publisher(),
   date: await releaseDate(version),
-  sha256_setup: named(`candeo_${version}_x64-setup.exe`),
-  sha256_msi: named(`candeo_${version}_x64_en-US.msi`),
+  sha256_msix: named(msix),
+  signature_msix: await signature(msix, named(msix)),
 }
 
 const out = join(root, 'target/winget/manifests/o/O2CSI/Candeo', version)
