@@ -6,7 +6,7 @@
     <title>Candeo — install</title>
     <meta
       name="description"
-      content="Every way to install Candeo: the Microsoft Store, the Windows installers, winget and Linux packages, how to check a download, and where your settings and effects live."
+      content="Every way to install Candeo: the Microsoft Store, its signed package, winget and Linux packages, how to check a download, and where your settings and effects live."
     />
     <link rel="icon" href="assets/icon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -36,14 +36,14 @@
             <a class="download" href="https://apps.microsoft.com/detail/9MXFM8QT1X7P">Get it from the Store</a>
           </div>
           <div class="way">
-            <h3>Windows installer</h3>
-            <p>Installs for your account, no administrator rights.</p>
-            <a class="download" href="{{setupUrl}}">Download {{version}}</a>
+            <h3>Signed package</h3>
+            <p>The Store's package, to open yourself. Needs the Store on the computer.</p>
+            <a class="download" href="{{packageUrl}}">Download {{packageVersion}}</a>
           </div>
           <div class="way">
             <h3>winget</h3>
-            <p>Once the manifest is accepted.</p>
-            <div class="command">winget install candeo</div>
+            <p>From the Store's catalogue.</p>
+            <div class="command">winget install --id 9MXFM8QT1X7P -s msstore</div>
           </div>
           <div class="way">
             <h3>Linux</h3>
@@ -56,27 +56,27 @@
       <section>
         <h2>Windows</h2>
         <p>
-          Every release carries two installers for 64-bit Windows, beside the Store version:
-        </p>
-        <ul>
-          <li>
-            <code>candeo_&lt;version&gt;_x64-setup.exe</code> installs for your account, without
-            administrator rights. This is the one to pick outside the Store.
-          </li>
-          <li>
-            <code>candeo_&lt;version&gt;_x64_en-US.msi</code> installs for every account of the
-            computer, and asks for administrator rights.
-          </li>
-        </ul>
-        <p>
-          These are not signed yet, so SmartScreen warns about an unknown publisher: click
-          <em>More info</em>, then <em>Run anyway</em>. The Store version is signed by Microsoft
-          and shows no warning.
+          On 64-bit Windows, Candeo is the package the Microsoft Store signs, however you install
+          it: from the Store, with winget, or downloaded from a release as
+          <code>Candeo_&lt;version&gt;_x64.msix</code> and opened with a double click. Signed by
+          Microsoft, it shows no warning.
         </p>
         <p>
-          With winget, once its manifest is accepted, the identifier is <code>O2CSI.Candeo</code>:
+          Its first launch takes the free licence the Store gives every app: the computer needs the
+          Microsoft Store, and on a Windows without it Candeo does not start.
         </p>
+        <p>
+          With winget, the Store's catalogue has it now; once its own manifest is accepted, the
+          identifier is <code>O2CSI.Candeo</code>:
+        </p>
+        <div class="command">winget install --id 9MXFM8QT1X7P -s msstore</div>
         <div class="command">winget install O2CSI.Candeo</div>
+        <p>
+          Installed before with <code>candeo_&lt;version&gt;_x64-setup.exe</code> or the
+          <code>.msi</code>? They are no longer published. Uninstall that version in
+          <em>Settings › Apps</em>, then install the package: your settings and your effects stay
+          where they are.
+        </p>
       </section>
 
       <section>
@@ -102,16 +102,16 @@
         </p>
         <div class="command">sha256sum -c SHA256SUMS --ignore-missing</div>
         <p>On Windows, compare with the line for your file in <code>SHA256SUMS</code>:</p>
-        <div class="command" data-lang="powershell">Get-FileHash .\candeo_*_x64-setup.exe -Algorithm SHA256</div>
+        <div class="command" data-lang="powershell">Get-FileHash .\Candeo_*_x64.msix -Algorithm SHA256</div>
       </section>
 
       <section>
         <h2>Updates</h2>
         <p>
-          The Store updates Candeo by itself. Outside the Store, Candeo can tell you when a newer
-          version is published — the one request it makes, which you can turn off in
-          <em>Settings</em>. Installing a new version over the old one keeps your settings and your
-          effects.
+          The Store updates Candeo by itself, and <code>winget upgrade</code> does with winget. On
+          Linux, Candeo can tell you when a newer version is published — the one request it makes,
+          which you can turn off in <em>Settings</em>. Installing a new version over the old one
+          keeps your settings and your effects.
         </p>
       </section>
 

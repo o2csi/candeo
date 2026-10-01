@@ -17,8 +17,8 @@ account, no extra services to install, nothing sent anywhere.
 
 1. **Install Candeo** from the
    [Microsoft Store](https://apps.microsoft.com/detail/9MXFM8QT1X7P) — or
-   [another way](https://o2csi.github.io/candeo/install.html): Windows
-   installers, winget, Linux packages.
+   [another way](https://o2csi.github.io/candeo/install.html): the signed
+   package to download, winget, Linux packages.
 2. **Open Devices** and click *Control* next to your keyboard.
 3. **Pick an effect** and *Apply* it. It keeps running when you close the window.
 

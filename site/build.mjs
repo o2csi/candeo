@@ -44,6 +44,33 @@ function repository() {
  * The latest release, or `null` when GitHub cannot be asked — a build without
  * network still produces a page, pointing at the releases list.
  */
+/**
+ * The newest release carrying the package the Store signed (#305), which a
+ * maintainer attaches once the Store has certified it: until then, the release
+ * before keeps the link working. `null` when none carries it.
+ */
+async function signedPackage(repo) {
+  const api = repo.replace('https://github.com/', 'https://api.github.com/repos/')
+  try {
+    const answer = await fetch(`${api}/releases?per_page=10`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+    if (!answer.ok) {
+      console.warn(`no releases: GitHub answered ${answer.status}`)
+      return null
+    }
+    for (const release of await answer.json()) {
+      const version = release.tag_name.replace(/^v/, '')
+      const asset = release.assets.find((a) => a.name === `Candeo_${version}_x64.msix`)
+      if (!release.draft && asset) return { version, url: asset.browser_download_url }
+    }
+    return null
+  } catch (e) {
+    console.warn(`no releases: ${e}`)
+    return null
+  }
+}
+
 async function latest(repo) {
   const api = repo.replace('https://github.com/', 'https://api.github.com/repos/')
   try {
@@ -184,6 +211,7 @@ ${rows}
 
 const repo = repository()
 const version = await latest(repo)
+const signed = await signedPackage(repo)
 const releases = `${repo}/releases`
 
 /** Text as a page holds it, so that `<`, `>` and `&` stay text. */
@@ -243,9 +271,8 @@ const zonesDefinition = escaped(
 const values = {
   version: version ?? 'the latest version',
   releaseUrl: version ? `${releases}/tag/v${version}` : releases,
-  setupUrl: version
-    ? `${releases}/download/v${version}/candeo_${version}_x64-setup.exe`
-    : `${releases}/latest`,
+  packageUrl: signed?.url ?? 'https://apps.microsoft.com/detail/9MXFM8QT1X7P',
+  packageVersion: signed?.version ?? '',
   repository: repo,
   devices: table(repo),
   toVerify: toVerify(repo),
