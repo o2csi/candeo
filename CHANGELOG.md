@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.1](https://github.com/o2csi/candeo/compare/v0.21.0...v0.21.1) (2026-10-01)
+
+
+### Documentation
+
+* install Candeo on Windows from the package the Store signs ([b2c5e3c](https://github.com/o2csi/candeo/commit/b2c5e3c536757f90e44657a58b4109d5a01c2da4))
+
+
+### CI/CD
+
+* attach the Store package and send it to winget unattended ([1409fbe](https://github.com/o2csi/candeo/commit/1409fbe2eafe9686e162bb6f0d18233eefe83d7a))
+* run the store watch daily and log only changes ([deddd91](https://github.com/o2csi/candeo/commit/deddd916024c2b9e83782a28a9ecf2e3a3af3504))
+* Windows ships the package the Store signs ([e2d39da](https://github.com/o2csi/candeo/commit/e2d39da6f39d3898281cb8fbefe16acc2639205f))
+
 ## [0.21.0](https://github.com/o2csi/candeo/compare/v0.20.0...v0.21.0) (2026-09-29)
 
 
