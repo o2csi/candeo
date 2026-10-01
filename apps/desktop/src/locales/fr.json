@@ -14,7 +14,13 @@
       "light": "Thème clair",
       "dark": "Thème sombre"
     },
-    "dismiss": "Fermer ce message"
+    "dismiss": "Fermer ce message",
+    "support": {
+      "button": "Soutenir Candeo",
+      "lead": "Candeo est gratuit. Le soutenir permet qu'il le reste.",
+      "github": "GitHub Sponsors",
+      "githubDetail": "Chaque mois ou une fois, dans votre navigateur"
+    }
   },
   "effects": {
     "columns": {
@@ -502,8 +508,7 @@
       "newer": "La version {version} est disponible.",
       "unreadable": "La dernière version, {version}, ne peut pas être comparée à celle-ci.",
       "failed": "Vérification impossible.",
-      "openRelease": "Ouvrir la page de la version",
-      "support": "Soutenir Candeo sur GitHub Sponsors"
+      "openRelease": "Ouvrir la page de la version"
     },
     "log": {
       "title": "Journal",

@@ -80,7 +80,7 @@ your files live, the editor, the references.
 
 Candeo is free, and it stays free: no account, no ads, nothing sent anywhere.
 If it lights your days, **[sponsor it on GitHub](https://github.com/sponsors/o2csi)**
-— or from the app, in *Settings*.
+— or from the app, with *Support Candeo* at the top of the window.
 
 ## Contribute
 

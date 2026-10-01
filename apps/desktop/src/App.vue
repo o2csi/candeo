@@ -14,6 +14,7 @@ import type { ThemeSetting } from './api/candeo'
 import { refreshLibrary } from './editor/library'
 import { refreshFirmwareEffects } from './composables/useEffects'
 import { refreshGames, valveGames } from './composables/games'
+import SupportButton from './components/SupportButton.vue'
 import { t } from './i18n'
 
 const route = useRoute()
@@ -97,6 +98,9 @@ onMounted(() => {
       <RouterLink v-if="valveGames" to="/games" class="tab">{{ t('app.tabs.games') }}</RouterLink>
       <RouterLink to="/settings" class="tab">{{ t('app.tabs.settings') }}</RouterLink>
 
+      <!-- Midway between the tabs and the theme: seen from every screen, in nobody's way. -->
+      <span class="spacer" />
+      <SupportButton />
       <span class="spacer" />
 
       <!--

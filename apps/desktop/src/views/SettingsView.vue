@@ -19,7 +19,6 @@ import {
   getSettings,
   openLogDir,
   openRelease,
-  openSponsors,
   resetSettings,
   setLanguage,
   setLaunchAtLogin,
@@ -138,16 +137,6 @@ async function open(url: string): Promise<void> {
   versionProblem.value = null
   try {
     await openRelease(url)
-  } catch (e) {
-    versionProblem.value = message(e)
-  }
-}
-
-/** The sponsors page, in the browser: supporting Candeo happens there. */
-async function support(): Promise<void> {
-  versionProblem.value = null
-  try {
-    await openSponsors()
   } catch (e) {
     versionProblem.value = message(e)
   }
@@ -442,10 +431,6 @@ onMounted(() => {
           </button>
         </p>
       </template>
-      <!-- The provider named on the button, as the Store asks of a donation made outside it. -->
-      <p class="level">
-        <button type="button" class="ghost" @click="support">{{ t('settings.version.support') }}</button>
-      </p>
     </section>
 
     <section v-if="journal" class="block" aria-labelledby="journal-title">
