@@ -1,14 +1,19 @@
 name: winget
 
 # Sends a published release to the Windows Package Manager (#180). What winget
-# installs is the package the Microsoft Store signed, which a maintainer attaches
-# to the release once certified: packaging/windows/store-package.ps1 starts this
-# workflow then (#305). Running it by hand sends a version attached before.
+# installs is the package the Microsoft Store signed, attached to the release
+# once certified by packaging/windows/store-package.ps1, which starts this
+# workflow then, or by store-watch.ps1, which starts it once winget lists the
+# package (#305). Running it by hand sends a version attached before.
 #
 # The manifests are rendered by packaging/winget/winget.mjs from the release's
 # own SHA256SUMS, as when they are written by hand (docs/releasing.md), and
 # wingetcreate only opens the pull request. `wingetcreate update` would download
 # the package and hash it again, which the script does only for its signature.
+
+# Named after the tag: store-watch.ps1 starts a version once, and finds its run.
+run-name: winget ${{ inputs.tag }}
+
 on:
   workflow_dispatch:
     inputs:
