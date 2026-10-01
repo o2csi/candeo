@@ -83,6 +83,20 @@ pub fn open_release(app: AppHandle, url: String) -> CmdResult<()> {
         .map_err(|e| Failure::unexpected(format!("cannot open {url}: {e}")))
 }
 
+/// Where Candeo is supported: the sponsors page of the organisation that
+/// publishes it. A fixed address, as the site's list of devices is.
+const SPONSORS: &str = "https://github.com/sponsors/o2csi";
+
+/// Opens the sponsors page in the browser. The provider is named on the button,
+/// as the Store asks of a donation made outside it (policy 10.8.2); the payment
+/// happens there, and Candeo sees none of it.
+#[tauri::command]
+pub fn open_sponsors(app: AppHandle) -> CmdResult<()> {
+    app.opener()
+        .open_url(SPONSORS, None::<&str>)
+        .map_err(|e| Failure::unexpected(format!("cannot open the sponsors page: {e}")))
+}
+
 /// Whether an address is a page of this repository's releases.
 fn is_release_page(url: &str) -> bool {
     url.starts_with(RELEASES) && !url.contains(['"', '\'', ' ', '\\'])

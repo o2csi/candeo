@@ -1807,6 +1807,7 @@ pub fn run() {
             autostart::set_launch_at_login,
             update::get_update_check,
             update::open_release,
+            update::open_sponsors,
             storage::set_check_for_updates,
             storage::reset_settings,
             storage::remember_effect_params,

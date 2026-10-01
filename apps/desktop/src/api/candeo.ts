@@ -1234,6 +1234,11 @@ export function systemNow(): Promise<SystemNow> {
   return invoke('system_now')
 }
 
+/** Opens the page where Candeo is supported, on GitHub Sponsors. */
+export function openSponsors(): Promise<void> {
+  return invoke('open_sponsors')
+}
+
 export function getSignalsApi(): Promise<SignalsApi> {
   return invoke('get_signals_api')
 }

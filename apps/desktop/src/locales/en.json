@@ -14,7 +14,13 @@
       "light": "Light theme",
       "dark": "Dark theme"
     },
-    "dismiss": "Close this message"
+    "dismiss": "Close this message",
+    "support": {
+      "button": "Support Candeo",
+      "lead": "Candeo is free. Supporting it keeps it that way.",
+      "github": "GitHub Sponsors",
+      "githubDetail": "Monthly or once, in your browser"
+    }
   },
   "effects": {
     "columns": {

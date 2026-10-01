@@ -24,7 +24,7 @@ account, no extra services to install, nothing sent anywhere.
 
 ## What it does
 
-- **Twenty-four effects, ready to go** — waves, rain, a starry night, a clock,
+- **Twenty-six effects, ready to go** — waves, rain, a starry night, a clock,
   scrolling text, ripples from the keys you press, fireworks on the beat. Tune
   each one while you watch it; your keyboard's own built-in effects are there
   too.
@@ -37,8 +37,11 @@ account, no extra services to install, nothing sent anywhere.
   [Signals](https://o2csi.github.io/candeo/signals.html)
 - **Your games** — your health, ammo, flashes and the bomb in Counter-Strike 2,
   your hero's health, mana and stuns in Dota 2, connected in one click. [Games](https://o2csi.github.io/candeo/games.html)
+- **Your computer** — the keyboard from cool to hot as the graphics card heats
+  up, the brightness following the processor's load. Read without a driver.
 - **Your devices** — the Razer DeathStalker V2 Pro and the Alienware m18 R1,
-  keyboard and lighting zones, and more Razer keyboards to try.
+  keyboard and lighting zones, and sixty more keyboards from Razer, SteelSeries,
+  Logitech, ASUS and HyperX to try from *Devices*.
   [Devices](https://o2csi.github.io/candeo/devices.html)
 - **Sends nothing** — no account, no telemetry. In English and French.
 
@@ -72,6 +75,12 @@ export default defineEffect({
 
 More in **[Build on Candeo](https://o2csi.github.io/candeo/sdk.html)**: where
 your files live, the editor, the references.
+
+## Support Candeo
+
+Candeo is free, and it stays free: no account, no ads, nothing sent anywhere.
+If it lights your days, **[sponsor it on GitHub](https://github.com/sponsors/o2csi)**
+— or from the app, with *Support Candeo* at the top of the window.
 
 ## Contribute
 
