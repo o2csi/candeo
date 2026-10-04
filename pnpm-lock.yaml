@@ -198,23 +198,23 @@ importers:
         version: 11.4.12(vue@3.5.43(typescript@6.0.3))
       vue-router:
         specifier: ^5.3.1
-        version: 5.3.1(@vue/compiler-sfc@3.5.42)(rolldown@1.2.8)(vite@8.3.1)(vue@3.5.43(typescript@6.0.3))
+        version: 5.3.1(@vue/compiler-sfc@3.5.42)(rolldown@1.2.8)(vite@8.3.2)(vue@3.5.43(typescript@6.0.3))
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.11.5
         version: 2.11.5
       '@vitejs/plugin-vue':
         specifier: ^6.0.9
-        version: 6.0.9(vite@8.3.1)(vue@3.5.43(typescript@6.0.3))
+        version: 6.0.9(vite@8.3.2)(vue@3.5.43(typescript@6.0.3))
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
       vite:
-        specifier: ^8.3.1
-        version: 8.3.1
+        specifier: ^8.3.2
+        version: 8.3.2
       vitest:
         specifier: ^5.0.1
-        version: 5.0.1(vite@8.3.1)
+        version: 5.0.1(vite@8.3.2)
       vue-tsc:
         specifier: ^3.3.11
         version: 3.3.11(typescript@6.0.3)
@@ -997,8 +997,8 @@ packages:
       webpack:
         optional: true
 
-  vite@8.3.1:
-    resolution: {integrity: sha512-/bvH9E9tmCXRGp2uXY3WbOldqpTwFkbha/8ANaEQ6VkxhH60KyqLwgZq6lG2y+4uT55x9+9eUHMpQ7uGnOCKjA==}
+  vite@8.3.2:
+    resolution: {integrity: sha512-SQr1x6W5vVSbROg7vsyXIaxK9b0G7zsT68acdWWRmnBUsgDieLCRG+Rep9WdZgcposvv/GSnr4GUUBqB3vXq6w==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -1344,20 +1344,20 @@ snapshots:
   '@types/trusted-types@2.0.7':
     optional: true
 
-  '@vitejs/plugin-vue@6.0.9(vite@8.3.1)(vue@3.5.43(typescript@6.0.3))':
+  '@vitejs/plugin-vue@6.0.9(vite@8.3.2)(vue@3.5.43(typescript@6.0.3))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.3.1
+      vite: 8.3.2
       vue: 3.5.43(typescript@6.0.3)
 
-  '@vitest/mocker@5.0.1(vite@8.3.1)':
+  '@vitest/mocker@5.0.1(vite@8.3.2)':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.1
       estree-walker: 3.0.3
       magic-string: 1.3.1
     optionalDependencies:
-      vite: 8.3.1
+      vite: 8.3.2
 
   '@vitest/spy@5.0.1': {}
 
@@ -1754,16 +1754,16 @@ snapshots:
       pathe: 2.0.3
       picomatch: 4.0.7
 
-  unplugin@3.3.0(rolldown@1.2.8)(vite@8.3.1):
+  unplugin@3.3.0(rolldown@1.2.8)(vite@8.3.2):
     dependencies:
       '@jridgewell/remapping': 2.3.5
       picomatch: 4.0.7
       webpack-virtual-modules: 0.6.2
     optionalDependencies:
       rolldown: 1.2.8
-      vite: 8.3.1
+      vite: 8.3.2
 
-  vite@8.3.1:
+  vite@8.3.2:
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -1773,10 +1773,10 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
-  vitest@5.0.1(vite@8.3.1):
+  vitest@5.0.1(vite@8.3.2):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.1(vite@8.3.1)
+      '@vitest/mocker': 5.0.1(vite@8.3.2)
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0
@@ -1787,7 +1787,7 @@ snapshots:
       tinybench: 6.1.4
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
-      vite: 8.3.1
+      vite: 8.3.2
       why-is-node-running: 2.3.0
     transitivePeerDependencies:
       - msw
@@ -1802,7 +1802,7 @@ snapshots:
       '@vue/devtools-api': 6.6.4
       vue: 3.5.43(typescript@6.0.3)
 
-  vue-router@5.3.1(@vue/compiler-sfc@3.5.42)(rolldown@1.2.8)(vite@8.3.1)(vue@3.5.43(typescript@6.0.3)):
+  vue-router@5.3.1(@vue/compiler-sfc@3.5.42)(rolldown@1.2.8)(vite@8.3.2)(vue@3.5.43(typescript@6.0.3)):
     dependencies:
       '@vue-macros/common': 3.1.4(vue@3.5.43(typescript@6.0.3))
       '@vue/devtools-api': 8.2.1
@@ -1818,12 +1818,12 @@ snapshots:
       picomatch: 4.0.7
       scule: 1.3.0
       tinyglobby: 0.2.17
-      unplugin: 3.3.0(rolldown@1.2.8)(vite@8.3.1)
+      unplugin: 3.3.0(rolldown@1.2.8)(vite@8.3.2)
       unplugin-utils: 0.3.2
       vue: 3.5.43(typescript@6.0.3)
     optionalDependencies:
       '@vue/compiler-sfc': 3.5.42
-      vite: 8.3.1
+      vite: 8.3.2
     transitivePeerDependencies:
       - '@farmfe/core'
       - '@rspack/core'
