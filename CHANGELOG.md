@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.1](https://github.com/o2csi/candeo/compare/v0.22.0...v0.22.1) (2026-10-16)
+
+
+### Documentation
+
+* refresh the Store listing, the site's counts and its gallery ([df115ed](https://github.com/o2csi/candeo/commit/df115eddb635bca646dbb788a7e68ea180fbdbc3))
+* **site:** regions, devices not supported yet, and more to try ([f9ff3be](https://github.com/o2csi/candeo/commit/f9ff3be6b60ef2de6eea8662afd86dfdea3e71a3))
+
+
+### CI/CD
+
+* send the Store listing alone, and flag a stale one before release ([ef4e791](https://github.com/o2csi/candeo/commit/ef4e791583e50f28ffe68feb747fa8c2d31ba77a))
+
 ## [0.22.0](https://github.com/o2csi/candeo/compare/v0.21.0...v0.22.0) (2026-10-16)
 
 
