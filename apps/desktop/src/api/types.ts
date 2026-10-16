@@ -104,6 +104,8 @@ export interface DeviceInfo {
   /** What an effect may require that it has: see {@link LayoutInfo.capabilities}. */
   capabilities: readonly string[]
   lightCount: number
+  /** Its definition has a brightness command: see {@link LayoutInfo.hardwareBrightness}. */
+  hardwareBrightness: boolean
 }
 
 /** A collection of a device, as the system lists it without opening it. */
@@ -218,6 +220,12 @@ export interface LayoutInfo {
   capabilities: string[]
   /** What the simulator draws under the lights — a lid, a base, ports. Empty for a keyboard. */
   outline: OutlinePart[]
+  /**
+   * Its definition has a brightness command, which the slider writes. Without
+   * one there is no slider, and what the brightness follows scales frames from
+   * full (#334).
+   */
+  hardwareBrightness: boolean
 }
 
 /**

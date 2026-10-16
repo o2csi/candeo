@@ -30,6 +30,7 @@ function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
     unverified: false,
     lights: 'keys',
     lightCount: 106,
+    hardwareBrightness: true,
     capabilities: ['matrix', 'geometry'],
     ...part,
   }

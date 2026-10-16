@@ -28,6 +28,7 @@ function device(pid: number, part: Partial<DeviceInfo> = {}): DeviceInfo {
     unverified: false,
     lights: 'keys',
     lightCount: 1,
+    hardwareBrightness: true,
     capabilities: ['matrix', 'geometry'],
     ...part,
   }
@@ -43,6 +44,7 @@ const layoutOf = (pid: number): LayoutInfo => ({
   lights: 'keys',
   capabilities: ['matrix', 'geometry'],
   outline: [],
+  hardwareBrightness: true,
 })
 
 /** Module state: each test starts from a fresh one. */

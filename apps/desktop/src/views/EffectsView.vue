@@ -97,6 +97,7 @@ import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
+import { brightnessSlider } from '../composables/dimming'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
@@ -1243,6 +1244,11 @@ function onParamReset(): void {
  */
 const brightness = computed(() => brightnessOf(selectedDevice.value))
 
+/** The selected card's slider: none without a brightness command (#334). */
+const slider = computed(() =>
+  selectedDevice.value ? brightnessSlider(selectedDevice.value) : 'none',
+)
+
 /** As a percentage, because 0-255 means nothing to someone adjusting their light. */
 const brightnessPercent = computed(() =>
   Math.round((brightness.value / BRIGHTNESS_MAX) * 100),
@@ -1428,22 +1434,29 @@ onBeforeUnmount(() => {
 
             Collapsed column: the card rules below restore the button alone, so
             the slider is hidden without having to be named.
+
+            A device with no brightness command keeps the heading and what its
+            brightness follows, without a slider that would write nothing.
           -->
           <div v-if="deviceKey === key(d)" class="brightness">
-            <label class="brightness-head" :for="`brightness-${key(d)}`">
+            <label v-if="slider !== 'none'" class="brightness-head" :for="`brightness-${key(d)}`">
               <span class="brightness-label">{{ t('effects.brightness') }}</span>
               <span class="brightness-value">{{
                 t('effects.percent', { n: brightnessPercent })
               }}</span>
             </label>
+            <div v-else class="brightness-head">
+              <span class="brightness-label">{{ t('effects.brightness') }}</span>
+            </div>
             <input
+              v-if="slider !== 'none'"
               :id="`brightness-${key(d)}`"
               type="range"
               min="0"
               :max="BRIGHTNESS_MAX"
               step="1"
               :value="brightness"
-              :disabled="!d.open"
+              :disabled="slider === 'disabled'"
               @input="onBrightness($event, false)"
               @change="onBrightness($event, true)"
             />
