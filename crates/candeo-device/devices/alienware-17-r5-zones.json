@@ -7,9 +7,10 @@
     "Addresses found on 2026-10-16 by lighting one at a time and watching the machine. 13 to 15 light nothing; 2 is taken for the touchpad, which lights when touched and was not seen lit.",
     "The keyboard is four zones, from right to left: 4 is the numeric keypad, then 5, 6 and 7 (2026-10-16).",
     "The power button takes the colour written live here, unlike the m18 R1's: it is drawn.",
-    "Drawn from the front, lid open; the alien head, on the back of the lid, sits where it would show through."
+    "Drawn from the front, lid open; the alien head, on the back of the lid, sits where it would show through.",
+    "Matched on the machine too: the AW-ELC is in many Alienware and Dell machines, each wiring its ids its own way (#326)."
   ],
-  "match": { "vid": "187c", "pid": "0550", "usagePage": "ff00", "usage": "0001" },
+  "match": { "vid": "187c", "pid": "0550", "usagePage": "ff00", "usage": "0001", "machine": "Alienware 17 R5" },
   "report": { "wire": "output", "length": 33, "prefix": "00" },
   "frame": {
     "pace": { "atLeastMs": 100, "skipUnchanged": true },

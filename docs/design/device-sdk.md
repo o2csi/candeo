@@ -891,6 +891,46 @@ and chooses the copy, since a copy is made to be changed. Saving one of yours
 reads the folder again; when it is the one chosen, its device opens again on it,
 so that a change shows on the keyboard at once.
 
+### One controller in many machines (2026-10-16, #326)
+
+A laptop's lights are not a peripheral: the maker fits one controller in many
+machines and wires it differently in each. Alienware's AW-ELC, `187c:0550`,
+lights the 17 R5 ([`alienware-17-r5.md`](../protocol/alienware-17-r5.md)), and
+also the m15 R1, the Area-51m, the m17 R3 and R4, Dell's G5 and G7 and several
+Auroras. The reports are the same; which id lights what is not: the 17 R5's
+keyboard is ids 4 to 7, an m15 R1's 2 to 5. Matched on `vid:pid` alone, the 17
+R5's definition would claim every one of them, call it *Alienware 17 R5* and
+draw the wrong machine. The USB ids are the controller's; only the system says
+which machine it sits in.
+
+So a definition may name the machine it was made on, in `match`:
+
+```json
+"match": { "vid": "187c", "pid": "0550", "usagePage": "ff00", "usage": "0001",
+           "machine": "Alienware 17 R5" }
+```
+
+- **The system's product name, as SMBIOS gives it**, read once when Candeo
+  starts: `HKLM\HARDWARE\DESCRIPTION\System\BIOS\SystemProductName` on Windows,
+  `/sys/class/dmi/id/product_name` on Linux. It names a model, not a unit: the
+  log and the copied diagnostic carry it, and the diagnostic is where whoever
+  writes a definition reads it.
+- **Compared exactly**, spaces around it aside. A prefix or a pattern would move
+  the problem one level down: *Alienware m17* is an R3 and an R4.
+- **On another machine, the definition does not apply**, wherever definitions
+  are matched. A built-in or unverified one is not there at all, not even under
+  *All*: this computer has no definition for that device. One of yours drives
+  nothing and says why, naming both models, as a file that does not load does.
+  A machine whose model cannot be read matches no definition naming one:
+  claiming a machine nobody can see is the error this prevents.
+- **Without `machine`, nothing changes**: a peripheral is the same device on
+  every computer. The m18 R1's two definitions keep matching on the device
+  alone until another machine is seen with the same ids, which may happen to
+  `187c:0551` and `0d62:aab0` too.
+
+This is not the list of models §1 refuses. An effect still names no machine; a
+definition names the one it was surveyed on, as it names its ids.
+
 ---
 
 ## 10. What this changes in the existing code

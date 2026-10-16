@@ -93,6 +93,8 @@ struct Match {
     interface: Option<u8>,
     usage_page: Option<String>,
     usage: Option<String>,
+    /// The system's product name the definition applies on, none for any.
+    machine: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1045,11 +1047,17 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
             ),
         };
 
+    let machine = d
+        .matching
+        .machine
+        .as_deref()
+        .map(|m| &*Box::leak(m.trim().to_owned().into_boxed_str()));
     let layout = Layout {
         name: Box::leak(d.name.into_boxed_str()),
         vid: hex_u16(&d.matching.vid, "vid")?,
         pid: hex_u16(&d.matching.pid, "pid")?,
         port,
+        machine,
         lighting: Box::leak(Box::new(template)),
         surveyed_firmware,
         firmware_effects: Box::leak(firmware_effects.into_boxed_slice()),
@@ -1517,6 +1525,54 @@ mod tests {
         }
         let broken: serde_json::Value = serde_json::from_str(&with("{count}", "{counts}")).unwrap();
         assert!(!validator.is_valid(&broken), "an unknown placeholder");
+    }
+
+    /// The 17 R5's controller is in many machines, each wiring it its own way
+    /// (#326): its definition applies on the 17 R5 alone, compared exactly,
+    /// and never where the model could not be read.
+    #[test]
+    fn a_definition_naming_a_machine_fits_that_machine_only() {
+        let r5 = load(builtin_text("alienware-17-r5-zones.json").unwrap()).unwrap();
+        assert_eq!((r5.vid, r5.pid), (0x187c, 0x0550));
+        assert_eq!(r5.machine, Some("Alienware 17 R5"));
+        assert!(r5.fits_machine(Some("Alienware 17 R5")));
+        assert!(
+            r5.fits_machine(Some(" Alienware 17 R5\n")),
+            "spaces around aside"
+        );
+        assert!(!r5.fits_machine(Some("Alienware m15 R1")));
+        assert!(!r5.fits_machine(Some("alienware 17 r5")), "exactly");
+        assert!(!r5.fits_machine(Some("Alienware 17")), "not a prefix");
+        assert!(!r5.fits_machine(None), "a model nobody read");
+    }
+
+    /// Without `machine`, a definition applies on any machine, one whose model
+    /// could not be read included: as before #326.
+    #[test]
+    fn a_definition_naming_no_machine_fits_every_machine() {
+        let zones = load(ZONES).unwrap();
+        assert_eq!(zones.machine, None);
+        for model in [Some("Alienware m18 R1"), Some("Alienware 17 R5"), None] {
+            assert!(zones.fits_machine(model), "{model:?}");
+        }
+    }
+
+    /// A machine is named by something, trimmed as the model read is: a blank
+    /// one would match no machine, silently, so the schema refuses it.
+    #[test]
+    fn a_machine_is_a_name() {
+        let named = |machine: &str| {
+            with(
+                "\"usage\": \"0001\" }",
+                &format!("\"usage\": \"0001\", \"machine\": {machine} }}"),
+            )
+        };
+        let l = load(&named("\" Alienware m18 R1 \"")).unwrap();
+        assert_eq!(l.machine, Some("Alienware m18 R1"));
+        for blank in ["\"\"", "\"  \"", "42"] {
+            let e = load(&named(blank)).err().expect(blank);
+            assert!(e.starts_with("/match/machine: "), "{e}");
+        }
     }
 
     /// Each integrity function, on bytes whose answer is worked out by hand.

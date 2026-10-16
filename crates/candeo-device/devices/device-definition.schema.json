@@ -36,7 +36,12 @@
           "description": "The interface of a composite device that carries the lighting: `3` on the DeathStalker."
         },
         "usagePage": { "$ref": "#/$defs/hex16", "description": "The collection's usage page, when several collections share one interface: `ff00`." },
-        "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`. Left out with an `interface`, any usage of that page on it matches." }
+        "usage": { "$ref": "#/$defs/hex16", "description": "The collection's usage, with `usagePage`: `0001`. Left out with an `interface`, any usage of that page on it matches." },
+        "machine": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "The machine this definition is for, when the device is built into machines that each wire it their own way: the system's product name as SMBIOS gives it, `Alienware 17 R5` — the `machine` line of the diagnostic Candeo copies. Compared exactly, spaces around it aside; on any other machine, or one whose model cannot be read, the definition drives nothing. Absent: any machine, as a peripheral needs."
+        }
       },
       "dependentRequired": { "usage": ["usagePage"] },
       "anyOf": [{ "required": ["interface"] }, { "required": ["usagePage", "usage"] }]
