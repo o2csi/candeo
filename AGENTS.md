@@ -20,6 +20,7 @@ pnpm test:rust        # cargo test --workspace
 pnpm --filter @candeo/desktop exec vue-tsc --noEmit
 pnpm test:web         # vitest run, in apps/desktop
 pnpm test:packaging   # node --test, the release scripts
+pnpm test:devices     # node --test, the device generators
 ```
 
 Front-end tests sit next to the module they cover (`useSettings.test.ts`), run

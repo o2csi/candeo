@@ -280,6 +280,31 @@
       },
       "description": "Parts that light nothing — a lid, a base, ports — drawn faintly under the lights. A keyboard needs none."
     },
+    "regions": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Parts of the device that can each run their own effect once someone splits it, every light in exactly one. Absent: the device is not offered *Split into regions*.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "lights"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,31}$",
+            "description": "What settings and commands name it by: `keyboard`. Changing it orphans what was kept for the region."
+          },
+          "name": { "$ref": "#/$defs/text", "description": "What the interface calls it: `{ \"en\": \"Lid\", \"fr\": \"Capot\" }`." },
+          "lights": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "description": "The addresses of its lights, as `lights.items` gives them."
+          }
+        }
+      }
+    },
     "examples": {
       "type": "array",
       "items": {

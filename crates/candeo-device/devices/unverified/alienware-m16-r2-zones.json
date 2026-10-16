@@ -1,0 +1,47 @@
+{
+  "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
+  "name": "Alienware m16 R2 zones",
+  "notes": [
+    "Unverified: never tried on this machine. Written on 2026-10-16 by alienfx.mjs from alienfx-tools, https://github.com/T-Troll/alienfx-tools, MIT licence, commit 3289c320 (2026-10-14): alienfx-gui/Mappings/devices.csv, each machine's map of its lights.",
+    "Its map there: “Alienware m16R2 (US)”, line 1239, device “m16 Tron lights”. Which id lights what is that map's; the names are its own, in plain words.",
+    "The protocol is verified: the AW-ELC's live preview, as alienware-m18-r1-zones.json sends it, which stores nothing in the device.",
+    "Matched on the machine (#326): SMBIOS names it “Alienware m16 R2”, as dmidecode reports it in linuxhw/DMI, https://github.com/linuxhw/DMI (CC BY 4.0), commit 57b21bc6 (2025-01-06): Notebook/Alienware/m16/m16 R2, SKU 0C91.",
+    "Left out: id 4, “Power”, which alienfx-tools marks as the power button: the firmware drives it, as on the m18 R1.",
+    "alienfx-tools names id 0 “haptic” and id 2 “back”, no more: drawn where its grid puts them, below the keyboard and on the lid.",
+    "Drawn from the front, lid open, the lights at the back seen through the hinge. Where a light sits is not in the source: the keyboard zones keep the order and widths of alienfx-tools' grid, the rest is drawn where its name puts it.",
+    "Does it light? Say so: https://github.com/o2csi/candeo/issues/new?template=device-report.yml"
+  ],
+  "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001", "machine": "Alienware m16 R2" },
+  "report": { "wire": "output", "length": 33, "prefix": "00" },
+  "frame": {
+    "pace": { "atLeastMs": 100, "skipUnchanged": true },
+    "open": ["03 21 00 01 ff ff"],
+    "each": {
+      "group": "colour",
+      "chunk": 4,
+      "send": ["03 23 01 00 {count} {addresses}", "03 24 00 07 d0 00 fa {r} {g} {b}"]
+    },
+    "close": ["03 21 00 03 00 ff"]
+  },
+  "lights": {
+    "kind": "zones",
+    "items": [
+      { "name": "haptic", "address": 0, "rect": [6.2, 15.6, 3.6, 2] },
+      { "name": "back", "address": 2, "shape": "disc", "rect": [7.2, 2.4, 1.6, 2] }
+    ]
+  },
+  "outline": [{ "rect": [0.5, 0, 15, 8], "r": 0.5 }, { "rect": [0, 9, 16, 9.5], "r": 0.8 }],
+  "examples": [
+    {
+      "colours": ["ff0000", "00ff00"],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 01 00",
+        "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 02",
+        "03 24 00 07 d0 00 fa 00 ff 00",
+        "03 21 00 03 00 ff"
+      ]
+    }
+  ]
+}

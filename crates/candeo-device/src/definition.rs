@@ -16,7 +16,7 @@ use candeo_protocol::{CommandId, Effect, Firmware, Rgb};
 use serde::Deserialize;
 
 use crate::layout::{
-    FirmwareEffect, Key, Layout, Lights, Outline, Port, Shape, Text, EMPTY, NO_SCANCODE,
+    FirmwareEffect, Key, Layout, Lights, Outline, Port, Region, Shape, Text, EMPTY, NO_SCANCODE,
 };
 use crate::lighting::{Lighting, Outgoing, Wire};
 
@@ -77,6 +77,9 @@ struct Definition {
     lights: LightsSpec,
     #[serde(default)]
     outline: Vec<PartSpec>,
+    /// Parts of the device that each run their own effect once it is split.
+    #[serde(default)]
+    regions: Vec<RegionSpec>,
     #[serde(default)]
     examples: Vec<Example>,
     /// What a reviewer should know that the survey says at length: not used.
@@ -254,6 +257,16 @@ struct PartSpec {
     rect: [f32; 4],
     #[serde(default)]
     r: f32,
+}
+
+/// A region as the file writes it: its lights named by their address, which
+/// does not move when the items are reordered (`docs/design/regions.md` §1).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RegionSpec {
+    id: String,
+    name: Text,
+    lights: Vec<u16>,
 }
 
 /// Colours in, reports out, as a contributor saw them: what the tests replay.
@@ -1052,7 +1065,9 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         .machine
         .as_deref()
         .map(|m| &*Box::leak(m.trim().to_owned().into_boxed_str()));
-    let layout = Layout {
+    let addresses: Vec<u16> = d.lights.items.iter().map(|item| item.address).collect();
+    let positions = region_positions(&d.regions, &addresses, &placed)?;
+    let mut layout = Layout {
         name: Box::leak(d.name.into_boxed_str()),
         vid: hex_u16(&d.matching.vid, "vid")?,
         pid: hex_u16(&d.matching.pid, "pid")?,
@@ -1068,8 +1083,97 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         matrix: Box::leak(matrix.into_boxed_slice()),
         keys: Box::leak(keys.into_boxed_slice()),
         outline: Box::leak(outline.into_boxed_slice()),
+        regions: &[],
     };
+    let regions: Vec<Region> = d
+        .regions
+        .into_iter()
+        .zip(positions)
+        .map(|(spec, positions)| Region {
+            id: Box::leak(spec.id.into_boxed_str()),
+            name: spec.name,
+            layout: Box::leak(Box::new(region_layout(&layout, &positions))),
+            positions: Box::leak(positions.into_boxed_slice()),
+        })
+        .collect();
+    layout.regions = Box::leak(regions.into_boxed_slice());
     Ok((layout, d.examples, placed))
+}
+
+/// Each region's frame positions, ascending, in the file's order — or the
+/// first thing wrong with them, in a sentence (`docs/design/regions.md` §11 a).
+///
+/// `addresses` and `placed` give each light's address and position, in the
+/// order the file lists them: a light in no region is named in that order.
+fn region_positions(
+    regions: &[RegionSpec],
+    addresses: &[u16],
+    placed: &[u16],
+) -> Result<Vec<Vec<u16>>, String> {
+    // Every light in exactly one region: one in none would stay dark once the
+    // device is split, one in two would have two effects fighting over it.
+    let mut owner: Vec<Option<&str>> = vec![None; addresses.len()];
+    let mut all = Vec::with_capacity(regions.len());
+    for (n, region) in regions.iter().enumerate() {
+        let id = region.id.as_str();
+        if regions[..n].iter().any(|r| r.id == id) {
+            return Err(format!("region “{id}” is given twice"));
+        }
+        let mut positions = Vec::with_capacity(region.lights.len());
+        for &address in &region.lights {
+            let light = addresses
+                .iter()
+                .position(|a| *a == address)
+                .ok_or_else(|| format!("region “{id}”: no light has address {address}"))?;
+            if let Some(first) = owner[light] {
+                return Err(format!("address {address} is in “{first}” and in “{id}”"));
+            }
+            owner[light] = Some(id);
+            positions.push(placed[light]);
+        }
+        positions.sort_unstable();
+        all.push(positions);
+    }
+    if !regions.is_empty() {
+        if let Some(light) = owner.iter().position(Option::is_none) {
+            return Err(format!("address {} is in no region", addresses[light]));
+        }
+    }
+    Ok(all)
+}
+
+/// The device as a region's effect sees it: its lights alone, everything else
+/// the device's, so a region's frame has the device's length and its
+/// positions (`docs/design/regions.md` §11 a).
+fn region_layout(device: &Layout, positions: &[u16]) -> Layout {
+    let mut matrix = vec![EMPTY; device.matrix.len()];
+    for &position in positions {
+        matrix[usize::from(position)] = device.matrix[usize::from(position)];
+    }
+    let keys: Vec<Key> = device
+        .keys
+        .iter()
+        .filter(|k| positions.contains(&k.index))
+        .copied()
+        .collect();
+    Layout {
+        name: device.name,
+        vid: device.vid,
+        pid: device.pid,
+        port: device.port,
+        machine: device.machine,
+        lighting: device.lighting,
+        surveyed_firmware: device.surveyed_firmware,
+        firmware_effects: &[],
+        lights: device.lights,
+        grid: device.grid,
+        rows: device.rows,
+        cols: device.cols,
+        matrix: Box::leak(matrix.into_boxed_slice()),
+        keys: Box::leak(keys.into_boxed_slice()),
+        outline: device.outline,
+        regions: &[],
+    }
 }
 
 /// Replays a definition's reference frames: the reports it gives must be the
@@ -1557,14 +1661,35 @@ mod tests {
         assert!(!r5.fits_machine(None), "a model nobody read");
     }
 
+    /// The m18 R1's AW-ELC, `187c:0551`, is also in the m16 R1, the m16 R2 and
+    /// the m18 R2, wired otherwise (#328): its zones apply on the m18 R1 alone,
+    /// by the name read on the surveyed machine. Its AMD edition is another.
+    #[test]
+    fn the_m18_r1_zones_fit_the_m18_r1_only() {
+        let zones = load(ZONES).unwrap();
+        assert_eq!((zones.vid, zones.pid), (0x187c, 0x0551));
+        assert_eq!(zones.machine, Some("Alienware m18 R1"));
+        assert!(zones.fits_machine(Some("Alienware m18 R1")));
+        for other in [
+            "Alienware m16 R1",
+            "Alienware m18 R2",
+            "Alienware m18 R1 AMD",
+        ] {
+            assert!(!zones.fits_machine(Some(other)), "{other}");
+        }
+    }
+
     /// Without `machine`, a definition applies on any machine, one whose model
-    /// could not be read included: as before #326.
+    /// could not be read included: as before #326. The m18 R1's keyboard,
+    /// `0d62:aab0`, is known in no other machine yet.
     #[test]
     fn a_definition_naming_no_machine_fits_every_machine() {
-        let zones = load(ZONES).unwrap();
-        assert_eq!(zones.machine, None);
-        for model in [Some("Alienware m18 R1"), Some("Alienware 17 R5"), None] {
-            assert!(zones.fits_machine(model), "{model:?}");
+        for json in [RAZER, KEYBOARD] {
+            let l = load(json).unwrap();
+            assert_eq!(l.machine, None, "{}", l.name);
+            for model in [Some("Alienware m18 R1"), Some("Alienware 17 R5"), None] {
+                assert!(l.fits_machine(model), "{}, {model:?}", l.name);
+            }
         }
     }
 
@@ -1574,8 +1699,8 @@ mod tests {
     fn a_machine_is_a_name() {
         let named = |machine: &str| {
             with(
-                "\"usage\": \"0001\" }",
-                &format!("\"usage\": \"0001\", \"machine\": {machine} }}"),
+                "\"machine\": \"Alienware m18 R1\"",
+                &format!("\"machine\": {machine}"),
             )
         };
         let l = load(&named("\" Alienware m18 R1 \"")).unwrap();
@@ -1584,6 +1709,146 @@ mod tests {
             let e = load(&named(blank)).err().expect(blank);
             assert!(e.starts_with("/match/machine: "), "{e}");
         }
+    }
+
+    const R5: &str = BUILTIN[3].1;
+
+    /// The 17 R5 with its regions replaced by `regions`, a JSON array.
+    fn r5_with_regions(regions: &str) -> String {
+        let start = R5
+            .find("\"regions\": [")
+            .expect("the 17 R5 declares regions");
+        let end = start + R5[start..].find("\n  ],").expect("the end of its regions") + 4;
+        format!("{}\"regions\": {regions}{}", &R5[..start], &R5[end..])
+    }
+
+    /// The built-in definitions declare the regions of `regions.md` §1, by
+    /// address, in the file's order; the others declare none.
+    #[test]
+    fn the_built_in_definitions_declare_their_regions() {
+        let by_address = |l: &Layout| -> Vec<(&str, Vec<u16>)> {
+            l.regions
+                .iter()
+                .map(|r| {
+                    let mut addresses: Vec<u16> =
+                        r.positions.iter().filter_map(|p| l.address(*p)).collect();
+                    addresses.sort_unstable();
+                    (r.id, addresses)
+                })
+                .collect()
+        };
+        let r5 = load(R5).unwrap();
+        assert_eq!(
+            by_address(r5),
+            vec![
+                ("keyboard", vec![4, 5, 6, 7, 12]),
+                ("lid", vec![0, 1, 10, 11]),
+                ("base", vec![2, 8, 9]),
+                ("power", vec![3]),
+            ]
+        );
+        let lid = r5.region("lid").unwrap();
+        assert_eq!(lid.name.get("fr"), "Capot");
+        assert_eq!(
+            lid.name.get("de"),
+            "Lid",
+            "English where a language is missing"
+        );
+        assert!(r5.region("screen").is_none());
+
+        let m18 = load(ZONES).unwrap();
+        assert_eq!(
+            by_address(m18),
+            vec![("ring", vec![0, 1]), ("logo", vec![2])],
+            "the ring's halves are one region"
+        );
+        assert_eq!(m18.region("logo").unwrap().name.get("fr"), "Logo");
+        assert!(load(RAZER).unwrap().regions.is_empty());
+        assert!(load(KEYBOARD).unwrap().regions.is_empty());
+    }
+
+    /// A region's effect sees the region as a device of its own: its lights
+    /// alone, and their bounds; positions, grid and frame stay the device's.
+    #[test]
+    fn a_region_s_layout_is_the_device_with_its_lights_alone() {
+        let r5 = load(R5).unwrap();
+        let keyboard = r5.region("keyboard").unwrap();
+        let l = keyboard.layout;
+        let keys: Vec<u16> = l.keys.iter().map(|k| k.index).collect();
+        assert_eq!(keys, keyboard.positions, "its keys, in position order");
+        assert_eq!(keyboard.positions, &[4, 5, 6, 7, 12]);
+        assert_eq!(
+            l.led_count(),
+            r5.led_count(),
+            "a frame of the device's length"
+        );
+        assert_eq!(l.lit_count(), 5);
+        assert_eq!((l.rows, l.cols, l.grid), (r5.rows, r5.cols, r5.grid));
+        assert_eq!(l.address(12), Some(12), "the device's address");
+        assert_eq!(l.address(3), None, "the power button is not its own");
+        assert_eq!(
+            l.key(4).map(|k| k.x),
+            r5.key(4).map(|k| k.x),
+            "where it sits"
+        );
+        assert!(l.firmware_effects.is_empty() && l.regions.is_empty());
+        assert_eq!(l.outline.len(), r5.outline.len());
+        assert_eq!((l.vid, l.pid, l.name), (r5.vid, r5.pid, r5.name));
+
+        // What `bounds` measures in the effects API: the region's rectangles.
+        let left = l.keys.iter().fold(f32::MAX, |m, k| m.min(k.x));
+        let right = l.keys.iter().fold(0.0f32, |m, k| m.max(k.x + k.w));
+        let top = l.keys.iter().fold(f32::MAX, |m, k| m.min(k.y));
+        let bottom = l.keys.iter().fold(0.0f32, |m, k| m.max(k.y + k.h));
+        assert_eq!((left, top), (0.6, 10.0), "from the media keys");
+        assert!((right - 15.4).abs() < 1e-4 && (bottom - 14.6).abs() < 1e-4);
+    }
+
+    /// What a region gets wrong is refused when the file loads, in one
+    /// sentence naming it (`regions.md` §11 a).
+    #[test]
+    fn a_definition_s_regions_are_checked() {
+        let refused = |regions: &str, says: &str| {
+            let e = load(&r5_with_regions(regions)).err().expect(regions);
+            assert_eq!(e, says);
+        };
+        let rest = r#"{ "id": "rest", "name": "Rest", "lights": [0, 1, 2, 3, 8, 9, 10, 11, 12] }"#;
+        refused(
+            &format!(r#"[{rest}, {{ "id": "rest", "name": "Keys", "lights": [4, 5, 6, 7] }}]"#),
+            "region “rest” is given twice",
+        );
+        refused(
+            &format!(r#"[{rest}, {{ "id": "keys", "name": "Keys", "lights": [4, 5, 6, 7, 14] }}]"#),
+            "region “keys”: no light has address 14",
+        );
+        refused(
+            &format!(r#"[{rest}, {{ "id": "keys", "name": "Keys", "lights": [3, 4, 5, 6, 7] }}]"#),
+            "address 3 is in “rest” and in “keys”",
+        );
+        refused(
+            &format!(r#"[{rest}, {{ "id": "keys", "name": "Keys", "lights": [4, 5, 6] }}]"#),
+            "address 7 is in no region",
+        );
+        let accepted =
+            format!(r#"[{rest}, {{ "id": "keys", "name": "Keys", "lights": [7, 4, 6, 5] }}]"#);
+        let l = load(&r5_with_regions(&accepted)).unwrap();
+        assert_eq!(
+            l.region("keys").unwrap().positions,
+            &[4, 5, 6, 7],
+            "ascending"
+        );
+    }
+
+    /// What the schema refuses of a region: one region alone, which would split
+    /// nothing, and an id the tray's menu ids could not carry.
+    #[test]
+    fn the_schema_refuses_a_region_that_splits_nothing() {
+        let all = r#"[{ "id": "all", "name": "All", "lights": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] }]"#;
+        let e = load(&r5_with_regions(all)).err().expect("one region");
+        assert!(e.starts_with("/regions: "), "{e}");
+        let colon = R5.replacen("\"id\": \"lid\"", "\"id\": \"lid:top\"", 1);
+        let e = load(&colon).err().expect("a colon");
+        assert!(e.starts_with("/regions/1/id: "), "{e}");
     }
 
     /// Each integrity function, on bytes whose answer is worked out by hand.
