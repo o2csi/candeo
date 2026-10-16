@@ -1,0 +1,79 @@
+{
+  "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
+  "name": "Alienware 17 R5",
+  "notes": [
+    "Survey: docs/protocol/alienware-17-r5.md.",
+    "The same controller family as the m18 R1's zones (187c:0551), framed the same way: the live preview, which stores nothing in the device.",
+    "Addresses found on 2026-10-16 by lighting one at a time and watching the machine. 13 to 15 light nothing; 2 is taken for the touchpad, which lights when touched and was not seen lit.",
+    "The keyboard is four zones, from right to left: 4 is the numeric keypad, then 5, 6 and 7 (2026-10-16).",
+    "The power button takes the colour written live here, unlike the m18 R1's: it is drawn.",
+    "Drawn from the front, lid open; the alien head, on the back of the lid, sits where it would show through."
+  ],
+  "match": { "vid": "187c", "pid": "0550", "usagePage": "ff00", "usage": "0001" },
+  "report": { "wire": "output", "length": 33, "prefix": "00" },
+  "frame": {
+    "pace": { "atLeastMs": 100, "skipUnchanged": true },
+    "open": ["03 21 00 01 ff ff"],
+    "each": {
+      "group": "colour",
+      "chunk": 4,
+      "send": ["03 23 01 00 {count} {addresses}", "03 24 00 07 d0 00 fa {r} {g} {b}"]
+    },
+    "close": ["03 21 00 03 00 ff"]
+  },
+  "lights": {
+    "kind": "zones",
+    "items": [
+      { "name": "alien head on the lid", "address": 0, "shape": "disc", "rect": [7.2, 2.4, 1.6, 2] },
+      { "name": "logo under the screen", "address": 1, "rect": [5.5, 6.9, 5, 0.5] },
+      { "name": "touchpad", "address": 2, "rect": [6.2, 15.2, 3.6, 2] },
+      { "name": "power button", "address": 3, "shape": "disc", "rect": [7.6, 8.9, 0.8, 0.8] },
+      { "name": "keyboard, numeric keypad", "address": 4, "rect": [12.6, 10, 2.8, 4.6] },
+      { "name": "keyboard, right", "address": 5, "rect": [9, 10, 3.5, 4.6] },
+      { "name": "keyboard, centre", "address": 6, "rect": [5.3, 10, 3.6, 4.6] },
+      { "name": "keyboard, left", "address": 7, "rect": [1.6, 10, 3.6, 4.6] },
+      { "name": "left side of the base", "address": 8, "rect": [0, 9.6, 0.3, 7.2] },
+      { "name": "right side of the base", "address": 9, "rect": [15.7, 9.6, 0.3, 7.2] },
+      { "name": "left edge of the lid", "address": 10, "rect": [0.5, 1, 0.3, 6] },
+      { "name": "right edge of the lid", "address": 11, "rect": [15.2, 1, 0.3, 6] },
+      { "name": "media keys", "address": 12, "rect": [0.6, 10, 0.8, 4.6] }
+    ]
+  },
+  "outline": [
+    { "rect": [0.5, 0, 15, 8], "r": 0.5 },
+    { "rect": [0, 8.5, 16, 9], "r": 0.8 }
+  ],
+  "examples": [
+    {
+      "colours": [
+        "ff0000", "ff0000", "ff0000", "ff0000", "ff0000", "ff0000", "ff0000",
+        "ff0000", "ff0000", "ff0000", "ff0000", "ff0000", "ff0000"
+      ],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 04 00 01 02 03", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 04 04 05 06 07", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 04 08 09 0a 0b", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 0c", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 21 00 03 00 ff"
+      ]
+    },
+    {
+      "colours": [
+        "000000", "000000", "000000", "000000", "0000ff", "ff0000", "00ff00",
+        "ffffff", "000000", "000000", "000000", "000000", "000000"
+      ],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 04 00 01 02 03", "03 24 00 07 d0 00 fa",
+        "03 23 01 00 04 08 09 0a 0b", "03 24 00 07 d0 00 fa",
+        "03 23 01 00 01 0c", "03 24 00 07 d0 00 fa",
+        "03 23 01 00 01 04", "03 24 00 07 d0 00 fa 00 00 ff",
+        "03 23 01 00 01 05", "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 06", "03 24 00 07 d0 00 fa 00 ff 00",
+        "03 23 01 00 01 07", "03 24 00 07 d0 00 fa ff ff ff",
+        "03 21 00 03 00 ff"
+      ]
+    }
+  ]
+}

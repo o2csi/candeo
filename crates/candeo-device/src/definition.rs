@@ -34,6 +34,10 @@ pub const BUILTIN: &[(&str, &str)] = &[
         "alienware-m18-r1-zones.json",
         include_str!("../devices/alienware-m18-r1-zones.json"),
     ),
+    (
+        "alienware-17-r5-zones.json",
+        include_str!("../devices/alienware-17-r5-zones.json"),
+    ),
 ];
 
 // The unverified definitions, by file name (`docs/design/device-sdk.md` §9):

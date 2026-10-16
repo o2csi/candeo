@@ -13,7 +13,7 @@ Your keyboard's lighting, exactly the way you want it, without the maker's softw
 
 Make your keyboard light up exactly the way you want. Candeo drives every key directly — twenty-four ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
 
-Works with the Razer DeathStalker V2 Pro (wired) and the Alienware m18 R1, its keyboard and its lighting zones. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
+Works with the Razer DeathStalker V2 Pro (wired), the Alienware m18 R1, its keyboard and its lighting zones, and the Alienware 17 R5. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
 
 HIGHLIGHTS
 • Twenty-four effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it.

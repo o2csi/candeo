@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn without_a_folder_the_built_in_devices_are_known() {
         let c = build(None, Choices::new());
-        assert_eq!(c.layouts.len(), 3);
+        assert_eq!(c.layouts.len(), definition::BUILTIN.len());
         assert!(c.layouts.iter().all(|l| c.origin(l) == Origin::BuiltIn));
         assert!(c.problems.is_empty());
     }
@@ -253,7 +253,11 @@ mod tests {
         let added = c.layouts.last().unwrap();
         assert_eq!((added.name, added.pid), ("Alienware test zones", 0x0999));
         assert_eq!(c.origin(added), Origin::Yours);
-        assert_eq!(c.layouts.len(), 4, "the text file is not read");
+        assert_eq!(
+            c.layouts.len(),
+            definition::BUILTIN.len() + 1,
+            "the text file is not read"
+        );
     }
 
     #[test]
@@ -261,7 +265,7 @@ mod tests {
         let dir = folder(&[("a.json", ZONES), ("b.json", ZONES)]);
 
         let c = build(Some(dir.path()), Choices::new());
-        assert_eq!(c.layouts.len(), 3);
+        assert_eq!(c.layouts.len(), definition::BUILTIN.len());
         assert_eq!(zones(&c).origin, Origin::BuiltIn);
         let files: Vec<&str> = c
             .candidates(ZONES_ID.0, ZONES_ID.1)
@@ -278,7 +282,7 @@ mod tests {
             (Origin::Yours, "b.json")
         );
         assert_eq!(c.unloaded_choice(zones(&c).layout), None);
-        assert_eq!(c.layouts.len(), 3);
+        assert_eq!(c.layouts.len(), definition::BUILTIN.len());
     }
 
     #[test]

@@ -12,7 +12,7 @@ L'éclairage de votre clavier, exactement comme vous le voulez, sans le logiciel
 
 Faites briller votre clavier exactement comme vous l'entendez. Candeo pilote chaque touche directement — vingt-quatre effets prêts à l'emploi, un aperçu en direct, des règles qui changent l'éclairage d'elles-mêmes — sans logiciel du fabricant, sans service en arrière-plan et sans compte.
 
-Compatible avec le Razer DeathStalker V2 Pro (filaire) et l'Alienware m18 R1, son clavier et ses zones lumineuses. Un appareil pris en charge est nécessaire ; la liste s'allonge sur https://o2csi.github.io/candeo/devices.html.
+Compatible avec le Razer DeathStalker V2 Pro (filaire), l'Alienware m18 R1, son clavier et ses zones lumineuses, et l'Alienware 17 R5. Un appareil pris en charge est nécessaire ; la liste s'allonge sur https://o2csi.github.io/candeo/devices.html.
 
 POINTS FORTS
 • Vingt-quatre effets prêts à l'emploi : des ondes qui suivent votre frappe, la pluie, un ciel étoilé, des éclairs, une horloge qui fait défiler l'heure sur les touches, le texte de votre choix qui défile de la même façon, des barres et des gerbes qui dansent sur la musique que vous écoutez, une rangée d'état pour ce que disent vos autres outils… Réglez chacun en le regardant.
