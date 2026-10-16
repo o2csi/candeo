@@ -137,12 +137,14 @@ ${rows}
  * The unverified definitions (`docs/design/device-sdk.md` §9), as tables with
  * a download each: the facts they were derived from say what they are, and
  * the file is served beside the page. Two degrees: a model whose protocol a
- * sibling proved, and a family whose protocol comes from OpenRGB alone
+ * sibling proved — the Razer keyboards, the Alienware and Dell machines of the
+ * AW-ELC — and a family whose protocol comes from OpenRGB alone
  * (`docs/design/other-keyboards.md` §5).
  */
 const UNVERIFIED = join(root, 'crates/candeo-device/devices/unverified')
 const families = [
   { facts: 'variants.json', vid: '1532', heading: 'Their protocol proved on a sibling' },
+  { facts: 'alienfx.facts.json', vid: '187c' },
   { facts: 'steelseries.facts.json', vid: '1038', heading: 'Their protocol to verify too' },
   { facts: 'logitech.facts.json', vid: '046d' },
   { facts: 'asus.facts.json', vid: '0b05' },
