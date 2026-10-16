@@ -142,7 +142,9 @@ the serial itself. Test fixtures use made-up values such as `XY24ABCDEFG0001`.
 - **Pull requests:** English, with *What changed*, *Tests* and *Not verified*
   sections, and `Fixes #N` when they close an issue. Re-read the published text.
 - **A change users will see** adds its Store *What's new* line, in English and
-  French, under `packaging/store/news/`.
+  French, under `packaging/store/news/`. A new feature also goes into what
+  presents Candeo: the Store listings (`packaging/store/listing-*.md`), the
+  README and the site, before the release that ships it.
 - **Pull request titles in plain language**, not as a Conventional Commit:
   *Release pipeline with release-please*, not `ci: release pipeline`. The merge
   commit carries the title, and release-please would list the change a second

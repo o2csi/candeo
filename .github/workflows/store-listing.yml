@@ -1,0 +1,72 @@
+name: store-listing
+
+# Sends packaging/store/listing-*.md to the Microsoft Store between releases,
+# without a new package: v0.22.0 shipped with a listing that did not name its
+# features, and waiting for the next release would have left them unsaid.
+#
+# The submission must exist as a draft in Partner Center first (Update, then the
+# screenshots, which only Partner Center takes): this workflow writes the texts
+# into that draft and submits it for certification. What's new stays the one the
+# release sent, counted up to its tag. docs/releasing.md says when to use it.
+run-name: store-listing ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release the Store has now, such as v0.22.0"
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: candeo-store
+  cancel-in-progress: false
+
+jobs:
+  listing:
+    if: vars.STORE_PRODUCT_ID != ''
+    # msstore is installed by Microsoft's action, for Windows.
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The listings as main has them; the tags, for What's new.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24 }
+      - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+        with: { version: v0.4.3 }
+      - name: Write the listings into the draft and submit it
+        shell: bash
+        env:
+          TENANT_ID: ${{ secrets.PARTNER_CENTER_TENANT_ID }}
+          SELLER_ID: ${{ secrets.PARTNER_CENTER_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.PARTNER_CENTER_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.PARTNER_CENTER_CLIENT_SECRET }}
+          PRODUCT_ID: ${{ vars.STORE_PRODUCT_ID }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag must look like v1.2.3, got $TAG"
+            exit 1
+          fi
+          git rev-parse --verify --quiet "refs/tags/$TAG" > /dev/null || {
+            echo "::error::No tag $TAG."
+            exit 1
+          }
+          msstore reconfigure --tenantId "$TENANT_ID" --sellerId "$SELLER_ID" \
+            --clientId "$CLIENT_ID" --clientSecret "$CLIENT_SECRET"
+          if ! msstore submission get "$PRODUCT_ID" > "$RUNNER_TEMP/submission.json"; then
+            echo "::error::No draft submission to write into: in Partner Center, choose Update on Candeo, set the screenshots, save, then run this again."
+            exit 1
+          fi
+          node packaging/store/listing.mjs "${TAG#v}" "$RUNNER_TEMP/submission.json" "$TAG" \
+            > "$RUNNER_TEMP/updated.json"
+          msstore submission update "$PRODUCT_ID" "$(cat "$RUNNER_TEMP/updated.json")"
+          msstore submission publish "$PRODUCT_ID"
+          echo "The listings of main were submitted to the Store, What's new as $TAG sent it." >> "$GITHUB_STEP_SUMMARY"

@@ -5,6 +5,9 @@
 //
 //   node packaging/store/listing.mjs <version>                   what would be sent
 //   node packaging/store/listing.mjs <version> <submission.json> the submission, updated
+//   node packaging/store/listing.mjs <version> <submission.json> v<version>
+//                                                                the same, What's new as released:
+//                                                                the listing sent again (store-listing.yml)
 //   node packaging/store/listing.mjs --preview [<version>]       the release pull request's comment
 //
 // The submission is what `msstore submission get` prints. The updated one goes to
@@ -140,8 +143,18 @@ function framed(bullets, language, version) {
   return [frame.version.replace('{version}', version), bullets, frame.all.replace('{url}', url)].join('\n\n')
 }
 
-/** The release pull request's comment: the *What's new* as the release will send it. */
-export function previewComment(since, news, problem) {
+// The features a release pull request lists before it shortens the list.
+const FEATURES_SHOWN = 20
+
+/**
+ * The release pull request's comment: the *What's new* as the release will send
+ * it, then the features shipping against the listing. v0.22.0 shipped regions
+ * with a listing that did not name them: the description and the screenshots are
+ * only checked when someone thinks of it, so the comment asks where the merge is
+ * decided. `listing` is `{ features, changed }`: the `feat` subjects since the
+ * last release, and the listing files changed since then.
+ */
+export function previewComment(since, news, problem, listing) {
   const lines = [PREVIEW_MARKER, "### Microsoft Store: What's new", '']
   if (problem) {
     lines.push(`The lines added to \`packaging/store/news/\` since ${since} cannot be sent: ${problem}.`)
@@ -153,7 +166,39 @@ export function previewComment(since, news, problem) {
     lines.push(`Gathered from \`packaging/store/news/\` since ${since}, sent with this release.`)
     for (const [language, notes] of Object.entries(news)) lines.push('', `**${language}**`, '', notes)
   }
+  if (listing && listing.features.length > 0) lines.push('', ...listingCheck(since, listing))
   return lines.join('\n')
+}
+
+function listingCheck(since, { features, changed }) {
+  const lines = ['### Microsoft Store: listing and screenshots', '']
+  if (changed.length === 0) {
+    lines.push(
+      `⚠️ ${features.length} feature${features.length > 1 ? 's' : ''} since ${since}, and the listings have not changed: check the description, the features and the screenshots before merging. The release sends \`packaging/store/listing-*.md\` as they are; the screenshots are changed in Partner Center by hand.`,
+    )
+  } else {
+    lines.push(
+      `Changed since ${since}: ${changed.map((path) => `\`${path}\``).join(', ')}. Check they name what ships, and the screenshots in Partner Center.`,
+    )
+  }
+  lines.push('', ...features.slice(0, FEATURES_SHOWN).map((subject) => `- ${subject}`))
+  if (features.length > FEATURES_SHOWN) lines.push(`- … and ${features.length - FEATURES_SHOWN} more`)
+  return lines
+}
+
+/** The subjects of the `feat` commits between `since` and `ref`, oldest first. */
+export function featuresSince(since, ref = 'HEAD', cwd = HERE) {
+  const log = git(cwd, 'log', '--reverse', '--no-merges', '--format=%s', `${since}..${ref}`)
+  return log
+    .split('\n')
+    .filter((subject) => /^feat(\([^)]*\))?!?:/.test(subject))
+}
+
+/** The listing files changed between `since` and `ref`, by path from `cwd`. */
+export function listingsChanged(since, ref = 'HEAD', cwd = HERE) {
+  return git(cwd, 'diff', '--relative', '--name-only', since, ref, '--', '.')
+    .split('\n')
+    .filter((path) => /^listing-.+\.md$/.test(path))
 }
 
 /** The key of `object` equal to `name` ignoring case: the API answers in camelCase, the CLI may not. */
@@ -247,7 +292,7 @@ export function newsAdded(since, ref = 'HEAD', cwd = HERE) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [first, second] = process.argv.slice(2)
+  const [first, second, newsRef = 'HEAD'] = process.argv.slice(2)
   const preview = first === '--preview'
   // In a preview, the version the release pull request proposes, when its title
   // was read: the comment then shows exactly what will be sent.
@@ -262,16 +307,19 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const listings = readListings()
   const languages = listings.map(languageOf)
   // A preview counts from the last release; a release, from the one before it.
-  const since = previousRelease(preview ? undefined : version)
-  const added = newsAdded(since)
+  const since = previousRelease(preview ? undefined : version, newsRef)
+  // Up to the release's tag when only the listing is sent again: lines merged
+  // since then belong to the next release.
+  const added = newsAdded(since, newsRef)
   const fragments = Object.fromEntries(added.map((path) => [path, readFileSync(join(HERE, path), 'utf8')]))
 
   if (preview) {
+    const listing = { features: featuresSince(since), changed: listingsChanged(since) }
     let comment
     try {
-      comment = previewComment(since, added.length > 0 ? whatsNew(fragments, languages, version) : null)
+      comment = previewComment(since, added.length > 0 ? whatsNew(fragments, languages, version) : null, null, listing)
     } catch (error) {
-      comment = previewComment(since, null, error.message)
+      comment = previewComment(since, null, error.message, listing)
     }
     console.log(comment)
     process.exit(0)

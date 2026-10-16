@@ -103,6 +103,24 @@ pull request (`packaging/store/news/README.md`). The release pull request
 carries a comment with the *What's new* as it will be sent, updated at each
 merge; `node packaging/store/listing.mjs X.Y.Z` prints everything that would be.
 
+**The listing ships as the repository has it.** The same comment lists the
+features since the previous release next to whether `listing-*.md` changed, with
+a warning when they did not: v0.22.0 shipped regions with a description that did
+not name them. Before merging the release, check that the description, the
+features and the screenshots say what ships; the screenshots are set in Partner
+Center by hand.
+
+**Between releases**, the listings alone can be sent again, without a package:
+in Partner Center choose *Update* on Candeo, set the screenshots and save the
+draft, then run
+
+```bash
+gh workflow run store-listing.yml -f tag=vX.Y.Z
+```
+
+with the release the Store has. It writes the listings of `main` into that draft,
+keeps that release's *What's new*, and submits it for certification.
+
 What the job needs, set once under *Settings → Secrets and variables → Actions*:
 
 | Name | Kind | Where it comes from |
