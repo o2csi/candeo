@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.22.0](https://github.com/o2csi/candeo/compare/v0.21.0...v0.22.0) (2026-10-16)
+
+
+### Features
+
+* carry regions through the window's API and settings ([61e1a6b](https://github.com/o2csi/candeo/commit/61e1a6beb8bc871f64318e44e3bffa3c57b2e8b5))
+* **devices:** fill in the machine's model when reporting a device ([60d450b](https://github.com/o2csi/candeo/commit/60d450b3c0dcc1bec473a753c6e758649c0ac5d3))
+* **devices:** show and report devices not supported yet ([b78e2d1](https://github.com/o2csi/candeo/commit/b78e2d157df9f996b4ad76fa29b2bd61b4427317))
+* keep split devices in settings ([21ac403](https://github.com/o2csi/candeo/commit/21ac4030c62f0b2eb036a9c4281380e5131b7ba0))
+* lay a region's preview over its device's frames ([c7a8307](https://github.com/o2csi/candeo/commit/c7a8307e54efcd0e509c77ba0deae2253a1d41f9))
+* let a device definition declare its regions ([2058077](https://github.com/o2csi/candeo/commit/2058077dd6439d80da18775488bb713f5da32fd2))
+* light the Alienware 17 R5 ([bd6da18](https://github.com/o2csi/candeo/commit/bd6da184898a1bdb34b71ba7f3fe01bd0825e03e))
+* list a region's bound settings under its signal ([765b42b](https://github.com/o2csi/candeo/commit/765b42b6d82ae12cf0226d00b3f915bdb2ed1642))
+* match device definitions on the machine's model ([75680d5](https://github.com/o2csi/candeo/commit/75680d5847ee687966e8ce0cc01f48e5da752f53))
+* match the m18 R1's zones on its machine ([561fde1](https://github.com/o2csi/candeo/commit/561fde1e251a34aeb81ef60d9a307fa2a5672aad))
+* name a region in the effect commands ([3705079](https://github.com/o2csi/candeo/commit/370507914fd1636bd69fbb9d5f11330b0ec1ba8e))
+* offer each region's effects in the tray ([f62cba7](https://github.com/o2csi/candeo/commit/f62cba7a9ecdf5473619c6496f3bd9f80a0a74b3))
+* run an effect per region in Effects and the editor ([00ba5e7](https://github.com/o2csi/candeo/commit/00ba5e70de0598b5e8d51c4d21d77aa300bc3d9a))
+* run one effect per region in a device's loop ([90d85c9](https://github.com/o2csi/candeo/commit/90d85c978a0e0d55cee4945a22b226486acae144))
+* **site:** list the AW-ELC machines to verify ([f66cf24](https://github.com/o2csi/candeo/commit/f66cf2404f1b2bce4171367128fc28e1400012c5))
+* split a device into regions in Devices ([9836d61](https://github.com/o2csi/candeo/commit/9836d615c97b495b303a60196ed48810c33528d6))
+* unverified definitions for the AW-ELC machines ([79aaaf5](https://github.com/o2csi/candeo/commit/79aaaf5e08506497fcca69120db824dede08be22))
+
+
+### Bug Fixes
+
+* draw the 17 R5 keyboard zones 7, 6, 5 from left to right ([afc299d](https://github.com/o2csi/candeo/commit/afc299d7eb5f81bd2bf5edb37a61a9bdec7fe2f4))
+* fit the follow switch in a region card ([c13a11d](https://github.com/o2csi/candeo/commit/c13a11d4556b3a9ed8edcef0304aec451423a680))
+* hide the brightness slider where a device has none ([2fe338e](https://github.com/o2csi/candeo/commit/2fe338e9211373c0564aadecd800f575a47a717b))
+* say the device where the window said the keyboard ([0f70f7a](https://github.com/o2csi/candeo/commit/0f70f7a997f1153bb27d321edd994b2439afb391))
+
+
+### Refactoring
+
+* say the device, not the keyboard, in Rust's text ([fe651c8](https://github.com/o2csi/candeo/commit/fe651c89cc56568935a518d5956793fa2d8c7bc6))
+
+
+### Documentation
+
+* design regions, one effect per part of a device ([5c17572](https://github.com/o2csi/candeo/commit/5c17572991d049dabbd30acb543f6f8356e5ede2))
+* Devices shows lighting devices no definition describes ([f98b74a](https://github.com/o2csi/candeo/commit/f98b74ae37ffd2b430944c9a66e8b44fd31f7566))
+* explain match.machine in the devices guide ([abf01bf](https://github.com/o2csi/candeo/commit/abf01bfc9afc50d0598251571161bb65ece66cff))
+* install Candeo on Windows from the package the Store signs ([b2c5e3c](https://github.com/o2csi/candeo/commit/b2c5e3c536757f90e44657a58b4109d5a01c2da4))
+* let a device definition name the machine it is for ([8fd8c0b](https://github.com/o2csi/candeo/commit/8fd8c0b2f9cb82a63c4b590c21dbf122c3c38985))
+* mark the regions note implemented ([1664b1c](https://github.com/o2csi/candeo/commit/1664b1c24e459a7b32b95575866befe83cd48d26))
+* no brightness slider without a brightness command ([388d82f](https://github.com/o2csi/candeo/commit/388d82ff28dffa0ab48198999669ceb1e70bf5e6))
+* run the device generators' tests before pushing ([fc74e65](https://github.com/o2csi/candeo/commit/fc74e65b9a4144dee29f04754b5504154acc6cb3))
+* the AW-ELC machines, unverified, from alienfx-tools' maps ([a7beff2](https://github.com/o2csi/candeo/commit/a7beff2521cf8bb84223a3b7acf93419b49b57d0))
+* the m18 R1's zones are matched on its machine ([dc186d3](https://github.com/o2csi/candeo/commit/dc186d3d380c06fc7ce7a724568fc76d12f77a09))
+* the privacy policy says what Report fills in ([6401b82](https://github.com/o2csi/candeo/commit/6401b828974057aa1a64178a0b72a5da7fb53258))
+
+
+### CI/CD
+
+* attach the Store package and send it to winget unattended ([1409fbe](https://github.com/o2csi/candeo/commit/1409fbe2eafe9686e162bb6f0d18233eefe83d7a))
+* run the store watch daily and log only changes ([deddd91](https://github.com/o2csi/candeo/commit/deddd916024c2b9e83782a28a9ecf2e3a3af3504))
+* run the tests of the unverified definitions' generators ([dcd4813](https://github.com/o2csi/candeo/commit/dcd48136c8ded2569f78025f7fc4d5778abe4ec5))
+* Windows ships the package the Store signs ([e2d39da](https://github.com/o2csi/candeo/commit/e2d39da6f39d3898281cb8fbefe16acc2639205f))
+
 ## [0.21.0](https://github.com/o2csi/candeo/compare/v0.20.0...v0.21.0) (2026-09-29)
 
 
