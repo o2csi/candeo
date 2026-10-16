@@ -228,6 +228,40 @@
       </section>
 
       <section>
+        <h2>Parts that run their own effect: <code>regions</code></h2>
+        <p>
+          A laptop's controller often lights the keyboard, the lid and the base together, so the
+          whole machine runs one effect. <code>regions</code> names its parts, and a device that
+          declares them is offered <em>Split into regions</em>: each part then runs an effect of its
+          own. Each region gives:
+        </p>
+        <ul>
+          <li>
+            <code>id</code> — how settings name it: lower case letters, digits and hyphens. Keep it
+            when you copy a definition, and what was kept for the region follows.
+          </li>
+          <li><code>name</code> — what the interface calls it, in one language or several.</li>
+          <li>
+            <code>lights</code> — the addresses of its lights, as <code>items</code> gives them.
+          </li>
+        </ul>
+        <pre data-lang="json"><code>"regions": [
+  { "id": "keyboard", "name": { "en": "Keyboard", "fr": "Clavier" }, "lights": [4, 5, 6, 7, 12] },
+  { "id": "lid", "name": { "en": "Lid", "fr": "Capot" }, "lights": [0, 1, 10, 11] },
+  { "id": "base", "name": { "en": "Base", "fr": "Base" }, "lights": [8, 9, 2] },
+  { "id": "power", "name": { "en": "Power button", "fr": "Bouton d'alimentation" }, "lights": [3] }
+]</code></pre>
+        <p>
+          Every light belongs to exactly one region, and there are at least two: a light in none
+          would stay dark once the device is split, a light in two would have two effects fighting
+          over it, and the file is refused, naming the address. An effect running on a region sees
+          the region alone, measured where it sits on the device. Split only what the hardware
+          keeps apart: the m18 R1's ring is one region, since one half lit alone spreads through
+          the whole ring.
+        </p>
+      </section>
+
+      <section>
         <h2>Brightness and the firmware's own effects</h2>
         <p>
           <code>brightness</code> lists the reports setting the overall level, <code>{level}</code>

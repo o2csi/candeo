@@ -38,6 +38,7 @@ pub const NO_SCANCODE: u16 = 0;
 /// Only [`Key::index`] comes from the hardware survey, described in
 /// `docs/protocol/deathstalker-v2-pro.md` §6. [`Key::scancode`] follows from the
 /// position, as the rectangle does.
+#[derive(Clone, Copy)]
 pub struct Key {
     /// LED index, as it appears in [`Layout::matrix`].
     pub index: u16,
@@ -239,9 +240,36 @@ pub struct Layout {
     pub keys: &'static [Key],
     /// What the simulator draws under the lights. Empty for a keyboard.
     pub outline: &'static [Outline],
+    /// The parts it can be split into, each running its own effect, in the
+    /// file's order; empty for a definition declaring none, and for a region's
+    /// own layout.
+    pub regions: &'static [Region],
+}
+
+/// A part of a device that runs its own effect once the device is split
+/// (`docs/design/regions.md`).
+pub struct Region {
+    /// What settings and commands name it by: `keyboard`.
+    pub id: &'static str,
+    /// What the interface calls it, as its definition writes it: only the
+    /// definition's author knows what the parts of their device are called.
+    pub name: Text,
+    /// The frame positions of its lights, ascending.
+    pub positions: &'static [u16],
+    /// The device as the region's effect sees it: its lights alone in `keys`
+    /// and `matrix`, everything else the device's — the grid, the outline, the
+    /// length of a frame — so that a region's frame lays over the device's with
+    /// nothing to translate (§1 of the design).
+    pub layout: &'static Layout,
 }
 
 impl Layout {
+    /// The region this layout declares under `id`.
+    pub fn region(&self, id: &str) -> Option<&'static Region> {
+        let regions: &'static [Region] = self.regions;
+        regions.iter().find(|r| r.id == id)
+    }
+
     /// True if this HID enumeration entry is **the lighting interface** of this
     /// layout.
     ///

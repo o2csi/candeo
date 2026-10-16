@@ -1935,6 +1935,7 @@ mod tests {
         matrix: &[0],
         keys: &[],
         outline: &[],
+        regions: &[],
     };
     static SECOND: Layout = Layout {
         name: "Second",
@@ -1952,6 +1953,7 @@ mod tests {
         matrix: &[0],
         keys: &[],
         outline: &[],
+        regions: &[],
     };
 
     /// A serial specific to each layout, as in a real enumeration.
