@@ -317,6 +317,9 @@
     "tryNote": "Nobody has verified this definition on this device yet.",
     "report": "Report",
     "reportNote": "Does it light as it should? Say so, and it can join the verified ones.",
+    "reportTitle": "Open the report form in the browser, filled in with what Candeo detected",
+    "unknownMaker": "Unknown maker",
+    "usagePages": "HID usage page {pages} | HID usage pages {pages}",
     "none": "No known layout.",
     "neverSeen": "A device never seen before is listed but not controlled: the decision is made once, then remembered.",
     "warnings": {
@@ -333,7 +336,8 @@
     "groups": {
       "builtIn": "Built-in",
       "yours": "Yours",
-      "unverified": "Not verified"
+      "unverified": "Not verified",
+      "notSupported": "Detected, not supported yet"
     },
     "openFolder": "Open the folder",
     "yoursNone": "No definition of yours.",

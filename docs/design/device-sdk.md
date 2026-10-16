@@ -944,6 +944,34 @@ as the power button is left out, as the m18 R1's is. The ones on `187c:0551`
 are not offered in the application while the m18 R1's zones claim that id on
 every machine: they are there to download, and to choose on the device's card.
 
+### A device nobody describes (2026-10-16, #327)
+
+Without a definition, a keyboard was invisible: nothing said whether Candeo saw
+it. *Devices* now lists, after the devices it knows, under *Plugged in* and
+*All*, the HID devices of lighting makers that no definition for this machine
+describes, built in, yours or unverified: Alienware (`187c`), Darfon (`0d62`),
+Razer (`1532`), ASUS (`0b05`), Logitech (`046d`), SteelSeries (`1038`), HyperX
+(`0951`), HP (`03f0`: the HyperX devices made since HP bought the brand, and
+every other HP device), Corsair (`1b1c`), and any maker's device with a
+collection on the Lighting and Illumination page `0x59`. One card per
+`vid:pid`, *Detected, not supported yet*, with the maker and the usage pages of
+its collections; it cannot be controlled. An AW-ELC on a machine no definition
+names is one: listed here, not taken for a 17 R5.
+
+- **Read from the enumeration only.** Nothing is opened, nothing is written:
+  the vendor and product ids, the interface, usage page and usage of each
+  collection, and the manufacturer's name, which names a maker outside the list.
+- **No report lengths.** hidapi's enumeration does not give them: Windows gives
+  them through `HidP_GetCaps`, on a handle to the device, which this rule keeps
+  closed.
+- **Report** opens `unsupported-device.yml`, filled with the maker, `vid:pid`,
+  the collections, the machine's model as read above, Candeo's version and the
+  system. Candeo sends nothing. The person corrects the model if need be, types
+  it where the system gave none, and says what lights.
+
+Guessing such a device's family, or driving it, is not part of this: a
+definition still comes from someone who has the device.
+
 ---
 
 ## 10. What this changes in the existing code

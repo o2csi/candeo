@@ -40,6 +40,7 @@ mod storage;
 mod system;
 mod taskbar;
 mod tray;
+mod unsupported;
 mod update;
 
 /// Known layouts: the ones written in Rust, the built-in definitions, then
@@ -1120,7 +1121,7 @@ fn report_url(name: &str, file: &str, firmware: Option<&str>, candeo: &str) -> S
 }
 
 /// A query parameter's value, every byte but the unreserved ones escaped.
-fn query(value: &str) -> String {
+pub(crate) fn query(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {
@@ -1796,6 +1797,8 @@ pub fn run() {
             storage::copy_device_definition,
             try_device_definition,
             report_device_definition,
+            unsupported::unsupported_devices,
+            unsupported::report_unsupported_device,
             firmware_effects,
             storage::choose_device_definition,
             storage::read_device_definition,
