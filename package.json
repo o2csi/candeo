@@ -14,6 +14,7 @@
     "test:rust": "cargo test --workspace",
     "test:web": "pnpm --filter @candeo/desktop test",
     "test:packaging": "node --test \"packaging/**/*.test.mjs\"",
+    "test:devices": "node --test \"crates/candeo-device/devices/**/*.test.mjs\"",
     "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "site": "node site/build.mjs",
     "fmt:rust": "cargo fmt --all",

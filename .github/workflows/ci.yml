@@ -247,6 +247,9 @@ jobs:
       # The release scripts: a Store listing or a What's new line that the
       # release would refuse fails here, in its own pull request.
       - run: pnpm test:packaging
+      # The generators of the unverified definitions: a definition no longer
+      # what its facts give, or a map read wrong, fails here (#328).
+      - run: pnpm test:devices
 
   # The only job that actually builds the application. `fmt`, `clippy`, the
   # tests and `vue-tsc` never compile `candeo-desktop`: a break in the Tauri
