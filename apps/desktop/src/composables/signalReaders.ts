@@ -17,14 +17,15 @@ import { boundSignal } from './bindings'
 import { editable, switchedOn } from './rules'
 import { named } from './useEffects'
 
-/** A device the window lists: enough to name it. */
-export type KnownDevice = Pick<DeviceInfo, 'vid' | 'pid' | 'name'>
+/** A device the window lists: enough to name it, and its regions. */
+export type KnownDevice = Pick<DeviceInfo, 'vid' | 'pid' | 'name'> &
+  Partial<Pick<DeviceInfo, 'regions'>>
 
 /** A library effect: enough to name it and its settings. */
 export type KnownEffect = Pick<EffectEntry, 'id' | 'name' | 'params'>
 
-/** What the file says reads signals. */
-export type ReadingSettings = Pick<Settings, 'effectParams' | 'rules'>
+/** What the file says reads signals: a split device's regions keep their own settings. */
+export type ReadingSettings = Pick<Settings, 'effectParams' | 'rules' | 'splitDevices'>
 
 /** Something that reads a signal, named as Settings lists it. */
 export type SignalReader =
@@ -80,6 +81,28 @@ export function signalReaders(
         effect: effectName(record.effect),
         setting: settingName(record.effect, param),
       })
+    }
+  }
+
+  // A region's settings, named as the gallery names where they are kept:
+  // *Alienware 17 R5 · Keyboard* (`docs/design/regions.md` §3).
+  const regionName = (d: DeviceRef, region: string) => {
+    const declared = devices
+      .find((k) => k.vid === d.vid && k.pid === d.pid)
+      ?.regions?.find((r) => r.id === region)
+    const shown = declared ? localized(declared.name) || region : region
+    return t('effects.regionOfDevice', { device: deviceName(d), region: shown })
+  }
+  for (const split of settings.splitDevices ?? []) {
+    for (const record of split.effectParams ?? []) {
+      for (const [param, name] of boundNames(record.bindings)) {
+        add(name, {
+          kind: 'setting',
+          device: regionName(split, record.region),
+          effect: effectName(record.effect),
+          setting: settingName(record.effect, param),
+        })
+      }
     }
   }
 

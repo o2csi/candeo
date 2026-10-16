@@ -97,6 +97,38 @@ describe('signalReaders', () => {
     ])
   })
 
+  it("lists a split device's region settings after the devices', named with their region", () => {
+    const lid = {
+      id: 'lid',
+      name: { en: 'Lid', fr: 'Capot' },
+      positions: [0, 1],
+      lights: 'zones' as const,
+      capabilities: ['geometry'],
+    }
+    const readers = signalReaders(
+      settings({
+        effectParams: [record(KEYBOARD, GRADIENT, { colour: 'signal:status' })],
+        splitDevices: [
+          {
+            ...LAPTOP,
+            effectParams: [
+              { region: 'lid', effect: GRADIENT, values: {}, bindings: { speed: 'signal:status' } },
+              { region: 'gone', effect: GRADIENT, values: {}, bindings: { colour: 'signal:status' } },
+            ],
+          },
+        ],
+      }),
+      [{ ...KEYBOARD, name: DEATHSTALKER }, { ...LAPTOP, name: M18, regions: [lid] }],
+      library,
+    )
+    expect(readers.get('status')).toEqual([
+      onDevice(DEATHSTALKER, 'Colour'),
+      onDevice(`${M18} · Lid`, 'Speed'),
+      // A region its definition no longer declares goes by its id.
+      onDevice(`${M18} · gone`, 'Colour'),
+    ])
+  })
+
   it('lists settings bound to different names each under its own', () => {
     const readers = signalReaders(
       settings({
