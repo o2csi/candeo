@@ -38,8 +38,8 @@ account, no extra services to install, nothing sent anywhere.
 - **Your games** — your health, ammo, flashes and the bomb in Counter-Strike 2,
   your hero's health, mana and stuns in Dota 2, connected in one click. [Games](https://o2csi.github.io/candeo/games.html)
 - **Your devices** — the Razer DeathStalker V2 Pro, the Alienware m18 R1,
-  keyboard and lighting zones, the Alienware 17 R5, and more Razer keyboards to
-  try.
+  keyboard and lighting zones, the Alienware 17 R5, and more keyboards and
+  laptops to try. Split a device into regions, one effect each.
   [Devices](https://o2csi.github.io/candeo/devices.html)
 - **Sends nothing** — no account, no telemetry. In English and French.
 
