@@ -15,13 +15,18 @@ install a driver or a service.
 The application needs a specific keyboard to light anything, and the tester
 almost certainly does not have one. This is expected behaviour, not a failure.
 
-Supported today: Razer DeathStalker V2 Pro (wired), USB vendor 0x1532, product
-0x0292.
+Supported today, by USB vendor and product identifiers:
+- Razer DeathStalker V2 Pro (wired), 0x1532:0x0292;
+- Alienware m18 R1 laptop: its keyboard, 0x0d62:0xaab0, and its lighting
+  zones, 0x187c:0x0551;
+- Alienware 17 R5 laptop: its lighting zones, keyboard included, 0x187c:0x0550.
 
-Without that keyboard, Candeo starts normally, shows its three screens, and the
-Devices screen lists no controlled device. The effect gallery and its editor
-work, and the preview animates the effects on a drawn keyboard. That is the
-application working, with nothing to light.
+Without one of them, Candeo starts normally, shows its five screens (Effects,
+Automations, Devices, Games, Settings), and the Devices screen lists no
+controlled device; a lighting device it cannot drive yet appears there as
+"Detected, not supported yet", and is never opened. The effect gallery and its
+editor work, and the preview animates the effects on a drawn keyboard. That is
+the application working, with nothing to light.
 
 Closing the window folds the application into the notification area rather than
 quitting it. This is deliberate: an effect keeps running with the window closed.
