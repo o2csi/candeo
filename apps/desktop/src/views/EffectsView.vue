@@ -2414,7 +2414,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 2px 4px 4px 22px;
+  padding: 2px 4px 4px 14px;
 }
 
 .region {
@@ -2447,9 +2447,12 @@ onBeforeUnmount(() => {
   color: var(--bad);
 }
 
-/* Under a region's name: its button's border, padding, pictogram and gap. */
+/*
+ * Against the region card's own edge, not under its name: indented once already,
+ * the card has no room left for the follow switch's four choices.
+ */
 .region .brightness {
-  padding-left: calc(1px + var(--gap-2) + 16px + var(--gap-2));
+  padding-left: var(--gap-2);
 }
 
 /*
