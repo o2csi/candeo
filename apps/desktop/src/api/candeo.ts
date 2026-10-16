@@ -18,6 +18,7 @@ import type {
   FirmwareEffectInfo,
   LayoutInfo,
   Rgb,
+  UnsupportedDevice,
 } from './types'
 
 /** Lists the known layouts, plugged in or not, with the state of each. */
@@ -355,6 +356,19 @@ export function tryDeviceDefinition(file: string): Promise<LayoutInfo | null> {
 /** Opens the report form in the browser, filled with what Candeo knows of the device. */
 export function reportDeviceDefinition(vid: number, pid: number): Promise<void> {
   return invoke('report_device_definition', { vid, pid })
+}
+
+/**
+ * The lighting devices plugged in that no definition describes, read from the
+ * system's enumeration: nothing is opened (#327).
+ */
+export function unsupportedDevices(): Promise<UnsupportedDevice[]> {
+  return invoke('unsupported_devices')
+}
+
+/** Opens the report form in the browser, filled with what the system says of the device. */
+export function reportUnsupportedDevice(vid: number, pid: number): Promise<void> {
+  return invoke('report_unsupported_device', { vid, pid })
 }
 
 /**

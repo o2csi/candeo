@@ -106,6 +106,28 @@ export interface DeviceInfo {
   lightCount: number
 }
 
+/** A collection of a device, as the system lists it without opening it. */
+export interface HidCollection {
+  /** `null` when the system does not say, over Bluetooth. */
+  interface: number | null
+  usagePage: number
+  usage: number
+}
+
+/**
+ * A lighting maker's device plugged in that no definition describes, built in,
+ * yours or unverified: detected, not supported yet (#327). Read from the
+ * system's enumeration only; nothing opens it, and it cannot be controlled.
+ * Mirror of `UnsupportedDevice`, in `src-tauri/src/unsupported.rs`.
+ */
+export interface UnsupportedDevice {
+  /** `null` when neither Candeo's list nor the device names one. */
+  maker: string | null
+  vid: number
+  pid: number
+  collections: readonly HidCollection[]
+}
+
 /**
  * A key, as the simulator must draw it.
  *

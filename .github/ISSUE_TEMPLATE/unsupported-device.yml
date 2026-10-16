@@ -1,0 +1,45 @@
+name: Device not supported yet
+description: A lighting device Candeo detects but cannot control yet — say what it is.
+title: "Device not supported yet: "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Candeo filled in what the system lists of this device, without opening it, and sent nothing. Please never paste a serial number, your computer's name or a path with your user name in it.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Its vendor and product ids, as its card in Devices shows them.
+      placeholder: 187c:0550
+    validations:
+      required: true
+  - type: input
+    id: maker
+    attributes:
+      label: Maker
+      placeholder: Alienware
+  - type: input
+    id: machine
+    attributes:
+      label: Computer model
+      description: For a device built into a laptop or a desktop, the model as its maker names it. Not its serial number.
+      placeholder: Alienware 17 R5
+  - type: textarea
+    id: lights
+    attributes:
+      label: What lights
+      description: The keyboard, key by key or in zones, a logo, a light bar… and the software that drives it today, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: collections
+    attributes:
+      label: HID collections
+      description: As Candeo listed them, one per line.
+  - type: input
+    id: candeo
+    attributes:
+      label: Candeo version and system
+      placeholder: 0.21.0, Windows 11
