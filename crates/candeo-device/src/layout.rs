@@ -178,6 +178,15 @@ pub struct Layout {
     pub pid: u16,
     /// Where the lighting is, in this device's HID enumeration.
     pub port: Port,
+    /// The machine this layout is for, by the system's product name as SMBIOS
+    /// gives it; `None` for any machine.
+    ///
+    /// A controller built into laptops is wired differently in each model:
+    /// Alienware's AW-ELC, `187c:0550`, lights the 17 R5's keyboard with ids 4
+    /// to 7 and an m15 R1's with 2 to 5 (`docs/design/device-sdk.md` §9, #326).
+    /// Its USB ids cannot tell them apart; the system's name can. See
+    /// [`Self::fits_machine`].
+    pub machine: Option<&'static str>,
     /// The family whose reports it speaks — see [`crate::lighting`]. A device of
     /// a family already written is this line and the data around it, nothing
     /// more.
@@ -278,6 +287,20 @@ impl Layout {
                     && usage_page == page
                     && which.is_none_or(|which| usage == which)
             }
+        }
+    }
+
+    /// True if this layout applies on the machine whose product name is
+    /// `model`, `None` when it could not be read.
+    ///
+    /// Compared exactly, spaces around either aside: a prefix would take an
+    /// m17 R3 for an R4. A layout naming a machine never applies where the
+    /// model is unknown — claiming a machine nobody can see is the error the
+    /// field is there to prevent. One naming none applies everywhere.
+    pub fn fits_machine(&self, model: Option<&str>) -> bool {
+        match self.machine {
+            None => true,
+            Some(wanted) => model.is_some_and(|m| m.trim() == wanted.trim()),
         }
     }
 

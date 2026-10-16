@@ -94,6 +94,14 @@
           entry opens fine and silently drops every write, which is why it is named rather than
           guessed.
         </p>
+        <p>
+          A laptop's lights are different: the maker fits the same controller in many machines and
+          wires it differently in each, so the same ids light the keyboard on one model and the lid
+          on another. There, <code>machine</code> names the model the definition was made on, as
+          the system gives it — the <code>machine</code> line of the diagnostic Candeo copies:
+          <code>"machine": "Alienware 17 R5"</code>. It is compared exactly, and on any other
+          machine the definition drives nothing. A keyboard or a mouse needs none.
+        </p>
       </section>
 
       <section>

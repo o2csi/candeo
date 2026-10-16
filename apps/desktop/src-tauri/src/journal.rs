@@ -337,6 +337,8 @@ pub fn init(app: &AppHandle) {
         version = app.package_info().version.to_string(),
         os = std::env::consts::OS,
         architecture = std::env::consts::ARCH,
+        // A model, not a unit: what decides which definitions apply (#326).
+        machine = crate::machine::model(),
         log = dir.as_deref().map(crate::paths::shown),
         "Candeo starting"
     );
@@ -865,6 +867,13 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         &mut out,
         "system",
         &format!("{} · {}", os_version(), std::env::consts::ARCH),
+    );
+    // Which definitions apply here, and what one written for this machine
+    // names in `match.machine` (#326). A model, not a unit.
+    line(
+        &mut out,
+        "machine",
+        crate::machine::model().unwrap_or("not read"),
     );
     line(
         &mut out,

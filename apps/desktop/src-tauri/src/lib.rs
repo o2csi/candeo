@@ -26,6 +26,7 @@ mod idle;
 mod journal;
 mod keys;
 mod language;
+mod machine;
 mod msix;
 mod paths;
 mod runtime;
@@ -1053,10 +1054,11 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
 /// (#300). Nothing opens them: they are `detected`, driven by nothing until
 /// tried.
 fn unverified_devices(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<DeviceInfo> {
-    let unverified = candeo_device::definition::unverified();
+    // Only the ones for this machine, as the built-in ones (#326).
+    let unverified: Vec<&(&str, &Layout)> = catalog::unverified().collect();
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for (_, l) in unverified {
+    for (_, l) in unverified.iter().copied() {
         let model = (l.vid, l.pid);
         if known.iter().any(|k| (k.vid, k.pid) == model) || !seen.insert(model) {
             continue;
@@ -1065,6 +1067,7 @@ fn unverified_devices(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<De
         // any, is the one offered; the card lets you pick the other.
         let files: Vec<&(&str, &Layout)> = unverified
             .iter()
+            .copied()
             .filter(|(_, u)| (u.vid, u.pid) == model)
             .collect();
         let plugged_in = files.iter().find(|(_, u)| plugged(api, u).is_some());
@@ -1169,8 +1172,7 @@ fn try_device_definition(
 ) -> CmdResult<Option<LayoutInfo>> {
     let json = candeo_device::definition::unverified_text(&file)
         .ok_or_else(|| Failure::unexpected(format!("no unverified definition {file:?}")))?;
-    let layout = candeo_device::definition::unverified()
-        .iter()
+    let layout = catalog::unverified()
         .find(|(name, _)| *name == file)
         .map(|(_, layout)| *layout)
         .ok_or_else(|| Failure::unexpected(format!("{file:?} does not load")))?;
@@ -1925,6 +1927,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x1111,
         port: candeo_device::Port::Interface(3),
+        machine: None,
         lighting: &Unused,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
@@ -1941,6 +1944,7 @@ mod tests {
         vid: 0x1532,
         pid: 0x2222,
         port: candeo_device::Port::Interface(3),
+        machine: None,
         lighting: &Unused,
         surveyed_firmware: Some(candeo_protocol::Firmware { major: 1, minor: 0 }),
         firmware_effects: &[],
