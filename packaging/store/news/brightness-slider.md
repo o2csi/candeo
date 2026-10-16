@@ -1,0 +1,2 @@
+en: Effects no longer shows a brightness slider for the Alienware 17 R5 and the lights around an Alienware m18's keyboard, which have no brightness to set; theirs can still follow the music or a signal.
+fr: Effets n'affiche plus de curseur de luminosité pour l'Alienware 17 R5 et les lumières autour du clavier d'un Alienware m18, qui n'ont pas de luminosité réglable ; la leur peut toujours suivre la musique ou un signal.
