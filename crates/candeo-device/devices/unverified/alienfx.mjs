@@ -486,9 +486,6 @@ export function definition(facts, v, verified) {
     ...lights
       .filter((l) => l.flags & INDICATOR)
       .map((l) => `alienfx-tools marks ${named(l)}, as an indicator, which it keeps dark when the lights are off; here it follows the effect.`),
-    ...(map.pid === '0551'
-      ? ['The m18 R1\'s built-in zones name no machine and describe 187c:0551 too: download this file and choose it on the device\'s card.']
-      : []),
     ...(v.notes ?? []),
     v.kind === 'laptop'
       ? 'Drawn from the front, lid open, the lights at the back seen through the hinge. Where a light sits is not in the source: the keyboard zones keep the order and widths of alienfx-tools\' grid, the rest is drawn where its name puts it.'

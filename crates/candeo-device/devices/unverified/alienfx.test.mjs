@@ -239,8 +239,8 @@ test('a light marked as the power button is left out, and the machine is matched
   assert.ok(d.notes.some((n) => n.startsWith('Left out: id 1, “Power Button”')))
   assert.deepEqual(d.frame, verified['alienware-17-r5-zones.json'].frame)
   const m16 = definition(facts, facts.variants.find((v) => v.pid === '0551'), verified)
-  assert.equal(m16.match.pid, '0551')
-  assert.ok(m16.notes.some((n) => n.includes('choose it on the device')))
+  assert.deepEqual(m16.match, { vid: '187c', pid: '0551', usagePage: 'ff00', usage: '0001', machine: 'Alienware m16 R1' })
+  assert.ok(m16.notes.some((n) => n.includes('as alienware-m18-r1-zones.json sends it')))
 })
 
 test('the files are what the generator writes from the facts', async () => {

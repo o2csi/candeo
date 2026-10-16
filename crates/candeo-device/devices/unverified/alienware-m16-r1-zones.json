@@ -7,7 +7,6 @@
     "The protocol is verified: the AW-ELC's live preview, as alienware-m18-r1-zones.json sends it, which stores nothing in the device.",
     "Matched on the machine (#326): SMBIOS names it “Alienware m16 R1”, as dmidecode reports it in linuxhw/DMI, https://github.com/linuxhw/DMI (CC BY 4.0), commit 57b21bc6 (2025-01-06): Notebook/Alienware/m16/m16 R1, SKU 0BFC.",
     "Left out: id 4, “Power Button”, which alienfx-tools marks as the power button: the firmware drives it, as on the m18 R1.",
-    "The m18 R1's built-in zones name no machine and describe 187c:0551 too: download this file and choose it on the device's card.",
     "The AMD edition, “Alienware m16 R1 AMD”, is left out: alienfx-tools does not say which edition its map was made on.",
     "Drawn from the front, lid open, the lights at the back seen through the hinge. Where a light sits is not in the source: the keyboard zones keep the order and widths of alienfx-tools' grid, the rest is drawn where its name puts it.",
     "Does it light? Say so: https://github.com/o2csi/candeo/issues/new?template=device-report.yml"

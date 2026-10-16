@@ -1,7 +1,12 @@
 {
   "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
   "name": "Alienware m18 R1 zones",
-  "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001" },
+  "notes": [
+    "Survey: docs/protocol/alienware-m18-r1.md, section 2.",
+    "Matched on the machine: SMBIOS names it “Alienware m18 R1”, as Candeo read it at startup on the surveyed machine on 2026-10-16. The AW-ELC, 187c:0551, also lights the m16 R1, the m16 R2 and the m18 R2, each wiring its ids its own way (alienfx-tools' maps, #328).",
+    "The AMD edition, “Alienware m18 R1 AMD”, is another machine: not matched until someone confirms its ids."
+  ],
+  "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001", "machine": "Alienware m18 R1" },
   "report": { "wire": "output", "length": 33, "prefix": "00" },
   "frame": {
     "pace": { "atLeastMs": 100, "skipUnchanged": true },
