@@ -641,7 +641,7 @@ fn device_submenu(
         &Action::ToggleOutput {
             device: controlled.device,
         },
-        &i18n::text(language, "tray.sendToKeyboard"),
+        &i18n::text(language, "tray.sendToDevice"),
         view.output,
         current.is_some_and(|s| s.to_keyboard),
     )?));
