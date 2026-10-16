@@ -889,24 +889,39 @@ impl Settings {
         true
     }
 
-    /// Every device's, for the engine at startup. The engine knows a device by
-    /// model: of two units of one, the first entry holds. One edited by hand
-    /// into a source nothing reads is left out, and said.
-    pub fn dimmings(&self) -> std::collections::HashMap<DeviceRef, Dimming> {
-        let mut all = std::collections::HashMap::new();
-        for record in &self.devices {
-            let Some(dimming) = record.dimming.clone() else {
-                continue;
-            };
+    /// Every device's, and every region's of a split device, for the engine at
+    /// startup: a device's under `None`, a region's under its id. The engine
+    /// knows a device by model: of two units of one, the first entry holds. One
+    /// edited by hand into a source nothing reads is left out, and said.
+    pub fn dimmings(&self) -> crate::runtime::dimming::Dimmings {
+        let devices = self.devices.iter().filter_map(|record| {
             let device = DeviceRef {
                 vid: record.vid,
                 pid: record.pid,
             };
+            Some(((device, None), record.dimming.clone()?))
+        });
+        let regions = self.split_devices.iter().flat_map(|split| {
+            let device = DeviceRef {
+                vid: split.vid,
+                pid: split.pid,
+            };
+            split
+                .regions
+                .iter()
+                .filter_map(move |r| Some(((device, Some(r.region.clone())), r.dimming.clone()?)))
+        });
+        let mut all = std::collections::HashMap::new();
+        for (key, dimming) in devices.chain(regions) {
             match dimming.checked() {
                 Ok(dimming) => {
-                    all.entry(device).or_insert(dimming);
+                    all.entry(key).or_insert(dimming);
                 }
-                Err(e) => tracing::warn!(device = %device, "stored brightness source ignored: {e}"),
+                Err(e) => tracing::warn!(
+                    device = %key.0,
+                    region = key.1.as_deref().unwrap_or_default(),
+                    "stored brightness source ignored: {e}"
+                ),
             }
         }
         all
@@ -4930,17 +4945,22 @@ mod tests {
         assert!(settings.set_dimming(VID, PID, None, Some(following("sound:bass"))));
         assert!(!settings.set_dimming(VID, PID, None, Some(following("sound:bass"))));
         assert_eq!(
-            settings.dimmings().get(&DeviceRef {
-                vid: VID,
-                pid: PID + 1
-            }),
+            settings.dimmings().get(&(
+                DeviceRef {
+                    vid: VID,
+                    pid: PID + 1
+                },
+                None
+            )),
             None
         );
         store.write_settings(&settings).unwrap();
 
         let mut reloaded = store.read_settings().unwrap();
         assert_eq!(
-            reloaded.dimmings().get(&DeviceRef { vid: VID, pid: PID }),
+            reloaded
+                .dimmings()
+                .get(&(DeviceRef { vid: VID, pid: PID }, None)),
             Some(&following("sound:bass"))
         );
 
@@ -4959,6 +4979,26 @@ mod tests {
         let mut settings = Settings::default();
         settings.set_dimming(VID, PID, None, Some(following("sound:pitch")));
         assert!(settings.dimmings().is_empty());
+    }
+
+    /// The engine is handed each region's follow beside the device's own, which
+    /// the split leaves as it was (`regions.md` §4).
+    #[test]
+    fn the_regions_follows_go_to_the_engine_beside_the_device_s() {
+        let mut settings = Settings::default();
+        settings.set_dimming(VID, PID, None, Some(following("sound:bass")));
+        settings.set_split(VID, PID, Some(&["keyboard", "lid"]));
+        settings.set_region_dimming(VID, PID, "lid", Some(following("system:cpuTemp")));
+        settings.set_region_dimming(VID, PID, "keyboard", None);
+
+        let device = DeviceRef { vid: VID, pid: PID };
+        let all = settings.dimmings();
+        assert_eq!(all.len(), 2, "{all:?}");
+        assert_eq!(all[&(device, None)], following("sound:bass"));
+        assert_eq!(
+            all[&(device, Some("lid".to_owned()))],
+            following("system:cpuTemp")
+        );
     }
 
     /// The default is not written, and going back to the maximum is what

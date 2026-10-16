@@ -1473,7 +1473,7 @@ fn set_dimming(
     let dimming = dimming
         .map(runtime::dimming::Dimming::checked)
         .transpose()?;
-    state.engine.set_dimming(device, dimming);
+    state.engine.set_dimming(device, None, dimming);
     Ok(())
 }
 

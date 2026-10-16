@@ -34,10 +34,15 @@ fn default_floor() -> u8 {
     DEFAULT_FLOOR
 }
 
-/// Each device's, shared by its loop, the preview borrowing its layout, and the
-/// commands. Kept by the engine rather than by a loop: it belongs to the device,
-/// and holds when the effect changes or a rule takes over.
-pub type Table = Arc<Mutex<HashMap<DeviceRef, Dimming>>>;
+/// What each device's brightness follows, under `None`, and each region's of a
+/// split device, under its id (`docs/design/regions.md` §4).
+pub type Dimmings = HashMap<(DeviceRef, Option<String>), Dimming>;
+
+/// Each device's and region's, shared by its loop, the preview borrowing its
+/// layout, and the commands. Kept by the engine rather than by a loop: it
+/// belongs to the lights, and holds when the effect changes or a rule takes
+/// over.
+pub type Table = Arc<Mutex<Dimmings>>;
 
 impl Dimming {
     /// As the interface or the file gives it, checked: a source Rust reads, as a
@@ -122,6 +127,21 @@ pub fn dim(bytes: &mut [u8], factor: f32) {
     }
 }
 
+/// Scales the colours at `positions` alone: a region's follow over its own
+/// lights, whatever drew them — its effect, or a rule's over the whole device
+/// (`docs/design/regions.md` §4).
+pub fn dim_positions(bytes: &mut [u8], positions: &[u16], factor: f32) {
+    if factor >= 1.0 {
+        return;
+    }
+    for &position in positions {
+        let at = usize::from(position) * 3;
+        if let Some(colour) = bytes.get_mut(at..at + 3) {
+            dim(colour, factor);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,6 +219,22 @@ mod tests {
         let mut frame = [255, 128, 0, 10, 20, 30];
         dim(&mut frame, 0.5);
         assert_eq!(frame, [128, 64, 0, 5, 10, 15]);
+    }
+
+    /// Over a rule's frame on a split device, each region's lights take their
+    /// own region's follow, and the others theirs.
+    #[test]
+    fn each_region_s_follow_scales_its_lights_alone() {
+        let mut frame = [200; 4 * 3];
+        dim_positions(&mut frame, &[0, 2], 0.5);
+        dim_positions(&mut frame, &[1], 0.25);
+        dim_positions(&mut frame, &[3], 1.0);
+        assert_eq!(
+            frame,
+            [100, 100, 100, 50, 50, 50, 100, 100, 100, 200, 200, 200]
+        );
+        dim_positions(&mut frame, &[9], 0.5);
+        assert_eq!(frame[9..], [200, 200, 200], "past the frame, nothing");
     }
 
     #[test]

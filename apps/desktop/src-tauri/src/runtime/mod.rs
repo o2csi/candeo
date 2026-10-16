@@ -16,6 +16,17 @@
 //! layout spans several devices, [`DeviceOut`] will split the frame, and the
 //! effect code will not change by a single line.
 //!
+//! # A loop runs parts
+//!
+//! A device split into regions runs one effect per region, in the same loop
+//! (`docs/design/regions.md` §7): each **part** renders on its own layout —
+//! the device's, or a region's — then the device's frame takes each position
+//! from the part owning it, the follows scale it, and it leaves once. A whole
+//! device is one part owning every position, on the same path. One loop rather
+//! than one per region: the family keeps a definition's pace by remembering the
+//! last frame it sent, and two writers on one device would each find the
+//! other's frame too soon or changed.
+//!
 //! # And one preview loop, which belongs to no device
 //!
 //! **Previewing must never interrupt the effect running on the keyboard.**
@@ -62,7 +73,9 @@
 //! The render thread takes only the last one: it knows only its [`Shared`] and
 //! its output, never the engine. It therefore has no way to hold back a command,
 //! and it never holds a device handle and an engine lock at the same time. See
-//! `crate::AppState`.
+//! `crate::AppState`. A command changing one region waits for the thread's
+//! answer holding its device's thread lock, which the render thread never
+//! takes: starts on one device are serialised, and no other device waits.
 //!
 //! See `docs/design/effects-runtime.md`.
 
@@ -70,11 +83,12 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use candeo_device::{Keyboard, Layout};
+use candeo_device::{Keyboard, Layout, Region};
 use candeo_protocol::Rgb;
 use rquickjs::function::Args;
 use rquickjs::loader::{BuiltinLoader, BuiltinResolver};
@@ -232,15 +246,16 @@ const LOAD_BUDGET: Duration = Duration::from_secs(2);
 /// every frame taking down the whole process instead of itself.
 const MEMORY_BUDGET: usize = 32 * 1024 * 1024;
 
-/// What the loop shares with the rest of the application.
+/// What a device's loop shares with the rest of the application: the device's
+/// half — its output, its frames, its regions. Each part's half is
+/// [`PartShared`].
 ///
 /// Everything is behind `Arc`: the render thread outlives the window, so it
 /// cannot borrow anything from a command's state.
 struct Shared {
+    /// The loop ends: set by a command, or by the loop when no part runs any
+    /// more after failing.
     stop: AtomicBool,
-    /// Effect parameters, as JSON. Re-read on every frame: setting them does
-    /// not restart the loop.
-    params: Mutex<String>,
     /// Keyboard output. Separate from the simulator output — one must be able
     /// to write an effect without owning the keyboard, and to leave it running
     /// without watching the screen.
@@ -248,15 +263,12 @@ struct Shared {
     /// Simulator output. `None` while nobody listens: nothing is serialized
     /// then.
     frames: Mutex<Option<Channel<InvokeResponseBody>>>,
-    /// The effect's last error. Readable even after the window is closed and
-    /// reopened, which a one-off event would not allow.
-    error: Mutex<Option<String>>,
     /// Last failed write to the keyboard.
     ///
-    /// Distinct from the effect error above: these two failures have neither
-    /// the same cause nor the same remedy, and mixing them up would send
-    /// someone looking in the wrong place. A flawless effect may well reach no
-    /// LED.
+    /// Distinct from the effect error of each part: these two failures have
+    /// neither the same cause nor the same remedy, and mixing them up would
+    /// send someone looking in the wrong place. A flawless effect may well
+    /// reach no LED.
     device_error: Mutex<Option<Failure>>,
     /// True if the last frame was actually written to a device.
     ///
@@ -268,33 +280,139 @@ struct Shared {
     /// Consecutive failed writes, reset by any successful write. See
     /// [`MAX_DEVICE_WRITE_ERRORS`].
     device_failures: AtomicU32,
-    /// Name of the running effect, so that the interface knows what to
-    /// highlight after the window restarts.
-    effect_id: Mutex<Option<String>>,
-    /// The effect reads key presses or signals: its error text stays out of the
-    /// log and the diagnostic. See [`loggable`].
-    reads_private: AtomicBool,
-    /// Parameters bound to a signal, by parameter: `{"colour": "signal:status"}`.
-    /// Re-read on every frame, like `params`.
-    bindings: Mutex<Bindings>,
+    /// The device's regions, in its definition's order, while the loop runs
+    /// them; `None` while it runs one effect on the whole device.
+    regions: Option<&'static [Region]>,
+    /// The parts as the commands and the status reach them: the one on the
+    /// whole device, or one per region running an effect or stopped on its own
+    /// — a region running nothing has none.
+    parts: Mutex<Vec<Arc<PartShared>>>,
+    /// What the commands ask of the running thread, read between two frames.
+    requests: Mutex<Option<Sender<Request>>>,
 }
 
-impl Default for Shared {
-    fn default() -> Self {
+impl Shared {
+    fn new(regions: Option<&'static [Region]>, requests: Sender<Request>) -> Self {
         Self {
             stop: AtomicBool::new(false),
-            params: Mutex::new("{}".to_string()),
             to_keyboard: AtomicBool::new(true),
             frames: Mutex::new(None),
-            error: Mutex::new(None),
             device_error: Mutex::new(None),
             reaching: AtomicBool::new(false),
             device_failures: AtomicU32::new(0),
-            effect_id: Mutex::new(None),
-            reads_private: AtomicBool::new(false),
-            bindings: Mutex::new(Bindings::new()),
+            regions,
+            parts: Mutex::new(Vec::new()),
+            requests: Mutex::new(Some(requests)),
         }
     }
+
+    /// The part on this region, or on the whole device with `None`.
+    fn part(&self, region: Option<&str>) -> Option<Arc<PartShared>> {
+        self.parts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|p| p.region == region)
+            .cloned()
+    }
+
+    /// True while its thread runs the device's regions, ready for a request.
+    fn runs_regions(&self) -> bool {
+        self.regions.is_some() && !self.stop.load(Ordering::Relaxed)
+    }
+}
+
+/// What one part shares: its effect's state, as the commands set it and the
+/// status reads it.
+struct PartShared {
+    /// The region it runs on, `None` on the whole device.
+    region: Option<&'static str>,
+    /// Stopped on its own after [`MAX_CONSECUTIVE_ERRORS`]: its lights are
+    /// black, and its error says why.
+    stopped: AtomicBool,
+    /// Effect parameters, as JSON. Re-read on every frame: setting them does
+    /// not restart the loop.
+    params: Mutex<String>,
+    /// Parameters bound to a signal, by parameter: `{"colour": "signal:status"}`.
+    /// Re-read on every frame, like `params`.
+    bindings: Mutex<Bindings>,
+    /// Name of the running effect, so that the interface knows what to
+    /// highlight after the window restarts.
+    effect_id: Mutex<Option<String>>,
+    /// The effect's last error. Readable even after the window is closed and
+    /// reopened, which a one-off event would not allow.
+    error: Mutex<Option<String>>,
+    /// The effect reads key presses or signals: its error text stays out of the
+    /// log and the diagnostic. See [`loggable`].
+    reads_private: AtomicBool,
+}
+
+impl PartShared {
+    fn new(region: Option<&'static str>, start: &EffectStart) -> Self {
+        Self {
+            region,
+            stopped: AtomicBool::new(false),
+            params: Mutex::new(start.params.clone()),
+            bindings: Mutex::new(start.bindings.clone()),
+            effect_id: Mutex::new(Some(start.effect_id.clone())),
+            error: Mutex::new(None),
+            reads_private: AtomicBool::new(false),
+        }
+    }
+
+    fn effect_id(&self) -> Option<String> {
+        self.effect_id.lock().unwrap().clone()
+    }
+
+    fn error(&self) -> Option<String> {
+        self.error.lock().unwrap().clone()
+    }
+
+    fn private(&self) -> bool {
+        self.reads_private.load(Ordering::Relaxed)
+    }
+
+    fn running(&self) -> bool {
+        !self.stopped.load(Ordering::Relaxed)
+    }
+}
+
+/// An effect to start: which one, its code, and what it starts with.
+pub struct EffectStart {
+    pub effect_id: String,
+    pub js: String,
+    /// Its parameters, as JSON.
+    pub params: String,
+    pub bindings: Bindings,
+}
+
+/// Why one region's effect did not start on the loop running.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RegionStart {
+    /// The loop does not run the device's regions — a rule interrupts the
+    /// device, or nothing runs: the caller starts them all, with
+    /// [`Engine::start_regions`].
+    NotRunningRegions,
+    /// The effect did not load: the region goes on with what it ran.
+    Failed(String),
+}
+
+/// What a command asks of a running thread, between two frames: a QuickJS
+/// context lives and dies on the thread that runs it, so a region's new effect
+/// is built there.
+enum Request {
+    /// Start this effect on this region in place of what it ran, the other
+    /// regions untouched; the verdict comes back.
+    Replace {
+        region: &'static Region,
+        start: EffectStart,
+        verdict: Sender<Result<(), String>>,
+    },
+    /// The region runs nothing from now on.
+    Stop {
+        region: &'static str,
+        done: Sender<()>,
+    },
 }
 
 /// What the log and the diagnostic may say of an effect's error.
@@ -312,6 +430,10 @@ pub(crate) fn loggable(error: &str, private: bool) -> &str {
 }
 
 /// Engine state for **one** device, as the interface reads it.
+///
+/// While the loop runs the device's regions, `running` says whether one of them
+/// runs, and `effect_id` and `error` are `None`: each region's are in
+/// `regions`.
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineStatus {
@@ -319,6 +441,11 @@ pub struct EngineStatus {
     pub effect_id: Option<String>,
     /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
+    /// One per region of the definition, in its order, while the loop runs
+    /// them; absent while one effect runs on the whole device — a rule's
+    /// included, on a split device.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regions: Option<Vec<RegionEngineStatus>>,
     /// Failed write to the keyboard — nothing to do with the effect code.
     pub device_error: Option<Failure>,
     /// True if the frames actually reach a keyboard.
@@ -332,6 +459,21 @@ pub struct EngineStatus {
     /// knows nothing of rules.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interruption: Option<crate::automations::InterruptionStatus>,
+}
+
+/// One region of a split device, as the interface reads it.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionEngineStatus {
+    pub region: String,
+    pub running: bool,
+    /// What it runs, or ran until it stopped on its own; `None` for nothing.
+    pub effect_id: Option<String>,
+    /// Error coming from the region's effect, already readable.
+    pub error: Option<String>,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_private: bool,
 }
 
 /// A device's state, and which device it belongs to.
@@ -374,6 +516,10 @@ pub struct PreviewStatus {
     /// geometry, not a destination. Naming it lets the interface say "what it
     /// will look like on that keyboard".
     pub layout_of: DeviceRef,
+    /// The region of it whose layout is borrowed, when one is: the frames have
+    /// the device's length, black outside the region.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
     pub running: bool,
     pub effect_id: Option<String>,
     /// Error coming from the effect code, already readable: shown as is.
@@ -524,8 +670,9 @@ pub struct Engine {
     /// out of the table makes the type hold what would otherwise be held by
     /// vigilance.
     preview: Arc<DeviceLoop>,
-    /// The layout the preview borrows, written and cleared with the loop.
-    preview_layout: Mutex<Option<DeviceRef>>,
+    /// The layout the preview borrows — a device's, or one of its regions' —
+    /// written and cleared with the loop.
+    preview_layout: Mutex<Option<(DeviceRef, Option<String>)>>,
     /// Key presses, read only while a loop runs an effect declaring them.
     presses: Arc<Presses>,
     /// The signals held, shared with [`crate::signals`]: a loop reads the values
@@ -535,17 +682,76 @@ pub struct Engine {
     sound: Arc<crate::audio::Sound>,
     /// What the computer is doing, sampled while something reads it (§2.4).
     system: Arc<crate::system::System>,
-    /// What each device's brightness follows (§2.2.2). Here rather than in a
-    /// loop's [`Shared`]: it belongs to the device, and outlives the effect.
+    /// What each device's brightness follows, and each region's of a split
+    /// device (§2.2.2). Here rather than in a loop's [`Shared`]: it belongs to
+    /// the lights, and outlives the effect — a rule's effect over a split
+    /// device is scaled by its regions' follows.
     dimming: dimming::Table,
+}
+
+/// One part to start: an effect, or nothing, on a layout.
+struct PartStart {
+    /// The region it runs on, `None` on the whole device.
+    region: Option<&'static str>,
+    layout: &'static Layout,
+    /// The positions it owns in the device's frame, `None` for every one.
+    owns: Option<Vec<u16>>,
+    start: Option<EffectStart>,
+}
+
+impl PartStart {
+    fn whole(layout: &'static Layout, start: EffectStart) -> Self {
+        Self {
+            region: None,
+            layout,
+            owns: None,
+            start: Some(start),
+        }
+    }
+
+    fn region(region: &'static Region, start: Option<EffectStart>) -> Self {
+        Self {
+            region: Some(region.id),
+            layout: region.layout,
+            owns: Some(region.positions.to_vec()),
+            start,
+        }
+    }
+}
+
+/// Whose follow scales a loop's frame (`docs/design/regions.md` §4).
+#[derive(Clone)]
+enum Follows {
+    /// One over the whole frame: the device's, or a region's for its preview,
+    /// whose frame is black outside it.
+    Whole(Option<String>),
+    /// Each region's over its own lights, whatever draws them: a split device,
+    /// its regions' effects or a rule's over all of it.
+    Regions(&'static [Region]),
+}
+
+impl Follows {
+    /// Each follow's key in the table — `None` for the device's own — and the
+    /// positions it scales, `None` for the whole frame.
+    fn scopes(&self) -> Vec<(Option<&str>, Option<&'static [u16]>)> {
+        match self {
+            Follows::Whole(region) => vec![(region.as_deref(), None)],
+            Follows::Regions(regions) => regions
+                .iter()
+                .map(|r| (Some(r.id), Some(r.positions)))
+                .collect(),
+        }
+    }
 }
 
 /// The loop of **one** device.
 ///
 /// Two locks, and the order between them is fixed: `thread` then `shared`.
-/// `thread` serializes start and stop; `shared` is taken only long enough to
-/// clone or replace an `Arc`, never during a wait. That is what allows reading
-/// a device's state while another one starts — and even while this one starts.
+/// `thread` serializes start and stop, and a region's start or stop, which
+/// waits for the thread's answer holding it; `shared` is taken only long
+/// enough to clone or replace an `Arc`, never during a wait. That is what
+/// allows reading a device's state while another one starts — and even while
+/// this one starts.
 #[derive(Default)]
 struct DeviceLoop {
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -557,31 +763,70 @@ impl DeviceLoop {
         self.shared.lock().unwrap().clone()
     }
 
-    /// True if **this** effect is the one the loop is running.
+    /// True if **this** effect is one the loop is running, on the whole device
+    /// or on a region.
     ///
     /// The id is the one requested from `start`, not a property of the loaded
     /// code: the JavaScript is read once at start and then lives in memory, so
     /// there is nothing to re-read to know it — and that is precisely why
     /// deleting an effect does not get noticed on its own.
     fn runs(&self, effect: &str) -> bool {
-        self.current()
-            .is_some_and(|s| s.effect_id.lock().unwrap().as_deref() == Some(effect))
+        self.current().is_some_and(|s| {
+            s.parts
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.effect_id().as_deref() == Some(effect))
+        })
     }
 
     fn status(&self) -> EngineStatus {
-        match self.current() {
-            None => EngineStatus::default(),
-            Some(s) => EngineStatus {
-                running: !s.stop.load(Ordering::Relaxed),
-                effect_id: s.effect_id.lock().unwrap().clone(),
-                error: s.error.lock().unwrap().clone(),
-                device_error: s.device_error.lock().unwrap().clone(),
-                reaching_keyboard: s.reaching.load(Ordering::Relaxed),
-                to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
-                reads_private: s.reads_private.load(Ordering::Relaxed),
-                // The engine knows nothing of rules: see [`engine_status`].
-                interruption: None,
-            },
+        let Some(s) = self.current() else {
+            return EngineStatus::default();
+        };
+        let parts = s.parts.lock().unwrap().clone();
+        let ended = s.stop.load(Ordering::Relaxed);
+        let device = |running, regions: Option<Vec<RegionEngineStatus>>| EngineStatus {
+            running,
+            effect_id: None,
+            error: None,
+            device_error: s.device_error.lock().unwrap().clone(),
+            reaching_keyboard: s.reaching.load(Ordering::Relaxed),
+            to_keyboard: s.to_keyboard.load(Ordering::Relaxed),
+            reads_private: false,
+            // The engine knows nothing of rules: see [`engine_status`].
+            interruption: None,
+            regions,
+        };
+        match s.regions {
+            None => {
+                let part = parts.first();
+                EngineStatus {
+                    effect_id: part.and_then(|p| p.effect_id()),
+                    error: part.and_then(|p| p.error()),
+                    reads_private: part.is_some_and(|p| p.private()),
+                    ..device(!ended, None)
+                }
+            }
+            Some(regions) => {
+                let regions: Vec<RegionEngineStatus> = regions
+                    .iter()
+                    .map(|r| {
+                        let part = parts.iter().find(|p| p.region == Some(r.id));
+                        RegionEngineStatus {
+                            region: r.id.to_owned(),
+                            running: !ended && part.is_some_and(|p| p.running()),
+                            effect_id: part.and_then(|p| p.effect_id()),
+                            error: part.and_then(|p| p.error()),
+                            reads_private: part.is_some_and(|p| p.private()),
+                        }
+                    })
+                    .collect();
+                EngineStatus {
+                    reads_private: regions.iter().any(|r| r.reads_private),
+                    ..device(regions.iter().any(|r| r.running), Some(regions))
+                }
+            }
         }
     }
 
@@ -607,32 +852,39 @@ impl DeviceLoop {
         // common action of all — every effect deletion goes through it — and
         // tells nobody anything.
         if let Some(s) = was_running {
-            let effect = s.effect_id.lock().unwrap().clone();
-            match target {
-                Target::Device(d) => tracing::info!(device = %d, effect, "effect stopped"),
+            let effect = s.part(None).and_then(|p| p.effect_id());
+            match (target, s.regions) {
+                (Target::Device(d), None) => tracing::info!(device = %d, effect, "effect stopped"),
+                (Target::Device(d), Some(_)) => tracing::info!(device = %d, "regions stopped"),
                 // `debug`: see [`DeviceLoop::start`]. The "lifecycle" level
                 // describes what the keyboard does, and a preview does not touch it.
-                Target::Preview(d) => tracing::debug!(layout = %d, effect, "preview stopped"),
+                (Target::Preview(d), _) => tracing::debug!(layout = %d, effect, "preview stopped"),
             }
         }
     }
 
-    /// Starts an effect on this target. Replaces the one that was running.
+    /// Starts parts on this target — one effect on the whole layout, or the
+    /// device's regions — and replaces whatever ran. Each part's verdict comes
+    /// back in order; `Err` when the thread itself did not start.
+    ///
+    /// A whole device whose effect does not load runs nothing, as before
+    /// regions. A region whose effect does not load runs nothing, and the
+    /// others start all the same.
     #[allow(clippy::too_many_arguments)]
     fn start(
         &self,
         target: Target,
-        effect_id: String,
-        js: String,
-        params: String,
-        bindings: Bindings,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
         inputs: Inputs,
-    ) -> Result<(), String> {
+        parts: Vec<PartStart>,
+        regions: Option<&'static [Region]>,
+        follows: Follows,
+    ) -> Result<Vec<Result<(), String>>, String> {
         // Held from start to finish: this lock is what forbids two loops from
-        // overlapping on this device. It is taken only here and in
-        // [`Self::stop`], and the render thread does not know it.
+        // overlapping on this device. It is taken only here, in [`Self::stop`]
+        // and by a region's start or stop, and the render thread does not know
+        // it.
         let mut thread = self.thread.lock().unwrap();
         let previous = self.shared.lock().unwrap().take();
         if let Some(s) = &previous {
@@ -642,10 +894,8 @@ impl DeviceLoop {
             let _ = h.join();
         }
 
-        let shared = Arc::new(Shared::default());
-        *shared.params.lock().unwrap() = params;
-        *shared.bindings.lock().unwrap() = bindings;
-        *shared.effect_id.lock().unwrap() = Some(effect_id.clone());
+        let (requests, requested) = std::sync::mpsc::channel::<Request>();
+        let shared = Arc::new(Shared::new(regions, requests));
         // The simulator listens to a target, not to an effect: whoever subscribed
         // keeps the frames when another effect starts there. An automation
         // restarts a device's loop without the window knowing — a rule's effect,
@@ -656,77 +906,198 @@ impl DeviceLoop {
             *shared.frames.lock().unwrap() = previous.frames.lock().unwrap().take();
         }
 
-        // The JavaScript context is built **inside** the thread and never
-        // leaves it: QuickJS types do not cross threads, and confining them
-        // here is safer than making them shareable.
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
-        let s = Arc::clone(&shared);
+        // What was asked, for the log once the verdicts are in.
+        let asked: Vec<(Option<&'static str>, Option<String>)> = parts
+            .iter()
+            .map(|p| (p.region, p.start.as_ref().map(|s| s.effect_id.clone())))
+            .collect();
 
-        let thread_effect_id = effect_id.clone();
+        // The JavaScript contexts are built **inside** the thread and never
+        // leave it: QuickJS types do not cross threads, and confining them
+        // here is safer than making them shareable.
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Vec<Result<(), String>>>();
+        let s = Arc::clone(&shared);
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
             .spawn(move || {
                 render_loop(
-                    target,
-                    thread_effect_id,
-                    s,
-                    js,
-                    layout,
-                    out,
-                    inputs,
-                    ready_tx,
+                    target, s, layout, out, inputs, parts, follows, ready_tx, requested,
                 )
             })
             .map_err(|e| format!("render thread not started: {e}"))?;
 
-        // Wait for the load verdict: a syntax error must surface to the call,
+        // Wait for the load verdicts: a syntax error must surface to the call,
         // not be discovered in a status later.
-        match ready_rx.recv() {
-            Ok(Ok(())) => {
-                match target {
-                    Target::Device(d) => {
-                        tracing::info!(device = %d, effect = %effect_id, "effect started")
-                    }
-                    // `debug` and not `info`, and this is not shyness:
-                    // "lifecycle" is the level that describes **what the
-                    // keyboard does**, and a preview does not touch it. Browsing
-                    // the gallery would otherwise fill the log with lines that
-                    // match nothing lit.
-                    Target::Preview(d) => {
-                        tracing::debug!(layout = %d, effect = %effect_id, "preview started")
-                    }
-                }
-                *self.shared.lock().unwrap() = Some(shared);
-                *thread = Some(handle);
-                Ok(())
-            }
-            Ok(Err(e)) => {
-                let _ = handle.join();
-                match target {
-                    // `error`: the requested effect will not run, so the
-                    // lighting is not the one requested. The caller gets the
-                    // same message — the log is for whoever reads it afterwards,
-                    // and for whoever does not have the window in front of them.
-                    Target::Device(d) => {
-                        tracing::error!(device = %d, effect = %effect_id, "effect not started: {e}")
-                    }
-                    // `warn`: nothing is broken on the hardware, but the screen
-                    // will not show what was requested — and that is precisely
-                    // the first place where a freshly written effect breaks.
-                    Target::Preview(d) => {
-                        tracing::warn!(layout = %d, effect = %effect_id, "preview not started: {e}")
-                    }
-                }
-                Err(e)
-            }
-            Err(_) => {
-                let _ = handle.join();
-                let e = "the render thread stopped before loading the effect".to_string();
-                tracing::error!(target = ?target, effect = %effect_id, "{e}");
-                Err(e)
+        let Ok(verdicts) = ready_rx.recv() else {
+            let _ = handle.join();
+            let e = "the render thread stopped before loading the effect".to_string();
+            tracing::error!(target = ?target, "{e}");
+            return Err(e);
+        };
+        for ((region, effect), verdict) in asked.iter().zip(&verdicts) {
+            if let Some(effect) = effect {
+                log_start(target, *region, effect, verdict);
             }
         }
+        if regions.is_none() && verdicts.iter().any(Result::is_err) {
+            let _ = handle.join();
+            return Ok(verdicts);
+        }
+        *self.shared.lock().unwrap() = Some(shared);
+        *thread = Some(handle);
+        Ok(verdicts)
     }
+
+    /// Starts `start` on one region of the loop running the device's regions,
+    /// the others untouched (`docs/design/regions.md` §7). The thread builds
+    /// the context between two frames; on failure the region goes on with what
+    /// it ran.
+    fn start_region(
+        &self,
+        device: DeviceRef,
+        region: &str,
+        start: EffectStart,
+    ) -> Result<(), RegionStart> {
+        // Held while the thread answers, as `start` holds it: starts on one
+        // device are serialised, and the thread never takes it.
+        let _thread = self.thread.lock().unwrap();
+        let (shared, region) = self.running_region(region)?;
+        let effect = start.effect_id.clone();
+        let (verdict, answer) = std::sync::mpsc::channel();
+        shared.request(Request::Replace {
+            region,
+            start,
+            verdict,
+        })?;
+        // No answer: the thread ended meanwhile, on its own.
+        let verdict = answer.recv().map_err(|_| RegionStart::NotRunningRegions)?;
+        log_start(Target::Device(device), Some(region.id), &effect, &verdict);
+        verdict.map_err(RegionStart::Failed)
+    }
+
+    /// The region runs nothing from now on, its lights black; the others go
+    /// on. The loop goes on too, even with no region running anything: see
+    /// [`render_loop`].
+    fn stop_region(&self, device: DeviceRef, region: &str) {
+        let _thread = self.thread.lock().unwrap();
+        let Some(shared) = self.current() else {
+            return;
+        };
+        let stopped = shared.part(Some(region)).and_then(|p| p.effect_id());
+        match self.running_region(region) {
+            Ok((shared, region)) => {
+                let (done, answer) = std::sync::mpsc::channel();
+                if shared
+                    .request(Request::Stop {
+                        region: region.id,
+                        done,
+                    })
+                    .is_ok()
+                {
+                    let _ = answer.recv();
+                }
+            }
+            // No thread to race with: a loop ended on its own still shows the
+            // region's error, which goes with the effect.
+            Err(_) => shared
+                .parts
+                .lock()
+                .unwrap()
+                .retain(|p| p.region != Some(region)),
+        }
+        if let Some(effect) = stopped {
+            tracing::info!(device = %device, region, effect, "effect stopped");
+        }
+    }
+
+    /// The loop's shared state and the region named, while its thread runs
+    /// the device's regions.
+    fn running_region(&self, region: &str) -> Result<(Arc<Shared>, &'static Region), RegionStart> {
+        let shared = self
+            .current()
+            .filter(|s| s.runs_regions())
+            .ok_or(RegionStart::NotRunningRegions)?;
+        let region = shared
+            .regions
+            .and_then(|regions| regions.iter().find(|r| r.id == region))
+            .ok_or(RegionStart::NotRunningRegions)?;
+        Ok((shared, region))
+    }
+
+    /// Stops `effect` wherever this loop runs it — the loop on a whole device,
+    /// the regions running it on a split one — and says whether it ran here.
+    fn stop_effect(&self, device: DeviceRef, effect: &str) -> bool {
+        let Some(s) = self.current() else {
+            return false;
+        };
+        let running: Vec<Option<&'static str>> = s
+            .parts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.effect_id().as_deref() == Some(effect))
+            .map(|p| p.region)
+            .collect();
+        if running.is_empty() {
+            return false;
+        }
+        match s.regions {
+            None => self.stop(Target::Device(device)),
+            Some(_) => {
+                for region in running.into_iter().flatten() {
+                    self.stop_region(device, region);
+                }
+            }
+        }
+        true
+    }
+}
+
+impl Shared {
+    /// Hands a request to the thread; `NotRunningRegions` when it is gone.
+    fn request(&self, request: Request) -> Result<(), RegionStart> {
+        let sender = self.requests.lock().unwrap().clone();
+        sender
+            .ok_or(RegionStart::NotRunningRegions)?
+            .send(request)
+            .map_err(|_| RegionStart::NotRunningRegions)
+    }
+}
+
+/// A start's verdict, in the log.
+fn log_start(target: Target, region: Option<&str>, effect: &str, verdict: &Result<(), String>) {
+    match (target, verdict) {
+        (Target::Device(d), Ok(())) => match region {
+            None => tracing::info!(device = %d, effect, "effect started"),
+            Some(region) => tracing::info!(device = %d, region, effect, "effect started"),
+        },
+        // `error`: the requested effect will not run, so the lighting is not
+        // the one requested. The caller gets the same message — the log is for
+        // whoever reads it afterwards, and for whoever does not have the window
+        // in front of them.
+        (Target::Device(d), Err(e)) => match region {
+            None => tracing::error!(device = %d, effect, "effect not started: {e}"),
+            Some(region) => {
+                tracing::error!(device = %d, region, effect, "effect not started: {e}")
+            }
+        },
+        // `debug` and not `info`, and this is not shyness: "lifecycle" is the
+        // level that describes **what the keyboard does**, and a preview does
+        // not touch it. Browsing the gallery would otherwise fill the log with
+        // lines that match nothing lit.
+        (Target::Preview(d), Ok(())) => tracing::debug!(layout = %d, effect, "preview started"),
+        // `warn`: nothing is broken on the hardware, but the screen will not
+        // show what was requested — and that is precisely the first place where
+        // a freshly written effect breaks.
+        (Target::Preview(d), Err(e)) => {
+            tracing::warn!(layout = %d, effect, "preview not started: {e}")
+        }
+    }
+}
+
+/// The verdict of a start of one part.
+fn single(verdicts: Vec<Result<(), String>>) -> Result<(), String> {
+    verdicts.into_iter().next().unwrap_or(Ok(()))
 }
 
 impl Engine {
@@ -789,14 +1160,16 @@ impl Engine {
     /// — does stay visible, with `running` false and the error along with it:
     /// that is the only way to know why the screen froze.
     pub fn preview_status(&self) -> Option<PreviewStatus> {
-        let layout_of = (*self.preview_layout.lock().unwrap())?;
+        let (layout_of, region) = self.preview_layout.lock().unwrap().clone()?;
         let s = self.preview.current()?;
+        let part = s.part(None);
         let status = PreviewStatus {
             layout_of,
+            region,
             running: !s.stop.load(Ordering::Relaxed),
-            effect_id: s.effect_id.lock().unwrap().clone(),
-            error: s.error.lock().unwrap().clone(),
-            reads_private: s.reads_private.load(Ordering::Relaxed),
+            effect_id: part.as_ref().and_then(|p| p.effect_id()),
+            error: part.as_ref().and_then(|p| p.error()),
+            reads_private: part.is_some_and(|p| p.private()),
         };
         Some(status)
     }
@@ -840,8 +1213,11 @@ impl Engine {
     /// Starts — or replaces — the preview, **without touching any device**.
     ///
     /// `layout_of` names the device whose layout is borrowed; it is neither
-    /// open, nor controlled, nor even necessarily plugged in. The output is
-    /// [`NoOutput`]: not a single byte goes to a keyboard, whatever happens.
+    /// open, nor controlled, nor even necessarily plugged in. With `region`,
+    /// `layout` is that region's: the effect sees the region alone, the frames
+    /// keep the device's length, black outside it, and its follow is the
+    /// region's. The output is [`NoOutput`]: not a single byte goes to a
+    /// keyboard, whatever happens.
     ///
     /// Replacing costs one QuickJS context destroyed and another one built.
     /// That is not free, and that is why the rate is bounded **on the gesture
@@ -852,26 +1228,31 @@ impl Engine {
     pub fn start_preview(
         &self,
         layout_of: DeviceRef,
-        effect_id: String,
-        js: String,
-        params: String,
-        bindings: Bindings,
+        region: Option<&str>,
+        start: EffectStart,
         layout: &'static Layout,
     ) -> Result<(), String> {
         // Written **before** the start: if the start fails, the loop is empty
         // and `preview_status` returns `None` anyway — whereas a layout set
         // afterwards would be missing for the whole load.
-        *self.preview_layout.lock().unwrap() = Some(layout_of);
-        self.preview.start(
+        *self.preview_layout.lock().unwrap() = Some((layout_of, region.map(str::to_owned)));
+        let part = PartStart {
+            region: None,
+            layout,
+            // Black outside the region, whatever the effect paints there.
+            owns: region.map(|_| layout.keys.iter().map(|k| k.index).collect()),
+            start: Some(start),
+        };
+        let verdicts = self.preview.start(
             Target::Preview(layout_of),
-            effect_id,
-            js,
-            params,
-            bindings,
             layout,
             Box::new(NoOutput),
             self.inputs(),
-        )
+            vec![part],
+            None,
+            Follows::Whole(region.map(str::to_owned)),
+        )?;
+        single(verdicts)
     }
 
     /// Stops the preview. No device effect is touched.
@@ -879,20 +1260,20 @@ impl Engine {
         // The layout is taken before the stop, so that the log line names the
         // one that was borrowed rather than nothing.
         let borrowed = self.preview_layout.lock().unwrap().take();
-        if let Some(device) = borrowed {
+        if let Some((device, _)) = borrowed {
             self.preview.stop(Target::Preview(device));
         }
     }
 
     pub fn set_preview_params(&self, params: String) {
-        if let Some(s) = self.preview.current() {
-            *s.params.lock().unwrap() = params;
+        if let Some(p) = self.preview.current().and_then(|s| s.part(None)) {
+            *p.params.lock().unwrap() = params;
         }
     }
 
     pub fn set_preview_bindings(&self, bindings: Bindings) {
-        if let Some(s) = self.preview.current() {
-            *s.bindings.lock().unwrap() = bindings;
+        if let Some(p) = self.preview.current().and_then(|s| s.part(None)) {
+            *p.bindings.lock().unwrap() = bindings;
         }
     }
 
@@ -911,7 +1292,8 @@ impl Engine {
     ///
     /// All devices, not just the one being looked at: the same effect can be
     /// started on as many keyboards as one likes, and missing one would leave it
-    /// in that invisible state.
+    /// in that invisible state. On a split device, the regions running it stop
+    /// and the others go on.
     ///
     /// The device's status line does not disappear, but it stops naming the
     /// effect — that is what [`DeviceLoop::stop`] does, and it is exactly what
@@ -930,15 +1312,14 @@ impl Engine {
             // The table lock is already released — `all` copied the pointers.
             // A stop waits for a thread to end, and a command aimed at another
             // device is never made to wait.
-            if l.runs(effect) {
-                l.stop(Target::Device(device));
+            if l.stop_effect(device, effect) {
                 stopped.push(device);
             }
         }
         stopped
     }
 
-    /// Renames this effect wherever it runs, preview included.
+    /// Renames this effect wherever it runs, preview and regions included.
     ///
     /// The loops keep the JavaScript they loaded at start: only the id they
     /// report changes. That is what lets renaming an effect leave the lighting as
@@ -950,8 +1331,9 @@ impl Engine {
             .map(|(_, l)| l)
             .chain(std::iter::once(Arc::clone(&self.preview)));
         for l in loops {
-            if let Some(s) = l.current() {
-                let mut id = s.effect_id.lock().unwrap();
+            let Some(s) = l.current() else { continue };
+            for part in s.parts.lock().unwrap().iter() {
+                let mut id = part.effect_id.lock().unwrap();
                 if id.as_deref() == Some(from) {
                     *id = Some(to.to_owned());
                 }
@@ -959,15 +1341,19 @@ impl Engine {
         }
     }
 
-    pub fn set_params(&self, device: DeviceRef, params: String) {
-        if let Some(s) = self.shared(device) {
-            *s.params.lock().unwrap() = params;
+    /// The parameters of the part on `region`, or on the whole device with
+    /// `None`, re-read from its next frame. Nothing when that part does not
+    /// run — a region during a rule's interruption among others.
+    pub fn set_params(&self, device: DeviceRef, region: Option<&str>, params: String) {
+        if let Some(p) = self.shared(device).and_then(|s| s.part(region)) {
+            *p.params.lock().unwrap() = params;
         }
     }
 
-    pub fn set_bindings(&self, device: DeviceRef, bindings: Bindings) {
-        if let Some(s) = self.shared(device) {
-            *s.bindings.lock().unwrap() = bindings;
+    /// The bindings of the part on `region`, as [`Self::set_params`].
+    pub fn set_bindings(&self, device: DeviceRef, region: Option<&str>, bindings: Bindings) {
+        if let Some(p) = self.shared(device).and_then(|s| s.part(region)) {
+            *p.bindings.lock().unwrap() = bindings;
         }
     }
 
@@ -996,19 +1382,26 @@ impl Engine {
         }
     }
 
-    /// What this device's brightness follows, `None` for nothing: its loop and
-    /// a preview on its layout read it from the next frame.
-    pub fn set_dimming(&self, device: DeviceRef, dimming: Option<dimming::Dimming>) {
+    /// What this device's brightness follows — or one of its regions', with
+    /// `region` — `None` for nothing: its loop and a preview on its layout read
+    /// it from the next frame.
+    pub fn set_dimming(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        dimming: Option<dimming::Dimming>,
+    ) {
+        let key = (device, region.map(str::to_owned));
         let mut table = self.dimming.lock().unwrap();
         match dimming {
-            Some(d) => table.insert(device, d),
-            None => table.remove(&device),
+            Some(d) => table.insert(key, d),
+            None => table.remove(&key),
         };
     }
 
-    /// Every device's at once, as the file keeps them: at startup, and when the
-    /// configuration is reset.
-    pub fn set_dimmings(&self, all: HashMap<DeviceRef, dimming::Dimming>) {
+    /// Every device's and region's at once, as the file keeps them: at
+    /// startup, and when the configuration is reset.
+    pub fn set_dimmings(&self, all: dimming::Dimmings) {
         *self.dimming.lock().unwrap() = all;
     }
 
@@ -1024,31 +1417,96 @@ impl Engine {
         }
     }
 
-    /// Starts an effect on a device. Replaces the one running there.
+    /// Starts an effect on a whole device. Replaces whatever ran there, its
+    /// regions included.
+    ///
+    /// `split` says whose follows scale the frame: the regions' on a split
+    /// device a rule interrupts, the device's otherwise.
     ///
     /// The other devices are not touched — not their loop, not their frame
     /// rate, not their error state.
-    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &self,
         device: DeviceRef,
-        effect_id: String,
-        js: String,
-        params: String,
-        bindings: Bindings,
+        start: EffectStart,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
+        split: bool,
     ) -> Result<(), String> {
-        self.device_loop(device).start(
+        let follows = if split && !layout.regions.is_empty() {
+            Follows::Regions(layout.regions)
+        } else {
+            Follows::Whole(None)
+        };
+        let verdicts = self.device_loop(device).start(
             Target::Device(device),
-            effect_id,
-            js,
-            params,
-            bindings,
             layout,
             out,
             self.inputs(),
-        )
+            vec![PartStart::whole(layout, start)],
+            None,
+            follows,
+        )?;
+        single(verdicts)
+    }
+
+    /// Starts the device's regions, each with its effect or none, replacing
+    /// whatever ran. A region whose effect does not load runs nothing, and its
+    /// verdict says why; the loop runs even when no region runs anything,
+    /// keeping their lights black.
+    pub fn start_regions(
+        &self,
+        device: DeviceRef,
+        layout: &'static Layout,
+        out: Box<dyn DeviceOut>,
+        regions: Vec<(&'static Region, Option<EffectStart>)>,
+    ) -> Vec<(&'static str, Result<(), String>)> {
+        let ids: Vec<&'static str> = regions.iter().map(|(r, _)| r.id).collect();
+        let parts = regions
+            .into_iter()
+            .map(|(region, start)| PartStart::region(region, start))
+            .collect();
+        let started = self.device_loop(device).start(
+            Target::Device(device),
+            layout,
+            out,
+            self.inputs(),
+            parts,
+            Some(layout.regions),
+            Follows::Regions(layout.regions),
+        );
+        match started {
+            Ok(verdicts) => ids.into_iter().zip(verdicts).collect(),
+            Err(e) => ids.into_iter().map(|id| (id, Err(e.clone()))).collect(),
+        }
+    }
+
+    /// Starts an effect on one region, the others untouched: their clocks go
+    /// on. `Err(NotRunningRegions)` when the loop does not run the device's
+    /// regions: the caller then calls [`Self::start_regions`].
+    pub fn start_region(
+        &self,
+        device: DeviceRef,
+        region: &str,
+        start: EffectStart,
+    ) -> Result<(), RegionStart> {
+        match self.existing(device) {
+            Some(l) => l.start_region(device, region, start),
+            None => Err(RegionStart::NotRunningRegions),
+        }
+    }
+
+    /// The region runs nothing, its lights black; the others go on.
+    pub fn stop_region(&self, device: DeviceRef, region: &str) {
+        if let Some(l) = self.existing(device) {
+            l.stop_region(device, region);
+        }
+    }
+
+    /// True while the device's loop runs its regions: a rule's interruption is
+    /// not them.
+    pub fn runs_regions(&self, device: DeviceRef) -> bool {
+        self.shared(device).is_some_and(|s| s.runs_regions())
     }
 }
 
@@ -1058,103 +1516,447 @@ impl Drop for Engine {
     }
 }
 
-/// Prepares the QuickJS context, then runs until stopped.
-#[allow(clippy::too_many_arguments)]
-fn render_loop(
-    target: Target,
-    effect_id: String,
-    shared: Arc<Shared>,
-    js: String,
-    layout: &'static Layout,
-    out: Box<dyn DeviceOut>,
-    inputs: Inputs,
-    ready: std::sync::mpsc::Sender<Result<(), String>>,
-) {
-    let Inputs {
-        presses,
-        signals,
-        sound,
-        system,
-        dimming,
-    } = inputs;
-    // **The span, and it is the reason `tracing` was chosen.** There is one
-    // loop per device: "write refused" is useless without knowing which one.
-    // Opened here, it carries the device and the effect until the thread ends,
-    // and everything logged below — including in [`emit`] — carries them too,
-    // without a single call having to pass them.
-    //
-    // Two names, not a field to read: in a log read afterwards, "render" and
-    // "preview" must be told apart at a glance — an
-    // effect error in one did not turn off the keyboard, in the other it did.
-    let span = match target {
-        Target::Device(d) => tracing::info_span!("render", device = %d, effect = %effect_id),
-        Target::Preview(d) => tracing::info_span!("preview", layout = %d, effect = %effect_id),
-    };
-    let _entered = span.enter();
+/// One part as its thread runs it: an effect, its context, its clock.
+struct Part {
+    shared: Arc<PartShared>,
+    /// The positions it owns in the device's frame, `None` for every one.
+    owns: Option<Vec<u16>>,
+    /// Its region and effect, for what it logs; none on the whole device, whose
+    /// loop's span already names its effect.
+    span: tracing::Span,
+    /// The deadline its interrupt handler checks.
+    budget: Rc<Budget>,
+    // The context before its runtime: fields drop in declaration order, and the
+    // runtime carries the module resolver the context uses until it goes.
+    ctx: Context,
+    _rt: Runtime,
+    /// Where its `time` counts from: replacing one region's effect restarts
+    /// that region's clock alone.
+    started: Instant,
+    frame_index: u32,
+    consecutive_errors: u32,
+    reads_signals: bool,
+    reads_audio: bool,
+    reads_system: bool,
+    /// The sound capture, held while the effect declares it or a setting
+    /// follows the sound (§2.2).
+    hearing: Option<crate::audio::Lease>,
+    /// The system sampler, held the same way (§2.4).
+    watching: Option<crate::system::Lease>,
+    keys: Option<(presses::Reading, presses::Positions)>,
+    /// Its last frame rendered: what its lights show while it fails for a
+    /// moment, as a whole device keeps its last frame.
+    last: Option<Vec<u8>>,
+}
 
-    let frame_len = layout.led_count();
+/// What one frame did to a part.
+enum Outcome {
+    Rendered,
+    Failed,
+    /// Failed [`MAX_CONSECUTIVE_ERRORS`] times in a row: it stops, with this
+    /// error.
+    Stopped(String),
+}
 
-    // The budget is born here and never leaves the thread: the interrupt
-    // handler crosses no boundary, and the deadline is written only by this
-    // loop, just before each run of effect code.
-    let budget = Rc::new(Budget::default());
+impl Part {
+    /// Loads an effect on a part's layout, under [`LOAD_BUDGET`].
+    fn load(
+        region: Option<&'static str>,
+        layout: &'static Layout,
+        owns: Option<Vec<u16>>,
+        start: EffectStart,
+        inputs: &Inputs,
+    ) -> Result<Self, String> {
+        let shared = Arc::new(PartShared::new(region, &start));
+        let span = match region {
+            Some(region) => tracing::info_span!("region", region, effect = %start.effect_id),
+            None => tracing::Span::none(),
+        };
 
-    // Loading gets its own: the module body runs once, before the first frame,
-    // hence outside any frame budget.
-    budget.grant(LOAD_BUDGET);
-
-    // `_rt` must live as long as the context: it carries the module resolver.
-    // Dropping it here would make every `import` unresolvable on the first
-    // frame.
-    let (_rt, ctx) = match prepare_budgeted(&js, layout, &budget) {
-        Ok(c) => {
-            let _ = ready.send(Ok(()));
-            c
-        }
-        Err(e) => {
-            let _ = ready.send(Err(name_the_cause(
+        // The budget is born here and never leaves the thread: the interrupt
+        // handler crosses no boundary, and the deadline is written only by this
+        // loop, just before each run of effect code.
+        let budget = Rc::new(Budget::default());
+        // Loading gets its own: the module body runs once, before the first
+        // frame, hence outside any frame budget.
+        budget.grant(LOAD_BUDGET);
+        // The runtime must live as long as the context: it carries the module
+        // resolver. Dropping it would make every `import` unresolvable on the
+        // first frame.
+        let (rt, ctx) = prepare_budgeted(&start.js, layout, &budget).map_err(|e| {
+            name_the_cause(
                 e,
                 &budget,
                 "loading the effect",
                 &format!("{} s", LOAD_BUDGET.as_secs()),
-            )));
-            return;
+            )
+        })?;
+
+        // Presses are read only for an effect that declares them, and for as
+        // long as this part runs it: the guard ends with it
+        // (`docs/design/key-input.md` §3). A device's loop reads its own
+        // keyboard; the preview draws a layout, not a device, and reads them
+        // all.
+        //
+        // `started` first: a press that arrives once the guard exists is never
+        // older than the effect's clock.
+        let started = Instant::now();
+        let declares = |name: &str| {
+            ctx.with(|ctx| ctx.globals().get::<_, bool>(name))
+                .unwrap_or(false)
+        };
+        let reads_keys = declares("__candeo_reads_keys");
+        // The bag of signals, for an effect declaring it (§2.3.1). Bound values
+        // need no declaration: they reach any effect through its parameters.
+        let reads_signals = declares("__candeo_reads_signals");
+        // The sound playing, for an effect declaring it: the capture runs while
+        // at least one reader holds it (§2.2).
+        let reads_audio = declares("__candeo_reads_audio");
+        // What the computer is doing, for an effect declaring it: sampled while
+        // at least one reader holds it, and held the same way (§2.4).
+        let reads_system = declares("__candeo_reads_system");
+        shared
+            .reads_private
+            .store(reads_keys || reads_signals, Ordering::Relaxed);
+        let keys = reads_keys.then(|| (inputs.presses.read(), presses::positions(layout)));
+        Ok(Self {
+            shared,
+            owns,
+            span,
+            budget,
+            ctx,
+            _rt: rt,
+            started,
+            frame_index: 0,
+            consecutive_errors: 0,
+            reads_signals,
+            reads_audio,
+            reads_system,
+            hearing: reads_audio.then(|| inputs.sound.lease()),
+            watching: reads_system.then(|| inputs.system.lease()),
+            keys,
+            last: None,
+        })
+    }
+
+    /// One frame of its effect, counted: three outcomes, and the transitions
+    /// logged once, not once per frame.
+    fn frame(
+        &mut self,
+        inputs: &Inputs,
+        keyboard: Option<(u16, u16)>,
+        frame_len: usize,
+    ) -> Outcome {
+        let span = self.span.clone();
+        let _entered = span.enter();
+        match self.render(inputs, keyboard, frame_len) {
+            Ok(()) => {
+                self.consecutive_errors = 0;
+                // The effect recovered: clear the error, otherwise the
+                // interface would show a stale one indefinitely.
+                let before = self.shared.error.lock().unwrap().take();
+                if journal::transition(before.as_deref(), None) == journal::Transition::Recovered {
+                    tracing::info!("effect recovered");
+                }
+                Outcome::Rendered
+            }
+            Err(e) => {
+                // Exceeding a limit opens no new path: it is a frame error like
+                // any other, which the counter below eventually turns into a
+                // clean stop.
+                self.consecutive_errors += 1;
+                // **One line when the failure starts, not one per frame.** At 30
+                // frames per second, logging every failure would produce thirty
+                // lines per second and bury the one that names the cause.
+                // [`journal::transition`] holds the rule.
+                let before = self.shared.error.lock().unwrap().replace(e.clone());
+                if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
+                {
+                    tracing::warn!(
+                        "effect started failing: {}",
+                        loggable(&e, self.shared.private())
+                    );
+                }
+                if self.consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    self.shared.stopped.store(true, Ordering::Relaxed);
+                    Outcome::Stopped(e)
+                } else {
+                    Outcome::Failed
+                }
+            }
+        }
+    }
+
+    /// Renders one frame on its layout, which it keeps as its last.
+    fn render(
+        &mut self,
+        inputs: &Inputs,
+        keyboard: Option<(u16, u16)>,
+        frame_len: usize,
+    ) -> Result<(), String> {
+        let params = self.shared.params.lock().unwrap().clone();
+        let bindings = self.shared.bindings.lock().unwrap().clone();
+        let clock_ms = wall_clock_ms();
+        // The store is touched only when something reads it: most effects bind
+        // nothing and declare nothing.
+        let (mut bound, held) = if bindings.is_empty() && !self.reads_signals {
+            (String::new(), String::new())
+        } else {
+            inputs.signals.lock().unwrap().frame_inputs(
+                &bindings,
+                self.reads_signals,
+                clock_ms as i64,
+            )
+        };
+        let follows_sound = bindings
+            .values()
+            .any(|s| crate::audio::analysis::Source::parse(s).is_some());
+        // Held while the effect declares it or a setting follows the sound; the
+        // bindings change while the loop runs, so it is taken and let go per
+        // frame.
+        match (self.reads_audio || follows_sound, self.hearing.is_some()) {
+            (true, false) => self.hearing = Some(inputs.sound.lease()),
+            (false, true) => self.hearing = None,
+            _ => {}
+        }
+        if follows_sound {
+            bound = with_levels(&bound, sound_bound(&bindings, &inputs.sound.frame()));
+        }
+        let follows_system = bindings
+            .values()
+            .any(|s| crate::system::Source::parse(s).is_some());
+        match (self.reads_system || follows_system, self.watching.is_some()) {
+            (true, false) => self.watching = Some(inputs.system.lease()),
+            (false, true) => self.watching = None,
+            _ => {}
+        }
+        if follows_system {
+            bound = with_levels(&bound, system_bound(&bindings, &inputs.system));
+        }
+        let now = Instant::now();
+        let time = now.duration_since(self.started).as_secs_f64();
+        let heard = if self.reads_audio {
+            inputs.sound.latest()
+        } else {
+            String::new()
+        };
+        let busy = if self.reads_system {
+            inputs.system.to_json()
+        } else {
+            String::new()
+        };
+        let pressed = match &self.keys {
+            Some((reading, positions)) => {
+                positions.to_json(&reading.since(self.started, now, keyboard), now, time)
+            }
+            None => String::new(),
+        };
+
+        // The deadline is renewed before **every** frame: that is the whole
+        // point of the shared cell. The handler, for its part, was set once and
+        // for all on the `Runtime`.
+        self.budget.grant(FRAME_BUDGET);
+
+        let rendered = render_with(
+            &self.ctx,
+            time,
+            self.frame_index,
+            &FrameInputs {
+                params: &params,
+                presses: &pressed,
+                clock_ms,
+                bound: &bound,
+                signals: &held,
+                audio: &heard,
+                system: &busy,
+            },
+            frame_len,
+        );
+        self.frame_index = self.frame_index.wrapping_add(1);
+        match rendered {
+            Ok(bytes) => {
+                self.last = Some(bytes);
+                Ok(())
+            }
+            Err(e) => Err(name_the_cause(
+                e,
+                &self.budget,
+                "the effect",
+                &format!("{} ms per frame", FRAME_BUDGET.as_millis()),
+            )),
+        }
+    }
+}
+
+/// The device's frame from its parts' (`docs/design/regions.md` §7): black,
+/// then each position takes the colour of the part owning it — every position
+/// for a part owning them all. A part that has drawn nothing yet leaves its
+/// lights black.
+fn compose<'a>(
+    len: usize,
+    parts: impl IntoIterator<Item = (Option<&'a [u16]>, Option<&'a [u8]>)>,
+) -> Vec<u8> {
+    let mut frame = vec![0; len];
+    for (owns, bytes) in parts {
+        let Some(bytes) = bytes else { continue };
+        match owns {
+            None => frame.copy_from_slice(&bytes[..len]),
+            Some(positions) => {
+                for &position in positions {
+                    let at = usize::from(position) * 3;
+                    if let (Some(to), Some(from)) =
+                        (frame.get_mut(at..at + 3), bytes.get(at..at + 3))
+                    {
+                        to.copy_from_slice(from);
+                    }
+                }
+            }
+        }
+    }
+    frame
+}
+
+/// The factor a follow gives this frame, from its floor to 1 (§2.2.2): the
+/// sound, the computer, or a signal. A value that cannot be read leaves the
+/// brightness the slider sets.
+fn follow_factor(d: &dimming::Dimming, inputs: &Inputs, clock_ms: f64) -> f32 {
+    if d.sound().is_some() {
+        d.sound_factor(&inputs.sound.frame())
+    } else if let Some(source) = d.system() {
+        d.level_factor(inputs.system.level(source))
+    } else {
+        let store = inputs.signals.lock().unwrap();
+        d.signal_factor(
+            d.signal()
+                .and_then(|name| store.value(name, clock_ms as i64)),
+        )
+    }
+}
+
+/// Takes `lease` while `wanted`, and lets it go once not.
+fn hold<T>(lease: &mut Option<T>, wanted: bool, take: impl FnOnce() -> T) {
+    match (wanted, lease.is_some()) {
+        (true, false) => *lease = Some(take()),
+        (false, true) => *lease = None,
+        _ => {}
+    }
+}
+
+/// Serves a command's request between two frames.
+fn serve(request: Request, parts: &mut Vec<Part>, shared: &Shared, inputs: &Inputs) {
+    match request {
+        Request::Replace {
+            region,
+            start,
+            verdict,
+        } => {
+            let owns = Some(region.positions.to_vec());
+            match Part::load(Some(region.id), region.layout, owns, start, inputs) {
+                Ok(part) => {
+                    // The part replaced goes with its context, on this thread.
+                    parts.retain(|p| p.shared.region != Some(region.id));
+                    {
+                        let mut table = shared.parts.lock().unwrap();
+                        table.retain(|p| p.region != Some(region.id));
+                        table.push(Arc::clone(&part.shared));
+                    }
+                    parts.push(part);
+                    let _ = verdict.send(Ok(()));
+                }
+                // The region goes on with what it ran.
+                Err(e) => {
+                    let _ = verdict.send(Err(e));
+                }
+            }
+        }
+        Request::Stop { region, done } => {
+            parts.retain(|p| p.shared.region != Some(region));
+            shared
+                .parts
+                .lock()
+                .unwrap()
+                .retain(|p| p.region != Some(region));
+            let _ = done.send(());
+        }
+    }
+}
+
+/// Loads the parts, then runs until stopped.
+///
+/// A loop on a split device goes on with no part left once its last region is
+/// stopped, writing black: a family's pace drops a frame sent too soon after the
+/// last (`Template::frame` in `definition.rs`), so a single black frame on the
+/// way out would be lost three times out of four on the Alienware zones. An
+/// unchanged frame costs a comparison there.
+#[allow(clippy::too_many_arguments)]
+fn render_loop(
+    target: Target,
+    shared: Arc<Shared>,
+    layout: &'static Layout,
+    out: Box<dyn DeviceOut>,
+    inputs: Inputs,
+    starts: Vec<PartStart>,
+    follows: Follows,
+    ready: Sender<Vec<Result<(), String>>>,
+    requests: Receiver<Request>,
+) {
+    let whole = shared.regions.is_none();
+    let effect_id = match starts.as_slice() {
+        [only] => only
+            .start
+            .as_ref()
+            .map_or_else(String::new, |s| s.effect_id.clone()),
+        _ => String::new(),
+    };
+    // **The span, and it is the reason `tracing` was chosen.** There is one
+    // loop per device: "write refused" is useless without knowing which one.
+    // Opened here, it carries the device and the effect until the thread ends,
+    // and everything logged below — including in [`emit`] — carries them too,
+    // without a single call having to pass them. On a split device each part's
+    // own span names its region and effect.
+    //
+    // Two names, not a field to read: in a log read afterwards, "render" and
+    // "preview" must be told apart at a glance — an effect error in one did not
+    // turn off the keyboard, in the other it did.
+    let span = match (target, &follows) {
+        (Target::Device(d), _) if whole => {
+            tracing::info_span!("render", device = %d, effect = %effect_id)
+        }
+        (Target::Device(d), _) => tracing::info_span!("render", device = %d),
+        (Target::Preview(d), Follows::Whole(Some(region))) => {
+            tracing::info_span!("preview", layout = %d, region = %region, effect = %effect_id)
+        }
+        (Target::Preview(d), _) => {
+            tracing::info_span!("preview", layout = %d, effect = %effect_id)
         }
     };
+    let _entered = span.enter();
 
-    // Presses are read only for an effect that declares them, and for as long as
-    // this loop runs it: the guard ends with the thread
-    // (`docs/design/key-input.md` §3). A device's loop reads its own keyboard; the
-    // preview draws a layout, not a device, and reads them all.
-    //
-    // `started` first: a press that arrives once the guard exists is never older
-    // than the effect's clock.
-    let started = Instant::now();
-    let reads_keys = ctx
-        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_keys"))
-        .unwrap_or(false);
-    // The bag of signals, for an effect declaring it (§2.3.1). Bound values
-    // need no declaration: they reach any effect through its parameters.
-    let reads_signals = ctx
-        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_signals"))
-        .unwrap_or(false);
-    // The sound playing, for an effect declaring it: the capture runs while at
-    // least one loop holds it (§2.2).
-    let reads_audio = ctx
-        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_audio"))
-        .unwrap_or(false);
-    // Held while the effect declares it or a setting follows the sound; the
-    // bindings change while the loop runs, so it is taken and let go per frame.
-    let mut hearing = reads_audio.then(|| sound.lease());
-    // What the computer is doing, for an effect declaring it: sampled while at
-    // least one reader holds it, and held the same way (§2.4).
-    let reads_system = ctx
-        .with(|ctx| ctx.globals().get::<_, bool>("__candeo_reads_system"))
-        .unwrap_or(false);
-    let mut watching = reads_system.then(|| system.lease());
-    let reads_private = reads_keys || reads_signals;
-    shared.reads_private.store(reads_private, Ordering::Relaxed);
-    let keys = reads_keys.then(|| (presses.read(), presses::positions(layout)));
+    let frame_len = layout.led_count();
+    let mut parts: Vec<Part> = Vec::new();
+    let mut verdicts = Vec::new();
+    for part in starts {
+        let Some(start) = part.start else {
+            verdicts.push(Ok(()));
+            continue;
+        };
+        match Part::load(part.region, part.layout, part.owns, start, &inputs) {
+            Ok(loaded) => {
+                verdicts.push(Ok(()));
+                parts.push(loaded);
+            }
+            Err(e) => verdicts.push(Err(e)),
+        }
+    }
+    *shared.parts.lock().unwrap() = parts.iter().map(|p| Arc::clone(&p.shared)).collect();
+    // A whole device's effect that does not load runs nothing; the command
+    // says why.
+    let loaded = !whole || !parts.is_empty();
+    let _ = ready.send(verdicts);
+    if !loaded {
+        return;
+    }
+
     let keyboard = match target {
         Target::Device(d) => Some((d.vid, d.pid)),
         Target::Preview(_) => None,
@@ -1169,156 +1971,96 @@ fn render_loop(
 
     let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
     let mut deadline = Instant::now();
-    let mut frame_index: u32 = 0;
-    let mut consecutive_errors: u32 = 0;
+    // What the follows read, held by the loop rather than by a part: they
+    // belong to the device and its regions, not to an effect.
+    let mut hearing = None;
+    let mut watching = None;
 
     while !shared.stop.load(Ordering::Relaxed) {
-        let params = shared.params.lock().unwrap().clone();
-        let bindings = shared.bindings.lock().unwrap().clone();
-        let clock_ms = wall_clock_ms();
-        // The store is touched only when something reads it: most effects bind
-        // nothing and declare nothing.
-        let (mut bound, held) = if bindings.is_empty() && !reads_signals {
-            (String::new(), String::new())
-        } else {
-            signals
-                .lock()
-                .unwrap()
-                .frame_inputs(&bindings, reads_signals, clock_ms as i64)
-        };
-        let follows_sound = bindings
-            .values()
-            .any(|s| crate::audio::analysis::Source::parse(s).is_some());
-        let dims = dimming.lock().unwrap().get(&device).cloned();
-        let dims_by_sound = dims.as_ref().is_some_and(|d| d.sound().is_some());
-        match (
-            reads_audio || follows_sound || dims_by_sound,
-            hearing.is_some(),
-        ) {
-            (true, false) => hearing = Some(sound.lease()),
-            (false, true) => hearing = None,
-            _ => {}
+        for request in requests.try_iter() {
+            serve(request, &mut parts, &shared, &inputs);
         }
-        let heard_now = (follows_sound || dims_by_sound).then(|| sound.frame());
-        if let (true, Some(frame)) = (follows_sound, &heard_now) {
-            bound = with_levels(&bound, sound_bound(&bindings, frame));
-        }
-        let follows_system = bindings
-            .values()
-            .any(|s| crate::system::Source::parse(s).is_some());
-        let dims_by_system = dims.as_ref().is_some_and(|d| d.system().is_some());
-        match (
-            reads_system || follows_system || dims_by_system,
-            watching.is_some(),
-        ) {
-            (true, false) => watching = Some(system.lease()),
-            (false, true) => watching = None,
-            _ => {}
-        }
-        if follows_system {
-            bound = with_levels(&bound, system_bound(&bindings, &system));
-        }
-        let factor = match (&dims, &heard_now) {
-            (None, _) => 1.0,
-            (Some(d), Some(frame)) if dims_by_sound => d.sound_factor(frame),
-            (Some(d), _) if dims_by_system => {
-                d.level_factor(d.system().and_then(|s| system.level(s)))
-            }
-            (Some(d), _) => {
-                let store = signals.lock().unwrap();
-                d.signal_factor(
-                    d.signal()
-                        .and_then(|name| store.value(name, clock_ms as i64)),
-                )
-            }
-        };
-        let now = Instant::now();
-        let time = now.duration_since(started).as_secs_f64();
-        let heard = if reads_audio {
-            sound.latest()
-        } else {
-            String::new()
-        };
-        let busy = if reads_system {
-            system.to_json()
-        } else {
-            String::new()
-        };
-        let pressed = match &keys {
-            Some((reading, positions)) => {
-                positions.to_json(&reading.since(started, now, keyboard), now, time)
-            }
-            None => String::new(),
-        };
 
-        // The deadline is renewed before **every** frame: that is the whole
-        // point of the shared cell. The handler, for its part, was set once and
-        // for all on the `Runtime`.
-        budget.grant(FRAME_BUDGET);
-
-        match render_with(
-            &ctx,
-            time,
-            frame_index,
-            &FrameInputs {
-                params: &params,
-                presses: &pressed,
-                clock_ms,
-                bound: &bound,
-                signals: &held,
-                audio: &heard,
-                system: &busy,
-            },
-            frame_len,
-        ) {
-            Ok(mut bytes) => {
-                consecutive_errors = 0;
-                dimming::dim(&mut bytes, factor);
-                // The effect recovered: clear the error, otherwise the
-                // interface would show a stale one indefinitely.
-                let before = shared.error.lock().unwrap().take();
-                if journal::transition(before.as_deref(), None) == journal::Transition::Recovered {
-                    tracing::info!("effect recovered");
-                }
-                emit(&shared, out.as_ref(), &bytes);
+        let mut rendered = false;
+        let mut stopped = Vec::new();
+        for (i, part) in parts.iter_mut().enumerate() {
+            match part.frame(&inputs, keyboard, frame_len) {
+                Outcome::Rendered => rendered = true,
+                Outcome::Failed => {}
+                Outcome::Stopped(e) => stopped.push((i, e)),
             }
-            Err(e) => {
-                // Exceeding a limit opens no new path: it is a frame error like
-                // any other, which the counter below eventually turns into a
-                // clean stop.
-                let e = name_the_cause(
-                    e,
-                    &budget,
-                    "the effect",
-                    &format!("{} ms per frame", FRAME_BUDGET.as_millis()),
-                );
-                consecutive_errors += 1;
-                // **One line when the failure starts, not one per frame.** At 30
-                // frames per second, logging every failure would produce thirty
-                // lines per second and bury the one that names the cause.
-                // [`journal::transition`] holds the rule.
-                let before = shared.error.lock().unwrap().replace(e.clone());
-                if journal::transition(before.as_deref(), Some(&e)) == journal::Transition::Started
-                {
-                    tracing::warn!("effect started failing: {}", loggable(&e, reads_private));
-                }
-                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+        }
+        if !stopped.is_empty() {
+            let left = parts.len() - stopped.len();
+            for (i, e) in stopped.into_iter().rev() {
+                // Its context and what it held go with it; its status stays,
+                // with the error that stopped it.
+                let part = parts.remove(i);
+                let _in = part.span.enter();
+                let error = loggable(&e, part.shared.private());
+                if left == 0 {
                     tracing::error!(
                         failures = MAX_CONSECUTIVE_ERRORS,
                         "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
-                         backlight turned off: {}",
-                        loggable(&e, reads_private)
+                         backlight turned off: {error}"
                     );
-                    shared.stop.store(true, Ordering::Relaxed);
-                    // A frozen last frame reads as an effect still running; off
-                    // says nothing runs, and the gallery says why (#48).
-                    out.turn_off();
-                    break;
+                } else {
+                    tracing::error!(
+                        failures = MAX_CONSECUTIVE_ERRORS,
+                        "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
+                         its lights black: {error}"
+                    );
                 }
+            }
+            // The device is turned off only when no part runs any more: a
+            // frozen last frame reads as an effect still running; off says
+            // nothing runs, and the gallery says why (#48).
+            if left == 0 {
+                shared.stop.store(true, Ordering::Relaxed);
+                out.turn_off();
+                break;
             }
         }
 
-        frame_index = frame_index.wrapping_add(1);
+        // A whole device whose effect failed this frame keeps its last frame,
+        // as before regions; a split one goes on composing, so that a region
+        // stopping goes black whatever the others do.
+        if rendered || !whole {
+            let mut bytes = compose(
+                frame_len * 3,
+                parts.iter().map(|p| (p.owns.as_deref(), p.last.as_deref())),
+            );
+            let dims: Vec<(Option<&'static [u16]>, Option<dimming::Dimming>)> = {
+                let table = inputs.dimming.lock().unwrap();
+                follows
+                    .scopes()
+                    .into_iter()
+                    .map(|(region, positions)| {
+                        let key = (device, region.map(str::to_owned));
+                        (positions, table.get(&key).cloned())
+                    })
+                    .collect()
+            };
+            let by = |what: fn(&dimming::Dimming) -> bool| {
+                dims.iter().any(|(_, d)| d.as_ref().is_some_and(what))
+            };
+            hold(&mut hearing, by(|d| d.sound().is_some()), || {
+                inputs.sound.lease()
+            });
+            hold(&mut watching, by(|d| d.system().is_some()), || {
+                inputs.system.lease()
+            });
+            let clock_ms = wall_clock_ms();
+            for (positions, d) in &dims {
+                let Some(d) = d else { continue };
+                let factor = follow_factor(d, &inputs, clock_ms);
+                match positions {
+                    None => dimming::dim(&mut bytes, factor),
+                    Some(positions) => dimming::dim_positions(&mut bytes, positions, factor),
+                }
+            }
+            emit(&shared, out.as_ref(), &bytes);
+        }
 
         // Absolute deadline rather than `sleep(period)`: a slow frame must not
         // shift all the following ones. If we fell behind, start again from now
@@ -1879,8 +2621,7 @@ pub(crate) fn run_effect(
     bindings: Bindings,
 ) -> CmdResult<()> {
     let layout = crate::find_layout(device)?;
-    let js = crate::storage::store(app)?.effect_js(&crate::storage::EffectKey::parse(id)?)?;
-    let params = serialised(params)?;
+    let start = effect_start(app, id, params, bindings)?;
 
     let state = app.state::<AppState>();
     // The handle is shared with the loop, not copied: closing the device later
@@ -1888,8 +2629,24 @@ pub(crate) fn run_effect(
     let out = Box::new(state.handle(device));
     state
         .engine
-        .start(device, id.to_owned(), js, params, bindings, layout, out)
+        .start(device, start, layout, out, false)
         .map_err(|error| not_started(id, error))
+}
+
+/// An effect from the library, ready to start: its code, its parameters.
+fn effect_start(
+    app: &AppHandle,
+    id: &str,
+    params: &serde_json::Value,
+    bindings: Bindings,
+) -> CmdResult<EffectStart> {
+    let js = crate::storage::store(app)?.effect_js(&crate::storage::EffectKey::parse(id)?)?;
+    Ok(EffectStart {
+        effect_id: id.to_owned(),
+        js,
+        params: serialised(params)?,
+        bindings,
+    })
 }
 
 /// Starts `effect` on `device` with `stored` over its declared defaults, without
@@ -2075,19 +2832,11 @@ pub fn start_preview(
         Some(d) => crate::find_layout(d)?,
         None => crate::default_layout(),
     };
-    let js = crate::storage::store(&app)?.effect_js(&crate::storage::EffectKey::parse(&id)?)?;
-    let params = serialised(&params)?;
+    let start = effect_start(&app, &id, &params, bindings)?;
 
     state
         .engine
-        .start_preview(
-            DeviceRef::of(layout),
-            id.clone(),
-            js,
-            params,
-            bindings,
-            layout,
-        )
+        .start_preview(DeviceRef::of(layout), None, start, layout)
         .map_err(|error| not_started(&id, error))
 }
 
@@ -2137,7 +2886,7 @@ pub fn set_effect_params(
     device: DeviceRef,
     params: serde_json::Value,
 ) -> CmdResult<()> {
-    state.engine.set_params(device, serialised(&params)?);
+    state.engine.set_params(device, None, serialised(&params)?);
     Ok(())
 }
 
@@ -2152,7 +2901,7 @@ pub fn set_effect_bindings(
 ) -> CmdResult<()> {
     state
         .engine
-        .set_bindings(device, checked_bindings(bindings)?);
+        .set_bindings(device, None, checked_bindings(bindings)?);
     Ok(())
 }
 
@@ -2478,6 +3227,7 @@ mod tests {
 
         engine.set_dimming(
             FIRST,
+            None,
             Some(dimming::Dimming {
                 source: "signal:lux".into(),
                 floor: 20,
@@ -2495,7 +3245,7 @@ mod tests {
             brightest(&next) == 128
         });
 
-        engine.set_dimming(FIRST, None);
+        engine.set_dimming(FIRST, None, None);
         wait_for("the brightness did not come back", || {
             brightest(&next) == 255
         });
@@ -2542,14 +3292,22 @@ mod tests {
         engine
             .start(
                 device,
-                effect_id.into(),
-                EFFECT.into(),
-                "{}".into(),
-                Bindings::new(),
+                effect(effect_id, EFFECT),
                 layout(),
                 Box::new(out),
+                false,
             )
             .expect("start");
+    }
+
+    /// `js` to start under the name `effect_id`, with no setting moved.
+    fn effect(effect_id: &str, js: &str) -> EffectStart {
+        EffectStart {
+            effect_id: effect_id.into(),
+            js: js.into(),
+            params: "{}".into(),
+            bindings: Bindings::new(),
+        }
     }
 
     /// A device's status, taken from the list the engine returns.
@@ -2773,18 +3531,453 @@ mod tests {
         assert!(engine.preview_status().is_none());
     }
 
+    // ------------------------------------------------------------ regions
+
+    /// The 17 R5's zones: keyboard 4–7 and 12, lid 0, 1, 10, 11, base 2, 8, 9,
+    /// power 3 — positions and addresses alike.
+    fn r5() -> &'static Layout {
+        candeo_device::definition::builtin_layout("alienware-17-r5-zones.json").expect("built in")
+    }
+
+    const R5: DeviceRef = DeviceRef {
+        vid: 0x187c,
+        pid: 0x0550,
+    };
+
+    /// Every light of its layout in one colour, read from `params.r`.
+    const LEVEL: &str = r#"export default {
+        render({ layout, frame, params }) {
+            for (const key of layout.keys) frame.set(key, { r: Number(params.r ?? 0), g: 0, b: 0 })
+        },
+    }"#;
+
+    /// Paints the whole frame, past its layout's lights: what it owns is all a
+    /// region's part keeps.
+    const FILL: &str = r#"export default {
+        render({ frame }) { frame.fill({ r: 0, g: 0, b: 255 }) },
+    }"#;
+
+    /// Its time, in red: 255 after 0.64 s.
+    const RAMP: &str = r#"export default {
+        render({ layout, frame, time }) {
+            for (const key of layout.keys) frame.set(key, { r: Math.min(255, Math.floor(time * 400)), g: 0, b: 0 })
+        },
+    }"#;
+
+    const THROWS: &str = "export default { render() { throw new Error('boum') } }";
+
+    fn with_params(effect_id: &str, js: &str, params: &str) -> EffectStart {
+        EffectStart {
+            params: params.into(),
+            ..effect(effect_id, js)
+        }
+    }
+
+    fn colour(out: &Output, position: usize) -> Rgb {
+        out.last
+            .lock()
+            .unwrap()
+            .get(position)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The regions of the 17 R5 with what each runs, in the definition's order.
+    fn regions(
+        mut starts: Vec<(&str, Option<EffectStart>)>,
+    ) -> Vec<(&'static Region, Option<EffectStart>)> {
+        r5().regions
+            .iter()
+            .map(|r| {
+                let start = starts
+                    .iter()
+                    .position(|(id, _)| *id == r.id)
+                    .and_then(|i| starts.remove(i).1);
+                (r, start)
+            })
+            .collect()
+    }
+
+    fn start_regions(engine: &Engine, out: &Arc<Output>, starts: Vec<(&str, Option<EffectStart>)>) {
+        let verdicts = engine.start_regions(R5, r5(), Box::new(Arc::clone(out)), regions(starts));
+        assert!(verdicts.iter().all(|(_, v)| v.is_ok()), "{verdicts:?}");
+    }
+
+    fn region_status(engine: &Engine, region: &str) -> RegionEngineStatus {
+        status(engine, R5)
+            .regions
+            .expect("the loop runs the regions")
+            .into_iter()
+            .find(|r| r.region == region)
+            .expect("a region of the definition")
+    }
+
+    /// One loop, one frame: each region's lights from its own effect, a region
+    /// running nothing black, and an effect painting past its region's lights
+    /// owning none of them (`regions.md` §7).
+    #[test]
+    fn each_region_runs_its_effect_in_the_device_s_frame() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(with_params("red", LEVEL, r#"{"r":200}"#))),
+                ("lid", Some(effect("blue", FILL))),
+            ],
+        );
+        wait_for("the regions were never drawn", || {
+            colour(&out, 4).r == 200 && colour(&out, 0).b == 255
+        });
+        let last = out.last.lock().unwrap().clone();
+        for position in [4, 5, 6, 7, 12] {
+            assert_eq!(last[position], Rgb::new(200, 0, 0), "keyboard {position}");
+        }
+        for position in [0, 1, 10, 11] {
+            assert_eq!(last[position], Rgb::new(0, 0, 255), "lid {position}");
+        }
+        for position in [2, 3, 8, 9] {
+            assert_eq!(last[position], Rgb::default(), "{position} runs nothing");
+        }
+
+        let device = status(&engine, R5);
+        assert!(device.running);
+        assert_eq!((device.effect_id, device.error), (None, None));
+        let regions = device.regions.unwrap();
+        let ids: Vec<&str> = regions.iter().map(|r| r.region.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["keyboard", "lid", "base", "power"],
+            "the definition's order"
+        );
+        assert_eq!(regions[0].effect_id.as_deref(), Some("red"));
+        assert!(regions[1].running);
+        assert!(!regions[2].running && regions[2].effect_id.is_none());
+        assert!(engine.runs_regions(R5));
+        engine.stop(R5);
+    }
+
+    /// Applying an effect on one region leaves the others running, their clocks
+    /// going on; one that does not load leaves the region with what it ran.
+    #[test]
+    fn one_region_replaced_leaves_the_others_clocks_running() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(effect("ramp", RAMP))),
+                ("lid", Some(effect("ramp", RAMP))),
+            ],
+        );
+        wait_for("the clocks never reached 0.64 s", || {
+            colour(&out, 4).r == 255 && colour(&out, 0).r == 255
+        });
+
+        assert_eq!(
+            engine.start_region(R5, "lid", effect("again", RAMP)),
+            Ok(())
+        );
+        wait_for("the lid did not start again from zero", || {
+            colour(&out, 0).r < 200
+        });
+        assert_eq!(colour(&out, 4).r, 255, "the keyboard's clock went back");
+        assert_eq!(
+            region_status(&engine, "lid").effect_id.as_deref(),
+            Some("again")
+        );
+
+        let refused = engine.start_region(R5, "lid", effect("broken", "not JavaScript {{{"));
+        assert!(matches!(refused, Err(RegionStart::Failed(e)) if e.contains("loading the effect")));
+        let lid = region_status(&engine, "lid");
+        assert!(lid.running);
+        assert_eq!(lid.effect_id.as_deref(), Some("again"), "still what it ran");
+        engine.stop(R5);
+    }
+
+    /// A region's effect failing stops alone: its lights black, its error kept,
+    /// the others going on and the device left on (`regions.md` §7).
+    #[test]
+    fn a_region_s_effect_failing_stops_alone() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(with_params("red", LEVEL, r#"{"r":200}"#))),
+                ("lid", Some(effect("broken", THROWS))),
+            ],
+        );
+        wait_for("the failing region never stopped", || {
+            !region_status(&engine, "lid").running
+        });
+        let lid = region_status(&engine, "lid");
+        assert!(
+            lid.error.as_deref().is_some_and(|e| e.contains("boum")),
+            "{lid:?}"
+        );
+        assert_eq!(
+            lid.effect_id.as_deref(),
+            Some("broken"),
+            "it says what failed"
+        );
+        assert!(status(&engine, R5).running, "the keyboard runs");
+        assert!(!out.turned_off.load(Ordering::Relaxed));
+        let before = out.written.load(Ordering::Relaxed);
+        wait_for("the other region stopped with it", || {
+            out.written.load(Ordering::Relaxed) > before + 2
+        });
+        assert_eq!(colour(&out, 0), Rgb::default());
+        assert_eq!(colour(&out, 4), Rgb::new(200, 0, 0));
+        engine.stop(R5);
+    }
+
+    /// The device is turned off once no part runs any more, as a whole
+    /// device's is.
+    #[test]
+    fn the_last_region_failing_turns_the_device_off() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(effect("broken", THROWS))),
+                ("lid", Some(effect("broken", THROWS))),
+            ],
+        );
+        wait_for("the loop never stopped", || !status(&engine, R5).running);
+        wait_for("the device was not turned off", || {
+            out.turned_off.load(Ordering::Relaxed)
+        });
+        assert!(!engine.runs_regions(R5));
+        assert!(region_status(&engine, "keyboard").error.is_some());
+    }
+
+    /// A region stopped goes black and the others go on; with none left the
+    /// loop keeps the device dark, and a region started then joins it.
+    #[test]
+    fn a_region_stopped_goes_black() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(with_params("red", LEVEL, r#"{"r":200}"#))),
+                ("lid", Some(effect("blue", FILL))),
+            ],
+        );
+        wait_for("never drawn", || colour(&out, 0).b == 255);
+
+        engine.stop_region(R5, "lid");
+        wait_for("the lid stayed lit", || colour(&out, 0) == Rgb::default());
+        assert_eq!(colour(&out, 4).r, 200, "the keyboard went with it");
+        let lid = region_status(&engine, "lid");
+        assert!(!lid.running && lid.effect_id.is_none() && lid.error.is_none());
+
+        engine.stop_region(R5, "keyboard");
+        wait_for("the keyboard stayed lit", || {
+            colour(&out, 4) == Rgb::default()
+        });
+        assert!(!status(&engine, R5).running, "no region runs anything");
+        assert!(engine.runs_regions(R5), "the loop keeps them dark");
+
+        assert_eq!(
+            engine.start_region(R5, "power", effect("blue", FILL)),
+            Ok(())
+        );
+        wait_for("the power button never lit", || colour(&out, 3).b == 255);
+        assert_eq!(
+            colour(&out, 0),
+            Rgb::default(),
+            "the lid is not the power button's"
+        );
+        engine.stop(R5);
+    }
+
+    /// A loop running one effect over the whole device takes no region: the
+    /// caller starts them all.
+    #[test]
+    fn a_whole_device_takes_no_region() {
+        let engine = Engine::default();
+        assert_eq!(
+            engine.start_region(R5, "lid", effect("blue", FILL)),
+            Err(RegionStart::NotRunningRegions),
+            "nothing runs"
+        );
+        engine
+            .start(
+                R5,
+                effect("blue", FILL),
+                r5(),
+                Box::new(Arc::new(Output::default())),
+                true,
+            )
+            .expect("start");
+        assert_eq!(
+            engine.start_region(R5, "lid", effect("blue", FILL)),
+            Err(RegionStart::NotRunningRegions),
+            "a rule's effect over the whole device"
+        );
+        assert!(!engine.runs_regions(R5));
+        let device = status(&engine, R5);
+        assert!(device.regions.is_none());
+        assert_eq!(device.effect_id.as_deref(), Some("blue"));
+        engine.stop(R5);
+    }
+
+    /// Parameters and follows reach one region's lights alone; a rule's effect
+    /// over a split device is scaled by each region's follow (`regions.md` §4).
+    #[test]
+    fn parameters_and_follows_are_each_region_s() {
+        let engine = Engine::default();
+        let now = wall_clock_ms() as i64;
+        engine
+            .signals()
+            .lock()
+            .unwrap()
+            .apply(&serde_json::json!({ "lux": 50 }), None, now)
+            .unwrap();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                (
+                    "keyboard",
+                    Some(with_params("level", LEVEL, r#"{"r":200}"#)),
+                ),
+                ("lid", Some(with_params("level", LEVEL, r#"{"r":200}"#))),
+            ],
+        );
+        engine.set_params(R5, Some("lid"), r#"{"r":100}"#.into());
+        wait_for("the lid's parameters were not set", || {
+            colour(&out, 0).r == 100
+        });
+        assert_eq!(colour(&out, 4).r, 200, "the keyboard's moved too");
+
+        let lux = Some(dimming::Dimming {
+            source: "signal:lux".into(),
+            floor: 20,
+        });
+        engine.set_dimming(R5, Some("keyboard"), lux.clone());
+        wait_for("the keyboard did not follow the signal", || {
+            colour(&out, 4).r == 100
+        });
+        assert_eq!(colour(&out, 0).r, 100, "the lid followed the keyboard's");
+
+        // A rule over the whole device: the keyboard's follow still scales the
+        // keyboard's lights, and the device's own scales nothing.
+        engine.set_dimming(R5, None, lux);
+        let rule = Arc::new(Output::default());
+        engine
+            .start(
+                R5,
+                with_params("rule", LEVEL, r#"{"r":200}"#),
+                r5(),
+                Box::new(Arc::clone(&rule)),
+                true,
+            )
+            .expect("start");
+        wait_for("the rule never drew", || colour(&rule, 0).r == 200);
+        assert_eq!(colour(&rule, 4).r, 100);
+        engine.stop(R5);
+    }
+
+    /// Deleting an effect stops the regions running it, and those alone.
+    #[test]
+    fn stopping_an_effect_everywhere_stops_the_regions_running_it() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_regions(
+            &engine,
+            &out,
+            vec![
+                ("keyboard", Some(effect("gone", FILL))),
+                ("lid", Some(effect("kept", FILL))),
+                ("base", Some(effect("gone", FILL))),
+            ],
+        );
+        assert_eq!(engine.stop_everywhere("gone"), vec![R5]);
+        assert!(region_status(&engine, "keyboard").effect_id.is_none());
+        assert!(region_status(&engine, "base").effect_id.is_none());
+        assert!(region_status(&engine, "lid").running);
+
+        engine.rename_everywhere("kept", "renamed");
+        assert_eq!(
+            region_status(&engine, "lid").effect_id.as_deref(),
+            Some("renamed")
+        );
+        engine.stop(R5);
+    }
+
+    /// The preview of a region sees the region alone, frames of the device's
+    /// length black outside it, and says which region it borrows.
+    #[test]
+    fn a_region_s_preview_is_black_outside_it() {
+        let engine = Engine::default();
+        let frames: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let kept = Arc::clone(&frames);
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Raw(bytes) = body {
+                *kept.lock().unwrap() = bytes;
+            }
+            Ok(())
+        });
+        let lid = r5().region("lid").unwrap();
+        engine
+            .start_preview(R5, Some("lid"), effect("blue", FILL), lid.layout)
+            .expect("preview start");
+        engine.set_preview_channel(Some(channel));
+        wait_for("no preview frame", || !frames.lock().unwrap().is_empty());
+
+        let frame = frames.lock().unwrap().clone();
+        assert_eq!(frame.len(), r5().led_count() * 3, "the device's length");
+        for position in 0..r5().led_count() {
+            let lit = frame[position * 3 + 2] == 255;
+            assert_eq!(
+                lit,
+                lid.positions.contains(&(position as u16)),
+                "{position}"
+            );
+        }
+        let preview = engine.preview_status().unwrap();
+        assert_eq!(
+            (preview.layout_of, preview.region.as_deref()),
+            (R5, Some("lid"))
+        );
+        assert!(engine.device_status().is_empty());
+        engine.stop_preview();
+    }
+
+    /// The device's frame from its parts', as a pure function: black where no
+    /// part owns, each owned position from its part, a part owning everything
+    /// copied whole.
+    #[test]
+    fn the_device_s_frame_takes_each_position_from_its_part() {
+        let keyboard = [9u8; 4 * 3];
+        let lid = [7u8; 4 * 3];
+        let frame = compose(
+            12,
+            [
+                (Some(&[0u16, 2][..]), Some(&keyboard[..])),
+                (Some(&[1u16][..]), Some(&lid[..])),
+                (Some(&[3u16][..]), None),
+            ],
+        );
+        assert_eq!(frame, [9, 9, 9, 7, 7, 7, 9, 9, 9, 0, 0, 0]);
+        assert_eq!(compose(12, [(None, Some(&lid[..]))]), lid.to_vec());
+    }
+
     // ------------------------------------------------------------ preview
 
     fn preview_effect(engine: &Engine, layout_of: DeviceRef, effect_id: &str) {
         engine
-            .start_preview(
-                layout_of,
-                effect_id.into(),
-                EFFECT.into(),
-                "{}".into(),
-                Bindings::new(),
-                layout(),
-            )
+            .start_preview(layout_of, None, effect(effect_id, EFFECT), layout())
             .expect("preview start");
     }
 
@@ -3227,14 +4420,7 @@ mod tests {
 
         start_js(&engine, SECOND, READS_KEYS, Arc::new(Output::default())).expect("start");
         engine
-            .start_preview(
-                FIRST,
-                "keys".into(),
-                READS_KEYS.into(),
-                "{}".into(),
-                Bindings::new(),
-                layout(),
-            )
+            .start_preview(FIRST, None, effect("keys", READS_KEYS), layout())
             .expect("preview start");
         wait_for("both loops read presses", || presses.readers() == 2);
 
@@ -3270,12 +4456,10 @@ mod tests {
         engine
             .start(
                 device,
-                "onde-radiale".into(),
-                js.to_string(),
-                "{}".into(),
-                Bindings::new(),
+                effect("onde-radiale", js),
                 l,
                 Box::new(Arc::clone(&handle)),
+                false,
             )
             .expect("start");
         println!("engine started — 3 s of radial wave on the keyboard");
@@ -3542,15 +4726,7 @@ mod tests {
         js: &str,
         out: Arc<Output>,
     ) -> Result<(), String> {
-        engine.start(
-            device,
-            "borne".into(),
-            js.into(),
-            "{}".into(),
-            Bindings::new(),
-            layout(),
-            Box::new(out),
-        )
+        engine.start(device, effect("borne", js), layout(), Box::new(out), false)
     }
 
     /// Runs `f` on the side, and returns its result — or fails if it does not
