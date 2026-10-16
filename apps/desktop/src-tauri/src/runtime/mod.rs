@@ -2566,10 +2566,11 @@ fn js_error(e: rquickjs::Error) -> String {
 
 // ---------------------------------------------------------------- commands
 
-use crate::{AppState, CmdResult, DeviceRef, Failure};
+use crate::{AppState, CmdResult, DeviceRef, Failure, Scope};
 use tauri::{AppHandle, Manager, State};
 
-/// Starts an effect, built-in or installed, **on a device**.
+/// Starts an effect, built-in or installed, **on a device** — or, on a split
+/// device, on one of its regions, the others untouched.
 ///
 /// The `id → JavaScript` resolution is the library's, so built-ins come first:
 /// see [`crate::storage`]. The engine itself makes no difference — a shipped
@@ -2586,17 +2587,24 @@ use tauri::{AppHandle, Manager, State};
 /// Previewing is the other path, and it does not go through here:
 /// [`start_preview`] opens no hardware output and writes nothing to disk.
 /// "Apply" does both — it sends to the keyboard, and it
-/// **remembers** the effect for this device.
+/// **remembers** the effect for this device, or this region.
 #[tauri::command]
 pub fn start_effect(
     app: AppHandle,
     device: DeviceRef,
+    region: Option<String>,
     id: String,
     params: serde_json::Value,
     bindings: Option<Bindings>,
 ) -> CmdResult<()> {
     let bindings = checked_bindings(bindings.unwrap_or_default())?;
-    run_effect(&app, device, &id, &params, bindings)?;
+    let part = crate::part_of(&app, device, region.as_deref(), false)?;
+    match part {
+        Scope::Whole => run_effect(&app, device, &id, &params, bindings)?,
+        Scope::Region(region) => run_region(&app, device, region, || {
+            effect_start(&app, &id, &params, bindings.clone())
+        })?,
+    }
     // A gesture always wins over a rule: an effect applied during an
     // interruption ends it, and becomes the one the device goes back to.
     crate::automations::dismiss(&app, device);
@@ -2604,7 +2612,10 @@ pub fn start_effect(
     // **After** the start, never before: only what actually runs is
     // remembered. An effect whose load fails must not leave behind an id that
     // the file presents as applied.
-    remember_active_effect(&app, device, Some(&id));
+    match part {
+        Scope::Whole => remember_active_effect(&app, device, Some(&id)),
+        Scope::Region(region) => remember_region_effect(&app, device, region.id, Some(&id)),
+    }
     Ok(())
 }
 
@@ -2613,6 +2624,8 @@ pub fn start_effect(
 /// [`start_effect`] is this plus the record; an automation is this alone, since
 /// an interruption must never rewrite `activeEffects` — it would take the place
 /// of what the device goes back to (`docs/design/inputs-and-automations.md` §3.1).
+/// On a split device it runs over all of it — a rule's effect — its regions'
+/// follows still scaling their lights (`docs/design/regions.md` §4).
 pub(crate) fn run_effect(
     app: &AppHandle,
     device: DeviceRef,
@@ -2622,6 +2635,7 @@ pub(crate) fn run_effect(
 ) -> CmdResult<()> {
     let layout = crate::find_layout(device)?;
     let start = effect_start(app, id, params, bindings)?;
+    let split = crate::is_split(app, device)?;
 
     let state = app.state::<AppState>();
     // The handle is shared with the loop, not copied: closing the device later
@@ -2629,8 +2643,103 @@ pub(crate) fn run_effect(
     let out = Box::new(state.handle(device));
     state
         .engine
-        .start(device, start, layout, out, false)
+        .start(device, start, layout, out, split)
         .map_err(|error| not_started(id, error))
+}
+
+/// Starts an effect on one region of a split device, without remembering it.
+///
+/// The running loop takes it between two frames, the other regions going on.
+/// When the loop does not run the regions — a rule interrupts the device, or
+/// nothing runs — they all start, the others with their applied effects: the
+/// gesture gives the device back its regions (`docs/design/regions.md` §4).
+/// `start` is asked for twice then, the first having gone to the loop.
+fn run_region(
+    app: &AppHandle,
+    device: DeviceRef,
+    region: &'static Region,
+    start: impl Fn() -> CmdResult<EffectStart>,
+) -> CmdResult<()> {
+    let state = app.state::<AppState>();
+    let first = start()?;
+    let id = first.effect_id.clone();
+    match state.engine.start_region(device, region.id, first) {
+        Ok(()) => return Ok(()),
+        Err(RegionStart::Failed(error)) => return Err(not_started(&id, error)),
+        Err(RegionStart::NotRunningRegions) => {}
+    }
+    let layout = crate::find_layout(device)?;
+    let settings = crate::storage::store(app)?.read_settings()?;
+    let mut starts = saved_region_starts(app, &settings, device, layout);
+    let mut this = Some(start()?);
+    for (r, s) in &mut starts {
+        if r.id == region.id {
+            *s = this.take();
+        }
+    }
+    let out = Box::new(state.handle(device));
+    let verdict = state
+        .engine
+        .start_regions(device, layout, out, starts)
+        .into_iter()
+        .find(|(r, _)| *r == region.id)
+        .map_or(Ok(()), |(_, verdict)| verdict);
+    verdict.map_err(|error| not_started(&id, error))
+}
+
+/// Starts every region of a split device with its applied effect and the
+/// settings saved for it there, replacing whatever ran: on splitting it, when a
+/// rule gives it back, when it opens. A region whose effect does not start runs
+/// nothing; the log says why, and its record stays, as a device's does.
+pub(crate) fn run_regions(app: &AppHandle, device: DeviceRef) -> CmdResult<()> {
+    let layout = crate::find_layout(device)?;
+    let settings = crate::storage::store(app)?.read_settings()?;
+    let starts = saved_region_starts(app, &settings, device, layout);
+    let state = app.state::<AppState>();
+    let out = Box::new(state.handle(device));
+    // Each verdict is in the log already, under the region's name.
+    state.engine.start_regions(device, layout, out, starts);
+    Ok(())
+}
+
+/// Each region of `layout` with its applied effect on `device`, ready to start
+/// with the settings saved for it there, as the gallery would start it.
+fn saved_region_starts(
+    app: &AppHandle,
+    settings: &crate::storage::Settings,
+    device: DeviceRef,
+    layout: &'static Layout,
+) -> Vec<(&'static Region, Option<EffectStart>)> {
+    let applied = |r: &Region| settings.region_effect(device.vid, device.pid, r.id);
+    // Read once, and only when a region has something to start.
+    let library = if layout.regions.iter().any(|r| applied(r).is_some()) {
+        crate::storage::store(app).and_then(|s| s.list_effects())
+    } else {
+        Ok(Vec::new())
+    };
+    layout
+        .regions
+        .iter()
+        .map(|r| {
+            let start = applied(r).and_then(|effect| {
+                let saved = library.as_ref().map_err(Clone::clone).and_then(|library| {
+                    saved_start(
+                        app,
+                        library,
+                        effect,
+                        settings.region_effect_params(device.vid, device.pid, r.id, effect),
+                        settings.region_effect_bindings(device.vid, device.pid, r.id, effect),
+                    )
+                });
+                saved
+                    .inspect_err(|e| {
+                        tracing::warn!(device = %device, region = r.id, effect, "applied effect not started: {e}")
+                    })
+                    .ok()
+            });
+            (r, start)
+        })
+        .collect()
 }
 
 /// An effect from the library, ready to start: its code, its parameters.
@@ -2647,6 +2756,23 @@ fn effect_start(
         params: serialised(params)?,
         bindings,
     })
+}
+
+/// `effect` ready to start with `stored` over its declared defaults, as the
+/// gallery starts it: see [`crate::storage::starting_params`].
+fn saved_start(
+    app: &AppHandle,
+    library: &[crate::storage::EffectEntry],
+    effect: &str,
+    stored: Option<&serde_json::Map<String, serde_json::Value>>,
+    bindings: Bindings,
+) -> CmdResult<EffectStart> {
+    let entry = library
+        .iter()
+        .find(|e| e.id == effect)
+        .ok_or_else(|| Failure::new("effectNotFound").with("name", effect))?;
+    let params = crate::storage::starting_params(&entry.manifest, stored);
+    effect_start(app, effect, &serde_json::Value::Object(params), bindings)
 }
 
 /// Starts `effect` on `device` with `stored` over its declared defaults, without
@@ -2690,8 +2816,39 @@ pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> C
     Ok(())
 }
 
+/// Starts `effect` on one region of a split device with the settings saved for
+/// it there, and remembers it as the region's: the tray's gesture, as *Apply*
+/// is the gallery's.
+pub(crate) fn start_saved_region(
+    app: &AppHandle,
+    device: DeviceRef,
+    region: &str,
+    effect: &str,
+) -> CmdResult<()> {
+    let Scope::Region(region) = crate::part_of(app, device, Some(region), false)? else {
+        return Err(Failure::unexpected(format!(
+            "{device} has no region {region}"
+        )));
+    };
+    let start = || {
+        let settings = crate::storage::store(app)?.read_settings()?;
+        let library = crate::storage::store(app)?.list_effects()?;
+        saved_start(
+            app,
+            &library,
+            effect,
+            settings.region_effect_params(device.vid, device.pid, region.id, effect),
+            settings.region_effect_bindings(device.vid, device.pid, region.id, effect),
+        )
+    };
+    run_region(app, device, region, start)?;
+    crate::automations::dismiss(app, device);
+    remember_region_effect(app, device, region.id, Some(effect));
+    Ok(())
+}
+
 /// Gives a device that just opened the effect applied on it (#102): at startup,
-/// on adoption, and on replug.
+/// on adoption, and on replug. A split device gets each region's.
 ///
 /// Nothing happens when the setting is off, when nothing is applied, or when that
 /// effect already runs on the device — a replug finds the loop still writing to
@@ -2713,13 +2870,25 @@ pub(crate) fn resume_applied(app: &AppHandle, device: DeviceRef) {
             return;
         }
     };
-    let running = app
+    let status = app
         .state::<AppState>()
         .engine
         .device_status()
         .into_iter()
-        .find(|s| s.device == device && s.status.running)
-        .and_then(|s| s.status.effect_id);
+        .find(|s| s.device == device)
+        .map(|s| s.status);
+    if crate::find_layout(device).is_ok_and(|l| crate::split(&settings, l)) {
+        let applied = applied_regions(&settings, device);
+        let running = status.and_then(|s| s.regions);
+        if regions_to_resume(&settings, &applied, running.as_deref()) {
+            match run_regions(app, device) {
+                Ok(()) => tracing::info!(device = %device, "applied regions resumed"),
+                Err(e) => tracing::warn!(device = %device, "applied regions not resumed: {e}"),
+            }
+        }
+        return;
+    }
+    let running = status.filter(|s| s.running).and_then(|s| s.effect_id);
     let Some(effect) = to_resume(&settings, device, running.as_deref()) else {
         return;
     };
@@ -2746,14 +2915,56 @@ fn to_resume(
     (running != Some(applied)).then(|| applied.to_owned())
 }
 
-/// Resumes, on every open device, `effect` if it is the one applied there: called
-/// once the window has compiled it.
+/// Each region of a split device with its applied effect, by id.
+fn applied_regions(
+    settings: &crate::storage::Settings,
+    device: DeviceRef,
+) -> Vec<(String, String)> {
+    settings
+        .split(device.vid, device.pid)
+        .map(|split| {
+            split
+                .regions
+                .iter()
+                .filter_map(|r| Some((r.region.clone(), r.effect.clone()?)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether a split device that opened starts its regions again: the setting on,
+/// and the loop not running each region's applied effect already — a replug
+/// finds it still writing. A split device whose regions run nothing is started
+/// too, so that it stays dark rather than showing its firmware's lighting.
+fn regions_to_resume(
+    settings: &crate::storage::Settings,
+    applied: &[(String, String)],
+    running: Option<&[RegionEngineStatus]>,
+) -> bool {
+    if !settings.preferences.resume_effects {
+        return false;
+    }
+    let Some(running) = running else {
+        return true;
+    };
+    !applied.iter().all(|(region, effect)| {
+        running
+            .iter()
+            .any(|r| &r.region == region && r.running && r.effect_id.as_ref() == Some(effect))
+    })
+}
+
+/// Resumes, on every open device, `effect` if it is the one applied there, or
+/// on one of its regions: called once the window has compiled it.
 pub(crate) fn resume_waiting(app: &AppHandle, effect: &str) {
     let Ok(settings) = crate::storage::store(app).and_then(|s| s.read_settings()) else {
         return;
     };
     for device in app.state::<AppState>().open_devices() {
-        if settings.active_effect(device.vid, device.pid) == Some(effect) {
+        let on_a_region = applied_regions(&settings, device)
+            .iter()
+            .any(|(_, applied)| applied == effect);
+        if settings.active_effect(device.vid, device.pid) == Some(effect) || on_a_region {
             resume_applied(app, device);
         }
     }
@@ -2772,13 +2983,37 @@ fn not_started(id: &str, error: String) -> Failure {
         .with("error", error)
 }
 
+/// Stops what runs on a device — or, on a split device, on one of its regions,
+/// whose lights go black while the others go on — and forgets it as applied.
 #[tauri::command]
-pub fn stop_effect(app: AppHandle, state: State<'_, AppState>, device: DeviceRef) {
-    state.engine.stop(device);
-    // Stopping during an interruption ends it too: nothing is applied any more,
-    // so there is nothing to give back.
-    crate::automations::dismiss(&app, device);
-    remember_active_effect(&app, device, None);
+pub fn stop_effect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    region: Option<String>,
+) -> CmdResult<()> {
+    match crate::part_of(&app, device, region.as_deref(), false)? {
+        Scope::Whole => {
+            state.engine.stop(device);
+            // Stopping during an interruption ends it too: nothing is applied
+            // any more, so there is nothing to give back.
+            crate::automations::dismiss(&app, device);
+            remember_active_effect(&app, device, None);
+        }
+        Scope::Region(region) => {
+            let interrupted = crate::automations::interrupts(&app, device);
+            crate::automations::dismiss(&app, device);
+            remember_region_effect(&app, device, region.id, None);
+            if interrupted {
+                // The gesture ends the rule: the device goes back to its
+                // regions, this one with nothing.
+                run_regions(&app, device)?;
+            } else {
+                state.engine.stop_region(device, region.id);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Remembers — or forgets, with `None` — the effect applied on this device.
@@ -2805,6 +3040,27 @@ pub(crate) fn remember_active_effect(app: &AppHandle, device: DeviceRef, effect:
     }
 }
 
+/// Remembers — or forgets — the effect applied on a region, as
+/// [`remember_active_effect`] does for a device: a failure is logged.
+pub(crate) fn remember_region_effect(
+    app: &AppHandle,
+    device: DeviceRef,
+    region: &str,
+    effect: Option<&str>,
+) {
+    let write = || -> CmdResult<()> {
+        let store = crate::storage::store(app)?;
+        let mut settings = store.read_settings()?;
+        if settings.set_region_effect(device.vid, device.pid, region, effect) {
+            store.write_settings(&settings)?;
+        }
+        Ok(())
+    };
+    if let Err(e) = write() {
+        tracing::warn!(device = %device, region, "applied effect not remembered: {e}");
+    }
+}
+
 // ---------------------------------------------------------------- preview
 
 /// Starts the preview of an effect, **without touching the keyboard or the
@@ -2818,25 +3074,39 @@ pub(crate) fn remember_active_effect(app: &AppHandle, device: DeviceRef, effect:
 /// `device` names the device whose **layout is borrowed**. `None` falls back to
 /// the default layout: one previews without owning the keyboard, and without
 /// having adopted any — the same reason `get_default_layout` exists.
+///
+/// With `region`, the region's layout, and its follow: the effect sees the
+/// region alone, and the frames have the device's length, black outside it
+/// (`docs/design/regions.md` §7). A split device's whole layout may be borrowed
+/// too.
 #[tauri::command]
 pub fn start_preview(
     app: AppHandle,
     state: State<'_, AppState>,
     device: Option<DeviceRef>,
+    region: Option<String>,
     id: String,
     params: serde_json::Value,
     bindings: Option<Bindings>,
 ) -> CmdResult<()> {
     let bindings = checked_bindings(bindings.unwrap_or_default())?;
-    let layout = match device {
-        Some(d) => crate::find_layout(d)?,
-        None => crate::default_layout(),
+    let (layout, region) = match (device, region.as_deref()) {
+        (None, None) => (crate::default_layout(), None),
+        (None, Some(region)) => {
+            return Err(Failure::unexpected(format!(
+                "the preview of region “{region}” names no device"
+            )))
+        }
+        (Some(d), region) => match crate::part_of(&app, d, region, true)? {
+            Scope::Whole => (crate::find_layout(d)?, None),
+            Scope::Region(region) => (region.layout, Some(region.id)),
+        },
     };
     let start = effect_start(&app, &id, &params, bindings)?;
 
     state
         .engine
-        .start_preview(DeviceRef::of(layout), None, start, layout)
+        .start_preview(DeviceRef::of(layout), region, start, layout)
         .map_err(|error| not_started(&id, error))
 }
 
@@ -2878,30 +3148,40 @@ pub fn unsubscribe_preview_frames(state: State<'_, AppState>) {
     state.engine.set_preview_channel(None);
 }
 
-/// Adjusts the parameters live. The loop does not restart: it re-reads the
-/// JSON on every frame.
+/// Adjusts the parameters live — of the device's effect, or of one region's on
+/// a split device. The loop does not restart: it re-reads the JSON on every
+/// frame.
 #[tauri::command]
 pub fn set_effect_params(
+    app: AppHandle,
     state: State<'_, AppState>,
     device: DeviceRef,
+    region: Option<String>,
     params: serde_json::Value,
 ) -> CmdResult<()> {
-    state.engine.set_params(device, None, serialised(&params)?);
+    let part = crate::part_of(&app, device, region.as_deref(), false)?;
+    state
+        .engine
+        .set_params(device, part.region(), serialised(&params)?);
     Ok(())
 }
 
-/// Binds parameters of the effect running on a device to signals, live: the
-/// loop reads the bound values from the next frame, without restarting.
-/// Remembering them is [`crate::storage::remember_effect_bindings`].
+/// Binds parameters of the effect running on a device — or on one of its
+/// regions — to signals, live: the loop reads the bound values from the next
+/// frame, without restarting. Remembering them is
+/// [`crate::storage::remember_effect_bindings`].
 #[tauri::command]
 pub fn set_effect_bindings(
+    app: AppHandle,
     state: State<'_, AppState>,
     device: DeviceRef,
+    region: Option<String>,
     bindings: Bindings,
 ) -> CmdResult<()> {
+    let part = crate::part_of(&app, device, region.as_deref(), false)?;
     state
         .engine
-        .set_bindings(device, None, checked_bindings(bindings)?);
+        .set_bindings(device, part.region(), checked_bindings(bindings)?);
     Ok(())
 }
 
@@ -3085,6 +3365,44 @@ mod tests {
 
         settings.preferences.resume_effects = false;
         assert_eq!(to_resume(&settings, FIRST, None), None);
+    }
+
+    /// A split device that opens gets its regions back, unless resuming is off
+    /// or its loop already runs each region's applied effect (`regions.md` §11 d).
+    #[test]
+    fn a_split_device_s_regions_are_resumed_unless_they_run() {
+        let mut settings = crate::storage::Settings::default();
+        settings.set_split(FIRST.vid, FIRST.pid, Some(&["keyboard", "lid"]));
+        settings.set_region_effect(FIRST.vid, FIRST.pid, "lid", Some("Rain"));
+        let applied = applied_regions(&settings, FIRST);
+        assert_eq!(applied, vec![("lid".to_owned(), "Rain".to_owned())]);
+        let region = |id: &str, running: bool, effect: Option<&str>| RegionEngineStatus {
+            region: id.into(),
+            running,
+            effect_id: effect.map(str::to_owned),
+            error: None,
+            reads_private: false,
+        };
+
+        assert!(regions_to_resume(&settings, &applied, None), "nothing runs");
+        let running = [
+            region("keyboard", false, None),
+            region("lid", true, Some("Rain")),
+        ];
+        assert!(!regions_to_resume(&settings, &applied, Some(&running)));
+        let failed = [
+            region("keyboard", false, None),
+            region("lid", false, Some("Rain")),
+        ];
+        assert!(regions_to_resume(&settings, &applied, Some(&failed)));
+        let other = [
+            region("keyboard", false, None),
+            region("lid", true, Some("Swirl")),
+        ];
+        assert!(regions_to_resume(&settings, &applied, Some(&other)));
+
+        settings.preferences.resume_effects = false;
+        assert!(!regions_to_resume(&settings, &applied, None));
     }
 
     /// Beyond this, the expected condition is considered not to be coming.

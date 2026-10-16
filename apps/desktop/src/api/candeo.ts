@@ -10,6 +10,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
+import { deviceOf, regionOf, type Target } from './target'
 import type {
   DeviceInfo,
   DeviceRef,
@@ -63,9 +64,26 @@ export function disconnect(device: DeviceRef): Promise<void> {
   return invoke('disconnect', { device })
 }
 
-/** Layout of an open device. Fails if it is not open. */
+/**
+ * Layout of a device, open or not: from the definition in force when it is not
+ * open, as the preview already borrows it. The window draws a device's regions
+ * before opening it (`docs/design/regions.md` §11 c).
+ */
 export function getLayout(device: DeviceRef): Promise<LayoutInfo> {
-  return invoke('get_layout', { device })
+  return invoke('get_layout', { device: deviceOf(device) })
+}
+
+/**
+ * Splits a device into the regions its definition declares, or makes it whole
+ * again (`docs/design/regions.md` §2).
+ *
+ * Splitting gives every region the device's applied effect, its settings and
+ * what its brightness follows; making it whole gives the device back what it
+ * had before. Either ends an interruption under way, and runs what the device
+ * now has when it is open and controlled.
+ */
+export function setSplit(device: DeviceRef, split: boolean): Promise<void> {
+  return invoke('set_split', { device: deviceOf(device), split })
 }
 
 /**
@@ -123,14 +141,17 @@ export const DIMMING_FLOOR_DEFAULT = 20
  * Makes a device's brightness follow the sound or a signal, `null` for nothing,
  * live. The hardware brightness is not touched, and nothing is remembered: that
  * is {@link rememberDimming}, same split as for the brightness itself.
+ *
+ * On a split device, what a region's lights follow: a region is named, and the
+ * whole device is not (`docs/design/regions.md` §4).
  */
-export function setDimming(device: DeviceRef, dimming: Dimming | null): Promise<void> {
-  return invoke('set_dimming', { device, dimming })
+export function setDimming(target: Target, dimming: Dimming | null): Promise<void> {
+  return invoke('set_dimming', { device: deviceOf(target), region: regionOf(target), dimming })
 }
 
-/** Remembers what a device's brightness follows, `null` forgetting it. */
-export function rememberDimming(device: DeviceRef, dimming: Dimming | null): Promise<void> {
-  return invoke('remember_dimming', { device, dimming })
+/** Remembers what a device's or a region's brightness follows, `null` forgetting it. */
+export function rememberDimming(target: Target, dimming: Dimming | null): Promise<void> {
+  return invoke('remember_dimming', { device: deviceOf(target), region: regionOf(target), dimming })
 }
 
 /**
@@ -545,6 +566,37 @@ export interface ActiveEffectRecord {
 }
 
 /**
+ * A device while it is split: what each region runs and follows, and the
+ * settings kept per region and effect (`docs/design/regions.md` §8, §11 b).
+ *
+ * The device's own records are left as they were: they are what making it whole
+ * gives back. Mirror of `SplitDeviceRecord`, in `src-tauri/src/storage.rs`.
+ */
+export interface SplitDeviceRecord {
+  vid: number
+  pid: number
+  /** Absent when empty, as the file writes it. */
+  regions?: RegionRecord[]
+  effectParams?: RegionEffectParamsRecord[]
+}
+
+/** A region's applied effect, and what its brightness follows. */
+export interface RegionRecord {
+  region: string
+  /** An effect key. Absent: the region runs nothing. */
+  effect?: string
+  dimming?: Dimming
+}
+
+/** {@link EffectParamsRecord}, for one region of the split device it sits in. */
+export interface RegionEffectParamsRecord {
+  region: string
+  effect: string
+  values: EffectParams
+  bindings?: Bindings
+}
+
+/**
  * What holds for the whole application, and for no device in particular.
  *
  * A separate object: everything that depends on a keyboard lives in an indexed
@@ -679,42 +731,6 @@ export interface EffectParamsRecord {
 export type Bindings = Record<string, string>
 
 /**
- * A device model while it is split into regions (`docs/design/regions.md` §8).
- * Mirror of `SplitDeviceRecord`, in `src-tauri/src/storage.rs`.
- *
- * The device's own records — `activeEffects`, `effectParams`, the `dimming` of
- * its `devices` entry — are not touched while it is split: they are what
- * making it whole gives back. The entry alone is a split device whose regions
- * run nothing.
- */
-export interface SplitDeviceRecord {
-  vid: number
-  pid: number
-  /** Each region's applied effect and follow; a region keeping neither has no record. */
-  regions?: RegionRecord[]
-  /** The settings kept per region and effect. */
-  effectParams?: RegionEffectParamsRecord[]
-}
-
-/** One region of a split device. Mirror of `RegionRecord`. */
-export interface RegionRecord {
-  /** The region's id, as its definition declares it. */
-  region: string
-  /** Its applied effect. Absent: it runs nothing. */
-  effect?: string
-  /** What its brightness follows. Absent: nothing. */
-  dimming?: Dimming
-}
-
-/** An effect's settings kept for one region. Mirror of `RegionEffectParamsRecord`. */
-export interface RegionEffectParamsRecord {
-  region: string
-  effect: string
-  values: EffectParams
-  bindings?: Bindings
-}
-
-/**
  * Mirror of `Settings`, in `src-tauri/src/storage.rs`.
  *
  * A global preference in `preferences`, everything that depends on a keyboard in
@@ -735,7 +751,7 @@ export interface Settings {
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]
   effectParams: EffectParamsRecord[]
-  /** The device models split into regions. Absent while none is. */
+  /** The devices split into regions. Absent when none is: an older build drops the key. */
   splitDevices?: SplitDeviceRecord[]
   /**
    * Automation rules, in their order, which is their priority. Kept here even by
@@ -850,13 +866,21 @@ export function resetSettings(): Promise<void> {
  * overwrite in passing an adoption decided in the meantime.
  *
  * An **empty** table erases the entry: it is "restore the declared values".
+ *
+ * On a split device, the settings kept for a region: each keeps its own per
+ * effect (`docs/design/regions.md` §3).
  */
 export function rememberEffectParams(
-  device: DeviceRef,
+  target: Target,
   effect: string,
   params: EffectParams,
 ): Promise<void> {
-  return invoke('remember_effect_params', { device, effect, params })
+  return invoke('remember_effect_params', {
+    device: deviceOf(target),
+    region: regionOf(target),
+    effect,
+    params,
+  })
 }
 
 /**
@@ -869,11 +893,16 @@ export function rememberEffectParams(
  * refused (`bindingInvalid`).
  */
 export function rememberEffectBindings(
-  device: DeviceRef,
+  target: Target,
   effect: string,
   bindings: Bindings,
 ): Promise<void> {
-  return invoke('remember_effect_bindings', { device, effect, bindings })
+  return invoke('remember_effect_bindings', {
+    device: deviceOf(target),
+    region: regionOf(target),
+    effect,
+    bindings,
+  })
 }
 
 // ---------------------------------------------------------------- engine
@@ -902,6 +931,18 @@ export interface EngineStatus {
   toKeyboard: boolean
   /** The rule interrupting this device, when one does (#106). */
   interruption?: InterruptionStatus
+}
+
+/**
+ * One region of a split device, as its loop runs it (`docs/design/regions.md`
+ * §11 c). A region whose effect failed stops alone, and says why here.
+ */
+export interface RegionEngineStatus {
+  region: string
+  running: boolean
+  effectId: string | null
+  /** Error coming from the region's effect. Already readable. */
+  error: string | null
 }
 
 /** A rule interrupting a device, as the engine reports it. */
@@ -944,6 +985,14 @@ export function idleAvailable(): Promise<boolean> {
 /** A device's state, and whom it belongs to. */
 export interface DeviceEngineStatus extends EngineStatus {
   device: DeviceRef
+  /**
+   * Present while the device's loop runs its regions, one per region of the
+   * definition, in its order. The device's own `running` is then true while one
+   * of them runs, and its `effectId` and `error` are null. Absent during an
+   * interruption: the rule's effect runs on the whole device, as the device's
+   * fields say.
+   */
+  regions?: RegionEngineStatus[]
 }
 
 /**
@@ -966,6 +1015,8 @@ export interface PreviewStatus {
    * destination.
    */
   layoutOf: DeviceRef
+  /** The region of that device whose layout it runs on, when it previews one. */
+  region?: string
   running: boolean
   effectId: string | null
   /** Error coming from the effect's code. Already readable: to be shown as it is. */
@@ -1005,16 +1056,26 @@ export interface EngineReport {
  * no signal, whatever is remembered for it.
  */
 export function startEffect(
-  device: DeviceRef,
+  target: Target,
   id: string,
   params: EffectParams = {},
   bindings: Bindings = {},
 ): Promise<void> {
-  return invoke('start_effect', { device, id, params, bindings })
+  return invoke('start_effect', {
+    device: deviceOf(target),
+    region: regionOf(target),
+    id,
+    params,
+    bindings,
+  })
 }
 
-export function stopEffect(device: DeviceRef): Promise<void> {
-  return invoke('stop_effect', { device })
+/**
+ * Stops what a device runs. On a split device, what one region runs: its lights
+ * go black, the other regions go on, and it forgets its applied effect.
+ */
+export function stopEffect(target: Target): Promise<void> {
+  return invoke('stop_effect', { device: deviceOf(target), region: regionOf(target) })
 }
 
 /**
@@ -1027,8 +1088,10 @@ export function stopEffect(device: DeviceRef): Promise<void> {
  * while an effect runs on the keyboard: without this separate loop, selecting
  * an effect would turn off the current lighting.
  *
- * `device` designates the device whose **layout is borrowed**; `null` falls
- * back on the default layout, to preview without owning a keyboard.
+ * `target` designates the device whose **layout is borrowed**; `null` falls
+ * back on the default layout, to preview without owning a keyboard. A region
+ * borrows its own layout and what its brightness follows: its frames have the
+ * device's length, black outside the region (`docs/design/regions.md` §7).
  *
  * There is only one preview: calling again **replaces** the previous one. Each
  * call builds a QuickJS context and destroys one, hence the debounce on the
@@ -1036,12 +1099,18 @@ export function stopEffect(device: DeviceRef): Promise<void> {
  * last selection wait and losing it.
  */
 export function startPreview(
-  device: DeviceRef | null,
+  target: Target | null,
   id: string,
   params: EffectParams = {},
   bindings: Bindings = {},
 ): Promise<void> {
-  return invoke('start_preview', { device, id, params, bindings })
+  return invoke('start_preview', {
+    device: target ? deviceOf(target) : null,
+    region: target ? regionOf(target) : null,
+    id,
+    params,
+    bindings,
+  })
 }
 
 /** Stops the preview. No device effect is touched. */
@@ -1078,9 +1147,9 @@ export function subscribePreviewFrames(
   )
 }
 
-/** Adjusts the parameters live, without restarting the loop. */
-export function setEffectParams(device: DeviceRef, params: EffectParams): Promise<void> {
-  return invoke('set_effect_params', { device, params })
+/** Adjusts the parameters live, without restarting the loop: on a split device, a region's. */
+export function setEffectParams(target: Target, params: EffectParams): Promise<void> {
+  return invoke('set_effect_params', { device: deviceOf(target), region: regionOf(target), params })
 }
 
 /**
@@ -1089,8 +1158,12 @@ export function setEffectParams(device: DeviceRef, params: EffectParams): Promis
  * {@link setEffectParams} sends every value. Remembering them is
  * {@link rememberEffectBindings}.
  */
-export function setEffectBindings(device: DeviceRef, bindings: Bindings): Promise<void> {
-  return invoke('set_effect_bindings', { device, bindings })
+export function setEffectBindings(target: Target, bindings: Bindings): Promise<void> {
+  return invoke('set_effect_bindings', {
+    device: deviceOf(target),
+    region: regionOf(target),
+    bindings,
+  })
 }
 
 /**
@@ -1122,8 +1195,10 @@ export function subscribeFrames(
   channel.onmessage = (m) => {
     onFrame(m instanceof ArrayBuffer ? new Uint8Array(m) : Uint8Array.from(m))
   }
-  return invoke<void>('subscribe_frames', { device, channel }).then(
-    () => () => void invoke('unsubscribe_frames', { device }),
+  // The model alone: a split device's frames are its regions', composed.
+  const model = deviceOf(device)
+  return invoke<void>('subscribe_frames', { device: model, channel }).then(
+    () => () => void invoke('unsubscribe_frames', { device: model }),
   )
 }
 

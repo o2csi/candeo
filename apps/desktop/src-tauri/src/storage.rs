@@ -3318,47 +3318,70 @@ pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<(
 /// [`crate::runtime::set_effect_params`]. The two are separate because they have
 /// neither the same rate nor the same destination — dozens of calls per second to
 /// the render loop, a single one to disk when the slider stops.
+///
+/// On a split device, a region's: kept with the split device's entry, per
+/// region and effect (`docs/design/regions.md` §8).
 #[tauri::command]
 pub fn remember_effect_params(
     app: AppHandle,
     device: DeviceRef,
+    region: Option<String>,
     effect: String,
     params: serde_json::Map<String, serde_json::Value>,
 ) -> CmdResult<()> {
     EffectKey::settings_of(&effect)?;
+    let part = crate::part_of(&app, device, region.as_deref(), false)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
+    let (vid, pid) = (device.vid, device.pid);
 
     // Nothing new: the file is not rewritten. A slider moved then brought back
     // comes through here, and so does switching back and forth between two
     // effects — one disk write per pass would tell nobody anything.
-    let stored = settings.effect_params(device.vid, device.pid, &effect);
+    let stored = match part.region() {
+        None => settings.effect_params(vid, pid, &effect),
+        Some(region) => settings.region_effect_params(vid, pid, region, &effect),
+    };
     if stored == Some(&params) || (stored.is_none() && params.is_empty()) {
         return Ok(());
     }
 
-    settings.set_effect_params(device.vid, device.pid, &effect, params);
+    match part.region() {
+        None => settings.set_effect_params(vid, pid, &effect, params),
+        Some(region) => settings.set_region_effect_params(vid, pid, region, &effect, params),
+    }
     store.write_settings(&settings)
 }
 
 /// Keeps which parameters of an effect read a signal on a device (§2.3.1), as
 /// [`remember_effect_params`] keeps their values: the running loop is set apart,
-/// through [`crate::runtime::set_effect_bindings`].
+/// through [`crate::runtime::set_effect_bindings`]. A binding follows the effect
+/// on the device, or on the region of a split device.
 #[tauri::command]
 pub fn remember_effect_bindings(
     app: AppHandle,
     device: DeviceRef,
+    region: Option<String>,
     effect: String,
     bindings: crate::runtime::Bindings,
 ) -> CmdResult<()> {
     EffectKey::settings_of(&effect)?;
     let bindings = crate::runtime::checked_bindings(bindings)?;
+    let part = crate::part_of(&app, device, region.as_deref(), false)?;
     let store = store(&app)?;
     let mut settings = store.read_settings()?;
-    if settings.effect_bindings(device.vid, device.pid, &effect) == bindings {
+    let (vid, pid) = (device.vid, device.pid);
+    let stored = match part.region() {
+        None => settings.effect_bindings(vid, pid, &effect),
+        Some(region) => settings.region_effect_bindings(vid, pid, region, &effect),
+    };
+    if stored == bindings {
         return Ok(());
     }
-    settings.set_effect_bindings(device.vid, device.pid, &effect, bindings);
+    match part.region() {
+        None => settings.set_effect_bindings(vid, pid, &effect, bindings),
+        Some(region) => settings.set_region_effect_bindings(vid, pid, region, &effect, bindings),
+    }
     store.write_settings(&settings)
 }
 

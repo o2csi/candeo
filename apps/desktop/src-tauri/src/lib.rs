@@ -153,6 +153,42 @@ pub struct DeviceInfo {
     pub light_count: usize,
     /// Its definition has a brightness command, as [`LayoutInfo::hardware_brightness`].
     pub hardware_brightness: bool,
+    /// The regions its definition declares, as [`LayoutInfo::regions`].
+    pub regions: Vec<RegionInfo>,
+    /// Split into regions: its settings say so and its definition declares
+    /// them (`docs/design/regions.md` §2).
+    pub split: bool,
+}
+
+/// A part of a device that runs its own effect once the device is split. Mirror
+/// of `candeo_device::Region`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionInfo {
+    /// What settings and commands name it by: `keyboard`.
+    pub id: &'static str,
+    /// As its definition writes it, for the window to put in its language.
+    pub name: candeo_device::Text,
+    /// The frame positions of its lights, ascending.
+    pub positions: Vec<u16>,
+    /// What an effect is checked against for it: its own layout's, the
+    /// device's today, so that a region drawn later may offer less (§1).
+    pub lights: &'static str,
+    pub capabilities: Vec<&'static str>,
+}
+
+/// The regions a layout declares, in its order.
+fn region_infos(l: &Layout) -> Vec<RegionInfo> {
+    l.regions
+        .iter()
+        .map(|r| RegionInfo {
+            id: r.id,
+            name: r.name.clone(),
+            positions: r.positions.to_vec(),
+            lights: lights_kind(r.layout),
+            capabilities: capabilities(r.layout),
+        })
+        .collect()
 }
 
 /// `keys` or `zones`, as the manifest's `kinds` name them.
@@ -250,6 +286,9 @@ pub struct LayoutInfo {
     /// the device. Without one the window shows no slider, and what the
     /// brightness follows scales frames from full (#334).
     pub hardware_brightness: bool,
+    /// The parts it can be split into, each running its own effect: empty
+    /// when its definition declares none.
+    pub regions: Vec<RegionInfo>,
 }
 
 /// One firmware effect, as the gallery needs it. Mirror of
@@ -379,6 +418,7 @@ impl From<&'static Layout> for LayoutInfo {
                 })
                 .collect(),
             hardware_brightness: l.has_brightness(),
+            regions: region_infos(l),
         }
     }
 }
@@ -507,6 +547,93 @@ fn find_layout(device: DeviceRef) -> CmdResult<&'static Layout> {
         .copied()
         .find(|l| DeviceRef::of(l) == device)
         .ok_or_else(|| Failure::new("noLayout").with("device", device))
+}
+
+// ---------------------------------------------------------------- regions
+
+/// Whether a device is split: its settings say so **and** the definition in
+/// force declares regions. A definition chosen without them leaves the device
+/// whole, the split kept in the file for when one with regions drives it again
+/// (`docs/design/regions.md` §2).
+pub(crate) fn split(settings: &Settings, layout: &Layout) -> bool {
+    !layout.regions.is_empty() && settings.split(layout.vid, layout.pid).is_some()
+}
+
+/// [`split`] for a device, reading the settings only where its definition
+/// declares regions: every other device answers as before regions, without a
+/// disk access.
+pub(crate) fn is_split(app: &AppHandle, device: DeviceRef) -> CmdResult<bool> {
+    match find_layout(device) {
+        Ok(layout) if !layout.regions.is_empty() => {
+            Ok(split(&storage::store(app)?.read_settings()?, layout))
+        }
+        _ => Ok(false),
+    }
+}
+
+/// What a command names on a device: all of it, or one of its regions.
+#[derive(Clone, Copy)]
+pub(crate) enum Scope {
+    Whole,
+    Region(&'static candeo_device::Region),
+}
+
+impl Scope {
+    /// The region's id, `None` for the whole device: the engine's key.
+    pub(crate) fn region(self) -> Option<&'static str> {
+        match self {
+            Scope::Whole => None,
+            Scope::Region(region) => Some(region.id),
+        }
+    }
+}
+
+/// The part a command names, checked (§11 c): a split device needs a region,
+/// a whole one takes none — `whole_of_split` lets a preview borrow a split
+/// device's whole layout — and a region is one the definition declares.
+///
+/// The window never sends a wrong one knowingly, and a race with the tray ends
+/// at the next state-changed event: an error nobody can act on.
+fn part(
+    device: DeviceRef,
+    layout: Option<&'static Layout>,
+    split: bool,
+    region: Option<&str>,
+    whole_of_split: bool,
+) -> CmdResult<Scope> {
+    match (region, split) {
+        (None, false) => Ok(Scope::Whole),
+        (None, true) if whole_of_split => Ok(Scope::Whole),
+        (None, true) => Err(Failure::unexpected(format!(
+            "{device} is split into regions: name one"
+        ))),
+        (Some(region), false) => Err(Failure::unexpected(format!(
+            "{device} is not split, it has no region “{region}” to name"
+        ))),
+        (Some(region), true) => layout
+            .and_then(|l| l.region(region))
+            .map(Scope::Region)
+            .ok_or_else(|| Failure::unexpected(format!("{device} declares no region “{region}”"))),
+    }
+}
+
+/// [`part`] for a device, the settings read only where its definition declares
+/// regions.
+pub(crate) fn part_of(
+    app: &AppHandle,
+    device: DeviceRef,
+    region: Option<&str>,
+    whole_of_split: bool,
+) -> CmdResult<Scope> {
+    let layout = layouts()
+        .iter()
+        .copied()
+        .find(|l| DeviceRef::of(l) == device);
+    let split = match layout {
+        Some(l) if !l.regions.is_empty() => split(&storage::store(app)?.read_settings()?, l),
+        _ => false,
+    };
+    part(device, layout, split, region, whole_of_split)
 }
 
 /// Serial number of the plugged-in unit — if one is plugged in.
@@ -872,6 +999,7 @@ pub(crate) fn reopen(app: &AppHandle, device: DeviceRef) {
             .and_then(|s| s.status.effect_id)
     };
     let was_running = running(&state);
+    let ran_regions = state.engine.runs_regions(device);
     // Stopping waits for the loop to end: nothing writes on the old handle
     // once it is closed.
     state.engine.stop(device);
@@ -882,10 +1010,20 @@ pub(crate) fn reopen(app: &AppHandle, device: DeviceRef) {
     // Resuming follows the setting; what ran a moment ago comes back
     // regardless, as the device would not have stopped without the save. Not a
     // rule's effect: starting it here would store it as the one applied, and
-    // the rule gives the device back when it ends anyway.
+    // the rule gives the device back when it ends anyway. The definition now in
+    // force says whether the device is split: what ran whole does not come
+    // back over regions, nor regions over a definition declaring none.
     let open = state.open_devices().contains(&device);
     let free = !automations::interrupts(app, device);
-    if let Some(effect) = was_running.filter(|_| open && free && running(&state).is_none()) {
+    if !(open && free) {
+        return;
+    }
+    let split = is_split(app, device).unwrap_or(false);
+    if split && (ran_regions || was_running.is_some()) && !state.engine.runs_regions(device) {
+        if let Err(e) = runtime::run_regions(app, device) {
+            tracing::warn!(device = %device, "regions not started again: {e}");
+        }
+    } else if let Some(effect) = was_running.filter(|_| !split && running(&state).is_none()) {
         if let Err(e) = runtime::start_saved(app, device, &effect) {
             tracing::warn!(device = %device, effect, "effect not started again: {e}");
         }
@@ -1037,6 +1175,8 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 capabilities: capabilities(l),
                 light_count: l.lit_count(),
                 hardware_brightness: l.has_brightness(),
+                regions: region_infos(l),
+                split: split(&settings, l),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
@@ -1106,6 +1246,9 @@ fn unverified_devices(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<De
             capabilities: capabilities(l),
             light_count: l.lit_count(),
             hardware_brightness: l.has_brightness(),
+            regions: region_infos(l),
+            // Driven by nothing until tried, so split by nothing either.
+            split: false,
             present: plugged_in.is_some(),
             state: DeviceState::Detected,
             open: false,
@@ -1414,9 +1557,9 @@ fn disconnect(state: State<'_, AppState>, device: DeviceRef) {
 
 /// Layout used as a fallback when nothing is connected.
 ///
-/// `get_layout` refuses when disconnected, and that is exactly the case to
-/// serve: we draw the keyboard and write an effect **before** plugging
-/// anything in, or without owning the keyboard.
+/// `get_layout` needs a device, and that is exactly the case to serve: we draw
+/// the keyboard and write an effect **before** plugging anything in, or
+/// without owning the keyboard.
 ///
 /// Without this command, the interface would have no choice but to copy the
 /// geometry — a second source of truth that would silently diverge.
@@ -1442,10 +1585,15 @@ fn with_keyboard<T>(
     f(kb)
 }
 
-/// Layout of an open device.
+/// Layout of a device: the one it was opened with, or, closed, its definition
+/// in force — the window draws regions and pictograms for a device it has not
+/// opened (`docs/design/regions.md` §11 c).
 #[tauri::command]
 fn get_layout(state: State<'_, AppState>, device: DeviceRef) -> CmdResult<LayoutInfo> {
-    with_keyboard(&state, device, |kb| Ok(LayoutInfo::from(kb.layout())))
+    match with_keyboard(&state, device, |kb| Ok(kb.layout())) {
+        Ok(layout) => Ok(LayoutInfo::from(layout)),
+        Err(_) => find_layout(device).map(LayoutInfo::from),
+    }
 }
 
 /// Writes the brightness **to the keyboard**, and nothing else.
@@ -1464,31 +1612,47 @@ fn set_brightness(state: State<'_, AppState>, device: DeviceRef, level: u8) -> C
 /// live: its loop, and a preview on its layout, read it from the next frame
 /// (`docs/design/inputs-and-automations.md` §2.2.2). The hardware brightness is
 /// not touched. Remembering it is [`remember_dimming`].
+///
+/// On a split device, what one region's brightness follows: it scales that
+/// region's lights, whatever draws them (`docs/design/regions.md` §4).
 #[tauri::command]
 fn set_dimming(
+    app: AppHandle,
     state: State<'_, AppState>,
     device: DeviceRef,
+    region: Option<String>,
     dimming: Option<runtime::dimming::Dimming>,
 ) -> CmdResult<()> {
     let dimming = dimming
         .map(runtime::dimming::Dimming::checked)
         .transpose()?;
-    state.engine.set_dimming(device, None, dimming);
+    let part = part_of(&app, device, region.as_deref(), false)?;
+    state.engine.set_dimming(device, part.region(), dimming);
     Ok(())
 }
 
 /// Stores what this device's brightness follows, as [`remember_brightness`]
-/// stores its level: read, changed and written here in one go.
+/// stores its level: read, changed and written here in one go. A region's goes
+/// with the split device's entry.
 #[tauri::command]
 fn remember_dimming(
     app: AppHandle,
     state: State<'_, AppState>,
     device: DeviceRef,
+    region: Option<String>,
     dimming: Option<runtime::dimming::Dimming>,
 ) -> CmdResult<()> {
     let dimming = dimming
         .map(runtime::dimming::Dimming::checked)
         .transpose()?;
+    if let Scope::Region(region) = part_of(&app, device, region.as_deref(), false)? {
+        let store = storage::store(&app)?;
+        let mut settings = store.read_settings()?;
+        if settings.set_region_dimming(device.vid, device.pid, region.id, dimming) {
+            store.write_settings(&settings)?;
+        }
+        return Ok(());
+    }
     let layout = find_layout(device)?;
     let serial = known_serial(
         state.inspection(device).as_ref(),
@@ -1540,6 +1704,9 @@ fn remember_brightness(
     store.write_settings(&settings)
 }
 
+/// Puts a firmware effect on a device. Refused on a split device: the firmware
+/// lights all of it, and a split device lights only what its regions run
+/// (`docs/design/regions.md` §2).
 #[tauri::command]
 fn set_effect(
     app: AppHandle,
@@ -1548,10 +1715,77 @@ fn set_effect(
     effect: String,
     colours: Vec<u8>,
 ) -> CmdResult<()> {
+    if is_split(&app, device)? {
+        return Err(Failure::unexpected(format!(
+            "{device} is split into regions: no firmware effect lights it"
+        )));
+    }
     let colours = triplets(&colours);
     with_keyboard(&state, device, |kb| Ok(kb.set_effect(&effect, &colours)?))?;
     // A firmware effect chosen by hand ends an interruption, like any gesture.
     automations::dismiss(&app, device);
+    Ok(())
+}
+
+/// Splits a device into the regions its definition declares, or makes it
+/// whole again (`docs/design/regions.md` §2, §11 c).
+///
+/// Splitting gives every region what the device had — its effect, its
+/// settings, its follow — so the device goes on showing the same thing, and a
+/// firmware effect driving it goes off: a split device lights only what its
+/// regions run. Making it whole gives it back what it had before. Either is a
+/// gesture on the device, and ends an interruption under way.
+#[tauri::command]
+fn set_split(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device: DeviceRef,
+    split: bool,
+) -> CmdResult<()> {
+    let layout = find_layout(device)?;
+    if layout.regions.is_empty() {
+        return Err(Failure::unexpected(format!(
+            "{} declares no regions to split it into",
+            layout.name
+        )));
+    }
+    let store = storage::store(&app)?;
+    let mut settings = store.read_settings()?;
+    let regions: Vec<&str> = layout.regions.iter().map(|r| r.id).collect();
+    if settings.set_split(device.vid, device.pid, split.then_some(regions.as_slice())) {
+        store.write_settings(&settings)?;
+        tracing::info!(device = %device, split, "device split into regions, or whole again");
+    }
+    // What the regions follow, live: copied on splitting, gone once whole.
+    for region in layout.regions {
+        let follows = settings.region_dimming(device.vid, device.pid, region.id);
+        state
+            .engine
+            .set_dimming(device, Some(region.id), follows.cloned());
+    }
+    automations::dismiss(&app, device);
+
+    let controlled = state.inspection(device).is_some_and(|inspection| {
+        let serial = known_serial(Some(&inspection), None);
+        settings.device_state(device.vid, device.pid, serial.as_deref()) == DeviceState::Adopted
+    });
+    if controlled {
+        if split {
+            runtime::run_regions(&app, device)?;
+        } else if let Some(effect) = settings.active_effect(device.vid, device.pid) {
+            let effect = effect.to_owned();
+            if let Err(e) = runtime::start_saved(&app, device, &effect) {
+                tracing::warn!(device = %device, effect, "applied effect not started again: {e}");
+            }
+        } else {
+            // Nothing to give back: dark, rather than the regions' last frame
+            // frozen as if they still ran (#48).
+            state.engine.stop(device);
+            with_keyboard(&state, device, |kb| Ok(kb.set_effect(OFF, &[])?))?;
+        }
+    }
+    tray::refresh(&app);
+    tray::notify_state_changed(&app);
     Ok(())
 }
 
@@ -1757,6 +1991,7 @@ pub fn run() {
             set_dimming,
             remember_dimming,
             set_effect,
+            set_split,
             present,
             write_row,
             runtime::start_effect,
@@ -1933,6 +2168,53 @@ mod tests {
         }
         assert_eq!(brightness_to_reapply(&settings, razer, serial), Some(80));
         assert_eq!(brightness_to_reapply(&settings, zones, serial), None);
+    }
+
+    /// A command names a region exactly when the device is split, and only one
+    /// its definition declares; a preview may borrow a split device whole
+    /// (`regions.md` §11 c).
+    #[test]
+    fn a_command_names_a_region_exactly_when_the_device_is_split() {
+        let r5 = candeo_device::definition::builtin_layout("alienware-17-r5-zones.json")
+            .expect("built in");
+        let device = DeviceRef::of(r5);
+        let named = |split, region, whole_of_split| {
+            part(device, Some(r5), split, region, whole_of_split).map(Scope::region)
+        };
+        assert_eq!(named(false, None, false), Ok(None));
+        assert_eq!(named(true, Some("lid"), false), Ok(Some("lid")));
+        assert_eq!(named(true, None, true), Ok(None), "a preview of it whole");
+        for (split, region) in [(true, None), (false, Some("lid")), (true, Some("screen"))] {
+            let refused = named(split, region, false).expect_err("refused");
+            assert_eq!(refused.code, "unexpected", "{split} {region:?}");
+        }
+
+        let mut settings = Settings::default();
+        assert!(!split(&settings, r5));
+        settings.set_split(r5.vid, r5.pid, Some(&["keyboard", "lid", "base", "power"]));
+        assert!(split(&settings, r5));
+        // A definition chosen without regions leaves the device whole, the
+        // split kept in the file.
+        let razer = candeo_device::definition::builtin()[0];
+        settings.set_split(razer.vid, razer.pid, Some(&[]));
+        assert!(!split(&settings, razer));
+    }
+
+    /// The window is told each region, with what an effect is checked against
+    /// for it.
+    #[test]
+    fn the_window_is_told_the_regions_of_a_layout() {
+        let r5 = candeo_device::definition::builtin_layout("alienware-17-r5-zones.json")
+            .expect("built in");
+        let info = serde_json::to_value(LayoutInfo::from(r5)).unwrap();
+        let lid = &info["regions"][1];
+        assert_eq!(lid["id"], "lid");
+        assert_eq!(lid["name"]["fr"], "Capot");
+        assert_eq!(lid["positions"], serde_json::json!([0, 1, 10, 11]));
+        assert_eq!(lid["lights"], "zones");
+        assert_eq!(lid["capabilities"], serde_json::json!(["geometry"]));
+        let razer = LayoutInfo::from(candeo_device::definition::builtin()[0]);
+        assert!(razer.regions.is_empty());
     }
 
     /// The layout sent to the window says whether to show the slider.
