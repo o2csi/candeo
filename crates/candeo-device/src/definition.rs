@@ -1557,14 +1557,35 @@ mod tests {
         assert!(!r5.fits_machine(None), "a model nobody read");
     }
 
+    /// The m18 R1's AW-ELC, `187c:0551`, is also in the m16 R1, the m16 R2 and
+    /// the m18 R2, wired otherwise (#328): its zones apply on the m18 R1 alone,
+    /// by the name read on the surveyed machine. Its AMD edition is another.
+    #[test]
+    fn the_m18_r1_zones_fit_the_m18_r1_only() {
+        let zones = load(ZONES).unwrap();
+        assert_eq!((zones.vid, zones.pid), (0x187c, 0x0551));
+        assert_eq!(zones.machine, Some("Alienware m18 R1"));
+        assert!(zones.fits_machine(Some("Alienware m18 R1")));
+        for other in [
+            "Alienware m16 R1",
+            "Alienware m18 R2",
+            "Alienware m18 R1 AMD",
+        ] {
+            assert!(!zones.fits_machine(Some(other)), "{other}");
+        }
+    }
+
     /// Without `machine`, a definition applies on any machine, one whose model
-    /// could not be read included: as before #326.
+    /// could not be read included: as before #326. The m18 R1's keyboard,
+    /// `0d62:aab0`, is known in no other machine yet.
     #[test]
     fn a_definition_naming_no_machine_fits_every_machine() {
-        let zones = load(ZONES).unwrap();
-        assert_eq!(zones.machine, None);
-        for model in [Some("Alienware m18 R1"), Some("Alienware 17 R5"), None] {
-            assert!(zones.fits_machine(model), "{model:?}");
+        for json in [RAZER, KEYBOARD] {
+            let l = load(json).unwrap();
+            assert_eq!(l.machine, None, "{}", l.name);
+            for model in [Some("Alienware m18 R1"), Some("Alienware 17 R5"), None] {
+                assert!(l.fits_machine(model), "{}, {model:?}", l.name);
+            }
         }
     }
 
@@ -1574,8 +1595,8 @@ mod tests {
     fn a_machine_is_a_name() {
         let named = |machine: &str| {
             with(
-                "\"usage\": \"0001\" }",
-                &format!("\"usage\": \"0001\", \"machine\": {machine} }}"),
+                "\"machine\": \"Alienware m18 R1\"",
+                &format!("\"machine\": {machine}"),
             )
         };
         let l = load(&named("\" Alienware m18 R1 \"")).unwrap();

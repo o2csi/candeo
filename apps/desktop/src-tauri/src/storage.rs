@@ -5206,11 +5206,14 @@ mod tests {
     #[test]
     fn an_effect_is_offered_where_it_applies() {
         let keys = crate::default_layout();
-        let zones = crate::layouts()
+        // Read from the built-in file, not from the layouts kept for the machine
+        // the tests run on: the m18's zones now name their machine (#328).
+        let zones = candeo_device::definition::BUILTIN
             .iter()
-            .copied()
-            .find(|l| l.lights == candeo_device::Lights::Zones)
+            .find(|(file, _)| *file == "alienware-m18-r1-zones.json")
+            .map(|(_, json)| candeo_device::definition::load(json).unwrap())
             .expect("the zones around the m18");
+        assert_eq!(zones.lights, candeo_device::Lights::Zones);
         assert!(keys.grid && !zones.grid);
         let effect = |kinds: &[&str], requires: &[&str], reads_keys: bool| Manifest {
             kinds: kinds.iter().map(|k| k.to_string()).collect(),

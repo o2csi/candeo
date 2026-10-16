@@ -8,7 +8,8 @@
     "Off is kind 01, a steady colour, given black: once the firmware animates, a black frame is overwritten within the second.",
     "Taking over sends that same Off when a host effect starts: an animating firmware redraws over every frame otherwise (2026-09-26).",
     "Sixteen kinds answer; these seven show something, watched one by one on 2026-09-18. Three take a colour.",
-    "The firmware effects are named as the maker’s software lists them, so that someone coming from it finds what they know; 02 and 09, which it does not offer, keep the names of the lighting API they belong to."
+    "The firmware effects are named as the maker’s software lists them, so that someone coming from it finds what they know; 02 and 09, which it does not offer, keep the names of the lighting API they belong to.",
+    "Not matched on the machine, unlike the zones: no other machine is known with 0d62:aab0 yet (2026-10-16, #326)."
   ],
   "match": { "vid": "0d62", "pid": "aab0", "usagePage": "ff89", "usage": "00cc" },
   "report": { "wire": "feature", "length": 64 },

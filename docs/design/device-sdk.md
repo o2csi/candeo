@@ -862,7 +862,8 @@ One confirmed on the device, with frames captured there, joins the built-in
 ones.
 
 They come in two degrees. The Razer ones only change what a verified sibling
-already sends; a family with no verified member — SteelSeries' Apex, written by
+already sends, and so do the Alienware and Dell machines of the AW-ELC (below);
+a family with no verified member — SteelSeries' Apex, written by
 `steelseries.mjs` from OpenRGB's reading of its protocol — has its protocol to
 verify too, and the site lists it apart. Each family's generator reads a facts
 file beside it: `variants.json` for Razer, `<family>.facts.json` for the others.
@@ -924,12 +925,24 @@ So a definition may name the machine it was made on, in `match`:
   A machine whose model cannot be read matches no definition naming one:
   claiming a machine nobody can see is the error this prevents.
 - **Without `machine`, nothing changes**: a peripheral is the same device on
-  every computer. The m18 R1's two definitions keep matching on the device
-  alone until another machine is seen with the same ids, which may happen to
-  `187c:0551` and `0d62:aab0` too.
+  every computer. The m18 R1's keyboard keeps matching on the device alone
+  until another machine is seen with `0d62:aab0`. Its zones name their
+  machine since other machines were seen with `187c:0551` (#328): *Alienware
+  m18 R1*, as Candeo read it on the surveyed machine on 2026-10-16.
 
 This is not the list of models §1 refuses. An effect still names no machine; a
 definition names the one it was surveyed on, as it names its ids.
+
+**The other AW-ELC machines, unverified (2026-10-16, #328).** `alienfx-tools`
+(MIT) keeps, per machine, which id lights what. `alienfx.mjs` reads its
+`devices.csv` once into `alienfx.facts.json`, then writes one definition per
+machine with the framing the 17 R5 and the m18 R1 verified: the protocol is
+proved, the map is not. Its labels are its own — *Alienware m15R1* — so each
+machine is named as SMBIOS names it, *Alienware m15*, from a published DMI
+dump the facts cite; a machine whose name was not found, or whose map that
+project itself calls wrong, is left out and the facts say why. A light it marks
+as the power button is left out, as the m18 R1's is. Three of them share
+`187c:0551` with the m18 R1, whose zones therefore name their machine too.
 
 ### A device nobody describes (2026-10-16, #327)
 
@@ -942,8 +955,8 @@ Razer (`1532`), ASUS (`0b05`), Logitech (`046d`), SteelSeries (`1038`), HyperX
 every other HP device), Corsair (`1b1c`), and any maker's device with a
 collection on the Lighting and Illumination page `0x59`. One card per
 `vid:pid`, *Detected, not supported yet*, with the maker and the usage pages of
-its collections; it cannot be controlled. An AW-ELC on an m15 R1 is one: listed
-here, not taken for a 17 R5.
+its collections; it cannot be controlled. An AW-ELC on a machine no definition
+names is one: listed here, not taken for a 17 R5.
 
 - **Read from the enumeration only.** Nothing is opened, nothing is written:
   the vendor and product ids, the interface, usage page and usage of each
