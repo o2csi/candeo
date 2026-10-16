@@ -925,9 +925,10 @@ So a definition may name the machine it was made on, in `match`:
   A machine whose model cannot be read matches no definition naming one:
   claiming a machine nobody can see is the error this prevents.
 - **Without `machine`, nothing changes**: a peripheral is the same device on
-  every computer. The m18 R1's two definitions keep matching on the device
-  alone until another machine is seen with the same ids, which may happen to
-  `187c:0551` and `0d62:aab0` too.
+  every computer. The m18 R1's keyboard keeps matching on the device alone
+  until another machine is seen with `0d62:aab0`. Its zones name their
+  machine since other machines were seen with `187c:0551` (#328): *Alienware
+  m18 R1*, as Candeo read it on the surveyed machine on 2026-10-16.
 
 This is not the list of models §1 refuses. An effect still names no machine; a
 definition names the one it was surveyed on, as it names its ids.
@@ -940,9 +941,8 @@ proved, the map is not. Its labels are its own — *Alienware m15R1* — so each
 machine is named as SMBIOS names it, *Alienware m15*, from a published DMI
 dump the facts cite; a machine whose name was not found, or whose map that
 project itself calls wrong, is left out and the facts say why. A light it marks
-as the power button is left out, as the m18 R1's is. The ones on `187c:0551`
-are not offered in the application while the m18 R1's zones claim that id on
-every machine: they are there to download, and to choose on the device's card.
+as the power button is left out, as the m18 R1's is. Three of them share
+`187c:0551` with the m18 R1, whose zones therefore name their machine too.
 
 ### A device nobody describes (2026-10-16, #327)
 

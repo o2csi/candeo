@@ -265,6 +265,13 @@ does change, on 2026-09-25: while it is in force the button **stops pulsing** an
 holds its own colour, even when no report names it. Candeo leaves it out of the
 matrix.
 
+**These ids are this machine's.** The same AW-ELC, `187c:0551`, is in the
+m16 R1, the m16 R2 and the m18 R2, and `alienfx-tools` maps their ids otherwise
+(#328). So Candeo's definition of these zones applies on the machine whose
+SMBIOS product name is `Alienware m18 R1`, as Candeo read it at startup on the
+surveyed machine on 2026-10-16. The keyboard, `0d62:aab0`, is matched on the
+device alone: no other machine is known with it yet.
+
 ## 3. Writing works, and what it costs
 
 The keyboard **accepts the reports above** from anything that opens its collection:
