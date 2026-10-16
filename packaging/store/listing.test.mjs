@@ -7,7 +7,9 @@ import { test } from 'node:test'
 import {
   PREVIEW_MARKER,
   applyListings,
+  featuresSince,
   languageOf,
+  listingsChanged,
   newsAdded,
   parseListing,
   previewComment,
@@ -117,6 +119,17 @@ test('the release pull request’s comment shows what will be sent, or why nothi
   assert.match(previewComment('v1.1.0', null, 'news/a.md: no fr line'), /cannot be sent: news\/a\.md: no fr line\./)
 })
 
+test('the release pull request’s comment asks for the listing when features ship without it', () => {
+  const features = ['feat: split a device', 'feat(devices): light the 17 R5']
+  const stale = previewComment('v1.1.0', { en: '• One.', fr: '• Un.' }, null, { features, changed: [] })
+  assert.match(stale, /⚠️ 2 features since v1\.1\.0, and the listings have not changed/)
+  assert.match(stale, /- feat: split a device\n- feat\(devices\): light the 17 R5/)
+  const fresh = previewComment('v1.1.0', null, null, { features, changed: ['listing-en.md'] })
+  assert.match(fresh, /Changed since v1\.1\.0: `listing-en\.md`/)
+  const none = previewComment('v1.1.0', null, null, { features: [], changed: [] })
+  assert.doesNotMatch(none, /listing and screenshots/, 'a release without features asks nothing')
+})
+
 test('the texts land in the fields the submission has, whatever their case', () => {
   const submission = {
     Listings: {
@@ -176,10 +189,10 @@ test('a release gathers the fragments added since the previous one', (t) => {
     GIT_COMMITTER_EMAIL: 'test@example.com',
   }
   const git = (...args) => execFileSync('git', args, { cwd: repo, env, encoding: 'utf8' })
-  const commit = (files, tag) => {
+  const commit = (files, tag, message = 'change') => {
     for (const [path, text] of Object.entries(files)) writeFileSync(join(repo, path), text)
     git('add', '--all')
-    git('commit', '--quiet', '--allow-empty', '--message', 'change')
+    git('commit', '--quiet', '--allow-empty', '--message', message)
     if (tag) git('tag', tag)
   }
 
@@ -193,4 +206,12 @@ test('a release gathers the fragments added since the previous one', (t) => {
   assert.deepEqual(newsAdded('v1.0.0', 'v1.1.0', repo), ['news/new.md'], 'an edited fragment stays with its release')
   assert.equal(previousRelease(undefined, 'HEAD', repo), 'v1.1.0')
   assert.deepEqual(newsAdded('v1.1.0', 'HEAD', repo), ['news/next.md'], 'the README is no fragment')
+
+  commit({}, undefined, 'feat: light a new device')
+  commit({}, undefined, 'fix(devices): mend something')
+  commit({}, undefined, 'feat(regions)!: split a device')
+  assert.deepEqual(featuresSince('v1.1.0', 'HEAD', repo), ['feat: light a new device', 'feat(regions)!: split a device'])
+  assert.deepEqual(listingsChanged('v1.1.0', 'HEAD', repo), [])
+  commit({ 'listing-en.md': LISTING }, undefined, 'docs: name the new device')
+  assert.deepEqual(listingsChanged('v1.1.0', 'HEAD', repo), ['listing-en.md'])
 })
