@@ -34,7 +34,9 @@ seconds each, and watching the machine.
 | 2 | nothing seen; taken for the touchpad, which lights when touched |
 | 3 | the power button |
 | 4 | the keyboard's numeric keypad |
-| 5, 6, 7 | the rest of the keyboard, in three zones |
+| 5 | the keyboard, right of the main keys |
+| 6 | the keyboard, centre |
+| 7 | the keyboard, left |
 | 8 | the outer strip on the left side of the base |
 | 9 | the same on the right side |
 | 10 | the outer strip on the left edge of the lid |
@@ -48,8 +50,6 @@ keeps pulsing with the power state.
 ## 3. What this leaves open
 
 - The **firmware version**, and where to read it.
-- The order of zones 5, 6 and 7 from left to right, which the definition draws
-  as 5, 6, 7.
 - Whether id 2 is the touchpad, and what it shows when not touched.
 - Whether the colours hold through sleep, and on battery.
 - `alienfx-tools` lists the 17 R5 as its *API v3*, twelve-byte reports; this
