@@ -125,12 +125,11 @@ pub(crate) fn select(listed: &[Listed], known: &HashSet<(u16, u16)>) -> Vec<Unsu
         .collect()
 }
 
-/// Every `vid:pid` a definition describes: built in, yours, or unverified, whose
-/// devices *Devices* already lists to try.
+/// Every `vid:pid` a definition for this machine describes: built in, yours,
+/// or unverified, whose devices *Devices* already lists to try. One naming
+/// another machine describes nothing here (#326): its device is listed.
 fn known() -> HashSet<(u16, u16)> {
-    let unverified = candeo_device::definition::unverified()
-        .iter()
-        .map(|(_, l)| *l);
+    let unverified = catalog::unverified().map(|(_, l)| *l);
     catalog::current()
         .layouts
         .iter()
@@ -185,9 +184,10 @@ fn collections_text(collections: &[Collection]) -> String {
 }
 
 /// The form for a device not supported yet, filled with what the enumeration
-/// says of it, Candeo's version and system. What lights on it is the person's to
-/// say. No serial and no path: nothing that names the computer or its user.
-fn report_url(device: &UnsupportedDevice, candeo: &str) -> String {
+/// says of it, the machine's model when the system gives it (#326), Candeo's
+/// version and system. What lights on it is the person's to say. A model, and
+/// no serial and no path: nothing that names this computer or its user.
+fn report_url(device: &UnsupportedDevice, machine: Option<&str>, candeo: &str) -> String {
     let ids = format!("{:04x}:{:04x}", device.vid, device.pid);
     let named = match &device.maker {
         Some(maker) => format!("{maker} {ids}"),
@@ -204,6 +204,9 @@ fn report_url(device: &UnsupportedDevice, candeo: &str) -> String {
     if let Some(maker) = &device.maker {
         url.push_str(&format!("&maker={}", crate::query(maker)));
     }
+    if let Some(machine) = machine {
+        url.push_str(&format!("&machine={}", crate::query(machine)));
+    }
     url
 }
 
@@ -218,7 +221,10 @@ pub fn report_unsupported_device(app: AppHandle, vid: u16, pid: u16) -> CmdResul
     let candeo = format!("{}, {}", app.package_info().version, journal::os_version());
     tracing::info!(device = %DeviceRef { vid, pid }, "report form opened for a device not supported yet");
     app.opener()
-        .open_url(report_url(&device, &candeo), None::<&str>)
+        .open_url(
+            report_url(&device, crate::machine::model(), &candeo),
+            None::<&str>,
+        )
         .map_err(|e| Failure::unexpected(format!("cannot open the report form: {e}")))
 }
 
@@ -327,7 +333,8 @@ mod tests {
     }
 
     /// The form comes filled and escaped, on this repository, with nothing but
-    /// what the enumeration says and the person would type.
+    /// what the enumeration and the machine's model say, and the person would
+    /// type.
     #[test]
     fn the_report_form_is_filled_and_escaped() {
         let device = UnsupportedDevice {
@@ -347,7 +354,11 @@ mod tests {
                 },
             ],
         };
-        let url = report_url(&device, "0.21.0, Windows 11 24H2 (26100.1) · x86_64");
+        let url = report_url(
+            &device,
+            Some("Alienware 17 R5"),
+            "0.21.0, Windows 11 24H2 (26100.1) · x86_64",
+        );
         assert!(url.starts_with(
             "https://github.com/o2csi/candeo/issues/new?template=unsupported-device.yml&"
         ));
@@ -357,14 +368,16 @@ mod tests {
             "&collections=-%20interface%200%3A%20usage%20page%200x0059%20%28Lighting%20and%20Illumination%29%2C%20usage%200x0001%0A-%20usage%20page%200xff00%2C%20usage%200x0002&"
         ));
         assert!(url.contains("&candeo=0.21.0%2C%20Windows%2011"));
-        assert!(url.ends_with("&maker=Alienware"));
+        assert!(url.ends_with("&maker=Alienware&machine=Alienware%2017%20R5"));
 
         let nameless = UnsupportedDevice {
             maker: None,
             ..device
         };
-        let url = report_url(&nameless, "0.21.0");
+        // Neither maker nor model read: the person types them.
+        let url = report_url(&nameless, None, "0.21.0");
         assert!(url.contains("&title=Device%20not%20supported%20yet%3A%20187c%3A0550&"));
         assert!(!url.contains("maker"));
+        assert!(!url.contains("machine"));
     }
 }

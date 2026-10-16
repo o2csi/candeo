@@ -90,9 +90,9 @@ account name does not appear. Nothing sends it: you decide where it goes.
 
 **Report**, in Devices, opens a GitHub issue form in your browser, filled in
 with what Candeo knows of a device: its vendor and product ids, its maker, how
-the system lists it, the definition tried and the firmware read, with Candeo's
-version and the system. No serial number and no path. Nothing is sent until you
-submit the form on GitHub yourself.
+the system lists it, the definition tried and the firmware read, with the
+computer's model, Candeo's version and the system. No serial number and no
+path. Nothing is sent until you submit the form on GitHub yourself.
 
 ## Children
 

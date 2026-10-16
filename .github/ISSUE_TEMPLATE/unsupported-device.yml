@@ -24,7 +24,7 @@ body:
     id: machine
     attributes:
       label: Computer model
-      description: For a device built into a laptop or a desktop, the model as its maker names it. Not its serial number.
+      description: The model as its maker names it, filled in when Candeo could read it; correct it if it is wrong. Not its serial number.
       placeholder: Alienware 17 R5
   - type: textarea
     id: lights
