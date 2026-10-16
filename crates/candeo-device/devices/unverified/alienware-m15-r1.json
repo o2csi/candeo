@@ -1,0 +1,53 @@
+{
+  "$schema": "https://o2csi.github.io/candeo/device-definition.schema.json",
+  "name": "Alienware m15 R1",
+  "notes": [
+    "Unverified: never tried on this machine. Written on 2026-10-16 by alienfx.mjs from alienfx-tools, https://github.com/T-Troll/alienfx-tools, MIT licence, commit 3289c320 (2026-10-14): alienfx-gui/Mappings/devices.csv, each machine's map of its lights.",
+    "Its map there: “Alienware m15R1”, line 13, device “Main lights”. Which id lights what is that map's; the names are its own, in plain words.",
+    "The protocol is verified: the AW-ELC's live preview, as alienware-17-r5-zones.json sends it, which stores nothing in the device.",
+    "Matched on the machine (#326): SMBIOS names it “Alienware m15”, as dmidecode reports it in linuxhw/DMI, https://github.com/linuxhw/DMI (CC BY 4.0), commit 57b21bc6 (2025-01-06): Notebook/Alienware/m/m15, SKU 08A1; the m15 R2 that followed is “Alienware m15 R2”.",
+    "Left out: id 1, “Power Button”, which alienfx-tools marks as the power button: the firmware drives it, as on the m18 R1.",
+    "Drawn from the front, lid open, the lights at the back seen through the hinge. Where a light sits is not in the source: the keyboard zones keep the order and widths of alienfx-tools' grid, the rest is drawn where its name puts it.",
+    "Does it light? Say so: https://github.com/o2csi/candeo/issues/new?template=device-report.yml"
+  ],
+  "match": { "vid": "187c", "pid": "0550", "usagePage": "ff00", "usage": "0001", "machine": "Alienware m15" },
+  "report": { "wire": "output", "length": 33, "prefix": "00" },
+  "frame": {
+    "pace": { "atLeastMs": 100, "skipUnchanged": true },
+    "open": ["03 21 00 01 ff ff"],
+    "each": {
+      "group": "colour",
+      "chunk": 4,
+      "send": ["03 23 01 00 {count} {addresses}", "03 24 00 07 d0 00 fa {r} {g} {b}"]
+    },
+    "close": ["03 21 00 03 00 ff"]
+  },
+  "lights": {
+    "kind": "zones",
+    "items": [
+      { "name": "alien head on the lid", "address": 0, "shape": "disc", "rect": [7.2, 2.4, 1.6, 2] },
+      { "name": "keyboard, left", "address": 2, "rect": [1.6, 10.5, 3.6, 4.6] },
+      { "name": "keyboard, centre left", "address": 3, "rect": [5.3, 10.5, 4.5, 4.6] },
+      { "name": "keyboard, centre right", "address": 4, "rect": [9.9, 10.5, 3, 4.6] },
+      { "name": "keyboard, right", "address": 5, "rect": [13, 10.5, 2.4, 4.6] }
+    ]
+  },
+  "outline": [{ "rect": [0.5, 0, 15, 8], "r": 0.5 }, { "rect": [0, 9, 16, 9.5], "r": 0.8 }],
+  "examples": [
+    {
+      "colours": ["ff0000", "00ff00", "0000ff"],
+      "reports": [
+        "03 21 00 01 ff ff",
+        "03 23 01 00 01 00",
+        "03 24 00 07 d0 00 fa ff 00 00",
+        "03 23 01 00 01 02",
+        "03 24 00 07 d0 00 fa 00 ff 00",
+        "03 23 01 00 01 03",
+        "03 24 00 07 d0 00 fa 00 00 ff",
+        "03 23 01 00 02 04 05",
+        "03 24 00 07 d0 00 fa",
+        "03 21 00 03 00 ff"
+      ]
+    }
+  ]
+}

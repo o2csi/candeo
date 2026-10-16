@@ -1,0 +1,713 @@
+{
+  "source": "alienfx-tools, https://github.com/T-Troll/alienfx-tools, MIT licence, commit 3289c320 (2026-10-14): alienfx-gui/Mappings/devices.csv, each machine's map of its lights.",
+  "derived": "2026-10-16",
+  "productNames": {
+    "linuxhw": "dmidecode reports it in linuxhw/DMI, https://github.com/linuxhw/DMI (CC BY 4.0), commit 57b21bc6 (2025-01-06)",
+    "awcc": "tr1xem/AWCC, https://github.com/tr1xem/AWCC, commit c74483e2 (2026-08-05), compares it exactly with /sys/class/dmi/id/product_name (src/helper.cpp) to find a machine in its database.json"
+  },
+  "variants": [
+    {
+      "file": "alienware-m15-r1.json",
+      "name": "Alienware m15 R1",
+      "label": "Alienware m15R1",
+      "machine": "Alienware m15",
+      "productName": {
+        "from": "linuxhw",
+        "at": "Notebook/Alienware/m/m15, SKU 08A1; the m15 R2 that followed is “Alienware m15 R2”"
+      },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in"
+    },
+    {
+      "file": "alienware-m15-r3-zones.json",
+      "name": "Alienware m15 R3 zones",
+      "label": "Alienware m15R3/R4",
+      "machine": "Alienware m15 R3",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m15/m15 R3, SKU 09CE" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": ["alienfx-tools gives the m15 R3 and R4 one map."]
+    },
+    {
+      "file": "alienware-m15-r4-zones.json",
+      "name": "Alienware m15 R4 zones",
+      "label": "Alienware m15R3/R4",
+      "machine": "Alienware m15 R4",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m15/m15 R4, SKU 0A74" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": ["alienfx-tools gives the m15 R3 and R4 one map."]
+    },
+    {
+      "file": "alienware-m15-r6.json",
+      "name": "Alienware m15 R6",
+      "label": "Alienware m15R6 4-zone",
+      "machine": "Alienware m15 R6",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m15/m15 R6, SKU 0A73" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": [
+        "alienfx-tools' map is the four-zone keyboard's. The per-key keyboard is another device, and on such an m15 R6 ids 4 to 7 may light nothing."
+      ]
+    },
+    {
+      "file": "alienware-area-51m-r1-zones.json",
+      "name": "Alienware Area-51m R1 zones",
+      "label": "Area 51m R1",
+      "machine": "Alienware Area-51m",
+      "productName": {
+        "from": "linuxhw",
+        "at": "Notebook/Alienware/Area-51/Area-51m, SKU 08C4; the R2 is “Alienware Area-51m R2”"
+      },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in"
+    },
+    {
+      "file": "alienware-area-51m-r2-zones.json",
+      "name": "Alienware Area-51m R2 zones",
+      "label": "Alienware Area-51m R2/m17R3/R4",
+      "machine": "Alienware Area-51m R2",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/Area-51m/Area-51m R2, SKU 099B" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": ["alienfx-tools gives the Area-51m R2, the m17 R3 and the m17 R4 one map."]
+    },
+    {
+      "file": "alienware-m16-r1-zones.json",
+      "name": "Alienware m16 R1 zones",
+      "label": "Alienware m16R1",
+      "machine": "Alienware m16 R1",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m16/m16 R1, SKU 0BFC" },
+      "kind": "laptop",
+      "pid": "0551",
+      "connection": "built in",
+      "notes": [
+        "The AMD edition, “Alienware m16 R1 AMD”, is left out: alienfx-tools does not say which edition its map was made on."
+      ]
+    },
+    {
+      "file": "alienware-m16-r2-zones.json",
+      "name": "Alienware m16 R2 zones",
+      "label": "Alienware m16R2 (US)",
+      "machine": "Alienware m16 R2",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m16/m16 R2, SKU 0C91" },
+      "kind": "laptop",
+      "pid": "0551",
+      "connection": "built in",
+      "notes": [
+        "alienfx-tools names id 0 “haptic” and id 2 “back”, no more: drawn where its grid puts them, below the keyboard and on the lid."
+      ]
+    },
+    {
+      "file": "alienware-m17-r3-zones.json",
+      "name": "Alienware m17 R3 zones",
+      "label": "Alienware Area-51m R2/m17R3/R4",
+      "machine": "Alienware m17 R3",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m17/m17 R3, SKU 09D1" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": ["alienfx-tools gives the Area-51m R2, the m17 R3 and the m17 R4 one map."]
+    },
+    {
+      "file": "alienware-m17-r4-zones.json",
+      "name": "Alienware m17 R4 zones",
+      "label": "Alienware Area-51m R2/m17R3/R4",
+      "machine": "Alienware m17 R4",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m17/m17 R4, SKU 0A75" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": ["alienfx-tools gives the Area-51m R2, the m17 R3 and the m17 R4 one map."]
+    },
+    {
+      "file": "alienware-m17-r5-zones.json",
+      "name": "Alienware m17 R5 zones",
+      "label": "Alienware m17R5",
+      "machine": "Alienware m17 R5 AMD",
+      "productName": {
+        "from": "linuxhw",
+        "at": "Notebook/Alienware/m17/m17 R5 AMD, SKU 0B5D; the m17 R5 is sold in that edition only"
+      },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": [
+        "alienfx-tools names id 2 the power button yet marks id 0 as one: which of the two the firmware keeps, only the machine can say."
+      ]
+    },
+    {
+      "file": "alienware-m18-r2-zones.json",
+      "name": "Alienware m18 R2 zones",
+      "label": "Alienware m18R2",
+      "machine": "Alienware m18 R2",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/m18/m18 R2, SKU 0C9D" },
+      "kind": "laptop",
+      "pid": "0551",
+      "connection": "built in",
+      "notes": [
+        "The m18 R1's power button takes no colour written live (docs/protocol/alienware-m18-r1.md §2); this one's may not either."
+      ]
+    },
+    {
+      "file": "alienware-x17-r1-zones.json",
+      "name": "Alienware x17 R1 zones",
+      "label": "Alienware x17 R1",
+      "machine": "Alienware x17 R1",
+      "productName": { "from": "linuxhw", "at": "Notebook/Alienware/x17/x17 R1, SKU 0A8F" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in"
+    },
+    {
+      "file": "dell-g5-5500.json",
+      "name": "Dell G5 5500",
+      "label": "Dell G5 5500",
+      "machine": "G5 5500",
+      "productName": { "from": "linuxhw", "at": "Notebook/Dell/G5/G5 5500, SKU 09E2" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": [
+        "alienfx-tools names ids 4 to 15 by number alone, 12 down to 01: taken for the light bar along the front, which Dell fits with the RGB keyboard (Dell's community forum, “G5 5500 Alienware FX options”), and drawn there from 1 to 12."
+      ]
+    },
+    {
+      "file": "dell-g7-7590.json",
+      "name": "Dell G7 7590",
+      "label": "Dell G7 7590",
+      "machine": "G7 7590",
+      "productName": { "from": "linuxhw", "at": "Notebook/Dell/G7/G7 7590, SKU 08EB" },
+      "kind": "laptop",
+      "pid": "0550",
+      "connection": "built in"
+    },
+    {
+      "file": "alienware-aurora-r12.json",
+      "name": "Alienware Aurora R12",
+      "label": "Alienware Aurora R12",
+      "machine": "Alienware Aurora R12",
+      "productName": { "from": "linuxhw", "at": "Desktop/Alienware/Aurora/Aurora R12, SKU 0A63" },
+      "kind": "desktop",
+      "pid": "0550",
+      "connection": "built in"
+    },
+    {
+      "file": "alienware-aurora-r15.json",
+      "name": "Alienware Aurora R15",
+      "label": "Alienware Aurora R15",
+      "machine": "Alienware Aurora R15",
+      "productName": { "from": "awcc", "at": "the key “Alienware Aurora R15”, beside “Alienware Aurora R16”" },
+      "kind": "desktop",
+      "pid": "0550",
+      "connection": "built in",
+      "notes": [
+        "The map came to alienfx-tools in its issue #642 (2026-10-08), from a machine that lit every light with it.",
+        "The AMD edition, “Alienware Aurora R15 AMD”, is left out: alienfx-tools does not say which edition its map was made on."
+      ]
+    }
+  ],
+  "left": [
+    {
+      "label": "Alienware m18",
+      "why": "The m18 R1: its ids are the ones its survey found, and Candeo has its definition built in."
+    },
+    { "label": "Alienware m18R1", "why": "Built into Candeo." },
+    { "label": "Alienware m16R1 (Brazil)", "why": "The m16 R1's map again, the same lights: written once." },
+    {
+      "label": "Alienware x15/17R2",
+      "why": "No light mapped: alienfx-tools' device is “Tron (Not set, do manual set!)”."
+    },
+    {
+      "label": "Dell G5 5515",
+      "why": "No machine of that name found: linuxhw/DMI knows the G5 5500, 5505, 5587 and 5590 only. It may be the Dell G15 5515, which nothing in alienfx-tools confirms."
+    },
+    {
+      "label": "Aurora R16",
+      "why": "alienfx-tools' issue #556 (2025-09-07) says this map is wrong: its two named lights are mislabelled, the keyboard keys listed after them light nothing, and the case's lights are left unnamed. The corrected map sent there is not in devices.csv yet."
+    }
+  ],
+  "machines": [
+    {
+      "label": "Alienware m15R1",
+      "line": 13,
+      "device": "Main lights",
+      "pid": "0550",
+      "grids": [
+        { "id": 0, "cols": 40, "rows": 7, "name": "Keyboard" },
+        { "id": 1, "cols": 3, "rows": 3, "name": "Tron" }
+      ],
+      "lights": [
+        { "id": 0, "name": "Alienhead", "flags": 0, "grid": 1, "cells": "1" },
+        { "id": 1, "name": "Power Button", "flags": 1, "grid": 0, "cells": "19-20" },
+        { "id": 2, "name": "KB Left", "flags": 0, "grid": 0, "cells": "40-51 80-90 120-129 160-170 200-208 240-248" },
+        {
+          "id": 3,
+          "name": "KB Center-Left",
+          "flags": 0,
+          "grid": 0,
+          "cells": "52-61 91-101 130-142 171-183 209-221 249-261"
+        },
+        {
+          "id": 4,
+          "name": "KB Center-Right",
+          "flags": 0,
+          "grid": 0,
+          "cells": "62-71 102-111 143-151 184-191 222-231 262-271"
+        },
+        { "id": 5, "name": "KB Right", "flags": 0, "grid": 0, "cells": "72-79 112-119 152-159 192-199 232-239 272-279" }
+      ]
+    },
+    {
+      "label": "Alienware m15R3/R4",
+      "line": 23,
+      "device": "Tron and power lights",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 0, "name": "Tron", "flags": 0 },
+        { "id": 1, "name": "Tron-Full", "flags": 0 },
+        { "id": 2, "name": "Power", "flags": 1 },
+        { "id": 3, "name": "Logo", "flags": 0 }
+      ]
+    },
+    {
+      "label": "Alienware Aurora R12",
+      "line": 117,
+      "device": "Chassis",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 0, "name": "Front Ring", "flags": 0 },
+        { "id": 1, "name": "Alienhead/Power Button", "flags": 0 }
+      ]
+    },
+    {
+      "label": "Dell G5 5515",
+      "line": 121,
+      "device": "Main lights",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 10, "name": "KB RIGHT MID", "flags": 0 },
+        { "id": 11, "name": "KB RIGHT", "flags": 0 },
+        { "id": 8, "name": "KB LEFT", "flags": 0 },
+        { "id": 9, "name": "KB LEFT MID", "flags": 0 }
+      ]
+    },
+    {
+      "label": "Alienware m15R6 4-zone",
+      "line": 127,
+      "device": "Main lights",
+      "pid": "0550",
+      "grids": [
+        { "id": 0, "cols": 16, "rows": 7, "name": "Tron and power lights" },
+        { "id": 1, "cols": 16, "rows": 7, "name": "RGB Keyboard" }
+      ],
+      "lights": [
+        { "id": 0, "name": "TRON-BackRight", "flags": 0, "grid": 0, "cells": "72-79 95 104-111" },
+        { "id": 1, "name": "TRON-BackLeft", "flags": 0, "grid": 0, "cells": "64-71 80 96-103" },
+        { "id": 2, "name": "PowerButton", "flags": 2, "grid": 1, "cells": "15" },
+        { "id": 3, "name": "BackAlienHead", "flags": 0, "grid": 0, "cells": "7-8 23-24" },
+        { "id": 4, "name": "Left", "flags": 0, "grid": 1, "cells": "16-19 32-35 48-52 64-67 80-83 96-100" },
+        { "id": 5, "name": "Center-Left", "flags": 0, "grid": 1, "cells": "20-24 36-40 53-55 68-72 84-88 101-104" },
+        { "id": 6, "name": "Center-Right", "flags": 0, "grid": 1, "cells": "25-28 41-44 56-59 73-76 89-91 105-108" },
+        { "id": 7, "name": "Right", "flags": 0, "grid": 1, "cells": "29-31 45-47 60-63 77-79 92-95 109-111" }
+      ]
+    },
+    {
+      "label": "Alienware Area-51m R2/m17R3/R4",
+      "line": 140,
+      "device": "Tron and power lights",
+      "pid": "0550",
+      "grids": [{ "id": 1, "cols": 3, "rows": 3, "name": "Chassis" }],
+      "lights": [
+        { "id": 0, "name": "Alien Head", "flags": 0, "grid": 1, "cells": "1" },
+        { "id": 1, "name": "Touchpad", "flags": 0, "grid": 1, "cells": "7" },
+        { "id": 2, "name": "Power Button", "flags": 1, "grid": 1, "cells": "4" },
+        { "id": 3, "name": "Ring Top", "flags": 0, "grid": 1, "cells": "0" },
+        { "id": 4, "name": "Ring Bottom", "flags": 0, "grid": 1, "cells": "3" }
+      ]
+    },
+    {
+      "label": "Alienware x17 R1",
+      "line": 364,
+      "device": "Main Lights",
+      "pid": "0550",
+      "grids": [
+        { "id": 2, "cols": 8, "rows": 3, "name": "Touchpad" },
+        { "id": 3, "cols": 6, "rows": 3, "name": "Tron" }
+      ],
+      "lights": [
+        { "id": 0, "name": "Power Button", "flags": 0 },
+        { "id": 1, "name": "AlienHead", "flags": 0 },
+        { "id": 10, "name": "Ring1", "flags": 0, "grid": 3, "cells": "2" },
+        { "id": 11, "name": "Ring2", "flags": 0, "grid": 3, "cells": "1" },
+        { "id": 12, "name": "Ring3", "flags": 0, "grid": 3, "cells": "6" },
+        { "id": 13, "name": "Ring4", "flags": 0, "grid": 3, "cells": "13" },
+        { "id": 14, "name": "Ring5", "flags": 0, "grid": 3, "cells": "14" },
+        { "id": 15, "name": "Ring6", "flags": 0, "grid": 3, "cells": "15" },
+        { "id": 16, "name": "Ring7", "flags": 0, "grid": 3, "cells": "16" },
+        { "id": 17, "name": "Ring8", "flags": 0, "grid": 3, "cells": "11" },
+        { "id": 18, "name": "Ring9", "flags": 0, "grid": 3, "cells": "4" },
+        { "id": 19, "name": "Ring10", "flags": 0, "grid": 3, "cells": "3" },
+        { "id": 2, "name": "Touchpad1", "flags": 0, "grid": 2, "cells": "0" },
+        { "id": 3, "name": "Touchpad2", "flags": 0, "grid": 2, "cells": "1" },
+        { "id": 4, "name": "Touchpad3", "flags": 0, "grid": 2, "cells": "2" },
+        { "id": 5, "name": "Touchpad4", "flags": 0, "grid": 2, "cells": "3" },
+        { "id": 6, "name": "Touchpad5", "flags": 0, "grid": 2, "cells": "4" },
+        { "id": 7, "name": "Touchpad6", "flags": 0, "grid": 2, "cells": "5" },
+        { "id": 8, "name": "Touchpad7", "flags": 0, "grid": 2, "cells": "6" },
+        { "id": 9, "name": "Touchpad8", "flags": 0, "grid": 2, "cells": "7" }
+      ]
+    },
+    {
+      "label": "Alienware x15/17R2",
+      "line": 474,
+      "device": "Tron (Not set, do manual set!)",
+      "pid": "0550",
+      "grids": [],
+      "lights": []
+    },
+    {
+      "label": "Dell G5 5500",
+      "line": 571,
+      "device": "Main lights",
+      "pid": "0550",
+      "grids": [{ "id": 1, "cols": 12, "rows": 3, "name": "Front panel" }],
+      "lights": [
+        { "id": 0, "name": "KB left", "flags": 0, "grid": 1, "cells": "0-2 12-14" },
+        { "id": 1, "name": "KB middle", "flags": 0, "grid": 1, "cells": "3-5 15-17" },
+        { "id": 10, "name": "06", "flags": 0, "grid": 1, "cells": "29" },
+        { "id": 11, "name": "05", "flags": 0, "grid": 1, "cells": "28" },
+        { "id": 12, "name": "04", "flags": 0, "grid": 1, "cells": "27" },
+        { "id": 13, "name": "03", "flags": 0, "grid": 1, "cells": "26" },
+        { "id": 14, "name": "02", "flags": 0, "grid": 1, "cells": "25" },
+        { "id": 15, "name": "01", "flags": 0, "grid": 1, "cells": "24" },
+        { "id": 2, "name": "KB right", "flags": 0, "grid": 1, "cells": "6-8 18-20" },
+        { "id": 3, "name": "KB numpad", "flags": 0, "grid": 1, "cells": "9-11 21-23" },
+        { "id": 4, "name": "12", "flags": 0, "grid": 1, "cells": "35" },
+        { "id": 5, "name": "11", "flags": 0, "grid": 1, "cells": "34" },
+        { "id": 6, "name": "10", "flags": 0, "grid": 1, "cells": "33" },
+        { "id": 7, "name": "09", "flags": 0, "grid": 1, "cells": "32" },
+        { "id": 8, "name": "08", "flags": 0, "grid": 1, "cells": "31" },
+        { "id": 9, "name": "07", "flags": 0, "grid": 1, "cells": "30" }
+      ]
+    },
+    {
+      "label": "Alienware m17R5",
+      "line": 590,
+      "device": "Tron lights",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 3, "name": "AlienHead", "flags": 2 },
+        { "id": 0, "name": "Left of Tron", "flags": 3 },
+        { "id": 1, "name": "Right of Tron", "flags": 0 },
+        { "id": 2, "name": "Power button", "flags": 0 }
+      ]
+    },
+    {
+      "label": "Dell G7 7590",
+      "line": 717,
+      "device": "Main Lights",
+      "pid": "0550",
+      "grids": [{ "id": 1, "cols": 12, "rows": 6, "name": "Keyboard" }],
+      "lights": [
+        { "id": 0, "name": "KB left", "flags": 0, "grid": 1, "cells": "0-2 12-14 24-26 36-38 48-50 60-62" },
+        { "id": 1, "name": "KB middle", "flags": 0, "grid": 1, "cells": "3-5 15-17 27-29 39-41 51-53 63-65" },
+        { "id": 2, "name": "KB right", "flags": 0, "grid": 1, "cells": "6-8 18-20 30-32 42-44 54-56 66-68" },
+        { "id": 3, "name": "KB numpad", "flags": 0, "grid": 1, "cells": "9-11 21-23 33-35 45-47 57-59 69-71" }
+      ]
+    },
+    {
+      "label": "Alienware m18",
+      "line": 724,
+      "device": "Alienware Tron",
+      "pid": "0551",
+      "grids": [],
+      "lights": [
+        { "id": 0, "name": "Rear Vents 1", "flags": 0 },
+        { "id": 1, "name": "Rear Vents 2", "flags": 0 },
+        { "id": 2, "name": "Lid Logo", "flags": 0 },
+        { "id": 4, "name": "Power", "flags": 1 }
+      ]
+    },
+    {
+      "label": "Alienware m16R1",
+      "line": 841,
+      "device": "Alienware AW-ELC",
+      "pid": "0551",
+      "grids": [{ "id": 0, "cols": 16, "rows": 7, "name": "Main" }, { "id": 1, "cols": 5, "rows": 5, "name": "Back" }],
+      "lights": [
+        { "id": 0, "name": "Tron Bottom", "flags": 0, "grid": 1, "cells": "20-24" },
+        { "id": 1, "name": "Tron Top", "flags": 0, "grid": 1, "cells": "15-19" },
+        { "id": 2, "name": "Logo", "flags": 0, "grid": 1, "cells": "7" },
+        { "id": 4, "name": "Power Button", "flags": 1, "grid": 0, "cells": "15" }
+      ]
+    },
+    {
+      "label": "Alienware m16R1 (Brazil)",
+      "line": 952,
+      "device": "Alienware AW-ELC",
+      "pid": "0551",
+      "grids": [{ "id": 0, "cols": 16, "rows": 7, "name": "Main" }, { "id": 1, "cols": 5, "rows": 5, "name": "Back" }],
+      "lights": [
+        { "id": 0, "name": "Tron Bottom", "flags": 0, "grid": 1, "cells": "20-24" },
+        { "id": 1, "name": "Tron Top", "flags": 0, "grid": 1, "cells": "15-19" },
+        { "id": 2, "name": "Logo", "flags": 0, "grid": 1, "cells": "7" },
+        { "id": 4, "name": "Power Button", "flags": 1, "grid": 0, "cells": "15" }
+      ]
+    },
+    {
+      "label": "Alienware m18R1",
+      "line": 1051,
+      "device": "m18 Tron lights",
+      "pid": "0551",
+      "grids": [{ "id": 0, "cols": 20, "rows": 8, "name": "Main" }, { "id": 1, "cols": 5, "rows": 5, "name": "Back" }],
+      "lights": [
+        { "id": 0, "name": "Tron Bottom", "flags": 0, "grid": 1, "cells": "20-24" },
+        { "id": 1, "name": "Tron Top", "flags": 0, "grid": 1, "cells": "15-19" },
+        { "id": 2, "name": "Logo", "flags": 0, "grid": 1, "cells": "7" },
+        { "id": 4, "name": "Power Button", "flags": 1, "grid": 0, "cells": "39" }
+      ]
+    },
+    {
+      "label": "Aurora R16",
+      "line": 1153,
+      "device": "Chassis",
+      "pid": "0550",
+      "grids": [{ "id": 0, "cols": 17, "rows": 33, "name": "Grid #0" }],
+      "lights": [
+        { "id": 0, "name": "Front Ring", "flags": 0, "grid": 0, "cells": "454" },
+        { "id": 1, "name": "Alienhead/Power Button", "flags": 0, "grid": 0, "cells": "471" },
+        { "id": 2, "name": "", "flags": 0, "grid": 0, "cells": "488" },
+        { "id": 3, "name": "", "flags": 0, "grid": 0, "cells": "505" },
+        { "id": 4, "name": "", "flags": 0, "grid": 0, "cells": "522" },
+        { "id": 5, "name": "", "flags": 0, "grid": 0, "cells": "539" },
+        { "id": 6, "name": "", "flags": 0, "grid": 0, "cells": "352" },
+        { "id": 7, "name": "", "flags": 0, "grid": 0, "cells": "369" },
+        { "id": 8, "name": "", "flags": 0, "grid": 0, "cells": "386" },
+        { "id": 9, "name": "", "flags": 0, "grid": 0, "cells": "403" },
+        { "id": 10, "name": "", "flags": 0, "grid": 0, "cells": "420" },
+        { "id": 11, "name": "", "flags": 0, "grid": 0, "cells": "437" },
+        { "id": 12, "name": "", "flags": 0, "grid": 0, "cells": "538" },
+        { "id": 13, "name": "", "flags": 0, "grid": 0, "cells": "521" },
+        { "id": 14, "name": "", "flags": 0, "grid": 0, "cells": "504" },
+        { "id": 15, "name": "", "flags": 0, "grid": 0, "cells": "487" },
+        { "id": 16, "name": "", "flags": 0, "grid": 0, "cells": "470" },
+        { "id": 17, "name": "", "flags": 0, "grid": 0, "cells": "453" },
+        { "id": 18, "name": "", "flags": 0, "grid": 0, "cells": "250" },
+        { "id": 23, "name": "", "flags": 0, "grid": 0, "cells": "335" },
+        { "id": 22, "name": "", "flags": 0, "grid": 0, "cells": "318" },
+        { "id": 21, "name": "", "flags": 0, "grid": 0, "cells": "301" },
+        { "id": 20, "name": "", "flags": 0, "grid": 0, "cells": "284" },
+        { "id": 19, "name": "", "flags": 0, "grid": 0, "cells": "267" },
+        { "id": 24, "name": "", "flags": 0, "grid": 0, "cells": "436" },
+        { "id": 25, "name": "", "flags": 0, "grid": 0, "cells": "419" },
+        { "id": 26, "name": "", "flags": 0, "grid": 0, "cells": "402" },
+        { "id": 27, "name": "", "flags": 0, "grid": 0, "cells": "385" },
+        { "id": 28, "name": "", "flags": 0, "grid": 0, "cells": "368" },
+        { "id": 29, "name": "", "flags": 0, "grid": 0, "cells": "351" },
+        { "id": 35, "name": "", "flags": 0, "grid": 0, "cells": "233" },
+        { "id": 34, "name": "", "flags": 0, "grid": 0, "cells": "216" },
+        { "id": 33, "name": "", "flags": 0, "grid": 0, "cells": "199" },
+        { "id": 32, "name": "", "flags": 0, "grid": 0, "cells": "182" },
+        { "id": 31, "name": "", "flags": 0, "grid": 0, "cells": "165" },
+        { "id": 30, "name": "", "flags": 0, "grid": 0, "cells": "148" },
+        { "id": 36, "name": "", "flags": 0, "grid": 0, "cells": "334" },
+        { "id": 37, "name": "", "flags": 0, "grid": 0, "cells": "317" },
+        { "id": 38, "name": "", "flags": 0, "grid": 0, "cells": "300" },
+        { "id": 39, "name": "", "flags": 0, "grid": 0, "cells": "283" },
+        { "id": 40, "name": "", "flags": 0, "grid": 0, "cells": "266" },
+        { "id": 41, "name": "", "flags": 0, "grid": 0, "cells": "249" },
+        { "id": 42, "name": "", "flags": 0, "grid": 0, "cells": "46" },
+        { "id": 47, "name": "", "flags": 0, "grid": 0, "cells": "131" },
+        { "id": 46, "name": "", "flags": 0, "grid": 0, "cells": "114" },
+        { "id": 45, "name": "", "flags": 0, "grid": 0, "cells": "97" },
+        { "id": 44, "name": "", "flags": 0, "grid": 0, "cells": "80" },
+        { "id": 43, "name": "", "flags": 0, "grid": 0, "cells": "63" },
+        { "id": 48, "name": "", "flags": 0, "grid": 0, "cells": "232" },
+        { "id": 49, "name": "", "flags": 0, "grid": 0, "cells": "215" },
+        { "id": 50, "name": "", "flags": 0, "grid": 0, "cells": "198" },
+        { "id": 51, "name": "", "flags": 0, "grid": 0, "cells": "181" },
+        { "id": 52, "name": "", "flags": 0, "grid": 0, "cells": "164" },
+        { "id": 53, "name": "", "flags": 0, "grid": 0, "cells": "147" },
+        { "id": 54, "name": "", "flags": 0, "grid": 0, "cells": "130" },
+        { "id": 55, "name": "", "flags": 0, "grid": 0, "cells": "113" },
+        { "id": 56, "name": "", "flags": 0, "grid": 0, "cells": "96" },
+        { "id": 57, "name": "", "flags": 0, "grid": 0, "cells": "79" },
+        { "id": 58, "name": "", "flags": 0, "grid": 0, "cells": "62" },
+        { "id": 59, "name": "", "flags": 0, "grid": 0, "cells": "45" },
+        { "id": 63, "name": "", "flags": 0, "grid": 0, "cells": "117" },
+        { "id": 64, "name": "", "flags": 0, "grid": 0, "cells": "100" },
+        { "id": 65, "name": "", "flags": 0, "grid": 0, "cells": "83" },
+        { "id": 68, "name": "", "flags": 0, "grid": 0, "cells": "121" },
+        { "id": 69, "name": "", "flags": 0, "grid": 0, "cells": "124" },
+        { "id": 70, "name": "", "flags": 0, "grid": 0, "cells": "141" },
+        { "id": 101, "name": "Fn", "flags": 0, "grid": 0, "cells": "142" },
+        { "id": 102, "name": "Left Windows", "flags": 0, "scancode": 347, "grid": 0, "cells": "143" },
+        { "id": 103, "name": "Light 104", "flags": 0 },
+        { "id": 104, "name": "Alt", "flags": 0, "scancode": 164, "grid": 0, "cells": "144" },
+        { "id": 106, "name": "Space", "flags": 0, "scancode": 32, "grid": 0, "cells": "145-149" },
+        { "id": 107, "name": "Light 108", "flags": 0 },
+        { "id": 109, "name": "Win lock", "flags": 0, "grid": 0, "cells": "151" },
+        { "id": 111, "name": "Right Alt", "flags": 0, "scancode": 421, "grid": 0, "cells": "150" },
+        { "id": 112, "name": "Right Ctrl", "flags": 0, "scancode": 419, "grid": 0, "cells": "152-153" },
+        { "id": 114, "name": "Up", "flags": 0, "scancode": 294, "grid": 0, "cells": "135" },
+        { "id": 133, "name": "Left", "flags": 0, "scancode": 293, "grid": 0, "cells": "154" },
+        { "id": 134, "name": "Down", "flags": 0, "scancode": 296, "grid": 0, "cells": "155" },
+        { "id": 135, "name": "Right", "flags": 0, "scancode": 295, "grid": 0, "cells": "156" },
+        { "id": 117, "name": "Num 0", "flags": 0, "scancode": 96, "grid": 0, "cells": "157" },
+        { "id": 118, "name": "Num Del", "flags": 0, "scancode": 110, "grid": 0, "cells": "158" },
+        { "id": 119, "name": "Num Enter", "flags": 0, "scancode": 269, "grid": 0, "cells": "139 159" }
+      ]
+    },
+    {
+      "label": "Alienware m16R2 (US)",
+      "line": 1239,
+      "device": "m16 Tron lights",
+      "pid": "0551",
+      "grids": [{ "id": 1, "cols": 18, "rows": 8, "name": "Grid #1" }],
+      "lights": [
+        { "id": 0, "name": "haptic", "flags": 0, "grid": 1, "cells": "79-81 97-99" },
+        { "id": 2, "name": "back", "flags": 0, "grid": 1, "cells": "7-9" },
+        { "id": 4, "name": "Power", "flags": 1, "grid": 1, "cells": "43-45" }
+      ]
+    },
+    {
+      "label": "Area 51m R1",
+      "line": 1332,
+      "device": "Main lights",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 0, "name": "Lid Logo", "flags": 0 },
+        { "id": 1, "name": "Touchpad", "flags": 0 },
+        { "id": 2, "name": "Power Button", "flags": 1 },
+        { "id": 3, "name": "Rear Vents 1", "flags": 0 },
+        { "id": 4, "name": "Rear Vents 2", "flags": 0 }
+      ]
+    },
+    {
+      "label": "Alienware m18R1",
+      "line": 1651,
+      "device": "m18 Tron lights",
+      "pid": "0551",
+      "grids": [
+        { "id": 0, "cols": 20, "rows": 8, "name": "RGB Keyboard" },
+        { "id": 1, "cols": 9, "rows": 7, "name": "Chasis" }
+      ],
+      "lights": [
+        { "id": 0, "name": "Tron Top", "flags": 0, "grid": 1, "cells": "45-53" },
+        { "id": 1, "name": "Tron Bottom", "flags": 0, "grid": 1, "cells": "54-62" },
+        { "id": 2, "name": "Logo", "flags": 0, "grid": 1, "cells": "13 22" },
+        { "id": 4, "name": "Power Button", "flags": 1, "grid": 0, "cells": "39" }
+      ]
+    },
+    {
+      "label": "Alienware m18R2",
+      "line": 1763,
+      "device": "Alienware AW-ELC",
+      "pid": "0551",
+      "grids": [{ "id": 0, "cols": 3, "rows": 3, "name": "Chasis" }],
+      "lights": [
+        { "id": 0, "name": "Exahust Lights 1", "flags": 0, "grid": 0, "cells": "0" },
+        { "id": 1, "name": "Exahust Lights 2", "flags": 0, "grid": 0, "cells": "1" },
+        { "id": 2, "name": "Lid Light", "flags": 0, "grid": 0, "cells": "3" },
+        { "id": 4, "name": "Power Button 1", "flags": 0, "grid": 0, "cells": "6" },
+        { "id": 5, "name": "Power Button 2", "flags": 0, "grid": 0, "cells": "7" }
+      ]
+    },
+    {
+      "label": "Alienware Aurora R15",
+      "line": 1886,
+      "device": "Alienware AW-ELC",
+      "pid": "0550",
+      "grids": [],
+      "lights": [
+        { "id": 0, "name": "Ring_LED1", "flags": 0 },
+        { "id": 1, "name": "Ring_LED2", "flags": 0 },
+        { "id": 2, "name": "Ring_LED3", "flags": 0 },
+        { "id": 3, "name": "Ring_LED4", "flags": 0 },
+        { "id": 4, "name": "Ring_LED5", "flags": 0 },
+        { "id": 5, "name": "Ring_LED6", "flags": 0 },
+        { "id": 6, "name": "Ring_LED7", "flags": 0 },
+        { "id": 7, "name": "Ring_LED8", "flags": 0 },
+        { "id": 8, "name": "Ring_LED9", "flags": 0 },
+        { "id": 9, "name": "Ring_LED10", "flags": 0 },
+        { "id": 10, "name": "Ring_LED11", "flags": 0 },
+        { "id": 11, "name": "Ring_LED12", "flags": 0 },
+        { "id": 12, "name": "Ring_LED13", "flags": 0 },
+        { "id": 13, "name": "Ring_LED14", "flags": 0 },
+        { "id": 14, "name": "Ring_LED15", "flags": 0 },
+        { "id": 15, "name": "Ring_LED16", "flags": 0 },
+        { "id": 16, "name": "Ring_LED17", "flags": 0 },
+        { "id": 17, "name": "Ring_LED18", "flags": 0 },
+        { "id": 18, "name": "Ring_LED19", "flags": 0 },
+        { "id": 19, "name": "Ring_LED20", "flags": 0 },
+        { "id": 20, "name": "Ring_LED21", "flags": 0 },
+        { "id": 21, "name": "Ring_LED22", "flags": 0 },
+        { "id": 22, "name": "Ring_LED23", "flags": 0 },
+        { "id": 23, "name": "Ring_LED24", "flags": 0 },
+        { "id": 26, "name": "Ring_LED25", "flags": 0 },
+        { "id": 32, "name": "Ring_LED26", "flags": 0 },
+        { "id": 38, "name": "Ring_LED27", "flags": 0 },
+        { "id": 44, "name": "Ring_LED28", "flags": 0 },
+        { "id": 27, "name": "Ring_LED29", "flags": 0 },
+        { "id": 33, "name": "Ring_LED30", "flags": 0 },
+        { "id": 39, "name": "Ring_LED31", "flags": 0 },
+        { "id": 45, "name": "Ring_LED32", "flags": 0 },
+        { "id": 28, "name": "Ring_LED33", "flags": 0 },
+        { "id": 34, "name": "Ring_LED34", "flags": 0 },
+        { "id": 48, "name": "Ambient_LED1", "flags": 0 },
+        { "id": 49, "name": "Ambient_LED2", "flags": 0 },
+        { "id": 50, "name": "Ambient_LED3", "flags": 0 },
+        { "id": 51, "name": "Ambient_LED4", "flags": 0 },
+        { "id": 52, "name": "Ambient_LED5", "flags": 0 },
+        { "id": 53, "name": "Ambient_LED6", "flags": 0 },
+        { "id": 54, "name": "Ambient_LED7", "flags": 0 },
+        { "id": 55, "name": "Ambient_LED8", "flags": 0 },
+        { "id": 56, "name": "Ambient_LED9", "flags": 0 },
+        { "id": 57, "name": "Ambient_LED10", "flags": 0 },
+        { "id": 58, "name": "Ambient_LED11", "flags": 0 },
+        { "id": 59, "name": "Ambient_LED12", "flags": 0 },
+        { "id": 60, "name": "Ambient_LED13", "flags": 0 },
+        { "id": 61, "name": "Ambient_LED14", "flags": 0 },
+        { "id": 62, "name": "Ambient_LED15", "flags": 0 },
+        { "id": 63, "name": "Ambient_LED16", "flags": 0 },
+        { "id": 64, "name": "Ambient_LED17", "flags": 0 },
+        { "id": 65, "name": "Ambient_LED18", "flags": 0 },
+        { "id": 66, "name": "Ambient_LED19", "flags": 0 },
+        { "id": 67, "name": "Ambient_LED20", "flags": 0 },
+        { "id": 68, "name": "Ambient_LED21", "flags": 0 },
+        { "id": 69, "name": "Ambient_LED22", "flags": 0 },
+        { "id": 70, "name": "Ambient_LED23", "flags": 0 },
+        { "id": 71, "name": "Ambient_LED24", "flags": 0 },
+        { "id": 24, "name": "Ambient_LED25", "flags": 0 },
+        { "id": 30, "name": "Ambient_LED26", "flags": 0 },
+        { "id": 36, "name": "Ambient_LED27", "flags": 0 },
+        { "id": 42, "name": "Ambient_LED28", "flags": 0 },
+        { "id": 25, "name": "Ambient_LED29", "flags": 0 },
+        { "id": 31, "name": "Ambient_LED30", "flags": 0 },
+        { "id": 37, "name": "Ambient_LED31", "flags": 0 },
+        { "id": 43, "name": "Ambient_LED32", "flags": 0 },
+        { "id": 40, "name": "Ambient_LED33", "flags": 0 },
+        { "id": 46, "name": "Ambient_LED34", "flags": 0 },
+        { "id": 29, "name": "PowerButton1", "flags": 0 },
+        { "id": 35, "name": "PowerButton2", "flags": 0 },
+        { "id": 72, "name": "ALIENWARE", "flags": 0 },
+        { "id": 73, "name": "Internal_Ambient", "flags": 0 },
+        { "id": 74, "name": "Fanlight", "flags": 0 },
+        { "id": 75, "name": "Cooling_Hexagon", "flags": 0 },
+        { "id": 76, "name": "Cooling_Logo", "flags": 0 }
+      ]
+    }
+  ]
+}
