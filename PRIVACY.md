@@ -88,6 +88,12 @@ needs: versions, the system, the state of the devices and of the engine. It is
 written to be read before it is sent, and paths in it are shortened so the
 account name does not appear. Nothing sends it: you decide where it goes.
 
+**Report**, in Devices, opens a GitHub issue form in your browser, filled in
+with what Candeo knows of a device: its vendor and product ids, its maker, how
+the system lists it, the definition tried and the firmware read, with the
+computer's model, Candeo's version and the system. No serial number and no
+path. Nothing is sent until you submit the form on GitHub yourself.
+
 ## Children
 
 The application is a tool for controlling keyboard lighting. It is not directed

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * Devices: one list, what is plugged in first, every device Candeo knows under
- * *All*, then your definitions (`docs/design/device-sdk.md` §9). What concerns
- * the whole application lives in Settings.
+ * *All*, the lighting devices it detects but does not support yet after them,
+ * then your definitions (`docs/design/device-sdk.md` §9). What concerns the
+ * whole application lives in Settings.
  */
 
 import { computed, onMounted, reactive, ref } from 'vue'
@@ -14,11 +15,13 @@ import {
   openSiteDevices,
   reloadDeviceDefinitions,
   reportDeviceDefinition,
+  reportUnsupportedDevice,
   tryDeviceDefinition,
+  unsupportedDevices,
   type DefinitionProblem,
 } from '../api/candeo'
 import { message } from '../api/journal'
-import type { DeviceInfo } from '../api/types'
+import type { DeviceInfo, UnsupportedDevice } from '../api/types'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
 import {
@@ -26,7 +29,9 @@ import {
   definitionChoice,
   ids,
   listed,
+  notSupported,
   type Shown,
+  usagePages,
   yourFiles,
 } from '../composables/devicesPage'
 import { useDevice } from '../composables/useDevice'
@@ -54,11 +59,21 @@ function hush(d: DeviceInfo): void {
 
 const { devices, layout, busy, refresh, adopt, ignore } = useDevice()
 
+/** Plugged in, from a maker that lights, and described by no definition (#327). */
+const unsupported = ref<UnsupportedDevice[]>([])
+
 /** The list, as filtered: what is plugged in, or every device described. */
 const shown = ref<Shown>('plugged')
 const text = ref('')
-const list = computed(() => listed(devices.value, shown.value, text.value))
-const pluggedCount = computed(() => devices.value.filter((d) => d.present).length)
+/** Every device the page lists, known or not supported yet. */
+const total = computed(() => devices.value.length + unsupported.value.length)
+const list = computed(() => listed(devices.value, shown.value, text.value, total.value))
+const others = computed(() =>
+  notSupported(unsupported.value, shown.value, text.value, total.value),
+)
+const pluggedCount = computed(
+  () => devices.value.filter((d) => d.present).length + unsupported.value.length,
+)
 
 /** Which cards show their technical details. */
 const opened = reactive<Record<string, boolean>>({})
@@ -69,10 +84,18 @@ const files = computed(() => yourFiles(devices.value, problems.value))
 /** What went wrong with a file or the folder, said once, under the list. */
 const fileError = ref<string | null>(null)
 
-/** Reads your definitions again first: a file just saved may define a device to look for. */
+/**
+ * Reads your definitions again first: a file just saved may define a device to
+ * look for, or one detected that it now describes.
+ */
 async function reread(): Promise<void> {
   problems.value = await reloadDeviceDefinitions().catch(() => problems.value)
-  await Promise.all([refresh(), refreshFirmwareEffects()])
+  await Promise.all([refresh(), refreshFirmwareEffects(), detect()])
+}
+
+/** What is not supported yet is read again with the rest; a failure keeps what was read. */
+async function detect(): Promise<void> {
+  unsupported.value = await unsupportedDevices().catch(() => unsupported.value)
 }
 
 async function attempt(action: () => Promise<unknown>): Promise<void> {
@@ -118,6 +141,17 @@ function report(d: DeviceInfo): Promise<void> {
   return attempt(() => reportDeviceDefinition(d.vid, d.pid))
 }
 
+/** The form for a device not supported yet, filled in: what lights is the person's to say. */
+function reportUnsupported(d: UnsupportedDevice): Promise<void> {
+  return attempt(() => reportUnsupportedDevice(d.vid, d.pid))
+}
+
+/** The usage pages of a device not supported yet, as its card writes them. */
+function pages(d: UnsupportedDevice): string {
+  const all = usagePages(d)
+  return t('devices.usagePages', { pages: all.join(', ') }, all.length)
+}
+
 /** The definition in use when the file chosen does not load. */
 function unloaded(d: DeviceInfo): string {
   const file = d.unloadedChoice ?? ''
@@ -152,7 +186,7 @@ onMounted(reread)
           {{ t('devices.pluggedIn', { n: pluggedCount }) }}
         </button>
         <button type="button" class="seg" :aria-pressed="shown === 'all'" @click="shown = 'all'">
-          {{ t('devices.all', { n: devices.length }) }}
+          {{ t('devices.all', { n: total }) }}
         </button>
       </span>
       <button class="ghost" :disabled="busy" :title="t('devices.refreshTitle')" @click="reread">
@@ -161,7 +195,7 @@ onMounted(reread)
     </header>
 
     <input
-      v-if="shown === 'all' && devices.length > FILTER_PAST"
+      v-if="shown === 'all' && total > FILTER_PAST"
       v-model="text"
       class="filter"
       type="search"
@@ -172,9 +206,10 @@ onMounted(reread)
 
     <!--
       One list: a device plugged in is a card to act on; one known but not
-      plugged in, under *All*, only has its definition to read.
+      plugged in, under *All*, only has its definition to read; one detected
+      but not supported yet, last, can only be reported.
     -->
-    <ul v-if="list.length" class="cards">
+    <ul v-if="list.length || others.length" class="cards">
       <li
         v-for="d in list"
         :key="ids(d)"
@@ -336,6 +371,28 @@ onMounted(reread)
             <button type="button" class="ghost small" @click="report(d)">{{ t('devices.report') }}</button>
           </p>
         </template>
+      </li>
+
+      <!--
+        Read from the system's list of devices: nothing opens it, and there is
+        nothing to control. *Report* is the one action (#327).
+      -->
+      <li v-for="u in others" :key="`unsupported:${ids(u)}`" class="card">
+        <div class="main">
+          <span class="spacer" aria-hidden="true" />
+          <div class="id">
+            <span class="name">
+              {{ u.maker ?? t('devices.unknownMaker') }}
+              <span class="tag unsupported">{{ t('devices.groups.notSupported') }}</span>
+            </span>
+            <span class="sub">
+              <span class="mono">{{ ids(u) }}</span> · {{ pages(u) }}
+            </span>
+          </div>
+          <button class="ghost" :title="t('devices.reportTitle')" @click="reportUnsupported(u)">
+            {{ t('devices.report') }}
+          </button>
+        </div>
       </li>
     </ul>
     <p v-else class="note">
@@ -528,6 +585,16 @@ onMounted(reread)
   margin-left: var(--gap-2);
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 14%, transparent);
+  vertical-align: 1px;
+}
+
+/* Not supported yet: a state, not a risk; nothing is sent to it. */
+.tag.unsupported {
+  margin-left: var(--gap-2);
+  color: var(--text-muted);
+  background: var(--raised-2);
+  /* Drawn inside: a border would make it taller than the other tags. */
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   vertical-align: 1px;
 }
 

@@ -1356,6 +1356,17 @@ mod tests {
         assert!(builtin_layout("unknown.json").is_none());
     }
 
+    /// A definition without `brightness` reports has no brightness: the window
+    /// offers no slider for it, and no level is written to it (#334).
+    #[test]
+    fn only_a_definition_with_brightness_reports_has_brightness() {
+        let has = |file: &str| builtin_layout(file).unwrap().has_brightness();
+        assert!(has("razer-deathstalker-v2-pro.json"));
+        assert!(has("alienware-m18-r1.json"));
+        assert!(!has("alienware-m18-r1-zones.json"));
+        assert!(!has("alienware-17-r5-zones.json"));
+    }
+
     /// §8: every built-in definition loads, and gives the reports its
     /// contributor saw.
     #[test]

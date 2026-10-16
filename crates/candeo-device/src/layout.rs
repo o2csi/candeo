@@ -332,6 +332,13 @@ impl Layout {
         }
     }
 
+    /// True where its family sets the overall brightness: the window offers a
+    /// slider for it there and nowhere else (#334). Asked of
+    /// [`Lighting::brightness`] itself, so the two cannot disagree.
+    pub fn has_brightness(&self) -> bool {
+        self.lighting.brightness(u8::MAX).is_some()
+    }
+
     /// Number of matrix positions — **not** the number of physical LEDs.
     ///
     /// This is the value a full frame must cover.

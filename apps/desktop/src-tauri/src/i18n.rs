@@ -82,6 +82,7 @@ mod tests {
             include_str!("runtime/mod.rs"),
             include_str!("storage.rs"),
             include_str!("tray.rs"),
+            include_str!("unsupported.rs"),
         ];
         let quoted = |source: &str, i: usize| {
             let start = i + source[i..].find('"').unwrap() + 1;

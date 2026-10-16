@@ -1,8 +1,10 @@
-// What the device card computes about a brightness following the sound, the
-// computer or a signal (`docs/design/inputs-and-automations.md` §2.2.2, §2.4). Pure, so what the
+// What the device card computes about its brightness: the slider, and a
+// brightness following the sound, the computer or a signal
+// (`docs/design/inputs-and-automations.md` §2.2.2, §2.4). Pure, so what the
 // switch shows and what goes to Rust are tested without a DOM.
 
 import { DIMMING_FLOOR_DEFAULT, type Dimming } from '../api/candeo'
+import type { DeviceInfo } from '../api/types'
 import {
   boundSignal,
   boundSound,
@@ -14,6 +16,21 @@ import {
   type SystemSource,
 } from './bindings'
 import { validSignalName } from './rules'
+
+/** The brightness slider a device's card carries. */
+export type BrightnessSlider = 'none' | 'disabled' | 'enabled'
+
+/**
+ * None where the definition has no brightness command: the slider would write
+ * nothing, while what the brightness follows still scales the frames (#334).
+ * Disabled while the device is not open.
+ */
+export function brightnessSlider(
+  device: Pick<DeviceInfo, 'hardwareBrightness' | 'open'>,
+): BrightnessSlider {
+  if (!device.hardwareBrightness) return 'none'
+  return device.open ? 'enabled' : 'disabled'
+}
 
 /** What holds a device's brightness: the slider alone, a signal, the sound or the computer. */
 export type DimmingMode = 'value' | 'signal' | 'sound' | 'system'

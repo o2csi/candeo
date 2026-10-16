@@ -317,6 +317,9 @@
     "tryNote": "Personne n'a encore vérifié cette définition sur cet appareil.",
     "report": "Faire un retour",
     "reportNote": "S'allume-t-il comme il faut ? Dites-le, et elle pourra rejoindre les vérifiées.",
+    "reportTitle": "Ouvrir dans le navigateur le formulaire de retour, rempli avec ce que Candeo a détecté",
+    "unknownMaker": "Fabricant inconnu",
+    "usagePages": "page d'utilisation HID {pages} | pages d'utilisation HID {pages}",
     "none": "Aucun gabarit connu.",
     "neverSeen": "Un appareil jamais vu est listé mais non piloté : la décision se prend une fois, puis se retient.",
     "warnings": {
@@ -333,7 +336,8 @@
     "groups": {
       "builtIn": "Intégrés",
       "yours": "À vous",
-      "unverified": "Non vérifiée"
+      "unverified": "Non vérifiée",
+      "notSupported": "Détecté, pas encore pris en charge"
     },
     "openFolder": "Ouvrir le dossier",
     "yoursNone": "Aucune définition à vous.",

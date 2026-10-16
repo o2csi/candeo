@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DeviceInfo } from '../api/types'
-import { FILTER_PAST, definitionChoice, ids, listed, yourFiles } from './devicesPage'
+import type { DeviceInfo, UnsupportedDevice } from '../api/types'
+import {
+  FILTER_PAST,
+  definitionChoice,
+  ids,
+  listed,
+  notSupported,
+  usagePages,
+  yourFiles,
+} from './devicesPage'
 
 function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
   return {
@@ -22,8 +30,22 @@ function device(name: string, part: Partial<DeviceInfo> = {}): DeviceInfo {
     unverified: false,
     lights: 'keys',
     lightCount: 106,
+    hardwareBrightness: true,
     capabilities: ['matrix', 'geometry'],
     ...part,
+  }
+}
+
+function unsupported(
+  maker: string | null,
+  pid: number,
+  pages: number[] = [0xff00],
+): UnsupportedDevice {
+  return {
+    maker,
+    vid: 0x187c,
+    pid,
+    collections: pages.map((usagePage, i) => ({ interface: i, usagePage, usage: 1 })),
   }
 }
 
@@ -102,5 +124,36 @@ describe('devices page', () => {
     expect(listed(many, 'all', '187c').map((d) => d.name)).toEqual(['Alienware m18 R1 zones'])
     expect(listed(many, 'all', 'corsair')).toEqual([])
     expect(listed(many, 'plugged', 'corsair')).toHaveLength(1)
+  })
+
+  it('lists the devices not supported yet under both filters, by maker, nameless last', () => {
+    const found = [
+      unsupported(null, 0x0003),
+      unsupported('Razer', 0x0002),
+      unsupported('Alienware', 0x0550),
+    ]
+    const order = ['Alienware', 'Razer', null]
+    expect(notSupported(found, 'plugged', '', 3).map((d) => d.maker)).toEqual(order)
+    expect(notSupported(found, 'all', '', 3).map((d) => d.maker)).toEqual(order)
+  })
+
+  it('filters the devices not supported yet by maker or ids, counting every device listed', () => {
+    const found = [unsupported('Alienware', 0x0550), unsupported('Razer', 0x0002)]
+    const known = Array.from({ length: FILTER_PAST - 1 }, (_, i) => device(`Keyboard ${i}`))
+    // Past FILTER_PAST once those not supported yet are counted: All filters.
+    const count = known.length + found.length
+    expect(notSupported(found, 'all', 'razer', count).map((d) => d.pid)).toEqual([0x0002])
+    expect(notSupported(found, 'all', '187c:0550', count).map((d) => d.pid)).toEqual([0x0550])
+    expect(listed(known, 'all', 'razer', count)).toEqual([])
+    // Plugged in shows no filter, and the known ones alone do not reach it.
+    expect(notSupported(found, 'plugged', 'razer', count)).toHaveLength(2)
+    expect(listed(known, 'all', 'razer')).toHaveLength(known.length)
+  })
+
+  it('writes each usage page once, in hexadecimal', () => {
+    expect(usagePages(unsupported('Alienware', 0x0550, [0xff00, 0x59, 0xff00]))).toEqual([
+      '0xff00',
+      '0x0059',
+    ])
   })
 })

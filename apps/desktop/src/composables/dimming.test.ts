@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  brightnessSlider,
   dimmingFloor,
   dimmingMode,
   dimmingSignal,
@@ -11,6 +12,15 @@ import {
   followingSystem,
   withFloor,
 } from './dimming'
+
+describe('brightnessSlider', () => {
+  it('is offered only where the definition has a brightness command', () => {
+    expect(brightnessSlider({ hardwareBrightness: true, open: true })).toBe('enabled')
+    expect(brightnessSlider({ hardwareBrightness: true, open: false })).toBe('disabled')
+    expect(brightnessSlider({ hardwareBrightness: false, open: true })).toBe('none')
+    expect(brightnessSlider({ hardwareBrightness: false, open: false })).toBe('none')
+  })
+})
 
 describe('dimming', () => {
   it('reads nothing as the slider alone', () => {

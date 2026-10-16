@@ -40,6 +40,7 @@ mod storage;
 mod system;
 mod taskbar;
 mod tray;
+mod unsupported;
 mod update;
 
 /// Known layouts: the ones written in Rust, the built-in definitions, then
@@ -150,6 +151,8 @@ pub struct DeviceInfo {
     /// the pickers of Automations and Games offer only the effects that apply.
     pub capabilities: Vec<&'static str>,
     pub light_count: usize,
+    /// Its definition has a brightness command, as [`LayoutInfo::hardware_brightness`].
+    pub hardware_brightness: bool,
 }
 
 /// `keys` or `zones`, as the manifest's `kinds` name them.
@@ -243,6 +246,10 @@ pub struct LayoutInfo {
     pub capabilities: Vec<&'static str>,
     /// What the simulator draws under the lights: empty for a keyboard.
     pub outline: Vec<OutlineInfo>,
+    /// Its definition has a brightness command: the slider writes the level to
+    /// the device. Without one the window shows no slider, and what the
+    /// brightness follows scales frames from full (#334).
+    pub hardware_brightness: bool,
 }
 
 /// One firmware effect, as the gallery needs it. Mirror of
@@ -371,6 +378,7 @@ impl From<&'static Layout> for LayoutInfo {
                     r: o.r,
                 })
                 .collect(),
+            hardware_brightness: l.has_brightness(),
         }
     }
 }
@@ -892,9 +900,6 @@ pub(crate) fn reopen(app: &AppHandle, device: DeviceRef) {
 /// its firmware kept, and the setting in `settings.json` describes a state
 /// that nothing produces.
 ///
-/// Nothing is rewritten when it is the default: the keyboard is already there,
-/// and one more HID write at each device's startup would buy nothing.
-///
 /// Nothing goes up: a refused write must not stop the adoption from
 /// completing — the device is open, the effect can run, and that is what
 /// matters. It is logged, because a keyboard dimmer than requested without a
@@ -905,10 +910,9 @@ fn reapply_brightness(
     layout: &Layout,
     serial: Option<&str>,
 ) {
-    let level = settings.brightness(layout.vid, layout.pid, serial);
-    if level == storage::DEFAULT_BRIGHTNESS {
+    let Some(level) = brightness_to_reapply(settings, layout, serial) else {
         return;
-    }
+    };
     match keyboard.set_brightness(level) {
         Ok(()) => tracing::info!(
             device = %DeviceRef::of(layout),
@@ -921,6 +925,17 @@ fn reapply_brightness(
             "stored brightness not reapplied: {e}"
         ),
     }
+}
+
+/// The stored level to write to a device just opened, if any.
+///
+/// None for the default: the keyboard is already there, and one more HID write
+/// at each device's startup would buy nothing. None either where the
+/// definition has no brightness command: a level saved before its slider was
+/// hidden would only fail in the log at every open (#334).
+fn brightness_to_reapply(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Option<u8> {
+    let level = settings.brightness(layout.vid, layout.pid, serial);
+    (level != storage::DEFAULT_BRIGHTNESS && layout.has_brightness()).then_some(level)
 }
 
 /// An inspection warning in the interface language: the device crate knows no
@@ -1021,6 +1036,7 @@ fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<Dev
                 lights: lights_kind(l),
                 capabilities: capabilities(l),
                 light_count: l.lit_count(),
+                hardware_brightness: l.has_brightness(),
                 present,
                 state: settings.device_state(l.vid, l.pid, serial.as_deref()),
                 open: inspection.is_some(),
@@ -1089,6 +1105,7 @@ fn unverified_devices(api: &hidapi::HidApi, known: &[&'static Layout]) -> Vec<De
             lights: lights_kind(l),
             capabilities: capabilities(l),
             light_count: l.lit_count(),
+            hardware_brightness: l.has_brightness(),
             present: plugged_in.is_some(),
             state: DeviceState::Detected,
             open: false,
@@ -1120,7 +1137,7 @@ fn report_url(name: &str, file: &str, firmware: Option<&str>, candeo: &str) -> S
 }
 
 /// A query parameter's value, every byte but the unreserved ones escaped.
-fn query(value: &str) -> String {
+pub(crate) fn query(value: &str) -> String {
     value
         .bytes()
         .map(|b| match b {
@@ -1796,6 +1813,8 @@ pub fn run() {
             storage::copy_device_definition,
             try_device_definition,
             report_device_definition,
+            unsupported::unsupported_devices,
+            unsupported::report_unsupported_device,
             firmware_effects,
             storage::choose_device_definition,
             storage::read_device_definition,
@@ -1892,6 +1911,39 @@ mod tests {
         );
         let en = warning_text(language::Language::En, &warning);
         assert!(en.contains("“effect”"), "{en}");
+    }
+
+    /// A stored level goes back to a device that has a brightness command, and
+    /// never to one that has none: there it would only fail in the log (#334).
+    #[test]
+    fn a_stored_brightness_is_reapplied_only_where_the_device_has_one() {
+        let razer = candeo_device::definition::builtin_layout("razer-deathstalker-v2-pro.json")
+            .expect("built in");
+        let zones = candeo_device::definition::builtin_layout("alienware-17-r5-zones.json")
+            .expect("built in");
+        let serial = Some("XY24ABCDEFG0001");
+        let mut settings = Settings::default();
+        assert_eq!(
+            brightness_to_reapply(&settings, razer, serial),
+            None,
+            "the default is not written again"
+        );
+        for l in [razer, zones] {
+            settings.set_brightness(l.vid, l.pid, serial, 80);
+        }
+        assert_eq!(brightness_to_reapply(&settings, razer, serial), Some(80));
+        assert_eq!(brightness_to_reapply(&settings, zones, serial), None);
+    }
+
+    /// The layout sent to the window says whether to show the slider.
+    #[test]
+    fn the_window_is_told_which_devices_have_a_brightness_command() {
+        let has = |file: &str| {
+            let l = candeo_device::definition::builtin_layout(file).expect("built in");
+            LayoutInfo::from(l).hardware_brightness
+        };
+        assert!(has("alienware-m18-r1.json"));
+        assert!(!has("alienware-m18-r1-zones.json"));
     }
 
     /// A family that sends nothing: the two layouts below are only ever
