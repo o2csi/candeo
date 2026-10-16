@@ -862,7 +862,8 @@ One confirmed on the device, with frames captured there, joins the built-in
 ones.
 
 They come in two degrees. The Razer ones only change what a verified sibling
-already sends; a family with no verified member — SteelSeries' Apex, written by
+already sends, and so do the Alienware and Dell machines of the AW-ELC (below);
+a family with no verified member — SteelSeries' Apex, written by
 `steelseries.mjs` from OpenRGB's reading of its protocol — has its protocol to
 verify too, and the site lists it apart. Each family's generator reads a facts
 file beside it: `variants.json` for Razer, `<family>.facts.json` for the others.
@@ -930,6 +931,18 @@ So a definition may name the machine it was made on, in `match`:
 
 This is not the list of models §1 refuses. An effect still names no machine; a
 definition names the one it was surveyed on, as it names its ids.
+
+**The other AW-ELC machines, unverified (2026-10-16, #328).** `alienfx-tools`
+(MIT) keeps, per machine, which id lights what. `alienfx.mjs` reads its
+`devices.csv` once into `alienfx.facts.json`, then writes one definition per
+machine with the framing the 17 R5 and the m18 R1 verified: the protocol is
+proved, the map is not. Its labels are its own — *Alienware m15R1* — so each
+machine is named as SMBIOS names it, *Alienware m15*, from a published DMI
+dump the facts cite; a machine whose name was not found, or whose map that
+project itself calls wrong, is left out and the facts say why. A light it marks
+as the power button is left out, as the m18 R1's is. The ones on `187c:0551`
+are not offered in the application while the m18 R1's zones claim that id on
+every machine: they are there to download, and to choose on the device's card.
 
 ---
 
