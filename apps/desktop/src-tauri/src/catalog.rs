@@ -432,8 +432,8 @@ mod tests {
         assert_eq!(c.problems.len(), 1);
     }
 
-    /// The unverified definitions are filtered as the built-in ones are; none
-    /// names a machine today, so all of them stay on any.
+    /// The unverified definitions are filtered as the built-in ones are: the
+    /// keyboards' stay on any machine, the AW-ELC's (#328) on theirs alone.
     #[test]
     fn an_unverified_definition_naming_another_machine_is_left_out() {
         let named = definition::load(&zones_for("Alienware m15 R1")).unwrap();
@@ -445,6 +445,24 @@ mod tests {
         assert_eq!(files(None), ["any.json"]);
 
         let everything = definition::unverified();
-        assert_eq!(fitting(everything, M15).count(), everything.len());
+        let anywhere = everything.iter().filter(|(_, l)| l.machine.is_none());
+        assert_eq!(fitting(everything, None).count(), anywhere.count());
+        let machines: Vec<&(&str, &Layout)> = everything
+            .iter()
+            .filter(|(_, l)| l.machine.is_some())
+            .collect();
+        assert!(machines.len() >= 17, "{} for a machine", machines.len());
+        for (file, layout) in machines {
+            let only: Vec<&str> = fitting(everything, layout.machine)
+                .filter(|(_, l)| l.machine.is_some())
+                .map(|(f, _)| *f)
+                .collect();
+            assert_eq!(only, [*file], "one definition for {:?}", layout.machine);
+        }
+        // The 17 R5 has its own, built in: none of these claims it.
+        assert_eq!(
+            fitting(everything, R5).count(),
+            fitting(everything, None).count()
+        );
     }
 }
