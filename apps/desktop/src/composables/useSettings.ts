@@ -55,14 +55,22 @@
  *
  * Module-level state, like `useDevice` and `useEffects`: moving to the editor
  * destroys the view, and settings in flight must not go with it.
+ *
+ * ## Regions
+ *
+ * On a split device each region keeps its applied effect, what its brightness
+ * follows, and its settings per effect (`docs/design/regions.md` §3, §8): every
+ * table here is keyed by a {@link Target}, the device's records untouched while
+ * its regions have their own. The brightness alone stays the device's (§4).
  */
 
 import { computed, readonly, ref } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
-import type { Bindings, Dimming, EffectParams } from '../api/candeo'
+import type { Bindings, Dimming, EffectParams, Settings } from '../api/candeo'
 import { message } from '../api/journal'
+import { targetKey, type Target } from '../api/target'
 import type { DeviceRef } from '../api/types'
 import { declaredBindings, rebound } from './bindings'
 
@@ -109,7 +117,10 @@ const DISK_DELAY = 600
  */
 const DISK_PERIOD = 250
 
-/** What differs from the manifest, per device and per effect. Key `vid:pid/effect`. */
+/**
+ * What differs from the manifest, per device and per effect. Key `vid:pid/effect`,
+ * `vid:pid@region/effect` for a region of a split device.
+ */
 const remembered = ref<Record<string, EffectParams>>({})
 
 /**
@@ -121,7 +132,7 @@ const bound = ref<Record<string, Bindings>>({})
 
 /**
  * The effect **applied** on each device, as the file remembers it.
- * Key `vid:pid`.
+ * Key `vid:pid`, and `vid:pid@region` for each region of a split device.
  *
  * Read back, never written from here: it is Rust that remembers it, at the
  * moment the effect really starts. The window would have no honest way to do
@@ -135,7 +146,10 @@ const applied = ref<Record<string, string>>({})
 /** The brightness remembered per device, key `vid:pid`. Absent = the default. */
 const brightness = ref<Record<string, number>>({})
 
-/** What each device's brightness follows, key `vid:pid`. Absent = nothing (§2.2.2). */
+/**
+ * What each device's brightness follows, key `vid:pid`, or each region's, key
+ * `vid:pid@region`. Absent = nothing (§2.2.2).
+ */
 const dimming = ref<Record<string, Dimming>>({})
 
 /** What prevented reading, adjusting or remembering. Already readable. */
@@ -157,8 +171,9 @@ let loaded = false
  */
 let generation = 0
 
-const deviceKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
-const key = (d: DeviceRef, effect: string) => `${deviceKey(d)}/${effect}`
+/** The model alone, for what stays the device's even on a split one: its brightness. */
+const modelKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
+const key = (t: Target, effect: string) => `${targetKey(t)}/${effect}`
 
 /** Errors raised by Rust are already readable: they are shown as they are. */
 // ---------------------------------------------------------------- values
@@ -385,7 +400,7 @@ function landed(k: string, table = inflight): void {
  * optimisation — `settings.json` is written through a temporary file then a
  * rename, it is a complete disk operation.
  */
-function persist(device: DeviceRef, effect: string, values: EffectParams): void {
+function persist(device: Target, effect: string, values: EffectParams): void {
   const k = key(device, effect)
   const previous = writes.get(k)
   if (previous) window.clearTimeout(previous.timer)
@@ -414,7 +429,7 @@ function persist(device: DeviceRef, effect: string, values: EffectParams): void 
  * binding changes on a click or a name typed, never thirty times a second.
  * Counted in flight until Rust answers, for {@link read}.
  */
-function rememberBindings(device: DeviceRef, effect: string, bindings: Bindings): void {
+function rememberBindings(device: Target, effect: string, bindings: Bindings): void {
   const k = key(device, effect)
   takeOff(k, bindingsInflight)
   api
@@ -437,7 +452,7 @@ function rememberBindings(device: DeviceRef, effect: string, bindings: Bindings)
  * `now` lifts this gap, for gestures that do not repeat: a click on "Restore"
  * has no reason to wait because a slider has just been released.
  */
-function settleOne(device: DeviceRef, effect: string, now = false): void {
+function settleOne(device: Target, effect: string, now = false): void {
   const k = key(device, effect)
   const w = writes.get(k)
   if (!w) return
@@ -500,6 +515,47 @@ window.addEventListener('pagehide', flushAll)
 
 // ------------------------------------------------------------------- reading
 
+/** What the file keeps, by key: the tables {@link read} installs. */
+interface OnDisk {
+  values: Record<string, EffectParams>
+  bindings: Record<string, Bindings>
+  applied: Record<string, string>
+  dimming: Record<string, Dimming>
+}
+
+/**
+ * The file's records under this module's keys: the devices', then each split
+ * device's regions' (`docs/design/regions.md` §11 b), which sit apart in the
+ * file and cannot collide with them here, `@region` making the key.
+ *
+ * A region record without an effect is a region that runs nothing; one the
+ * definition no longer declares is read all the same and asked for by no one.
+ */
+function onDisk(s: Settings): OnDisk {
+  const out: OnDisk = { values: {}, bindings: {}, applied: {}, dimming: {} }
+  for (const r of s.effectParams) {
+    const k = key({ vid: r.vid, pid: r.pid }, r.effect)
+    out.values[k] = r.values
+    if (r.bindings !== undefined) out.bindings[k] = r.bindings
+  }
+  for (const r of s.activeEffects) out.applied[modelKey(r)] = r.effect
+  for (const r of s.devices) if (r.dimming !== undefined) out.dimming[modelKey(r)] = r.dimming
+
+  for (const split of s.splitDevices ?? []) {
+    for (const r of split.regions ?? []) {
+      const t = { vid: split.vid, pid: split.pid, region: r.region }
+      if (r.effect) out.applied[targetKey(t)] = r.effect
+      if (r.dimming) out.dimming[targetKey(t)] = r.dimming
+    }
+    for (const r of split.effectParams ?? []) {
+      const k = key({ vid: split.vid, pid: split.pid, region: r.region }, r.effect)
+      out.values[k] = r.values
+      if (r.bindings !== undefined) out.bindings[k] = r.bindings
+    }
+  }
+  return out
+}
+
 /**
  * Reads `settings.json` and replaces what is remembered.
  *
@@ -516,32 +572,21 @@ function read(): Promise<void> {
       // what that one has just installed.
       if (mine !== generation) return
 
-      const onDisk: Record<string, EffectParams> = Object.fromEntries(
-        s.effectParams.map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.values]),
-      )
-      const boundOnDisk: Record<string, Bindings> = Object.fromEntries(
-        s.effectParams
-          .filter((r) => r.bindings !== undefined)
-          .map((r) => [key({ vid: r.vid, pid: r.pid }, r.effect), r.bindings as Bindings]),
-      )
+      const disk = onDisk(s)
+      const values = disk.values
+      const boundOnDisk = disk.bindings
 
       // The two other tables are taken as they are: the window does not write
       // them — Rust remembers the applied effect at startup, and the
       // brightness goes out through its own command —, so there is nothing to
       // protect from a write in flight as for the settings below.
-      applied.value = Object.fromEntries(
-        s.activeEffects.map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.effect]),
-      )
+      applied.value = disk.applied
       brightness.value = Object.fromEntries(
         s.devices
           .filter((r) => r.brightness !== undefined)
-          .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.brightness as number]),
+          .map((r) => [modelKey(r), r.brightness as number]),
       )
-      dimming.value = Object.fromEntries(
-        s.devices
-          .filter((r) => r.dimming !== undefined)
-          .map((r) => [deviceKey({ vid: r.vid, pid: r.pid }), r.dimming as Dimming]),
-      )
+      dimming.value = disk.dimming
 
       // What is still waiting for the disk is more recent than the disk: the
       // write only goes out when the slider rests, and `reload` does not choose
@@ -557,7 +602,7 @@ function read(): Promise<void> {
       // when something has just moved.
       for (const k of [...writes.keys(), ...inflight.keys()]) {
         const ours = remembered.value[k]
-        if (ours !== undefined) onDisk[k] = ours
+        if (ours !== undefined) values[k] = ours
       }
       // Same for a binding whose write has not come back: the file would unbind
       // what was just bound, or the other way round.
@@ -566,7 +611,7 @@ function read(): Promise<void> {
         if (ours !== undefined) boundOnDisk[k] = ours
       }
 
-      remembered.value = onDisk
+      remembered.value = values
       bound.value = boundOnDisk
       loaded = true
     })
@@ -620,13 +665,14 @@ export function useSettings() {
   }
 
   /**
-   * The values this effect runs — or would run — with on this device.
+   * The values this effect runs — or would run — with on this device, or this
+   * region of a split device.
    *
    * Without a device, what the effect declares: something has to be shown, and
    * those values hold for any device.
    */
   function valuesFor(
-    device: DeviceRef | null,
+    device: Target | null,
     effect: string,
     specs: Record<string, ParamSpec>,
   ): EffectParams {
@@ -639,7 +685,7 @@ export function useSettings() {
    * device, none: nothing is kept for no device.
    */
   function bindingsFor(
-    device: DeviceRef | null,
+    device: Target | null,
     effect: string,
     specs: Record<string, ParamSpec>,
   ): Bindings {
@@ -654,7 +700,7 @@ export function useSettings() {
    * by issue #28: the settings held, and nothing hinted at it — you adjust, you
    * close, and you have no reason to believe it survived.
    */
-  function keptFor(device: DeviceRef | null, effect: string): boolean {
+  function keptFor(device: Target | null, effect: string): boolean {
     if (!device) return false
     const k = key(device, effect)
     return (
@@ -675,7 +721,7 @@ export function useSettings() {
    * knows what it is looking at.
    */
   function adjust(
-    device: DeviceRef,
+    device: Target,
     effect: string,
     specs: Record<string, ParamSpec>,
     id: string,
@@ -707,7 +753,10 @@ export function useSettings() {
     // keyboard — that is the whole point of the preview. It is still
     // remembered: the setting belongs to the device/effect pair, it will apply
     // at the next start.
-    if (applied) hot(deviceKey(device), (p) => api.setEffectParams(device, p), complete)
+    //
+    // One sender per loop part: a region's values go to its own, beside the
+    // other regions' of the same device.
+    if (applied) hot(targetKey(device), (p) => api.setEffectParams(device, p), complete)
     persist(device, effect, kept)
     return complete
   }
@@ -737,7 +786,7 @@ export function useSettings() {
    * ({@link bindPreview}), as {@link adjust} returns the values.
    */
   function bind(
-    device: DeviceRef,
+    device: Target,
     effect: string,
     specs: Record<string, ParamSpec>,
     id: string,
@@ -763,10 +812,10 @@ export function useSettings() {
     })
   }
 
-  /** The brightness remembered for this device, or the default. */
+  /** The brightness remembered for this device, or the default. A split device's too: it stays the device's. */
   function brightnessOf(device: DeviceRef | null): number {
     if (!device) return api.BRIGHTNESS_DEFAULT
-    return brightness.value[deviceKey(device)] ?? api.BRIGHTNESS_DEFAULT
+    return brightness.value[modelKey(device)] ?? api.BRIGHTNESS_DEFAULT
   }
 
   /**
@@ -779,7 +828,7 @@ export function useSettings() {
    */
   function setBrightness(device: DeviceRef, level: number, commit: boolean): void {
     error.value = null
-    const k = deviceKey(device)
+    const k = modelKey(device)
     // The default is not remembered: the absence of an entry **is** the
     // default, here as in the file.
     const next = { ...brightness.value }
@@ -797,19 +846,20 @@ export function useSettings() {
     if (commit) void api.rememberBrightness(device, level).catch(fail)
   }
 
-  /** What this device's brightness follows, or `null` for nothing. */
-  function dimmingOf(device: DeviceRef | null): Dimming | null {
-    return device ? (dimming.value[deviceKey(device)] ?? null) : null
+  /** What this device's brightness follows, or this region's, or `null` for nothing. */
+  function dimmingOf(device: Target | null): Dimming | null {
+    return device ? (dimming.value[targetKey(device)] ?? null) : null
   }
 
   /**
    * Makes a device's brightness follow the sound or a signal, `null` for
    * nothing: memory, engine, and disk if asked — the floor slider moves live and
-   * is written once, like the brightness.
+   * is written once, like the brightness. On a split device, a region's: each
+   * follows its own source (`docs/design/regions.md` §4).
    */
-  function setDimming(device: DeviceRef, next: Dimming | null, commit: boolean): void {
+  function setDimming(device: Target, next: Dimming | null, commit: boolean): void {
     error.value = null
-    const k = deviceKey(device)
+    const k = targetKey(device)
     const all = { ...dimming.value }
     if (next === null) delete all[k]
     else all[k] = next
@@ -829,8 +879,8 @@ export function useSettings() {
    * applied last time, and what lets an idle device say it remembers it rather
    * than showing "no effect".
    */
-  function lastAppliedOn(device: DeviceRef | null): string | null {
-    return device ? (applied.value[deviceKey(device)] ?? null) : null
+  function lastAppliedOn(device: Target | null): string | null {
+    return device ? (applied.value[targetKey(device)] ?? null) : null
   }
 
   /**
@@ -841,7 +891,7 @@ export function useSettings() {
    * a 600 ms timer, which closing the window would take away — yet the window
    * is closed while an effect runs, it is how the app is meant to be used.
    */
-  function settle(device: DeviceRef, effect: string): void {
+  function settle(device: Target, effect: string): void {
     settleOne(device, effect)
   }
 
@@ -861,7 +911,7 @@ export function useSettings() {
    * what it is looking at. Its bindings are none: {@link bindPreview} with `{}`.
    */
   function forget(
-    device: DeviceRef,
+    device: Target,
     effect: string,
     specs: Record<string, ParamSpec>,
     applied: boolean,
@@ -875,7 +925,7 @@ export function useSettings() {
     // values of an effect being previewed has no reason to touch the keyboard,
     // which may be running something else.
     if (applied) {
-      hot(deviceKey(device), (p) => api.setEffectParams(device, p), declared)
+      hot(targetKey(device), (p) => api.setEffectParams(device, p), declared)
       void api.setEffectBindings(device, {}).catch((e: unknown) => {
         error.value = message(e)
       })
@@ -887,7 +937,7 @@ export function useSettings() {
   }
 
   /**
-   * Forgets what was remembered for an effect, on **every** device.
+   * Forgets what was remembered for an effect, on **every** device and region.
    *
    * The in-memory counterpart of what `delete_effect` does in `settings.json`.
    * Without it, the window would keep settings pointing to an identifier that

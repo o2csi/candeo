@@ -57,6 +57,15 @@ const shut = { devices: ref(false), effects: ref(false) }
  * It is fed by a frame channel from the engine, the very frames that go to the
  * keyboard when the device is what is being watched (`docs/design/studio.md`
  * §3).
+ *
+ * ## A split device: a header over its regions
+ *
+ * Each region runs its own effect (`docs/design/regions.md` §3). The device
+ * becomes a header nobody selects, its regions the cards that are: the effects
+ * offered, *Applied*, *Apply*, *Stop*, the settings and what the brightness
+ * follows are the selected region's. The brightness slider, the state, the
+ * interruption and *Resume* stay the device's, and the drawing stays the whole
+ * device, the region in full colour.
  */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
@@ -88,7 +97,8 @@ import {
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
-import type { DeviceRef, LayoutInfo, Rgb } from '../api/types'
+import { deviceOf, regionOf, targetFor, targetKey, type Target } from '../api/target'
+import type { DeviceInfo, DeviceRef, LayoutInfo, RegionInfo, Rgb } from '../api/types'
 import BrightnessFollow from '../components/BrightnessFollow.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import { readsSignal, readsSound, readsSystem } from '../composables/bindings'
@@ -96,12 +106,15 @@ import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
+import RegionGlyph from '../components/RegionGlyph.vue'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { brightnessSlider } from '../composables/dimming'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
 import { useDevice } from '../composables/useDevice'
-import { applies, wants } from '../composables/applies'
+import { useLayouts } from '../composables/layouts'
+import { isSplit, regionStatus } from '../composables/regions'
+import { applies, wants, type Offers } from '../composables/applies'
 import { valveGames } from '../composables/games'
 import { isLook } from '../keyboard/illustration'
 import {
@@ -134,7 +147,8 @@ const shutDevices = shut.devices
 const shutEffects = shut.effects
 
 const router = useRouter()
-const { devices, current, select, busy, refresh } = useDevice()
+const { devices, current, select, selectRegion, regionOn, busy, refresh } = useDevice()
+const { layoutOf, ensure: ensureLayouts } = useLayouts()
 // `apply` does not throw: it stores its failure in `applyError`, which must
 // therefore be shown, or a hardware mode refused by the device would say nothing.
 const {
@@ -215,6 +229,63 @@ watch(
 function choose(d: { vid: number; pid: number }) {
   select({ vid: d.vid, pid: d.pid })
 }
+
+// ---------------------------------------------------------------- regions
+
+/** The selected device runs one effect per region. */
+const split = computed(() => isSplit(selectedDevice.value))
+
+/**
+ * The region selected on the selected device, `null` while it is whole: the
+ * amber frame is on it, and everything the device's selection drove is its.
+ */
+const selectedRegion = computed<RegionInfo | null>(() =>
+  selectedDevice.value ? regionOn(selectedDevice.value) : null,
+)
+
+/** What the effects, *Apply*, *Stop*, the settings and the follow act on. */
+const target = computed<Target | null>(() =>
+  selectedDevice.value ? targetFor(selectedDevice.value, selectedRegion.value?.id ?? null) : null,
+)
+
+/** Changes with the device and with the region: what reselects the effect. */
+const targetId = computed(() => (target.value ? targetKey(target.value) : null))
+
+function chooseRegion(d: DeviceRef, r: RegionInfo): void {
+  selectRegion(d, r.id)
+}
+
+function regionSelected(d: DeviceInfo, r: RegionInfo): boolean {
+  return deviceKey.value === key(d) && selectedRegion.value?.id === r.id
+}
+
+/** *Alienware 17 R5 · Keyboard*: where a setting is kept, said where it is made. */
+const targetName = computed<string | null>(() => {
+  const d = selectedDevice.value
+  const r = selectedRegion.value
+  if (!d) return null
+  return r ? t('effects.regionOfDevice', { device: d.name, region: localized(r.name) }) : d.name
+})
+
+/** *Region Keyboard · 5 zones of 13*: the line under the drawing (§3). */
+const regionShare = computed<string | null>(() => {
+  const d = selectedDevice.value
+  const r = selectedRegion.value
+  if (!d || !r) return null
+  const n = r.positions.length
+  const params = { region: localized(r.name), n, total: d.lightCount }
+  return t(`effects.regionShare.${r.lights}`, params, n)
+})
+
+/**
+ * The column draws each region's pictogram from its device's layout, open or
+ * not (`docs/design/regions.md` §11 c).
+ */
+watch(
+  () => controlled.value.filter((d) => isSplit(d)),
+  (list) => void ensureLayouts(list),
+  { immediate: true },
+)
 
 /**
  * The warning waits for the search started at launch to end. Without this
@@ -343,9 +414,14 @@ function fromHardware(e: HardwareEffect): Choice {
  * reading key presses on a surface nobody types on, one drawn on rows of keys
  * on a few zones (`docs/design/device-sdk.md` §3). While no device is known,
  * nothing is left out.
+ *
+ * On a split device, checked against the selected region: a region drawn later
+ * may offer less than its device (`docs/design/regions.md` §1).
  */
+const offers = computed<Offers | null>(() => selectedRegion.value ?? board.value)
+
 function offered(e: Choice): boolean {
-  return board.value === null || applies(e, board.value)
+  return offers.value === null || applies(e, offers.value)
 }
 
 /**
@@ -360,8 +436,9 @@ const choices = computed<Choice[]>(() => [
   ...library.value.filter((e) => e.kind === 'builtin').map(fromEntry).filter(offered).filter(forGamesShown),
   ...library.value.filter((e) => e.kind === 'user').map(fromEntry).filter(offered).filter(forGamesShown),
   // Only what this device's firmware runs: offering a mode it does not know
-  // would be offering an effect that never starts.
-  ...hardwareEffectsFor(board.value).map(fromHardware),
+  // would be offering an effect that never starts. None on a split device: a
+  // firmware lights all of it and knows nothing of regions.
+  ...(split.value ? [] : hardwareEffectsFor(board.value).map(fromHardware)),
 ])
 
 /**
@@ -388,7 +465,10 @@ const grouped = computed(() =>
     nature,
     title: t(`effects.groups.${nature}`),
     items: choices.value.filter((c) => groupOf(c) === nature),
-  })).filter((g) => g.nature !== 'game' || g.items.length > 0),
+  })).filter(
+    // *Off* keeps the hardware section on any whole device; a split one has none.
+    (g) => (g.nature !== 'game' && g.nature !== 'hardware') || g.items.length > 0,
+  ),
 )
 
 /**
@@ -470,13 +550,13 @@ const effectsList = ref<HTMLElement | null>(null)
 
 /**
  * Selects the selected device's effect: the one running on it, else the one it
- * remembers (#118).
+ * remembers (#118). On a split device, the selected region's.
  *
- * Only when the screen opens and when another device is chosen, never on the
- * engine refresh: an effect clicked since stays selected.
+ * Only when the screen opens and when another device or region is chosen,
+ * never on the engine refresh: an effect clicked since stays selected.
  */
 async function followDevice(): Promise<void> {
-  const d = selectedDevice.value
+  const d = target.value
   chosenEffect.value = deviceEffect(
     runningOn(d),
     lastAppliedOn(d),
@@ -492,7 +572,7 @@ async function followDevice(): Promise<void> {
     ?.scrollIntoView({ block: 'nearest' })
 }
 
-watch(deviceKey, () => {
+watch(targetId, () => {
   if (loaded.value) void followDevice()
 })
 
@@ -522,13 +602,20 @@ function statusOf(d: { vid: number; pid: number } | null) {
  * what shows on the LEDs, whatever mode was set before. The preview does not
  * enter this computation, and cannot: it is not in `devices`.
  */
-function runningOn(d: { vid: number; pid: number } | null): string | null {
+function runningOn(d: Target | null): string | null {
   const s = statusOf(d)
   // A rule interrupting the device runs its own effect, but that effect is not
-  // applied: the one the device goes back to still is (#106).
-  if (d && s?.interruption) return lastAppliedOn({ vid: d.vid, pid: d.pid })
+  // applied: the one the device goes back to still is (#106). On a split
+  // device, each region goes back to its own (`docs/design/regions.md` §4).
+  if (d && s?.interruption) return lastAppliedOn(d)
+  const region = d ? regionOf(d) : null
+  if (region !== null) {
+    // A region runs no firmware effect: what its part of the loop runs, or nothing.
+    const r = regionStatus(s, region)
+    return r?.running === true && r.effectId !== null ? r.effectId : null
+  }
   if (s?.running === true && s.effectId !== null) return s.effectId
-  return appliedOn(d ? { vid: d.vid, pid: d.pid } : null)
+  return appliedOn(d ? deviceOf(d) : null)
 }
 
 function effectName(id: string | null): string | null {
@@ -559,16 +646,68 @@ function deviceLine(d: { vid: number; pid: number }): string {
     : t('effects.deviceIdle')
 }
 
-/** The only effect marked **applied**: the selected device's. */
-const activeId = computed(() => runningOn(selectedDevice.value))
+/**
+ * A split device's header line: the rule interrupting it, under its name and
+ * not under each region (`docs/design/regions.md` §4). It gives back its
+ * regions, which their own lines name: the sentence does not.
+ */
+function interruptionOf(d: DeviceRef): string | null {
+  const interruption = statusOf(d)?.interruption
+  if (!interruption) return null
+  const rule = interruption.name || (effectName(interruption.effect) ?? interruption.effect)
+  const line = interruptionLine(interruption, rule, null, Date.now())
+  return t(line.key, line.params)
+}
+
+/**
+ * Why a region's effect stopped on its own, when it failed: its lights are
+ * black and the other regions go on (`docs/design/regions.md` §7).
+ */
+function regionFailure(d: DeviceRef, r: RegionInfo): string | null {
+  const s = regionStatus(statusOf(d), r.id)
+  return s !== null && !s.running ? s.error : null
+}
+
+/**
+ * What a region does, in one line, as a device's line says it: in amber the
+ * effect it runs, *no effect* for a region running nothing (§3).
+ *
+ * During an interruption the regions' effects are set aside, and each line
+ * names the effect its region goes back to.
+ */
+function regionLine(d: DeviceRef, r: RegionInfo): string {
+  const region = targetFor(d, r.id)
+  const s = regionStatus(statusOf(d), r.id)
+  if (s?.running === true && s.effectId !== null) return effectName(s.effectId) ?? s.effectId
+  if (regionFailure(d, r) !== null) return t('effects.entryBroken')
+  const remembered = effectName(lastAppliedOn(region))
+  if (remembered === null) return t('effects.deviceIdle')
+  return statusOf(d)?.interruption ? remembered : t('effects.deviceStopped', { name: remembered })
+}
+
+/** The only effect marked **applied**: the selected device's, or the selected region's. */
+const activeId = computed(() => runningOn(target.value))
 
 const status = computed(() => statusOf(selectedDevice.value))
+
+/** The selected region's part of the device's loop, while the loop runs its regions. */
+const regionState = computed(() =>
+  selectedRegion.value ? regionStatus(status.value, selectedRegion.value.id) : null,
+)
 
 /** Whether a change to this effect's settings reaches the selected device live (#218). */
 function live(effect: string, applied: string | null = activeId.value): boolean {
   return goesLive(effect, applied, Boolean(status.value?.interruption))
 }
-const runningHere = computed(() => status.value?.running === true)
+/** What runs here, for *Stop*: on a split device, the selected region's effect. */
+const runningHere = computed(() =>
+  selectedRegion.value ? regionState.value?.running === true : status.value?.running === true,
+)
+
+/** The applied effect's error, the region's on a split device: the others go on. */
+const effectError = computed(() =>
+  selectedRegion.value ? (regionState.value?.error ?? null) : (status.value?.error ?? null),
+)
 
 /** The preview in progress, when it does show the selected effect. */
 const preview = computed(() => {
@@ -607,7 +746,11 @@ async function refreshStatus(): Promise<void> {
  * open.
  */
 const fallback = ref<LayoutInfo | null>(null)
-/** The selected device's layout, when it is really open. */
+/**
+ * The selected device's layout, when it is really open, or when it is split:
+ * a region's preview has the device's frame length, and is drawn over the
+ * device's own lights, open or not (`docs/design/regions.md` §3).
+ */
 const opened = ref<LayoutInfo | null>(null)
 /**
  * The whole layout, not the simulator's view of it: this screen also reads what
@@ -624,15 +767,17 @@ const board = computed<LayoutInfo | null>(() => opened.value ?? fallback.value)
  * otherwise. The day a second model arrives, this view has nothing to learn.
  */
 watch(
-  [deviceKey, () => selectedDevice.value?.open === true],
-  async ([, isOpen]) => {
+  [deviceKey, () => selectedDevice.value?.open === true, split],
+  async ([wanted, isOpen, isSplit]) => {
     const d = selectedDevice.value
-    if (!d || !isOpen) {
+    if (!d || (!isOpen && !isSplit)) {
       opened.value = null
       return
     }
     // A layout that cannot be obtained is not a failure: the fallback draws.
-    opened.value = await getLayout({ vid: d.vid, pid: d.pid }).catch(() => null)
+    const layout = await getLayout({ vid: d.vid, pid: d.pid }).catch(() => null)
+    // Another device chosen meanwhile: this answer is not for it.
+    if (deviceKey.value === wanted) opened.value = layout
   },
   { immediate: true },
 )
@@ -668,10 +813,26 @@ const showsDevice = computed(() =>
   showsDeviceFrames(runningHere.value, applied.value, Boolean(status.value?.interruption)),
 )
 
+/**
+ * What the device's loop runs, as the feed needs it to follow its frames: it
+ * changes when the loop may have been started again, with a new channel.
+ */
+const deviceLoop = computed<string | null>(() => {
+  const s = status.value
+  if (s?.running !== true) return null
+  const parts = s.regions
+    ? s.regions.map((r) => `${r.region}=${r.effectId ?? ''}`).join(',')
+    : (s.effectId ?? '')
+  return `${parts}|${s.interruption?.rule ?? ''}`
+})
+
 const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
-  device: () => selectedDevice.value,
+  device: () => target.value,
   showsDevice: () => showsDevice.value,
+  // A split device's region: its preview laid over what the device shows.
+  focus: () => selectedRegion.value?.positions ?? null,
+  deviceLoop: () => deviceLoop.value,
   // A hardware effect is run by the firmware and the app never sees its frames:
   // previewing it would mean inventing them.
   previewed: () => {
@@ -759,12 +920,14 @@ const working = ref(false)
 async function applyEffect(): Promise<void> {
   const c = selectedEffect.value
   const d = selectedDevice.value
-  if (!c || !d) return
+  const where = target.value
+  if (!c || !d || !where) return
 
   const device = { vid: d.vid, pid: d.pid }
   problem.value = null
   working.value = true
   try {
+    // Never on a split device: its list offers no firmware effect.
     if (c.hardware) {
       if (statusOf(d)?.running === true) await stopEffect(device)
       await apply(device, c.hardware, colourBytes(paramValues.value))
@@ -779,7 +942,9 @@ async function applyEffect(): Promise<void> {
       //
       // Its bindings too: Rust starts an effect with those it is given, and
       // without them the parameters bound here would stop reading their signal.
-      await startEffect(device, c.id, paramValues.value, paramBindings.value)
+      //
+      // On a split device, on the selected region: the others go on.
+      await startEffect(where, c.id, paramValues.value, paramBindings.value)
     }
   } catch (e) {
     problem.value = message(e)
@@ -799,15 +964,18 @@ async function applyEffect(): Promise<void> {
  *
  * The preview is not affected, and that is precisely the point: stopping what
  * runs on the keyboard must not close what is being watched.
+ *
+ * On a split device, the selected region's: its lights go black, the others go
+ * on (`docs/design/regions.md` §7).
  */
 async function halt(): Promise<void> {
-  const d = selectedDevice.value
-  if (!d) return
+  const where = target.value
+  if (!where) return
 
   problem.value = null
   working.value = true
   try {
-    await stopEffect({ vid: d.vid, pid: d.pid })
+    await stopEffect(where)
   } catch (e) {
     problem.value = message(e)
   } finally {
@@ -1031,10 +1199,11 @@ const specs = computed<Record<string, ParamSpec>>(() => selectedEffect.value?.pa
 
 /**
  * The values this effect runs on, or would run on, on this device: its
- * manifest, overridden by what was remembered for this pair.
+ * manifest, overridden by what was remembered for this pair. On a split
+ * device, for the selected region: each keeps its own per effect.
  */
 const paramValues = computed(() =>
-  valuesFor(selectedDevice.value, selectedEffect.value?.id ?? '', specs.value),
+  valuesFor(target.value, selectedEffect.value?.id ?? '', specs.value),
 )
 
 /**
@@ -1044,7 +1213,7 @@ const paramValues = computed(() =>
  */
 const paramBindings = computed(() => {
   const c = selectedEffect.value
-  return c && !c.hardware ? bindingsFor(selectedDevice.value, c.id, specs.value) : {}
+  return c && !c.hardware ? bindingsFor(target.value, c.id, specs.value) : {}
 })
 
 /** The signals held now: suggested to a setting that reads one, and what it reads. */
@@ -1064,17 +1233,17 @@ const receiving = ref(true)
 
 /** Whether an effect reads a signal on this device: marked in the list (#224). */
 function readsSignalHere(c: Choice): boolean {
-  return !c.hardware && readsSignal(c.readsSignals, bindingsFor(selectedDevice.value, c.id, c.params))
+  return !c.hardware && readsSignal(c.readsSignals, bindingsFor(target.value, c.id, c.params))
 }
 
 /** Whether an effect reads the sound on this device: declared, or a setting following it. */
 function readsSoundHere(c: Choice): boolean {
-  return !c.hardware && readsSound(c.readsAudio, bindingsFor(selectedDevice.value, c.id, c.params))
+  return !c.hardware && readsSound(c.readsAudio, bindingsFor(target.value, c.id, c.params))
 }
 
 /** Whether an effect reads the computer on this device: declared, or a setting following it. */
 function readsSystemHere(c: Choice): boolean {
-  return !c.hardware && readsSystem(c.readsSystem, bindingsFor(selectedDevice.value, c.id, c.params))
+  return !c.hardware && readsSystem(c.readsSystem, bindingsFor(target.value, c.id, c.params))
 }
 
 /** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
@@ -1144,12 +1313,13 @@ const noParams = computed(() =>
  */
 const savedNote = computed<string | null>(() => {
   const c = selectedEffect.value
-  const d = selectedDevice.value
+  const where = target.value
   if (!c || c.hardware || Object.keys(specs.value).length === 0) return null
-  if (!d) return t('effects.savedNoDevice')
-  return keptFor({ vid: d.vid, pid: d.pid }, c.id)
-    ? t('effects.savedKept', { device: d.name })
-    : t('effects.savedDeclared', { device: d.name })
+  if (!where || targetName.value === null) return t('effects.savedNoDevice')
+  // *Alienware 17 R5 · Keyboard* on a split device: the region keeps them.
+  return keptFor(where, c.id)
+    ? t('effects.savedKept', { device: targetName.value })
+    : t('effects.savedDeclared', { device: targetName.value })
 })
 
 /**
@@ -1168,33 +1338,27 @@ const savedNote = computed<string | null>(() => {
  * will hold at the next launch of this effect.
  */
 function onParamChange(id: string, value: ParamValue): void {
-  const d = selectedDevice.value
+  const where = target.value
   const c = selectedEffect.value
-  if (!d || !c) return
-  const complete = adjust(
-    { vid: d.vid, pid: d.pid },
-    c.id,
-    specs.value,
-    id,
-    value,
-    live(c.id),
-  )
+  if (!where || !c) return
+  const complete = adjust(where, c.id, specs.value, id, value, live(c.id))
   if (preview.value) adjustPreview(complete)
 }
 
 /** The gesture is over (slider released, box checked): write now. */
 function onParamCommit(): void {
-  const d = selectedDevice.value
+  const where = target.value
   const c = selectedEffect.value
-  if (!d || !c) return
-  const device = { vid: d.vid, pid: d.pid }
-  settle(device, c.id)
+  if (!where || !c) return
+  settle(where, c.id)
 
   // **One rule for every effect: a setting changed reaches the one running.** A
   // host effect has a loop, adjusted live above; a firmware effect has none and
   // holds the last colour it was given, so reaching it means sending the effect
   // again. At the end of the gesture, not at every shade a picker travels
-  // through, and only on the device already showing it.
+  // through, and only on the device already showing it — a whole one: a split
+  // device offers no firmware effect.
+  const device = deviceOf(where)
   if (c.hardware && live(c.id, appliedOn(device))) {
     void apply(device, c.hardware, colourBytes(paramValues.value))
   }
@@ -1205,26 +1369,19 @@ function onParamCommit(): void {
  * value, by the same rule — the keyboard only when this effect runs there.
  */
 function onParamBind(id: string, source: string | null): void {
-  const d = selectedDevice.value
+  const where = target.value
   const c = selectedEffect.value
-  if (!d || !c || c.hardware) return
-  const bindings = bind(
-    { vid: d.vid, pid: d.pid },
-    c.id,
-    specs.value,
-    id,
-    source,
-    live(c.id),
-  )
+  if (!where || !c || c.hardware) return
+  const bindings = bind(where, c.id, specs.value, id, source, live(c.id))
   if (preview.value) bindPreview(bindings)
 }
 
 /** Back to what the effect declares: its values, and no setting reading a signal. */
 function onParamReset(): void {
-  const d = selectedDevice.value
+  const where = target.value
   const c = selectedEffect.value
-  if (!d || !c) return
-  const declared = forget({ vid: d.vid, pid: d.pid }, c.id, specs.value, live(c.id))
+  if (!where || !c) return
+  const declared = forget(where, c.id, specs.value, live(c.id))
   if (preview.value) {
     adjustPreview(declared)
     bindPreview({})
@@ -1267,19 +1424,27 @@ function onBrightness(event: Event, commit: boolean): void {
   setBrightness({ vid: d.vid, pid: d.pid }, level, commit)
 }
 
-/** What the selected device's brightness follows (§2.2.2). */
-const dimming = computed(() => dimmingOf(selectedDevice.value))
+/**
+ * What the selected device's brightness follows (§2.2.2): on a split device,
+ * the selected region's, which scales its lights alone
+ * (`docs/design/regions.md` §4).
+ */
+const dimming = computed(() => dimmingOf(target.value))
 
-/** A hardware effect runs there: no frame of ours, so nothing to dim. */
+/**
+ * A hardware effect runs there: no frame of ours, so nothing to dim. On a split
+ * device only a rule can bring one, over the whole device.
+ */
 const firmwareRuns = computed(() => {
+  if (split.value) return status.value?.interruption?.effect.startsWith('hardware:') === true
   const id = runningOn(selectedDevice.value)
   return id !== null && choices.value.some((c) => c.id === id && c.hardware !== null)
 })
 
 function onDimming(next: Dimming | null, commit: boolean): void {
-  const d = selectedDevice.value
-  if (!d) return
-  setDimming({ vid: d.vid, pid: d.pid }, next, commit)
+  const where = target.value
+  if (!where) return
+  setDimming(where, next, commit)
 }
 
 // ---------------------------------------------------------------- lifecycle
@@ -1369,106 +1534,204 @@ onBeforeUnmount(() => {
       </div>
 
       <div id="col-devices" class="col-body">
-        <!--
-          The card is a plain container, not the button: the brightness slider
-          lives in it, and an interactive control nested in a button is invalid
-          markup that would also re-select the device on every drag.
-        -->
-        <div
-          v-for="d in controlled"
-          :key="`${d.vid}:${d.pid}`"
-          class="card"
-          :class="{ selected: deviceKey === key(d) }"
-        >
-          <button
-            class="entry"
-            type="button"
-            :aria-pressed="deviceKey === key(d)"
-            :aria-label="`${d.name} · ${statusLabel(deviceStatus(d))}`"
-            :title="`${d.name} · ${statusLabel(deviceStatus(d))}`"
-            @click="choose(d)"
-          >
-            <!--
-              A type pictogram, not a manufacturer's logo: those are protected
-              trademarks, they do not tell a keyboard from a mouse, and the
-              product name already carries the information. The only known
-              layout is a keyboard; the day Rust declares a type, it will come
-              from there rather than be guessed from the name.
-            -->
-            <!--
-              The state rides on the pictogram rather than in the text: it stays
-              visible when the column is collapsed to icons, and it says which
-              device dropped without a line of its own.
-            -->
-            <span class="glyph">
-              <svg
-                viewBox="0 0 24 16"
-                width="18"
-                height="12"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-              >
-                <rect x="1" y="2" width="22" height="12" rx="2" />
-                <path d="M6 11h12" stroke-linecap="round" />
-                <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
-              </svg>
-              <DeviceStatusDot class="state-badge" :device="d" aria-hidden="true" />
-            </span>
+        <template v-for="d in controlled" :key="`${d.vid}:${d.pid}`">
+          <!--
+            A split device: a header nobody selects, over one card per region in
+            the definition's order (`docs/design/regions.md` §3). The amber frame
+            goes to the region, the slider stays in the header, what the
+            brightness follows goes to the selected region's card.
+          -->
+          <div v-if="isSplit(d)" class="card split-dev">
+            <div class="dev-head" :title="`${d.name} · ${statusLabel(deviceStatus(d))}`">
+              <span class="glyph">
+                <svg
+                  viewBox="0 0 24 16"
+                  width="18"
+                  height="12"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                >
+                  <rect x="1" y="2" width="22" height="12" rx="2" />
+                  <path d="M6 11h12" stroke-linecap="round" />
+                  <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
+                </svg>
+                <DeviceStatusDot class="state-badge" :device="d" />
+              </span>
+              <span class="entry-text">
+                <span class="dev-name">{{ d.name }}</span>
+                <span class="dev-sub">{{
+                  t('effects.regionCount', { n: d.regions.length }, d.regions.length)
+                }}</span>
+                <!-- The rule interrupts the whole device: said here, not under each region. -->
+                <span v-if="interruptionOf(d)" class="dev-fx" :title="interruptionOf(d) ?? ''">{{
+                  interruptionOf(d)
+                }}</span>
+              </span>
+            </div>
 
-            <span class="entry-text">
-              <!-- The **product** name, not a category: it is what tells two
-                   keyboards of the same brand apart. It wraps rather than being
-                   truncated. -->
-              <span class="dev-name">{{ d.name }}</span>
-              <!-- The column is narrow and cuts the line: the whole of it on hover. -->
-              <span class="dev-fx" :title="deviceLine(d)">{{ deviceLine(d) }}</span>
-            </span>
-          </button>
+            <!-- The device's own, under the same condition as a whole device's card (#334). -->
+            <div v-if="deviceKey === key(d) && slider !== 'none'" class="brightness">
+              <label class="brightness-head" :for="`brightness-${key(d)}`">
+                <span class="brightness-label">{{ t('effects.brightness') }}</span>
+                <span class="brightness-value">{{
+                  t('effects.percent', { n: brightnessPercent })
+                }}</span>
+              </label>
+              <input
+                :id="`brightness-${key(d)}`"
+                type="range"
+                min="0"
+                :max="BRIGHTNESS_MAX"
+                step="1"
+                :value="brightness"
+                :disabled="slider === 'disabled'"
+                @input="onBrightness($event, false)"
+                @change="onBrightness($event, true)"
+              />
+            </div>
+
+            <div class="regions" role="group" :aria-label="d.name">
+              <div
+                v-for="r in d.regions"
+                :key="r.id"
+                class="region"
+                :class="{ selected: regionSelected(d, r) }"
+              >
+                <button
+                  class="entry"
+                  type="button"
+                  :aria-pressed="regionSelected(d, r)"
+                  :aria-label="`${localized(r.name)} · ${regionLine(d, r)}`"
+                  :title="`${localized(r.name)} · ${regionLine(d, r)}`"
+                  @click="chooseRegion(d, r)"
+                >
+                  <RegionGlyph :layout="layoutOf(d)" :positions="r.positions" />
+                  <span class="entry-text">
+                    <span class="reg-name">{{ localized(r.name) }}</span>
+                    <!-- A failed region says why on hover: its lights are black, the others go on. -->
+                    <span
+                      class="dev-fx"
+                      :class="{ failed: regionFailure(d, r) !== null }"
+                      :title="regionFailure(d, r) ?? regionLine(d, r)"
+                      >{{ regionLine(d, r) }}</span
+                    >
+                  </span>
+                </button>
+                <!-- What the region's brightness follows: its lights, its own source. -->
+                <div v-if="regionSelected(d, r)" class="brightness">
+                  <div v-if="slider === 'none'" class="brightness-head">
+                    <span class="brightness-label">{{ t('effects.brightness') }}</span>
+                  </div>
+                  <BrightnessFollow
+                    :id="`follow-${key(d)}-${r.id}`"
+                    :dimming="dimming"
+                    :firmware="firmwareRuns"
+                    :signals="held"
+                    @change="onDimming"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
 
           <!--
-            Brightness is a device property, not an effect setting, so it sits
-            in the device card. Only the selected card carries it: one slider
-            per row would weigh down the column for a setting set once.
-
-            Collapsed column: the card rules below restore the button alone, so
-            the slider is hidden without having to be named.
-
-            A device with no brightness command keeps the heading and what its
-            brightness follows, without a slider that would write nothing.
+            The card is a plain container, not the button: the brightness slider
+            lives in it, and an interactive control nested in a button is invalid
+            markup that would also re-select the device on every drag.
           -->
-          <div v-if="deviceKey === key(d)" class="brightness">
-            <label v-if="slider !== 'none'" class="brightness-head" :for="`brightness-${key(d)}`">
-              <span class="brightness-label">{{ t('effects.brightness') }}</span>
-              <span class="brightness-value">{{
-                t('effects.percent', { n: brightnessPercent })
-              }}</span>
-            </label>
-            <div v-else class="brightness-head">
-              <span class="brightness-label">{{ t('effects.brightness') }}</span>
+          <div v-else class="card" :class="{ selected: deviceKey === key(d) }">
+            <button
+              class="entry"
+              type="button"
+              :aria-pressed="deviceKey === key(d)"
+              :aria-label="`${d.name} · ${statusLabel(deviceStatus(d))}`"
+              :title="`${d.name} · ${statusLabel(deviceStatus(d))}`"
+              @click="choose(d)"
+            >
+              <!--
+                A type pictogram, not a manufacturer's logo: those are protected
+                trademarks, they do not tell a keyboard from a mouse, and the
+                product name already carries the information. The only known
+                layout is a keyboard; the day Rust declares a type, it will come
+                from there rather than be guessed from the name.
+              -->
+              <!--
+                The state rides on the pictogram rather than in the text: it stays
+                visible when the column is collapsed to icons, and it says which
+                device dropped without a line of its own.
+              -->
+              <span class="glyph">
+                <svg
+                  viewBox="0 0 24 16"
+                  width="18"
+                  height="12"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                >
+                  <rect x="1" y="2" width="22" height="12" rx="2" />
+                  <path d="M6 11h12" stroke-linecap="round" />
+                  <path d="M5 6h1M9 6h1M13 6h1M17 6h1" stroke-linecap="round" />
+                </svg>
+                <DeviceStatusDot class="state-badge" :device="d" aria-hidden="true" />
+              </span>
+
+              <span class="entry-text">
+                <!-- The **product** name, not a category: it is what tells two
+                     keyboards of the same brand apart. It wraps rather than being
+                     truncated. -->
+                <span class="dev-name">{{ d.name }}</span>
+                <!-- The column is narrow and cuts the line: the whole of it on hover. -->
+                <span class="dev-fx" :title="deviceLine(d)">{{ deviceLine(d) }}</span>
+              </span>
+            </button>
+
+            <!--
+              Brightness is a device property, not an effect setting, so it sits
+              in the device card. Only the selected card carries it: one slider
+              per row would weigh down the column for a setting set once.
+
+              Collapsed column: the card rules below restore the button alone, so
+              the slider is hidden without having to be named.
+
+              A device with no brightness command keeps the heading and what its
+              brightness follows, without a slider that would write nothing.
+            -->
+            <div v-if="deviceKey === key(d)" class="brightness">
+              <label v-if="slider !== 'none'" class="brightness-head" :for="`brightness-${key(d)}`">
+                <span class="brightness-label">{{ t('effects.brightness') }}</span>
+                <span class="brightness-value">{{
+                  t('effects.percent', { n: brightnessPercent })
+                }}</span>
+              </label>
+              <div v-else class="brightness-head">
+                <span class="brightness-label">{{ t('effects.brightness') }}</span>
+              </div>
+              <input
+                v-if="slider !== 'none'"
+                :id="`brightness-${key(d)}`"
+                type="range"
+                min="0"
+                :max="BRIGHTNESS_MAX"
+                step="1"
+                :value="brightness"
+                :disabled="slider === 'disabled'"
+                @input="onBrightness($event, false)"
+                @change="onBrightness($event, true)"
+              />
+              <BrightnessFollow
+                :id="`brightness-${key(d)}`"
+                :dimming="dimming"
+                :firmware="firmwareRuns"
+                :signals="held"
+                @change="onDimming"
+              />
             </div>
-            <input
-              v-if="slider !== 'none'"
-              :id="`brightness-${key(d)}`"
-              type="range"
-              min="0"
-              :max="BRIGHTNESS_MAX"
-              step="1"
-              :value="brightness"
-              :disabled="slider === 'disabled'"
-              @input="onBrightness($event, false)"
-              @change="onBrightness($event, true)"
-            />
-            <BrightnessFollow
-              :id="`brightness-${key(d)}`"
-              :dimming="dimming"
-              :firmware="firmwareRuns"
-              :signals="held"
-              @change="onDimming"
-            />
           </div>
-        </div>
+        </template>
 
         <p v-if="!controlled.length" class="none">
           {{ t('effects.noDevice') }}
@@ -1712,8 +1975,8 @@ onBeforeUnmount(() => {
         {{ paramsError }}
       </FailureNote>
       <!-- The effect that raised keeps raising: nothing here can close this one. -->
-      <FailureNote v-if="status?.error" class="failure" :closable="false">
-        {{ t('effects.effectError', { error: status.error }) }}
+      <FailureNote v-if="effectError" class="failure" :closable="false">
+        {{ t('effects.effectError', { error: effectError }) }}
       </FailureNote>
       <FailureNote v-if="deviceTrouble" class="notice warn" @close="hushed = deviceTrouble">
         {{ deviceTrouble }}
@@ -1793,7 +2056,20 @@ onBeforeUnmount(() => {
             The layout comes from Rust: it is null for the length of a round
             trip. No empty keyboard is drawn in the meantime.
           -->
-          <KeyboardSimulator v-if="board" class="sim" :layout="board" :frame="frame" />
+          <!--
+            On a split device, still the whole device: the selected region in
+            full colour, the others faded with their real frames, and what the
+            region's effect measures as its device drawn over it.
+          -->
+          <KeyboardSimulator
+            v-if="board"
+            class="sim"
+            :layout="board"
+            :frame="frame"
+            :focus="selectedRegion?.positions"
+            :focus-name="selectedRegion ? localized(selectedRegion.name) : undefined"
+          />
+          <p v-if="regionShare" class="cost">{{ regionShare }}</p>
           <p v-if="board && !opened" class="cost">{{ t('effects.preview.defaultLayout') }}</p>
         </div>
 
@@ -2112,6 +2388,74 @@ onBeforeUnmount(() => {
 }
 
 /*
+ * A split device: framed neutral, as a group. Only a region is selected, and
+ * only it carries the amber frame.
+ */
+.card.split-dev {
+  background: color-mix(in srgb, var(--raised-2) 45%, transparent);
+  border-color: var(--line);
+}
+
+/* The header: the device's pictogram, state, name and count, not a button. */
+.dev-head {
+  display: flex;
+  gap: var(--gap-2);
+  align-items: flex-start;
+  padding: 6px var(--gap-2) 2px calc(1px + var(--gap-2));
+}
+
+.dev-sub {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.regions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 4px 4px 14px;
+}
+
+.region {
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+}
+
+.region .entry {
+  padding-block: 4px;
+}
+
+.region.selected {
+  background: var(--raised-2);
+  border-color: var(--accent);
+}
+
+.region.selected .rglyph {
+  color: var(--accent);
+}
+
+.reg-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* Said in words too: *error*, and why on hover. */
+.dev-fx.failed {
+  color: var(--bad);
+}
+
+/*
+ * Against the region card's own edge, not under its name: indented once already,
+ * the card has no room left for the follow switch's four choices.
+ */
+.region .brightness {
+  padding-left: var(--gap-2);
+}
+
+/*
  * Aligned with the device name, not the card edge, so the slider reads as part
  * of that device. The left offset adds up the button's border, padding, glyph
  * width and gap.
@@ -2312,6 +2656,35 @@ onBeforeUnmount(() => {
     display: flex;
   }
 
+  /* A split device keeps its pictogram with its state, and below it each
+     region's pictogram alone, as an effect keeps its swatch. */
+  .col.shut .card > .dev-head {
+    display: flex;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .col.shut .dev-head > * {
+    display: none;
+  }
+
+  .col.shut .dev-head > .glyph {
+    display: block;
+  }
+
+  .col.shut .card > .regions {
+    display: flex;
+    padding-inline: 0;
+  }
+
+  .col.shut .region > * {
+    display: none;
+  }
+
+  .col.shut .region > .entry {
+    display: flex;
+  }
+
   .col.shut .col-body > .group {
     display: flex;
   }
@@ -2332,7 +2705,8 @@ onBeforeUnmount(() => {
     display: none;
   }
 
-  .col.shut .entry > .glyph {
+  .col.shut .entry > .glyph,
+  .col.shut .entry > .rglyph {
     display: block;
   }
 

@@ -7,9 +7,10 @@ and logo are one target too. This note settles how a definition splits a device
 into **regions**, each running its own effect, and what stays the device's
 (#329).
 
-Status: proposed. The mockup of *Devices* and *Effects* was approved on
+Status: implemented. The mockup of *Devices* and *Effects* was approved on
 2026-10-16 and is not published; the decisions below were taken on it. The code
-follows in two pull requests, built side by side from the contract in §11.
+came in two pull requests, built side by side from the contract in §11; §12 says
+what the window decided beyond it.
 
 ## 1. What a region is
 
@@ -713,3 +714,30 @@ Every reader of `activeEffects` asks first whether the device is split.
 
 The first refers to #329; the second fixes it, and turns this note's status to
 implemented, with what the implementation decided beyond it.
+
+## 12. What the window decided beyond this note
+
+- **The editor applies to the region chosen in *Effects*.** The region chosen
+  on each split device is the whole window's choice, as the device is: the
+  editor's *Apply* and *Stop* act on it, and its simulator draws the region
+  over the device as *Effects* does. Without it, the editor would send a split
+  device a command for all of it, which Rust refuses. The choice lives for the
+  session, per device; it is not saved.
+- **A region whose effect failed** says *error* on its card, in red, the reason
+  on hover and in the settings column while it is selected.
+- **During an interruption** each region's line names the effect it goes back
+  to; the header says the rule.
+- **Without a brightness command**, the header has no slider, and the selected
+  region's card puts the *Brightness* heading over what it follows, as a whole
+  device's card does (#334).
+- **The pictogram** thickens a light to 6 % of the device's longest side, about
+  a pixel at its size. The layouts it is drawn from are read once per
+  definition in force.
+- **The preview of a region** keeps both channels open, the preview's and the
+  device's, one owner each, and lays the first over the second; while the
+  device's loop runs nothing, the other regions are black. The device's channel
+  is opened again when what its loop runs changes.
+- **The line under the drawing** counts the region's lights out of the device's
+  (`lightCount`).
+- ***Settings › Signals*** lists a region's settings bound to a signal under
+  *device · region*, after the devices'.

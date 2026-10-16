@@ -7,12 +7,23 @@
  * the one running on that device, the preview otherwise. Two copies would
  * drift apart, and a simulator fed by the wrong source looks exactly like a
  * working one (issue #63).
+ *
+ * ## A region's preview is laid over its device
+ *
+ * On a split device the preview runs on one region, and the drawing stays the
+ * whole device: the region from the preview, the others with the frames the
+ * device shows now (`docs/design/regions.md` §3). Both channels are then open,
+ * one owner each: the device's channel is opened by one owner only, whether it
+ * is drawn alone or under a preview, so that closing one use never closes the
+ * other's — an unsubscription landing after a subscription erases it.
  */
 
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 
 import { startPreview, stopPreview, type Bindings, type EffectParams } from '../api/candeo'
-import type { DeviceRef, Rgb } from '../api/types'
+import { deviceOf, targetKey, type Target } from '../api/target'
+import type { Rgb } from '../api/types'
+import { overlay } from '../composables/regions'
 import { useEngineFrames } from './engineFrames'
 import { illustrate } from './illustration'
 import type { LayoutView } from './layout'
@@ -37,16 +48,33 @@ const PREVIEW_DELAY = 180
 /** How often an illustration is redrawn, in milliseconds: 25 images a second. */
 const ILLUSTRATION_PACE = 40
 
+const BLACK: Rgb = [0, 0, 0]
+
 export interface SimulatorFeedOptions {
   /** The layout black frames are drawn with until the first frame arrives. */
   layout: () => LayoutView | null
   /**
    * The device whose frames can be shown, and whose layout the preview
-   * borrows. `null` borrows the default layout: previewing needs no keyboard.
+   * borrows: one of its regions on a split device, whose own layout the preview
+   * then runs on. `null` borrows the default layout: previewing needs no
+   * keyboard.
    */
-  device: () => DeviceRef | null
+  device: () => Target | null
   /** True when the effect on screen is the one the device runs. */
   showsDevice: () => boolean
+  /**
+   * The frame positions of the region looked at on a split device, `null` for
+   * a whole one. While the preview runs, those come from it and the others from
+   * the device.
+   */
+  focus?: () => readonly number[] | null
+  /**
+   * What the device's loop runs, as a key that changes when it is started
+   * again — its channel goes with its state — or `null` while it runs nothing:
+   * there is then no frame to lay a region's preview over, and the other
+   * regions are black.
+   */
+  deviceLoop?: () => string | null
   /** The effect to preview when the device is not shown, or `null`. */
   previewed: () => string | null
   /**
@@ -75,31 +103,43 @@ export interface SimulatorFeedOptions {
 }
 
 export function useSimulatorFeed(options: SimulatorFeedOptions) {
-  const { frame: engineFrame, listen, listenPreview, stop } = useEngineFrames(options.layout)
+  // One owner per channel: see the header.
+  const onDevice = useEngineFrames(options.layout)
+  const onPreview = useEngineFrames(options.layout)
 
   // Only comparable values are watched. `engine_status` is re-read every second
   // and returns fresh objects: watching those would reopen a channel per second.
-  const deviceKey = computed(() => {
+  const modelKey = computed(() => {
     const d = options.device()
     return d ? `${d.vid}:${d.pid}` : null
   })
+  /** The device, or the region: the preview starts again on another region. */
+  const previewKey = computed(() => {
+    const d = options.device()
+    return d ? targetKey(d) : null
+  })
   const showsDevice = computed(() => options.showsDevice())
+  const focus = computed(() => options.focus?.() ?? null)
+  const deviceLoop = computed(() => options.deviceLoop?.() ?? null)
   // Doubling the device's real frames in a second engine would cost a context
   // for nothing.
   const previewed = computed(() => (showsDevice.value ? null : options.previewed()))
+  /** The device's frames are wanted under a region's preview: they exist only while its loop runs. */
+  const under = computed(() => !showsDevice.value && focus.value !== null && deviceLoop.value !== null)
 
   /** Bumped when the previewed id stays the same but its code on disk changed. */
   const revision = ref(0)
 
-  // One channel at a time: `useEngineFrames` closes the previous source when it
-  // switches, otherwise two streams would feed the same simulator. The preview
-  // channel is opened by the preview start below, not here.
+  // The device's channel: drawn alone, or under a region's preview. A loop
+  // started again comes with a new state, where the old channel is not: the
+  // loop's key subscribes again, on the same source, which replaces it.
   watch(
-    [deviceKey, showsDevice],
-    ([, onDevice]) => {
+    [modelKey, showsDevice, under, deviceLoop],
+    ([, shown, beneath]) => {
       const d = options.device()
-      if (d && onDevice) void listen({ vid: d.vid, pid: d.pid })
-      else stop()
+      if (d && (shown || beneath)) void onDevice.listen(deviceOf(d))
+      // Forgotten: listened to again, its last frame would be minutes old.
+      else onDevice.stop(true)
     },
     { immediate: true },
   )
@@ -110,26 +150,22 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
   // running 180 ms after an apply would make the simulator flicker between two
   // sources.
   watch(
-    [previewed, deviceKey, revision],
+    [previewed, previewKey, revision],
     ([id]) => {
       window.clearTimeout(timer)
       if (id === null) {
+        onPreview.stop(true)
         void stopPreview()
         return
       }
       timer = window.setTimeout(() => {
         const d = options.device()
-        startPreview(
-          d ? { vid: d.vid, pid: d.pid } : null,
-          id,
-          options.params(),
-          options.bindings?.() ?? {},
-        )
+        startPreview(d, id, options.params(), options.bindings?.() ?? {})
           // Resubscribing after every start is mandatory. The channel lives in
           // the loop state and `start_preview` builds a new one: without this,
           // the simulator would freeze on the previous preview's last frame and
           // no error would say so.
-          .then(() => listenPreview())
+          .then(() => onPreview.listenPreview())
           .catch(options.onError)
       }, PREVIEW_DELAY)
     },
@@ -199,8 +235,42 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
     void stopPreview()
   })
 
+  /**
+   * What the chosen source has to show, `null` until it has received a frame:
+   * the device's frames, the preview's, or the preview's laid over the
+   * device's. A region's preview is black outside the region (§7), which is
+   * what its neighbours show while the device runs nothing.
+   */
+  const live = computed<readonly Rgb[] | null>(() => {
+    if (showsDevice.value) return onDevice.last.value
+    const shown = onPreview.last.value
+    const positions = focus.value
+    const around = under.value ? onDevice.last.value : null
+    return shown !== null && positions !== null && around !== null
+      ? overlay(around, shown, positions)
+      : shown
+  })
+
+  /**
+   * The last frame drawn, held while the next source has sent nothing yet: going
+   * from the device's frames to a preview keeps the device's on screen for the
+   * length of the start, rather than a black board or another effect's last
+   * frame.
+   */
+  const held = shallowRef<readonly Rgb[] | null>(null)
+  watch(live, (f) => {
+    if (f !== null) held.value = f
+  })
+
   /** The illustration when one is drawn, the engine's frames otherwise. */
-  const frame = computed(() => drawn.value ?? engineFrame.value)
+  const frame = computed<readonly Rgb[]>(() => {
+    if (drawn.value) return drawn.value
+    const length = options.layout()?.frameLen ?? 0
+    const f = live.value ?? held.value
+    // A frame of another length is another device's: a black one instead, of
+    // the right length, until this device's first arrives.
+    return f !== null && f.length === length ? f : new Array<Rgb>(length).fill(BLACK)
+  })
 
   return { frame, restartPreview }
 }

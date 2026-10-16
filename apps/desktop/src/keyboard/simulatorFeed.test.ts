@@ -140,3 +140,88 @@ describe('useSimulatorFeed', () => {
     expect(api.startPreview).not.toHaveBeenCalled()
   })
 })
+
+describe('a region of a split device', () => {
+  const lid = { ...keyboard, region: 'lid' }
+  const layout = { name: 'board', rows: 1, cols: 3, frameLen: 3, keys: [] }
+
+  /** What the mocks were handed to push frames with. */
+  function channels() {
+    let device: ((frame: Uint8Array) => void) | null = null
+    let preview: ((frame: Uint8Array) => void) | null = null
+    api.subscribeFrames.mockImplementation(async (_d: unknown, on: (frame: Uint8Array) => void) => {
+      device = on
+      return () => {}
+    })
+    api.subscribePreviewFrames.mockImplementation(async (on: (frame: Uint8Array) => void) => {
+      preview = on
+      return () => {}
+    })
+    return {
+      device: (bytes: number[]) => device?.(Uint8Array.from(bytes)),
+      preview: (bytes: number[]) => preview?.(Uint8Array.from(bytes)),
+    }
+  }
+
+  function regionFeed(loop: string | null) {
+    const deviceLoop = ref<string | null>(loop)
+    const mounted = withSetup(() =>
+      useSimulatorFeed({
+        layout: () => layout,
+        device: () => lid,
+        showsDevice: () => false,
+        focus: () => [1],
+        deviceLoop: () => deviceLoop.value,
+        previewed: () => 'Rain',
+        params: () => ({}),
+        onError: vi.fn(),
+      }),
+    )
+    return { deviceLoop, ...mounted }
+  }
+
+  it('previews on the region, laid over the frames the device shows', async () => {
+    const push = channels()
+    const f = regionFeed('lid=shipped:Breathing|')
+    await vi.advanceTimersByTimeAsync(180)
+
+    expect(api.startPreview).toHaveBeenCalledWith(lid, 'Rain', {}, {})
+    expect(api.subscribeFrames).toHaveBeenCalledWith(keyboard, expect.any(Function))
+
+    push.device([10, 0, 0, 20, 0, 0, 30, 0, 0])
+    // Black outside the region, as Rust sends it.
+    push.preview([0, 0, 0, 0, 0, 99, 0, 0, 0])
+
+    expect(f.result.frame.value).toEqual([
+      [10, 0, 0],
+      [0, 0, 99],
+      [30, 0, 0],
+    ])
+  })
+
+  it('leaves the other regions black while the device runs nothing', async () => {
+    const push = channels()
+    const f = regionFeed(null)
+    await vi.advanceTimersByTimeAsync(180)
+
+    expect(api.subscribeFrames).not.toHaveBeenCalled()
+    push.preview([0, 0, 0, 0, 0, 99, 0, 0, 0])
+
+    expect(f.result.frame.value).toEqual([
+      [0, 0, 0],
+      [0, 0, 99],
+      [0, 0, 0],
+    ])
+  })
+
+  it('follows the device loop again when it is started again', async () => {
+    channels()
+    const f = regionFeed('lid=shipped:Breathing|')
+    await vi.advanceTimersByTimeAsync(180)
+
+    f.deviceLoop.value = 'lid=shipped:Starry night|'
+    await nextTick()
+
+    expect(api.subscribeFrames).toHaveBeenCalledTimes(2)
+  })
+})

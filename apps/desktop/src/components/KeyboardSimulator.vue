@@ -40,13 +40,21 @@ import { computed, watch } from 'vue'
 import { error } from '../api/journal'
 import { t } from '../i18n'
 import type { KeyShape, Rgb } from '../api/types'
-import { extent, layoutProblems, type LayoutView } from '../keyboard/layout'
+import { extent, focusBounds, layoutProblems, type LayoutView } from '../keyboard/layout'
 import { archPath, archStroke } from '../keyboard/shapes'
 
 const props = defineProps<{
   layout: LayoutView
   /** `layout.frameLen` colors, **not** `layout.keys.length`. */
   frame: readonly Rgb[]
+  /**
+   * The positions of a split device's region: drawn in full colour, the others
+   * faded with their real colours, the region's bounds and centre drawn over
+   * them (`docs/design/regions.md` §3). Absent: the whole device, as it is.
+   */
+  focus?: readonly number[]
+  /** The region's name, for what the drawing is said to show. */
+  focusName?: string
 }>()
 
 /**
@@ -94,7 +102,41 @@ interface Cap {
   /** For an arch: its path and stroke. */
   path?: string
   stroke?: number
+  /** Outside the region looked at: drawn faded. */
+  faded: boolean
 }
+
+/** The region's lights, `null` for the whole device. */
+const focused = computed(() => (props.focus ? new Set(props.focus) : null))
+
+/**
+ * What the region's effect measures as its device: the box around its lights
+ * and its centre, where a radial wave starts.
+ */
+const bounds = computed(() => (props.focus ? focusBounds(props.layout.keys, props.focus) : null))
+
+/**
+ * How far the bounds' dashes sit outside the lights, in pitch units: on their
+ * edge, the dashes would run along the keycaps and read as a light.
+ */
+const BOUNDS_MARGIN = 0.12
+/** Half the centre's cross, in pitch units. */
+const CROSS = 0.3
+
+/** What the drawing shows, for whoever cannot see it. */
+const label = computed(() => {
+  const l = props.layout
+  if (props.focus && props.focusName !== undefined) {
+    const n = props.focus.length
+    const params = { layout: l.name, region: props.focusName, n, total: l.keys.length }
+    return l.lights === 'zones'
+      ? t('effects.simulatorRegion.zones', params, n)
+      : t('effects.simulatorRegion.keys', params, n)
+  }
+  return l.lights === 'zones'
+    ? t('effects.simulatorZones', { layout: l.name, zones: l.keys.length })
+    : t('effects.simulator', { layout: l.name, keys: l.keys.length })
+})
 
 /**
  * A key's color is read at `frame[key.index]`.
@@ -106,14 +148,26 @@ interface Cap {
 const caps = computed<Cap[]>(() =>
   props.layout.keys.map((k) => {
     const fill = css(props.frame[k.index] ?? BLACK)
+    const faded = focused.value !== null && !focused.value.has(k.index)
     // A shaped light is drawn as its rectangle says, without the seam between
     // keycaps: the two halves of a ring meet edge to edge.
     if (k.shape === 'archUp' || k.shape === 'archDown') {
       const path = archPath(k, k.shape === 'archUp')
-      return { index: k.index, x: k.x, y: k.y, w: k.w, h: k.h, fill, shape: k.shape, path, stroke: archStroke(k) }
+      return {
+        index: k.index,
+        x: k.x,
+        y: k.y,
+        w: k.w,
+        h: k.h,
+        fill,
+        shape: k.shape,
+        path,
+        stroke: archStroke(k),
+        faded,
+      }
     }
     if (k.shape === 'disc') {
-      return { index: k.index, x: k.x, y: k.y, w: k.w, h: k.h, fill, shape: k.shape }
+      return { index: k.index, x: k.x, y: k.y, w: k.w, h: k.h, fill, shape: k.shape, faded }
     }
     return {
       index: k.index,
@@ -122,6 +176,7 @@ const caps = computed<Cap[]>(() =>
       w: Math.max(0, k.w - 2 * GAP),
       h: Math.max(0, k.h - 2 * GAP),
       fill,
+      faded,
     }
   }),
 )
@@ -164,11 +219,7 @@ if (import.meta.env.DEV) {
       :viewBox="`0 0 ${size.w} ${size.h}`"
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      :aria-label="
-        layout.lights === 'zones'
-          ? t('effects.simulatorZones', { layout: layout.name, zones: layout.keys.length })
-          : t('effects.simulator', { layout: layout.name, keys: layout.keys.length })
-      "
+      :aria-label="label"
     >
       <!-- What lights nothing: drawn first, faint, and themed like the chassis. -->
       <rect
@@ -185,6 +236,7 @@ if (import.meta.env.DEV) {
       <template v-for="cap in caps" :key="cap.index">
         <path
           v-if="cap.path"
+          :class="{ faded: cap.faded }"
           :d="cap.path"
           fill="none"
           :stroke="cap.fill"
@@ -192,6 +244,7 @@ if (import.meta.env.DEV) {
         />
         <ellipse
           v-else-if="cap.shape === 'disc'"
+          :class="{ faded: cap.faded }"
           :cx="cap.x + cap.w / 2"
           :cy="cap.y + cap.h / 2"
           :rx="cap.w / 2"
@@ -200,12 +253,30 @@ if (import.meta.env.DEV) {
         />
         <rect
           v-else
+          :class="{ faded: cap.faded }"
           :x="cap.x"
           :y="cap.y"
           :width="cap.w"
           :height="cap.h"
           :rx="RADIUS"
           :fill="cap.fill"
+        />
+      </template>
+      <!-- Drawn over the lights: interface, in the accent, like a selection. -->
+      <template v-if="bounds">
+        <rect
+          class="bounds"
+          :x="bounds.x - BOUNDS_MARGIN"
+          :y="bounds.y - BOUNDS_MARGIN"
+          :width="bounds.w + 2 * BOUNDS_MARGIN"
+          :height="bounds.h + 2 * BOUNDS_MARGIN"
+          :rx="RADIUS * 2"
+          vector-effect="non-scaling-stroke"
+        />
+        <path
+          class="centre"
+          :d="`M ${bounds.cx - CROSS} ${bounds.cy} h ${2 * CROSS} M ${bounds.cx} ${bounds.cy - CROSS} v ${2 * CROSS}`"
+          vector-effect="non-scaling-stroke"
         />
       </template>
     </svg>
@@ -238,6 +309,10 @@ if (import.meta.env.DEV) {
   width: 100%;
   height: auto;
   max-height: 100%;
+
+  /* A region's bounds sit just outside its lights, past the drawing's edge for
+     a light on it: the board's padding has room for them. */
+  overflow: visible;
 }
 
 /* A lid, a base, a port: interface, so it follows the theme, and faint enough
@@ -246,5 +321,25 @@ if (import.meta.env.DEV) {
   fill: none;
   stroke: var(--line-strong);
   stroke-width: 1;
+}
+
+/* The other regions: their real colours, faded, so the region reads as what
+   is looked at and the device stays whole around it. */
+.faded {
+  opacity: 0.3;
+}
+
+/* What the region's effect sees as its device: interface, themed. */
+.bounds {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.centre {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
 }
 </style>

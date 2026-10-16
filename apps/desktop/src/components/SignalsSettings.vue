@@ -151,7 +151,10 @@ async function readReaders(): Promise<void> {
       return null
     }),
   ])
-  if (settings) reading.value = { effectParams: settings.effectParams, rules: settings.rules }
+  if (settings) {
+    const { effectParams, rules, splitDevices } = settings
+    reading.value = { effectParams, rules, splitDevices }
+  }
   if (effects) library.value = effects
 }
 

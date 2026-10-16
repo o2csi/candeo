@@ -6,7 +6,7 @@
  * whole application lives in Settings.
  */
 
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import {
@@ -16,14 +16,16 @@ import {
   reloadDeviceDefinitions,
   reportDeviceDefinition,
   reportUnsupportedDevice,
+  setSplit,
   tryDeviceDefinition,
   unsupportedDevices,
   type DefinitionProblem,
 } from '../api/candeo'
 import { message } from '../api/journal'
-import type { DeviceInfo, UnsupportedDevice } from '../api/types'
+import type { DeviceInfo, RegionInfo, UnsupportedDevice } from '../api/types'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
+import RegionGlyph from '../components/RegionGlyph.vue'
 import {
   FILTER_PAST,
   definitionChoice,
@@ -34,9 +36,12 @@ import {
   usagePages,
   yourFiles,
 } from '../composables/devicesPage'
+import { useLayouts } from '../composables/layouts'
 import { useDevice } from '../composables/useDevice'
 import { refreshFirmwareEffects } from '../composables/useEffects'
+import { useSettings } from '../composables/useSettings'
 import { t } from '../i18n'
+import { localized } from '../i18n/text'
 
 /**
  * What has already been read, per device: closing fixes nothing, the device
@@ -167,6 +172,57 @@ function edit(origin: DeviceInfo['origin'], file: string): void {
 
 function count(d: DeviceInfo): string {
   return t(`devices.count.${d.lights}`, { n: d.lightCount }, d.lightCount)
+}
+
+// ------------------------------------------------------------------ regions
+
+const { reload: reloadSettings } = useSettings()
+const { layoutOf, ensure: ensureLayouts } = useLayouts()
+
+/**
+ * *Split into regions*, offered where *Control* and *Release* are, when the
+ * definition in force declares regions (`docs/design/regions.md` §2).
+ */
+function splittable(d: DeviceInfo): boolean {
+  return d.present && d.origin !== 'unverified' && d.regions.length > 0
+}
+
+/** The regions' pictograms are drawn from the layout, read for the devices split here. */
+watch(
+  () => devices.value.filter((d) => splittable(d) && d.split),
+  (split) => void ensureLayouts(split),
+  { immediate: true },
+)
+
+/** A device's split being changed: the box waits for Rust's answer. */
+const splitting = reactive<Record<string, boolean>>({})
+/** What went wrong splitting a device, on its card. */
+const splitError = reactive<Record<string, string>>({})
+
+/**
+ * Splits a device, or makes it whole again. The list and the settings are read
+ * again after: what each region now runs is Rust's to say.
+ */
+async function split(d: DeviceInfo, box: HTMLInputElement): Promise<void> {
+  const k = ids(d)
+  delete splitError[k]
+  splitting[k] = true
+  try {
+    await setSplit({ vid: d.vid, pid: d.pid }, box.checked)
+  } catch (e) {
+    splitError[k] = message(e)
+  } finally {
+    delete splitting[k]
+  }
+  await Promise.all([refresh(), reloadSettings()])
+  // A refused change leaves the list as it was, and the box would stay as it
+  // was clicked: nothing re-renders a value that did not change.
+  box.checked = devices.value.find((o) => ids(o) === k)?.split ?? false
+}
+
+/** *5 zones*: as the card counts the device's lights. */
+function regionCount(r: RegionInfo): string {
+  return t(`devices.count.${r.lights}`, { n: r.positions.length }, r.positions.length)
 }
 
 onMounted(reread)
@@ -322,6 +378,33 @@ onMounted(reread)
         </div>
 
         <template v-if="d.present">
+          <!--
+            Under the main line, aligned on the name. A native checkbox, as in
+            Settings and Automations: the application has no toggle switch.
+            What splitting changes is said in the design note, not here: the
+            device goes on showing what it showed (`docs/design/regions.md` §2).
+          -->
+          <label v-if="splittable(d)" class="split">
+            <input
+              type="checkbox"
+              :checked="d.split"
+              :disabled="busy || splitting[ids(d)]"
+              @change="split(d, $event.target as HTMLInputElement)"
+            />
+            {{ t('devices.split') }}
+          </label>
+          <!-- Listed, not edited: drawing regions is later (§10). -->
+          <ul v-if="splittable(d) && d.split" class="regions">
+            <li v-for="r in d.regions" :key="r.id">
+              <RegionGlyph :layout="layoutOf(d)" :positions="r.positions" />
+              <span>{{ localized(r.name) }}</span>
+              <span class="count">{{ regionCount(r) }}</span>
+            </li>
+          </ul>
+          <FailureNote v-if="splitError[ids(d)]" class="err" @close="delete splitError[ids(d)]">
+            {{ splitError[ids(d)] }}
+          </FailureNote>
+
           <!--
             The version read, next to the survey's: the first question in front of
             a keyboard that does not obey. 132 and 106 are named apart, since
@@ -549,6 +632,45 @@ onMounted(reread)
   flex-direction: column;
   gap: 2px;
   padding-left: calc(8px + var(--gap-3));
+}
+
+/* Aligned on the name, like the details: the dot's width and the gap. */
+.split {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-2);
+  width: fit-content;
+  padding-left: calc(8px + var(--gap-3));
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.split input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--gap-4);
+  margin: 0;
+  padding: 0 0 2px calc(8px + var(--gap-3));
+  list-style: none;
+}
+
+.regions li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.regions .count {
+  color: var(--text-faint);
 }
 
 .choice select {

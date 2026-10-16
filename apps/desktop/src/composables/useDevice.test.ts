@@ -133,3 +133,40 @@ describe('refresh', () => {
     expect(d.devices.value[0].state).toBe('adopted')
   })
 })
+
+describe('target', () => {
+  const regions = [
+    { id: 'keyboard', name: 'Keyboard', positions: [4, 5], lights: 'zones' as const, capabilities: ['geometry'] },
+    { id: 'lid', name: 'Lid', positions: [0, 1], lights: 'zones' as const, capabilities: ['geometry'] },
+  ]
+
+  it('is the device itself while it is whole', async () => {
+    const d = await fresh([device(1, { open: true, regions })])
+
+    expect(d.target.value).toEqual({ vid: 1, pid: 1 })
+  })
+
+  it('is the region chosen on a split device, its first until one is', async () => {
+    const d = await fresh([device(1, { open: true, regions, split: true }), device(2)])
+    expect(d.target.value).toEqual({ vid: 1, pid: 1, region: 'keyboard' })
+
+    d.selectRegion({ vid: 1, pid: 1 }, 'lid')
+    expect(d.target.value).toEqual({ vid: 1, pid: 1, region: 'lid' })
+
+    // Each device keeps its own: going back finds the region left there.
+    d.select({ vid: 1, pid: 2 })
+    expect(d.target.value).toEqual({ vid: 1, pid: 2 })
+    d.select({ vid: 1, pid: 1 })
+    expect(d.target.value).toEqual({ vid: 1, pid: 1, region: 'lid' })
+  })
+
+  it('gives way when the definition no longer declares the region', async () => {
+    const d = await fresh([device(1, { open: true, regions, split: true })])
+    d.selectRegion({ vid: 1, pid: 1 }, 'lid')
+
+    api.listDevices.mockResolvedValue([device(1, { open: true, regions: [regions[0]], split: true })])
+    await d.refresh()
+
+    expect(d.target.value).toEqual({ vid: 1, pid: 1, region: 'keyboard' })
+  })
+})
