@@ -317,6 +317,7 @@
     "matrix": "matrix {rows} × {cols} · frame of {frameLen} colors · {keys} lit keys",
     "control": "Control",
     "release": "Release",
+    "split": "Split into regions",
     "try": "Try",
     "tryNote": "Nobody has verified this definition on this device yet.",
     "report": "Report",

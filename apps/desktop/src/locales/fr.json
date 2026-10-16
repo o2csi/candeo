@@ -317,6 +317,7 @@
     "matrix": "matrice {rows} × {cols} · image de {frameLen} couleurs · {keys} touches éclairées",
     "control": "Piloter",
     "release": "Libérer",
+    "split": "Scinder en régions",
     "try": "Essayer",
     "tryNote": "Personne n'a encore vérifié cette définition sur cet appareil.",
     "report": "Faire un retour",
