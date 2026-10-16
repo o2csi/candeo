@@ -164,7 +164,11 @@
     "swatchKnown": "Colors sampled by running the effect",
     "swatchUnknown": "No swatch",
     "simulator": "Preview of {layout}: {keys} lit keys",
-    "simulatorZones": "Preview of {layout}: {zones} lit zones"
+    "simulatorZones": "Preview of {layout}: {zones} lit zones",
+    "simulatorRegion": {
+      "keys": "Preview of {layout}, region {region}: {n} lit key of {total} | Preview of {layout}, region {region}: {n} lit keys of {total}",
+      "zones": "Preview of {layout}, region {region}: {n} lit zone of {total} | Preview of {layout}, region {region}: {n} lit zones of {total}"
+    }
   },
   "editor": {
     "back": "Back",

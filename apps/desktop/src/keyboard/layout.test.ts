@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { KeyInfo, Rgb } from '../api/types'
-import { extent, layoutProblems, type LayoutView } from './layout'
+import { extent, focusBounds, layoutProblems, type LayoutView } from './layout'
 
 function key(index: number, x: number, part: Partial<KeyInfo> = {}): KeyInfo {
   return { index, row: 0, col: index, x, y: 0, w: 1, h: 1, ...part }
@@ -54,5 +54,16 @@ describe('layoutProblems', () => {
 
     expect(layoutProblems(touching, black(3))).toEqual([])
     expect(layoutProblems(overlapping, black(3))).toEqual(['keys 0 and 1 overlap'])
+  })
+})
+
+describe('focusBounds', () => {
+  it('boxes the region alone, its centre where a radial wave starts', () => {
+    const keys = [key(0, 0), key(1, 2, { y: 1, w: 2 }), key(2, 6)]
+    expect(focusBounds(keys, [0, 1])).toEqual({ x: 0, y: 0, w: 4, h: 2, cx: 2, cy: 1 })
+  })
+
+  it('is none when no position is a light', () => {
+    expect(focusBounds([key(0, 0)], [5])).toBeNull()
   })
 })

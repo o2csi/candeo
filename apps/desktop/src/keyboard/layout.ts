@@ -62,6 +62,41 @@ export function extent(
   return { w: w || 1, h: h || 1 }
 }
 
+/** A rectangle in pitch units, and its centre. */
+export interface Bounds {
+  x: number
+  y: number
+  w: number
+  h: number
+  cx: number
+  cy: number
+}
+
+/**
+ * The bounds and centre of some of a layout's lights: what a region's effect
+ * measures as its device (`docs/design/regions.md` §1, §3).
+ *
+ * The effects API's `bounds`, on the region's keys alone: the box around their
+ * rectangles, its centre where a radial wave starts. `null` when none of the
+ * positions is a light of this layout.
+ */
+export function focusBounds(keys: readonly KeyInfo[], positions: readonly number[]): Bounds | null {
+  const wanted = new Set(positions)
+  let x0 = Infinity
+  let y0 = Infinity
+  let x1 = -Infinity
+  let y1 = -Infinity
+  for (const k of keys) {
+    if (!wanted.has(k.index)) continue
+    x0 = Math.min(x0, k.x)
+    y0 = Math.min(y0, k.y)
+    x1 = Math.max(x1, k.x + k.w)
+    y1 = Math.max(y1, k.y + k.h)
+  }
+  if (x0 === Infinity) return null
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 }
+}
+
 /**
  * Layout ↔ frame consistency check.
  *

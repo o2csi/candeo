@@ -25,6 +25,11 @@
  * #63 refuses. It is what {@link Source} holds: switching from one to the other
  * closes the previous one, there are never two channels open on this component.
  *
+ * A region's preview is the one drawing made of both: the preview on the
+ * region, the device's frames around it (`docs/design/regions.md` §3).
+ * `simulatorFeed` then holds one of these per source, each with its channel, and
+ * the drawing still says which is which.
+ *
  * ## Unsubscribing does not stop the effect
  *
  * Leaving the editor releases the channel and the stream stops; the loop, for
@@ -158,11 +163,15 @@ export function useEngineFrames(layout: () => LayoutView | null) {
   /**
    * Closes the channel. The last frame stays displayed: it is still the one the
    * keyboard lights — stopping the loop does not turn the LEDs off.
+   *
+   * `forget` drops it instead, for a caller that draws something else
+   * meanwhile and would otherwise show a stale frame when it comes back here.
    */
-  function stop(): void {
+  function stop(forget = false): void {
     release?.()
     release = null
     source = null
+    if (forget) received.value = null
   }
 
   onBeforeUnmount(() => {
@@ -170,5 +179,8 @@ export function useEngineFrames(layout: () => LayoutView | null) {
     stop()
   })
 
-  return { frame, listen, listenPreview, stop }
+  /** The last frame received, `null` before any: for a caller composing two sources. */
+  const last = computed(() => received.value)
+
+  return { frame, last, listen, listenPreview, stop }
 }
