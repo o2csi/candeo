@@ -992,8 +992,13 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                 &mut out,
                 "    saved",
                 &format!(
-                    "effect {} · brightness {brightness}",
+                    "effect {} · brightness {brightness}{}",
                     s.active_effect(layout.vid, layout.pid).unwrap_or("none"),
+                    if crate::split(s, layout) {
+                        " · split into regions"
+                    } else {
+                        ""
+                    },
                 ),
             );
         }
@@ -1074,6 +1079,23 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                     .map_or(String::new(), |e| format!(" · write error: {e}")),
             ),
         );
+        // A split device's regions, each on its line: what one runs and why
+        // one stopped are not the device's.
+        for r in s.status.regions.into_iter().flatten() {
+            line(
+                &mut out,
+                &format!("    region {}", r.region),
+                &format!(
+                    "{} · effect {}{}",
+                    if r.running { "running" } else { "stopped" },
+                    r.effect_id.as_deref().unwrap_or("none"),
+                    r.error.map_or(String::new(), |e| format!(
+                        " · effect error: {}",
+                        crate::runtime::loggable(&e, r.reads_private)
+                    )),
+                ),
+            );
+        }
     }
 
     // **On its own line, and named for what it is.** A preview writes to no

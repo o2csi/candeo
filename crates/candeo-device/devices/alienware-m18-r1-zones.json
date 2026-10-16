@@ -4,7 +4,8 @@
   "notes": [
     "Survey: docs/protocol/alienware-m18-r1.md, section 2.",
     "Matched on the machine: SMBIOS names it “Alienware m18 R1”, as Candeo read it at startup on the surveyed machine on 2026-10-16. The AW-ELC, 187c:0551, also lights the m16 R1, the m16 R2 and the m18 R2, each wiring its ids its own way (alienfx-tools' maps, #328).",
-    "The AMD edition, “Alienware m18 R1 AMD”, is another machine: not matched until someone confirms its ids."
+    "The AMD edition, “Alienware m18 R1 AMD”, is another machine: not matched until someone confirms its ids.",
+    "The ring's two halves make one region: one half lit alone spreads through the whole ring, and the halves show only when both are lit (docs/protocol/alienware-m18-r1.md §2)."
   ],
   "match": { "vid": "187c", "pid": "0551", "usagePage": "ff00", "usage": "0001", "machine": "Alienware m18 R1" },
   "report": { "wire": "output", "length": 33, "prefix": "00" },
@@ -34,6 +35,10 @@
     { "rect": [6.2, 8.65, 0.6, 0.7], "r": 0.12 },
     { "rect": [7.2, 8.65, 1.4, 0.7], "r": 0.12 },
     { "rect": [9, 8.65, 0.8, 0.7], "r": 0.12 }
+  ],
+  "regions": [
+    { "id": "ring", "name": { "en": "Ring", "fr": "Anneau" }, "lights": [0, 1] },
+    { "id": "logo", "name": "Logo", "lights": [2] }
   ],
   "examples": [
     {

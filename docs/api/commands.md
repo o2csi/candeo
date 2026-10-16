@@ -37,6 +37,27 @@ would only show at run time.
 > `vid` and `pid` separate: they designate a **catalog layout**, not an
 > open device, and one of them is precisely what brings that device into existence.
 
+### Designating a region
+
+A device split into regions runs one effect per region
+([`../design/regions.md`](../design/regions.md)). A region is named by its device
+and the id its definition gives it, `"keyboard"`: the commands that act on what
+runs keep their `device` and take a separate `region: string | null`, so that
+`DeviceRef` stays the key of every table and a call without a region means
+exactly what it meant before regions.
+
+They are `start_effect`, `stop_effect`, `set_effect_params`,
+`set_effect_bindings`, `remember_effect_params`, `remember_effect_bindings`,
+`set_dimming`, `remember_dimming` and `start_preview`. On a split device they
+require a region, and on a whole one they refuse one — except `start_preview`,
+which may borrow a split device's whole layout. A region on a whole device, none
+on a split one, or an id the definition does not declare is
+`unexpected`, with an English detail: the window never sends one knowingly.
+
+A device is split when its settings say so **and** the definition in force
+declares regions; whether it is split is read from `settings.json` only for a
+device whose definition declares regions.
+
 ### Lock acquisition order
 
 A deadlock has already been caught on this code base: `list_devices` took the
@@ -244,7 +265,9 @@ window is shown.
 
 ### `get_layout(device) -> LayoutInfo`
 
-Fails if this device is not open.
+The layout the device was opened with, or, when it is not open, its definition
+in force: the window draws regions and pictograms for a device it has not
+opened. Fails with `noLayout` for a device no definition describes.
 
 ```ts
 {
@@ -258,9 +281,19 @@ Fails if this device is not open.
     scancode?: number,   // 0x01, 0x2A, 0x4E… — absent pour Fn
     label?: string,      // « ECHAP », « MAJ », « + (PAVE NUM.) »… — nommé par le système
     x: number, y: number, w: number, h: number   // rectangle physique
-  }[]                    // 106 entrées
+  }[],                   // 106 entrées
+  regions: {             // empty when the definition declares none
+    id: string,          // "keyboard"
+    name: Text,          // as the definition writes it
+    positions: number[], // its lights' frame positions, ascending
+    lights: 'keys' | 'zones',
+    capabilities: string[]
+  }[]
 }
 ```
+
+`list_devices` gives each device the same `regions`, and `split`: its settings
+say it is split and its definition declares regions.
 
 > The DTOs carry `#[serde(rename_all = "camelCase")]`: the Rust field `frame_len`
 > therefore arrives as `frameLen`. Rust naming must not leak through into
@@ -350,6 +383,25 @@ Serde tagging on the `kind` field:
 The first three are executed **by the firmware**: zero CPU cost,
 and they survive the application closing. `custom` switches the keyboard to
 host-controlled mode, which requires a continuous push of frames.
+
+Refused (`unexpected`) on a split device: the firmware lights all of it, and a
+split device lights only what its regions run.
+
+### `set_split(device, split: boolean)`
+
+Splits a device into the regions its definition declares, or makes it whole
+again ([`regions.md`](../design/regions.md) §2). Writes or removes its
+`splitDevices` entry (§Settings): splitting gives every region the device's
+applied effect, a copy of its settings for that effect and what its brightness
+follows; making it whole forgets the regions' choices and gives the device back
+its own, which the split never touched.
+
+It is a gesture on the device and ends an interruption under way. When the
+device is open and controlled, it then runs what it now has: every region with
+its copied effect — a firmware effect driving the device goes off, and a region
+running nothing is dark — or the whole device with its applied effect, turned
+off when it has none. Emits `candeo://etat-change` and rebuilds the tray menu.
+`unexpected` when the definition in force declares no regions.
 
 ### `present(device, frame: number[])`
 
@@ -722,9 +774,35 @@ without duplicating an effect.
     effect: string,              // identifiant de l'effet réglé
     values: Record<string, ParamValue>
   }[],
+  splitDevices?: {               // absent while no device is split
+    vid: number,
+    pid: number,
+    regions?: {                  // a region keeping nothing has no record
+      region: string,            // its id in the definition
+      effect?: string,           // its applied effect
+      dimming?: { source: string, floor: number }
+    }[],
+    effectParams?: {             // the shape of effectParams, per region
+      region: string,
+      effect: string,
+      values: Record<string, ParamValue>,
+      bindings?: Record<string, string>
+    }[]
+  }[],
   rules: Rule[]                  // in their order, which is their priority — see Automations
 }
 ```
+
+`splitDevices` has an entry while a model is split, keyed by VID and PID as
+`activeEffects` is; `{ vid, pid }` alone is a split device whose regions run
+nothing. The device's own records — `activeEffects`, `effectParams`, its
+`devices` entry's `dimming` — are not touched while it is split: they are what
+making it whole gives back. A key of its own rather than a `region` field on
+`effectParams`: an older build, which drops a key it does not know when it
+rewrites the file, gives the device back whole instead of reading a region's
+record as the device's ([`regions.md`](../design/regions.md) §8). Deleting or
+renaming an effect reaches the regions' records too, and `reset_settings` drops
+the key with the rest.
 
 **A global preference goes in `preferences`, anything that depends on a keyboard
 in a keyed list.** That is the rule this file follows, and it holds for everything
@@ -854,20 +932,21 @@ The window, for its part, keeps what it had read: it is up to the window to forg
 held in memory after the call, otherwise the first slider movement would
 write them back.
 
-### `remember_effect_params(device, effect, params)`
+### `remember_effect_params(device, region, effect, params)`
 
-Remembers an effect's settings **for one device**, and nothing else in the
-file. Not to be confused with `set_effect_params`, further down, which adjusts the
+Remembers an effect's settings **for one device** — or, on a split device, for
+one region, in its `splitDevices` entry — and nothing else in the file. Not to be confused with `set_effect_params`, further down, which adjusts the
 running loop: this one writes to disk and changes nothing about what is running. The two have neither the same rate — dozens of calls per second
 on one side, a single one when the slider stops on the other — nor the same destination.
 
 A dedicated command rather than a `set_settings` from the window: reading,
 modifying and writing happen on the Rust side, in one go.
 
-### `remember_effect_bindings(device, effect, bindings)`
+### `remember_effect_bindings(device, region, effect, bindings)`
 
-Remembers which settings of an effect read a signal on one device, beside their
-values: `{ colour: 'signal:status' }`. An empty object unbinds them all; the
+Remembers which settings of an effect read a signal on one device — or one
+region of a split device: two regions running one effect can bind it to
+different signals — beside their values: `{ colour: 'signal:status' }`. An empty object unbinds them all; the
 entry goes when it holds neither values nor bindings. `bindingInvalid { param,
 source }` when a source does not name a signal as `signal:<name>` does. The
 running loop is set apart, by `set_effect_bindings`.
@@ -1157,11 +1236,27 @@ runs — the front end never runs any, which incidentally denies it any access t
 the DOM and the Tauri API. Design in
 [`../design/effects-runtime.md`](../design/effects-runtime.md) §4 and §5.
 
-**One device, one effect.** Each carries its own loop, hence its own frame rate, its own
+**One device, one loop.** Each carries its own loop, hence its own frame rate, its own
 parameters, its own error state and its own output. Nothing is shared between two
 devices, and that is what keeps a failing device from affecting any other.
 
-### `start_effect(device, id, params, bindings?)`
+**A split device's loop runs one effect per region** — its *parts* — and composes
+their frames into the device's, sent once
+([`regions.md`](../design/regions.md) §7). Applying or stopping one region's
+effect leaves the others running, their time going on; a region's effect
+failing thirty frames in a row stops alone, its lights black. The device is
+turned off only when no region runs anything any more after failing; a region
+stopped by hand is dark, and the loop keeps it so.
+
+### `start_effect(device, region, id, params, bindings?)`
+
+With a region, on a split device: starts the effect on that region, the others
+untouched, and remembers it as the region's applied effect. A region's effect
+that does not load leaves the region with what it ran, and the call fails as it
+does for a device. When the loop does not run the regions — a rule interrupts
+the device, or nothing runs — every region starts, the others with their applied
+effects: the gesture ends the interruption and gives the device back its
+regions.
 
 Loads the JavaScript compiled from the effect file's current bytes, refused while the file is `stale` or `broken` — and
 starts the loop **of this device**. The engine makes
@@ -1204,7 +1299,7 @@ definition.
 ### Signals in settings: `bindings`
 
 `start_effect` and `start_preview` take an optional `bindings`, and
-`set_effect_bindings(device, bindings)` / `set_preview_bindings(bindings)`
+`set_effect_bindings(device, region, bindings)` / `set_preview_bindings(bindings)`
 change them live, the loop reading them at every frame like its parameters:
 
 ```ts
@@ -1218,11 +1313,25 @@ not convert, it keeps its configured value
 tray, resuming and automations start an effect with the bindings remembered for
 it, as they do with its parameters; a rule carries its own in `show.bindings`.
 
-### `stop_effect(device)` · `set_effect_params(device, params)`
+### `stop_effect(device, region)` · `set_effect_params(device, region, params)`
 
 `set_effect_params` adjusts **live**: the loop rereads the parameters at every
 frame, it does not restart. Both touch only the targeted device; a
 device on which nothing was ever started ignores them silently.
+
+With a region, on a split device: `stop_effect` leaves the region running
+nothing, its lights black, and forgets its applied effect — during an
+interruption, the device goes back to its regions, that one dark;
+`set_effect_params` reaches that region's effect alone.
+
+### `set_dimming(device, region, dimming)` · `remember_dimming(device, region, dimming)`
+
+What a device's brightness follows — the sound, a signal, the computer — as a
+factor on its frames, live and on disk
+([`inputs-and-automations.md`](../design/inputs-and-automations.md) §2.2.2). With
+a region, on a split device, the region's: it scales that region's lights
+whatever draws them, its own effect or a rule's over the whole device, and is
+kept in the region's record.
 
 `params` **replaces** the whole table, it does not merge into it: the caller sends
 the complete state, not just the field it has just changed.
@@ -1264,8 +1373,12 @@ the keyboard.
 ### The preview: `start_preview` · `stop_preview` · `set_preview_params`
 
 ```ts
-start_preview(device: { vid, pid } | null, id: string, params: object, bindings?: object)
+start_preview(device: { vid, pid } | null, region: string | null, id: string, params: object, bindings?: object)
 ```
+
+With a region, `device` is required: the preview runs on the region's layout
+with the region's follow, and its frames keep the device's length, black outside
+the region. A split device may also lend its whole layout, without a region.
 
 The exact counterpart of `start_effect`, **minus everything that commits**: no hardware
 output, nothing written to `settings.json`, and above all **no device
@@ -1325,10 +1438,17 @@ previous one, without any error saying so.
       name: string,                // empty when it has none
       effect: string,              // the effect it shows
       until?: number               // epoch ms; absent for a rule that never stops
-    }
+    },
+    regions?: {                    // while the loop runs a split device's regions
+      region: string,              // one per region of the definition, in its order
+      running: boolean,
+      effectId: string | null,     // kept after it stopped on its own, with its error
+      error: string | null
+    }[]
   }[],
   preview: {
     layoutOf: { vid: number, pid: number },   // gabarit emprunté
+    region?: string,               // the region whose layout it runs on
     running: boolean,
     effectId: string | null,
     error: string | null
@@ -1345,6 +1465,13 @@ that forgets it to announce as running on the keyboard an effect that is only be
 watched. Here there is nothing to filter.
 
 **The system tray, the log and the gallery read only `devices`.**
+
+While a split device's loop runs its regions, `regions` says what each runs, and
+the device's own `running` is true while one of them does, its `effectId` and
+`error` null. During an interruption the loop runs the rule's effect over the
+whole device: `regions` is absent, and the device's fields describe that effect.
+`deviceError`, `reachingKeyboard`, `toKeyboard` and `interruption` are always the
+device's: one frame leaves per device.
 
 `preview` carries neither `toKeyboard`, nor `reachingKeyboard`, nor `deviceError`:
 a preview loop has no hardware output, and those fields set to false would describe

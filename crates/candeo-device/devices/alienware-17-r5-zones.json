@@ -44,6 +44,12 @@
     { "rect": [0.5, 0, 15, 8], "r": 0.5 },
     { "rect": [0, 8.5, 16, 9], "r": 0.8 }
   ],
+  "regions": [
+    { "id": "keyboard", "name": { "en": "Keyboard", "fr": "Clavier" }, "lights": [4, 5, 6, 7, 12] },
+    { "id": "lid", "name": { "en": "Lid", "fr": "Capot" }, "lights": [0, 1, 10, 11] },
+    { "id": "base", "name": { "en": "Base", "fr": "Base" }, "lights": [8, 9, 2] },
+    { "id": "power", "name": { "en": "Power button", "fr": "Bouton d'alimentation" }, "lights": [3] }
+  ],
   "examples": [
     {
       "colours": [

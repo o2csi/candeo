@@ -106,6 +106,43 @@ export interface DeviceInfo {
   lightCount: number
   /** Its definition has a brightness command: see {@link LayoutInfo.hardwareBrightness}. */
   hardwareBrightness: boolean
+  /**
+   * The parts its definition in force splits it into, in the definition's order
+   * (`docs/design/regions.md` §1). Empty when it declares none.
+   *
+   * `readonly`, as {@link warnings}: `useDevice` exposes the list read-only, and
+   * a device read from it is passed on as a `DeviceInfo`.
+   */
+  regions: readonly RegionInfo[]
+  /** Its settings say so and its definition declares regions: each region runs its own effect. */
+  split: boolean
+}
+
+/**
+ * A part of a device that runs its own effect once the device is split.
+ *
+ * Its lists are `readonly` for the reason {@link DeviceInfo.regions} gives: the
+ * same JSON as Rust's, read-only on this side.
+ */
+export interface RegionInfo {
+  /** What settings and commands name it by: `keyboard`. */
+  id: string
+  /** As its definition writes it: a string, or one per language. */
+  name: Text
+  /** The frame positions of its lights — `KeyInfo.index` values — ascending. */
+  positions: readonly number[]
+  /** What `applies` checks an effect against for it: the device's, today. */
+  lights: 'keys' | 'zones'
+  capabilities: readonly string[]
+}
+
+/**
+ * One region of a split device: its model, as {@link DeviceRef} names it, and the
+ * id its definition gives it. A `DeviceRef` stays the key of every device table;
+ * commands take the region beside it (`docs/design/regions.md` §11 c).
+ */
+export interface RegionRef extends DeviceRef {
+  region: string
 }
 
 /** A collection of a device, as the system lists it without opening it. */
@@ -226,6 +263,8 @@ export interface LayoutInfo {
    * full (#334).
    */
   hardwareBrightness: boolean
+  /** The parts the device can be split into: empty when the definition declares none. */
+  regions: RegionInfo[]
 }
 
 /**

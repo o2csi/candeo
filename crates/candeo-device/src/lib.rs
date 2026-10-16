@@ -11,7 +11,9 @@ pub mod layout;
 pub mod lighting;
 
 pub use inspection::{Check, Inspection, Verdict, Warning};
-pub use layout::{FirmwareEffect, Key, Layout, Lights, Outline, Port, Shape, Text, NO_SCANCODE};
+pub use layout::{
+    FirmwareEffect, Key, Layout, Lights, Outline, Port, Region, Shape, Text, NO_SCANCODE,
+};
 pub use lighting::{Lighting, Outgoing, Wire};
 
 #[derive(Debug, thiserror::Error)]

@@ -170,6 +170,13 @@ enum Action {
     QuitApp,
     /// Start this effect on this device.
     Start { device: DeviceRef, effect: String },
+    /// Start this effect on this region of a split device
+    /// (`docs/design/regions.md` §5).
+    StartRegion {
+        device: DeviceRef,
+        region: String,
+        effect: String,
+    },
     /// Toggle this device's keyboard output.
     ToggleOutput { device: DeviceRef },
     /// The firmware's `Effect::Off` on this device.
@@ -190,14 +197,17 @@ const SORTIE: &str = "sortie";
 const ETEINDRE: &str = "eteindre";
 const RESUME: &str = "resume";
 const AUTOMATIONS: &str = "automations";
+const REGION_EFFECT: &str = "regionEffect";
 
 /// The separator between the fields of an identifier.
 ///
-/// `:` can stay unescaped: an effect identifier is a built-in id or an effect
-/// name, and [`storage::validate_name`] refuses `:` in names, as Windows does in
-/// file names — so it can never contain one. The test
-/// `the_effect_alphabet_excludes_the_separator` holds that dependency; without
-/// it, widening the identifier alphabet one day would silently break the menu.
+/// `:` can stay unescaped where it ends an identifier: an effect's key holds
+/// one, `<source>:<name>`, and comes last, read as the rest. Before it, nothing
+/// may: a device is four hex digits per field, and a region id is lower case
+/// letters, digits and hyphens, which the definition schema holds. The tests
+/// `the_effect_alphabet_excludes_the_separator` and
+/// `a_region_s_identifier_reads_back` hold those dependencies; without them,
+/// widening an alphabet one day would silently break the menu.
 const SEP: char = ':';
 
 /// The device, written to be read back — four hex digits per field.
@@ -225,6 +235,14 @@ impl Action {
             Self::Start { device, effect } => {
                 format!("{EFFET}{SEP}{}{SEP}{effect}", hex_id(*device))
             }
+            Self::StartRegion {
+                device,
+                region,
+                effect,
+            } => format!(
+                "{REGION_EFFECT}{SEP}{}{SEP}{region}{SEP}{effect}",
+                hex_id(*device)
+            ),
             Self::ToggleOutput { device } => format!("{SORTIE}{SEP}{}", hex_id(*device)),
             Self::TurnOff { device } => format!("{ETEINDRE}{SEP}{}", hex_id(*device)),
             Self::Resume { device } => format!("{RESUME}{SEP}{}", hex_id(*device)),
@@ -252,6 +270,18 @@ impl Action {
                 let (pid, effect) = rest.split_once(SEP)?;
                 Some(Self::Start {
                     device: device(vid, pid)?,
+                    effect: effect.to_owned(),
+                })
+            }
+            REGION_EFFECT => {
+                let (pid, rest) = rest.split_once(SEP)?;
+                let (region, effect) = rest.split_once(SEP)?;
+                if region.is_empty() || effect.is_empty() {
+                    return None;
+                }
+                Some(Self::StartRegion {
+                    device: device(vid, pid)?,
+                    region: region.to_owned(),
                     effect: effect.to_owned(),
                 })
             }
@@ -416,7 +446,10 @@ fn device_submenus(app: &AppHandle, language: Language) -> Built<Vec<Submenu<Wry
 
     controlled_devices(&settings, &app.state::<AppState>())
         .iter()
-        .map(|controlled| device_submenu(app, controlled, &library, &engine_status, language))
+        .map(|controlled| {
+            let split = crate::split(&settings, controlled.layout);
+            device_submenu(app, controlled, split, &library, &engine_status, language)
+        })
         .collect()
 }
 
@@ -499,10 +532,12 @@ fn menu(app: &AppHandle) -> Built<(Menu<Wry>, Option<String>)> {
     Ok((assembled, degraded))
 }
 
-/// A device's submenu: its effect, its output, turning it off.
+/// A device's submenu: its effect — or, split, one submenu per region — its
+/// output, turning it off.
 fn device_submenu(
     app: &AppHandle,
     controlled: &ControlledDevice,
+    split: bool,
     library: &[EffectEntry],
     engine_status: &[DeviceEngineStatus],
     language: Language,
@@ -519,7 +554,7 @@ fn device_submenu(
         .filter(|s| s.running)
         .and_then(|s| s.effect_id.as_deref());
 
-    let view = presentation(controlled, running_effect.is_some(), language);
+    let view = presentation(controlled, current.is_some_and(|s| s.running), language);
 
     let mut items: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
     if let Some(reason) = &view.reason {
@@ -553,41 +588,51 @@ fn device_submenu(
         )?));
         items.push(Box::new(separator_item(app)?));
     }
-    // Only what can start: a file not compiled yet, or that does not load, would
-    // be a menu item whose click fails with a message the tray cannot show.
-    // And only what applies to this device: a zone does not show an effect
-    // drawn on rows of keys (`docs/design/device-sdk.md` §3).
-    let ready: Vec<&EffectEntry> = library
-        .iter()
-        .filter(|e| e.state == EffectState::Ready)
-        .filter(|e| e.manifest.applies_to(controlled.layout))
-        .collect();
-    // Grouped like the gallery, under a heading when both groups have effects:
-    // a built-in and one of the user's may share a name.
-    let both = ready.iter().any(|e| e.kind == EffectKind::Builtin)
-        && ready.iter().any(|e| e.kind == EffectKind::User);
-    for (kind, heading) in [
-        (EffectKind::Builtin, "tray.builtinEffects"),
-        (EffectKind::User, "tray.userEffects"),
-    ] {
-        if both {
-            if kind == EffectKind::User {
-                items.push(Box::new(separator_item(app)?));
-            }
-            items.push(Box::new(inert_item(app, &i18n::text(language, heading))?));
-        }
-        for entry in ready.iter().filter(|e| e.kind == kind) {
-            items.push(Box::new(check_item(
+    if split {
+        // One submenu per region, in the definition's order, each listing what
+        // applies to it, the one it runs ticked (`docs/design/regions.md` §5).
+        let regions = current.and_then(|s| s.regions.as_deref()).unwrap_or(&[]);
+        for region in controlled.layout.regions {
+            let runs = regions
+                .iter()
+                .find(|r| r.region == region.id && r.running)
+                .and_then(|r| r.effect_id.as_deref());
+            let mut entries: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
+            effect_items(
                 app,
-                &Action::Start {
-                    device: controlled.device,
-                    effect: entry.id.clone(),
-                },
-                &entry.manifest.name,
+                &mut entries,
+                library,
+                region.layout,
+                runs,
                 view.effects,
-                running_effect == Some(entry.id.as_str()),
-            )?));
+                language,
+                |effect| Action::StartRegion {
+                    device: controlled.device,
+                    region: region.id.to_owned(),
+                    effect: effect.to_owned(),
+                },
+            )?;
+            let refs: Vec<&dyn IsMenuItem<Wry>> = entries.iter().map(AsRef::as_ref).collect();
+            let name = region.name.get(language.code());
+            items.push(Box::new(
+                Submenu::with_items(app, name, view.effects, &refs)
+                    .map_err(|e| format!("submenu of region {} not assembled: {e}", region.id))?,
+            ));
         }
+    } else {
+        effect_items(
+            app,
+            &mut items,
+            library,
+            controlled.layout,
+            running_effect,
+            view.effects,
+            language,
+            |effect| Action::Start {
+                device: controlled.device,
+                effect: effect.to_owned(),
+            },
+        )?;
     }
 
     items.push(Box::new(separator_item(app)?));
@@ -596,7 +641,7 @@ fn device_submenu(
         &Action::ToggleOutput {
             device: controlled.device,
         },
-        &i18n::text(language, "tray.sendToKeyboard"),
+        &i18n::text(language, "tray.sendToDevice"),
         view.output,
         current.is_some_and(|s| s.to_keyboard),
     )?));
@@ -615,6 +660,55 @@ fn device_submenu(
     let refs: Vec<&dyn IsMenuItem<Wry>> = items.iter().map(AsRef::as_ref).collect();
     Submenu::with_items(app, view.title, true, &refs)
         .map_err(|e| format!("submenu of {} not assembled: {e}", controlled.device))
+}
+
+/// The effects that can start on `layout` — a device's, or a region's — the one
+/// running ticked, each item doing what `start` makes of its key.
+#[allow(clippy::too_many_arguments)]
+fn effect_items(
+    app: &AppHandle,
+    items: &mut Vec<Box<dyn IsMenuItem<Wry>>>,
+    library: &[EffectEntry],
+    layout: &'static Layout,
+    running: Option<&str>,
+    enabled: bool,
+    language: Language,
+    start: impl Fn(&str) -> Action,
+) -> Built<()> {
+    // Only what can start: a file not compiled yet, or that does not load, would
+    // be a menu item whose click fails with a message the tray cannot show.
+    // And only what applies to this device: a zone does not show an effect
+    // drawn on rows of keys (`docs/design/device-sdk.md` §3).
+    let ready: Vec<&EffectEntry> = library
+        .iter()
+        .filter(|e| e.state == EffectState::Ready)
+        .filter(|e| e.manifest.applies_to(layout))
+        .collect();
+    // Grouped like the gallery, under a heading when both groups have effects:
+    // a built-in and one of the user's may share a name.
+    let both = ready.iter().any(|e| e.kind == EffectKind::Builtin)
+        && ready.iter().any(|e| e.kind == EffectKind::User);
+    for (kind, heading) in [
+        (EffectKind::Builtin, "tray.builtinEffects"),
+        (EffectKind::User, "tray.userEffects"),
+    ] {
+        if both {
+            if kind == EffectKind::User {
+                items.push(Box::new(separator_item(app)?));
+            }
+            items.push(Box::new(inert_item(app, &i18n::text(language, heading))?));
+        }
+        for entry in ready.iter().filter(|e| e.kind == kind) {
+            items.push(Box::new(check_item(
+                app,
+                &start(&entry.id),
+                &entry.manifest.name,
+                enabled,
+                running == Some(entry.id.as_str()),
+            )?));
+        }
+    }
+    Ok(())
 }
 
 /// How an effect a rule shows is named to a person: the library's name, or the
@@ -681,6 +775,23 @@ fn perform(app: &AppHandle, action: Action) {
         Action::QuitApp => quit(app),
         Action::Start { device, effect } => {
             start(app, device, &effect);
+            report_change(app);
+        }
+        Action::StartRegion {
+            device,
+            region,
+            effect,
+        } => {
+            // The window's path, as for a device: the region's saved
+            // settings, the others untouched, the gesture ending a rule.
+            if let Err(e) = crate::runtime::start_saved_region(app, device, &region, &effect) {
+                tracing::error!(
+                    device = %device,
+                    region,
+                    effect,
+                    "effect not started from the system tray: {e}"
+                );
+            }
             report_change(app);
         }
         Action::ToggleOutput { device } => {
@@ -812,8 +923,16 @@ fn turn_off_device(app: &AppHandle, device: DeviceRef) {
     // Nothing runs on this device any more, and the file must say so: leaving
     // the identifier in place would make `settings.json` describe an effect
     // nobody asks for any more. It is the same step `stop_effect` takes from
-    // the window.
-    crate::runtime::remember_active_effect(app, device, None);
+    // the window. A split device stays split, every region with no effect
+    // (`docs/design/regions.md` §5).
+    let regions = crate::find_layout(device).map_or(&[][..], |l| l.regions);
+    if crate::is_split(app, device).unwrap_or(false) {
+        for region in regions {
+            crate::runtime::remember_region_effect(app, device, region.id, None);
+        }
+    } else {
+        crate::runtime::remember_active_effect(app, device, None);
+    }
 
     if let Err(e) = crate::with_keyboard(&state, device, |kb| Ok(kb.set_effect(crate::OFF, &[])?)) {
         // The expected case: the device was unplugged — or ignored from the
@@ -972,11 +1091,54 @@ mod tests {
                 device: OTHER,
                 effect: "a".into(),
             },
+            Action::StartRegion {
+                device: DEVICE,
+                region: "lid".into(),
+                effect: "shipped:Radial wave".into(),
+            },
             Action::ToggleOutput { device: DEVICE },
             Action::TurnOff { device: OTHER },
             Action::Resume { device: DEVICE },
             Action::ToggleAutomations,
         ]
+    }
+
+    /// A region's effect is written `regionEffect:<vid>:<pid>:<region>:<effect>`,
+    /// the effect last since its key holds a `:`; every region id a definition
+    /// may declare reads back (`regions.md` §11 d).
+    #[test]
+    fn a_region_s_identifier_reads_back() {
+        let action = Action::StartRegion {
+            device: DEVICE,
+            region: "power-button-2".into(),
+            effect: "user:Onde (copie)".into(),
+        };
+        assert_eq!(
+            action.to_id(),
+            "regionEffect:1532:0292:power-button-2:user:Onde (copie)"
+        );
+        assert_eq!(Action::from_id(&action.to_id()), Some(action));
+
+        // The schema's pattern for a region id: no separator can slip in.
+        let schema: serde_json::Value =
+            serde_json::from_str(candeo_device::definition::SCHEMA).unwrap();
+        let pattern = schema["properties"]["regions"]["items"]["properties"]["id"]["pattern"]
+            .as_str()
+            .unwrap();
+        assert_eq!(pattern, "^[a-z][a-z0-9-]{0,31}$");
+        assert!(!pattern.contains(SEP));
+
+        for foreign in [
+            "regionEffect:1532:0292:lid",
+            "regionEffect:1532:0292::shipped:Rain",
+            "regionEffect:1532:0292:lid:",
+        ] {
+            assert_eq!(
+                Action::from_id(foreign),
+                None,
+                "\"{foreign}\" was interpreted"
+            );
+        }
     }
 
     /// **The only link between an item and what it does is a string.** muda

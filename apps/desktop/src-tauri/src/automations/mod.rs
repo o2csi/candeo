@@ -353,8 +353,11 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
         }
         tables.running.get(&device).map(|r| r.resting.clone())
     };
-    let resting = carried.unwrap_or_else(|| resting_state(&state, device));
+    let resting = carried.unwrap_or_else(|| resting_state(app, &state, device));
 
+    // On a split device the rule's effect runs over all of it, the regions set
+    // aside and their follows still scaling their lights: see
+    // [`crate::runtime::run_effect`].
     let started = match hardware(&interruption.effect) {
         Some(effect) => {
             // The loop stops first, and is awaited: its next frame would light
@@ -411,7 +414,13 @@ fn interrupt(app: &AppHandle, device: DeviceRef, interruption: Interruption, rul
 }
 
 /// What the device runs now, before a first interruption: see [`Resting`].
-fn resting_state(state: &AppState, device: DeviceRef) -> Resting {
+///
+/// A split device's resting state is always its regions: when the rule ends,
+/// every region starts its applied effect again (`docs/design/regions.md` §4).
+fn resting_state(app: &AppHandle, state: &AppState, device: DeviceRef) -> Resting {
+    if crate::is_split(app, device).unwrap_or(false) {
+        return Resting::Applied;
+    }
     let host_loop = state
         .engine
         .device_status()
@@ -446,6 +455,10 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
     };
 
     let restored = match running.resting {
+        // The regions, each with its applied effect, its time from zero.
+        Resting::Applied if crate::is_split(app, device).unwrap_or(false) => {
+            crate::runtime::run_regions(app, device)
+        }
         Resting::Applied => match crate::storage::store(app).and_then(|s| s.read_settings()) {
             Ok(settings) => match settings.active_effect(device.vid, device.pid) {
                 Some(effect) => crate::runtime::run_with(
