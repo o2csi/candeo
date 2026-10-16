@@ -977,16 +977,23 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
         // this is precisely the line that shows it, and it costs the reader
         // nothing.
         if let Ok(s) = &settings {
+            let level = match s.brightness(layout.vid, layout.pid, serial.as_deref()) {
+                crate::storage::DEFAULT_BRIGHTNESS => "full (default)".to_string(),
+                n => n.to_string(),
+            };
+            // A level saved for a device with no brightness command is never
+            // reapplied (#334): said, so that it does not read as a divergence.
+            let brightness = if layout.has_brightness() {
+                level
+            } else {
+                format!("{level}, not applied: no brightness command")
+            };
             line(
                 &mut out,
                 "    saved",
                 &format!(
-                    "effect {} · brightness {}",
+                    "effect {} · brightness {brightness}",
                     s.active_effect(layout.vid, layout.pid).unwrap_or("none"),
-                    match s.brightness(layout.vid, layout.pid, serial.as_deref()) {
-                        crate::storage::DEFAULT_BRIGHTNESS => "full (default)".to_string(),
-                        n => n.to_string(),
-                    }
                 ),
             );
         }
