@@ -162,6 +162,9 @@ one value every effect shares, so it follows instead.
   the hardware brightness instead would be one more HID report per frame, three
   on the Alienware, for a value the firmware may keep; scaling the frame costs
   nothing on the bus, and the simulator still shows what the device is sent.
+- **No slider without a brightness command** (#334). A definition without
+  `brightness` reports, the Alienware 17 R5 or the m18 R1's zones, gets the
+  switch alone, scaling from 100 %; a level saved for it is never written.
 - **The sound:** the six sources of §2.2.1, from the floor in silence to 1.
   *Beat* is already a pulse dying down, so the light jumps and settles.
 - **A signal:** a number is a percent, held between the floor and 100, as a
