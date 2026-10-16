@@ -445,6 +445,108 @@ pub struct EffectParamsRecord {
     pub bindings: crate::runtime::Bindings,
 }
 
+/// A device model while it is split into regions (`docs/design/regions.md` §8).
+///
+/// # A key of its own, beside the device's records
+///
+/// Not a `region` field on `effectParams`: an older build ignores a field it
+/// does not know, so a region's record would read there as the device's, and
+/// its next write would keep it without the region. Here an older build drops
+/// the whole key, and the device comes back whole with what it had before it
+/// was split: the device's own records — `activeEffects`, `effectParams`, the
+/// `dimming` of its `devices` entry — are not touched while it is split.
+///
+/// Keyed by VID and PID without serial, as [`ActiveEffectRecord`] is: every
+/// engine command targets a model. The entry alone is a split device whose
+/// regions run nothing.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitDeviceRecord {
+    pub vid: u16,
+    pub pid: u16,
+    /// Each region's applied effect and what its brightness follows; a region
+    /// keeping neither has no record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<RegionRecord>,
+    /// The settings kept per region and effect, as `effectParams` keeps them
+    /// per device and effect: two regions running one effect can bind it to
+    /// different signals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effect_params: Vec<RegionEffectParamsRecord>,
+}
+
+impl SplitDeviceRecord {
+    /// This region's record, made empty if it had none.
+    fn region_mut(&mut self, region: &str) -> &mut RegionRecord {
+        let i = match self.regions.iter().position(|r| r.region == region) {
+            Some(i) => i,
+            None => {
+                self.regions.push(RegionRecord {
+                    region: region.to_owned(),
+                    effect: None,
+                    dimming: None,
+                });
+                self.regions.len() - 1
+            }
+        };
+        &mut self.regions[i]
+    }
+
+    /// This region and effect's settings, made empty if there were none.
+    fn params_mut(&mut self, region: &str, effect: &str) -> &mut RegionEffectParamsRecord {
+        let found = self
+            .effect_params
+            .iter()
+            .position(|r| r.region == region && r.effect == effect);
+        let i = match found {
+            Some(i) => i,
+            None => {
+                self.effect_params.push(RegionEffectParamsRecord {
+                    region: region.to_owned(),
+                    effect: effect.to_owned(),
+                    values: serde_json::Map::new(),
+                    bindings: crate::runtime::Bindings::new(),
+                });
+                self.effect_params.len() - 1
+            }
+        };
+        &mut self.effect_params[i]
+    }
+
+    /// Same economy as the rest of the file: no record holding nothing. The
+    /// entry itself stays, empty or not, for as long as the model is split.
+    fn drop_empty(&mut self) {
+        self.regions
+            .retain(|r| r.effect.is_some() || r.dimming.is_some());
+        self.effect_params
+            .retain(|r| !r.values.is_empty() || !r.bindings.is_empty());
+    }
+}
+
+/// One region of a split device: its applied effect, and its follow.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionRecord {
+    /// The region's id, as its definition declares it.
+    pub region: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dimming: Option<Dimming>,
+}
+
+/// An effect's settings kept for one region: [`EffectParamsRecord`], plus the
+/// region.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionEffectParamsRecord {
+    pub region: String,
+    pub effect: String,
+    pub values: serde_json::Map<String, serde_json::Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bindings: crate::runtime::Bindings,
+}
+
 /// What applies to the whole application, and to no device in particular.
 ///
 /// A separate object rather than fields at the root: this layout is what
@@ -579,6 +681,10 @@ pub struct Settings {
     /// copy of the defaults that the next version of the effect would
     /// contradict.
     pub effect_params: Vec<EffectParamsRecord>,
+    /// The device models split into regions, each with what its regions run.
+    /// See [`SplitDeviceRecord`]; absent while no device is split.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub split_devices: Vec<SplitDeviceRecord>,
     /// The shipped effects copied into the folder, by name: the hash of the
     /// version copied, or `None` when a file of that name was already there and
     /// was left alone. See [`Store::seed_shipped`].
@@ -641,6 +747,7 @@ impl Default for Settings {
             definitions: Vec::new(),
             active_effects: Vec::new(),
             effect_params: Vec::new(),
+            split_devices: Vec::new(),
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
             signals: crate::signals::SignalsConfig::default(),
@@ -803,6 +910,15 @@ impl Settings {
             }
         }
         all
+    }
+
+    /// What this model's brightness follows, as [`Self::dimmings`] reads it:
+    /// the first entry that keeps one.
+    fn device_dimming(&self, vid: u16, pid: u16) -> Option<Dimming> {
+        self.devices
+            .iter()
+            .filter(|r| r.vid == vid && r.pid == pid)
+            .find_map(|r| r.dimming.clone())
     }
 
     /// The brightness kept for this device, or [`DEFAULT_BRIGHTNESS`].
@@ -981,6 +1097,199 @@ impl Settings {
             .retain(|r| !r.values.is_empty() || !r.bindings.is_empty());
     }
 
+    // ------------------------------------------------------------ regions
+
+    /// This model's entry while the file says it is split. The device is split
+    /// only if its definition declares regions too: see `crate::split`.
+    pub fn split(&self, vid: u16, pid: u16) -> Option<&SplitDeviceRecord> {
+        self.split_devices
+            .iter()
+            .find(|s| s.vid == vid && s.pid == pid)
+    }
+
+    fn split_mut(&mut self, vid: u16, pid: u16) -> Option<&mut SplitDeviceRecord> {
+        self.split_devices
+            .iter_mut()
+            .find(|s| s.vid == vid && s.pid == pid)
+    }
+
+    /// Splits this model into `regions`, or makes it whole again.
+    ///
+    /// Splitting changes how the device is driven, not what it shows: every
+    /// region gets the device's applied effect, a copy of the device's settings
+    /// for it, and what the device's brightness follows. Making it whole forgets
+    /// what the regions kept, so splitting again starts from the device's
+    /// effect. Neither touches the device's own records: they are what it goes
+    /// back to (`docs/design/regions.md` §2, §8).
+    ///
+    /// Returns true if something changed.
+    pub fn set_split(&mut self, vid: u16, pid: u16, regions: Option<&[&str]>) -> bool {
+        let Some(regions) = regions else {
+            let before = self.split_devices.len();
+            self.split_devices.retain(|s| (s.vid, s.pid) != (vid, pid));
+            return self.split_devices.len() != before;
+        };
+        if self.split(vid, pid).is_some() {
+            return false;
+        }
+        let effect = self.active_effect(vid, pid).map(str::to_owned);
+        let dimming = self.device_dimming(vid, pid);
+        let kept = effect.as_deref().and_then(|effect| {
+            self.effect_params
+                .iter()
+                .find(|r| r.vid == vid && r.pid == pid && r.effect == effect)
+        });
+        let mut split = SplitDeviceRecord {
+            vid,
+            pid,
+            regions: Vec::new(),
+            effect_params: Vec::new(),
+        };
+        for region in regions {
+            split.regions.push(RegionRecord {
+                region: (*region).to_owned(),
+                effect: effect.clone(),
+                dimming: dimming.clone(),
+            });
+            if let Some(kept) = kept {
+                split.effect_params.push(RegionEffectParamsRecord {
+                    region: (*region).to_owned(),
+                    effect: kept.effect.clone(),
+                    values: kept.values.clone(),
+                    bindings: kept.bindings.clone(),
+                });
+            }
+        }
+        split.drop_empty();
+        self.split_devices.push(split);
+        true
+    }
+
+    fn region_record(&self, vid: u16, pid: u16, region: &str) -> Option<&RegionRecord> {
+        self.split(vid, pid)?
+            .regions
+            .iter()
+            .find(|r| r.region == region)
+    }
+
+    /// The effect applied on this region, if there is one.
+    pub fn region_effect(&self, vid: u16, pid: u16, region: &str) -> Option<&str> {
+        self.region_record(vid, pid, region)?.effect.as_deref()
+    }
+
+    /// What this region's brightness follows, if anything.
+    pub fn region_dimming(&self, vid: u16, pid: u16, region: &str) -> Option<&Dimming> {
+        self.region_record(vid, pid, region)?.dimming.as_ref()
+    }
+
+    /// Keeps the effect applied on a region, or forgets it with `None`. Nothing
+    /// happens on a model the file does not split: an entry made here would
+    /// split it.
+    ///
+    /// Returns true if something changed.
+    pub fn set_region_effect(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: Option<&str>,
+    ) -> bool {
+        let Some(split) = self.split_mut(vid, pid) else {
+            return false;
+        };
+        let changed = split.region_mut(region).effect.as_deref() != effect;
+        split.region_mut(region).effect = effect.map(str::to_owned);
+        split.drop_empty();
+        changed
+    }
+
+    /// Keeps what a region's brightness follows, `None` forgetting it, as
+    /// [`Self::set_region_effect`] keeps its effect.
+    pub fn set_region_dimming(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        dimming: Option<Dimming>,
+    ) -> bool {
+        let Some(split) = self.split_mut(vid, pid) else {
+            return false;
+        };
+        let changed = split.region_mut(region).dimming != dimming;
+        split.region_mut(region).dimming = dimming;
+        split.drop_empty();
+        changed
+    }
+
+    fn region_params_record(
+        &self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: &str,
+    ) -> Option<&RegionEffectParamsRecord> {
+        self.split(vid, pid)?
+            .effect_params
+            .iter()
+            .find(|r| r.region == region && r.effect == effect)
+    }
+
+    /// The parameters kept for this effect on this region, if any.
+    pub fn region_effect_params(
+        &self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: &str,
+    ) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        self.region_params_record(vid, pid, region, effect)
+            .map(|r| &r.values)
+    }
+
+    /// The parameters of an effect bound to a live value on a region.
+    pub fn region_effect_bindings(
+        &self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: &str,
+    ) -> crate::runtime::Bindings {
+        self.region_params_record(vid, pid, region, effect)
+            .map(|r| r.bindings.clone())
+            .unwrap_or_default()
+    }
+
+    /// Keeps an effect's parameters on a region, as [`Self::set_effect_params`]
+    /// does on a device: empty erases them.
+    pub fn set_region_effect_params(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: &str,
+        values: serde_json::Map<String, serde_json::Value>,
+    ) {
+        if let Some(split) = self.split_mut(vid, pid) {
+            split.params_mut(region, effect).values = values;
+            split.drop_empty();
+        }
+    }
+
+    /// Keeps which parameters of an effect read a live value on a region.
+    pub fn set_region_effect_bindings(
+        &mut self,
+        vid: u16,
+        pid: u16,
+        region: &str,
+        effect: &str,
+        bindings: crate::runtime::Bindings,
+    ) {
+        if let Some(split) = self.split_mut(vid, pid) {
+            split.params_mut(region, effect).bindings = bindings;
+            split.drop_empty();
+        }
+    }
+
     /// Forgets an effect **everywhere**: its parameters, and where it is applied.
     ///
     /// Called when the effect is deleted. Without it, its parameters would stay
@@ -1008,10 +1317,20 @@ impl Settings {
     /// Returns true if something was removed, so the file is not rewritten when
     /// there is nothing to change in it.
     pub fn forget_effect(&mut self, effect: &str) -> bool {
-        let before = self.effect_params.len() + self.active_effects.len();
+        let before = self.clone();
         self.effect_params.retain(|r| r.effect != effect);
         self.active_effects.retain(|r| r.effect != effect);
-        self.effect_params.len() + self.active_effects.len() != before
+        // A region's too: the split stays, the region runs nothing.
+        for split in &mut self.split_devices {
+            split.effect_params.retain(|r| r.effect != effect);
+            for region in &mut split.regions {
+                if region.effect.as_deref() == Some(effect) {
+                    region.effect = None;
+                }
+            }
+            split.drop_empty();
+        }
+        *self != before
     }
 
     /// Moves every reference to an effect to its new name.
@@ -1027,11 +1346,16 @@ impl Settings {
 
     /// Every effect this file refers to, once each.
     fn effect_references(&self) -> Vec<String> {
+        let regions = self.split_devices.iter().flat_map(|split| {
+            let applied = split.regions.iter().filter_map(|r| r.effect.as_deref());
+            applied.chain(split.effect_params.iter().map(|r| r.effect.as_str()))
+        });
         let references: BTreeSet<&str> = self
             .active_effects
             .iter()
             .map(|r| r.effect.as_str())
             .chain(self.effect_params.iter().map(|r| r.effect.as_str()))
+            .chain(regions)
             .collect();
         references.into_iter().map(str::to_owned).collect()
     }
@@ -1042,11 +1366,16 @@ impl Settings {
     /// that is not there, which the startup fallback already copes with, and
     /// guessing what it meant would be worse.
     fn rename_effects(&mut self, renames: &BTreeMap<String, String>) {
+        let regions = self.split_devices.iter_mut().flat_map(|split| {
+            let applied = split.regions.iter_mut().filter_map(|r| r.effect.as_mut());
+            applied.chain(split.effect_params.iter_mut().map(|r| &mut r.effect))
+        });
         for effect in self
             .active_effects
             .iter_mut()
             .map(|r| &mut r.effect)
             .chain(self.effect_params.iter_mut().map(|r| &mut r.effect))
+            .chain(regions)
         {
             if let Some(name) = renames.get(effect.as_str()) {
                 effect.clone_from(name);
@@ -4437,6 +4766,24 @@ mod tests {
                 values: to_map(&[("period", serde_json::json!(12.5))]),
                 bindings: [("period".to_string(), "signal:tempo".to_string())].into(),
             }],
+            split_devices: vec![SplitDeviceRecord {
+                vid: 0x187c,
+                pid: 0x0550,
+                regions: vec![RegionRecord {
+                    region: "lid".into(),
+                    effect: Some("shipped:Rain".into()),
+                    dimming: Some(Dimming {
+                        source: "sound:bass".into(),
+                        floor: 30,
+                    }),
+                }],
+                effect_params: vec![RegionEffectParamsRecord {
+                    region: "lid".into(),
+                    effect: "shipped:Rain".into(),
+                    values: to_map(&[("speed", serde_json::json!(2))]),
+                    bindings: crate::runtime::Bindings::new(),
+                }],
+            }],
             shipped_effects: BTreeMap::from([
                 ("Breathing".to_owned(), Some("abc".to_owned())),
                 ("Sweep".to_owned(), None),
@@ -5168,6 +5515,245 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------- regions
+
+    const REGIONS: [&str; 3] = ["keyboard", "lid", "base"];
+
+    /// Ticking *Split* changes how the device is driven, not what it shows:
+    /// every region gets the device's effect, its settings for it and its
+    /// follow; the device's own records stay as they were (`regions.md` §2, §8).
+    #[test]
+    fn splitting_gives_every_region_what_the_device_had() {
+        let mut settings = Settings::default();
+        settings.set_active_effect(VID, PID, Some("shipped:Wave"));
+        settings.set_effect_params(VID, PID, "shipped:Wave", to_map(&[("speed", 3.into())]));
+        settings.set_effect_bindings(
+            VID,
+            PID,
+            "shipped:Wave",
+            crate::runtime::Bindings::from([("hue".to_owned(), "sound:tone".to_owned())]),
+        );
+        settings.set_dimming(VID, PID, None, Some(following("sound:volume")));
+        let whole = settings.clone();
+
+        assert!(settings.set_split(VID, PID, Some(&REGIONS)));
+        assert!(
+            !settings.set_split(VID, PID, Some(&REGIONS)),
+            "split twice copies nothing again"
+        );
+        for region in REGIONS {
+            assert_eq!(
+                settings.region_effect(VID, PID, region),
+                Some("shipped:Wave")
+            );
+            assert_eq!(
+                settings.region_effect_params(VID, PID, region, "shipped:Wave"),
+                Some(&to_map(&[("speed", 3.into())]))
+            );
+            assert_eq!(
+                settings.region_effect_bindings(VID, PID, region, "shipped:Wave")["hue"],
+                "sound:tone"
+            );
+            assert_eq!(
+                settings.region_dimming(VID, PID, region),
+                Some(&following("sound:volume"))
+            );
+        }
+        assert_eq!(settings.active_effects, whole.active_effects);
+        assert_eq!(settings.effect_params, whole.effect_params);
+        assert_eq!(settings.devices, whole.devices);
+        assert!(settings.split(VID, PID + 1).is_none(), "another model");
+    }
+
+    /// Unticking gives the device back what it had before, untouched by the
+    /// split, and forgets the regions' choices: ticking again starts from the
+    /// device's effect.
+    #[test]
+    fn making_a_device_whole_forgets_its_regions() {
+        let mut settings = Settings::default();
+        settings.set_active_effect(VID, PID, Some("shipped:Wave"));
+        let whole = settings.clone();
+        settings.set_split(VID, PID, Some(&REGIONS));
+        settings.set_region_effect(VID, PID, "lid", Some("shipped:Rain"));
+
+        assert!(settings.set_split(VID, PID, None));
+        assert_eq!(settings, whole);
+        assert!(!settings.set_split(VID, PID, None), "already whole");
+
+        settings.set_split(VID, PID, Some(&REGIONS));
+        assert_eq!(
+            settings.region_effect(VID, PID, "lid"),
+            Some("shipped:Wave")
+        );
+    }
+
+    /// A device split with nothing applied is its entry alone: no region
+    /// record holding nothing, and the rest of the file left out.
+    #[test]
+    fn a_split_device_whose_regions_run_nothing_is_its_entry_alone() {
+        let mut settings = Settings::default();
+        settings.set_split(VID, PID, Some(&REGIONS));
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            json["splitDevices"],
+            serde_json::json!([{ "vid": VID, "pid": PID }])
+        );
+        assert!(settings.split(VID, PID).is_some());
+
+        let whole = serde_json::to_value(Settings::default()).unwrap();
+        assert!(whole.get("splitDevices").is_none(), "no key while whole");
+    }
+
+    /// A region keeps its effect, its settings per effect and its follow, and
+    /// gives each up the way a device does: back to nothing, no record.
+    #[test]
+    fn a_region_keeps_its_own_choices() {
+        let mut settings = Settings::default();
+        assert!(
+            !settings.set_region_effect(VID, PID, "lid", Some("shipped:Rain")),
+            "a model the file does not split keeps nothing for a region"
+        );
+        assert!(settings.split_devices.is_empty());
+
+        settings.set_split(VID, PID, Some(&REGIONS));
+        assert!(settings.set_region_effect(VID, PID, "lid", Some("shipped:Rain")));
+        assert!(!settings.set_region_effect(VID, PID, "lid", Some("shipped:Rain")));
+        settings.set_region_effect_params(
+            VID,
+            PID,
+            "lid",
+            "shipped:Rain",
+            to_map(&[("speed", 2.into())]),
+        );
+        settings.set_region_effect_bindings(
+            VID,
+            PID,
+            "keyboard",
+            "shipped:Rain",
+            crate::runtime::Bindings::from([("hue".to_owned(), "signal:status".to_owned())]),
+        );
+        assert!(settings.set_region_dimming(VID, PID, "base", Some(following("signal:lux"))));
+
+        assert_eq!(settings.region_effect(VID, PID, "keyboard"), None);
+        assert_eq!(
+            settings.region_effect_params(VID, PID, "lid", "shipped:Rain"),
+            Some(&to_map(&[("speed", 2.into())]))
+        );
+        assert_eq!(
+            settings.region_effect_params(VID, PID, "keyboard", "shipped:Rain"),
+            Some(&serde_json::Map::new()),
+            "bound, with no value moved"
+        );
+        assert!(settings
+            .region_effect_bindings(VID, PID, "lid", "shipped:Rain")
+            .is_empty());
+
+        settings.set_region_effect(VID, PID, "lid", None);
+        settings.set_region_effect_params(VID, PID, "lid", "shipped:Rain", serde_json::Map::new());
+        settings.set_region_effect_bindings(
+            VID,
+            PID,
+            "keyboard",
+            "shipped:Rain",
+            crate::runtime::Bindings::new(),
+        );
+        assert!(settings.set_region_dimming(VID, PID, "base", None));
+        assert_eq!(
+            settings.split(VID, PID),
+            Some(&SplitDeviceRecord {
+                vid: VID,
+                pid: PID,
+                regions: Vec::new(),
+                effect_params: Vec::new(),
+            }),
+            "split still, holding nothing"
+        );
+    }
+
+    /// Deleting or renaming an effect reaches what the regions kept too: a
+    /// region running a deleted effect runs nothing, the split stays.
+    #[test]
+    fn forgetting_and_renaming_an_effect_reach_the_regions() {
+        let mut settings = Settings::default();
+        settings.set_split(VID, PID, Some(&REGIONS));
+        settings.set_region_effect(VID, PID, "lid", Some("user:Onde"));
+        settings.set_region_effect(VID, PID, "base", Some("user:Autre"));
+        settings.set_region_effect_params(
+            VID,
+            PID,
+            "lid",
+            "user:Onde",
+            to_map(&[("speed", 3.into())]),
+        );
+
+        assert!(settings.rename_effect("user:Onde", "user:Vague"));
+        assert_eq!(settings.region_effect(VID, PID, "lid"), Some("user:Vague"));
+        assert!(settings
+            .region_effect_params(VID, PID, "lid", "user:Vague")
+            .is_some());
+        assert_eq!(
+            settings.effect_references(),
+            vec!["user:Autre".to_owned(), "user:Vague".to_owned()]
+        );
+
+        assert!(settings.forget_effect("user:Vague"));
+        assert_eq!(settings.region_effect(VID, PID, "lid"), None);
+        assert!(settings
+            .region_effect_params(VID, PID, "lid", "user:Vague")
+            .is_none());
+        assert_eq!(settings.region_effect(VID, PID, "base"), Some("user:Autre"));
+        assert!(settings.split(VID, PID).is_some(), "the split stays");
+        assert!(!settings.forget_effect("user:Vague"));
+    }
+
+    /// The file as `regions.md` §11 b writes it reads back as it was written,
+    /// and a file without the key reads as every device whole.
+    #[test]
+    fn split_devices_round_trip_and_a_file_without_them_is_whole() {
+        let (tmp, store) = temp_store();
+        let config = tmp.path().join("config");
+        fs::create_dir_all(&config).unwrap();
+        let split = serde_json::json!([{
+            "vid": 6268,
+            "pid": 1360,
+            "regions": [
+                { "region": "keyboard", "effect": "shipped:Radial wave",
+                  "dimming": { "source": "sound:volume", "floor": 20 } },
+                { "region": "lid", "effect": "shipped:Breathing",
+                  "dimming": { "source": "system:cpuTemp", "floor": 20 } },
+                { "region": "base", "effect": "shipped:Starry night" }
+            ],
+            "effectParams": [
+                { "region": "keyboard", "effect": "shipped:Radial wave",
+                  "values": { "speed": 120 }, "bindings": { "hue": "sound:tone" } }
+            ]
+        }]);
+        fs::write(
+            config.join("settings.json"),
+            serde_json::json!({ "version": 3, "splitDevices": split }).to_string(),
+        )
+        .unwrap();
+
+        let settings = store.read_settings().unwrap();
+        assert_eq!(
+            settings.region_effect(6268, 1360, "base"),
+            Some("shipped:Starry night")
+        );
+        assert_eq!(
+            settings.region_dimming(6268, 1360, "lid"),
+            Some(&following("system:cpuTemp"))
+        );
+        store.write_settings(&settings).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(config.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(written["splitDevices"], split);
+
+        fs::write(config.join("settings.json"), r#"{"version": 3}"#).unwrap();
+        let whole = store.read_settings().unwrap();
+        assert!(whole.split_devices.is_empty() && whole.split(6268, 1360).is_none());
+    }
+
     // ------------------------------------------------- starting values
 
     /// Where an effect makes sense and what it needs, as its module says:
@@ -5398,10 +5984,31 @@ mod tests {
         mirror("CronTrigger", &serialized["when"]);
         let idle = crate::automations::resolver::Trigger::Idle { minutes: 10 };
         mirror("IdleTrigger", &idle);
+        let region = RegionRecord {
+            region: "lid".into(),
+            effect: Some("shipped:Rain".into()),
+            dimming: Some(following("sound:bass")),
+        };
+        let region_params = RegionEffectParamsRecord {
+            region: "lid".into(),
+            effect: "shipped:Rain".into(),
+            values: serde_json::Map::new(),
+            bindings: [("speed".to_string(), "signal:volume".to_string())].into(),
+        };
+        let split = SplitDeviceRecord {
+            vid: 0x187c,
+            pid: 0x0550,
+            regions: vec![region.clone()],
+            effect_params: vec![region_params.clone()],
+        };
+        mirror("SplitDeviceRecord", &split);
+        mirror("RegionRecord", &region);
+        mirror("RegionEffectParamsRecord", &region_params);
         mirror(
             "Settings",
             &Settings {
                 preferences,
+                split_devices: vec![split],
                 ..Settings::default()
             },
         );

@@ -665,6 +665,42 @@ export interface EffectParamsRecord {
 export type Bindings = Record<string, string>
 
 /**
+ * A device model while it is split into regions (`docs/design/regions.md` §8).
+ * Mirror of `SplitDeviceRecord`, in `src-tauri/src/storage.rs`.
+ *
+ * The device's own records — `activeEffects`, `effectParams`, the `dimming` of
+ * its `devices` entry — are not touched while it is split: they are what
+ * making it whole gives back. The entry alone is a split device whose regions
+ * run nothing.
+ */
+export interface SplitDeviceRecord {
+  vid: number
+  pid: number
+  /** Each region's applied effect and follow; a region keeping neither has no record. */
+  regions?: RegionRecord[]
+  /** The settings kept per region and effect. */
+  effectParams?: RegionEffectParamsRecord[]
+}
+
+/** One region of a split device. Mirror of `RegionRecord`. */
+export interface RegionRecord {
+  /** The region's id, as its definition declares it. */
+  region: string
+  /** Its applied effect. Absent: it runs nothing. */
+  effect?: string
+  /** What its brightness follows. Absent: nothing. */
+  dimming?: Dimming
+}
+
+/** An effect's settings kept for one region. Mirror of `RegionEffectParamsRecord`. */
+export interface RegionEffectParamsRecord {
+  region: string
+  effect: string
+  values: EffectParams
+  bindings?: Bindings
+}
+
+/**
  * Mirror of `Settings`, in `src-tauri/src/storage.rs`.
  *
  * A global preference in `preferences`, everything that depends on a keyboard in
@@ -685,6 +721,8 @@ export interface Settings {
   devices: DeviceRecord[]
   activeEffects: ActiveEffectRecord[]
   effectParams: EffectParamsRecord[]
+  /** The device models split into regions. Absent while none is. */
+  splitDevices?: SplitDeviceRecord[]
   /**
    * Automation rules, in their order, which is their priority. Kept here even by
    * code that does not read them: writing `Settings` back without them would
