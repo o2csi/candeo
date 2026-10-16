@@ -15,6 +15,8 @@ const api = vi.hoisted(() => ({
   setPreviewBindings: vi.fn(),
   setBrightness: vi.fn(),
   rememberBrightness: vi.fn(),
+  setDimming: vi.fn(),
+  rememberDimming: vi.fn(),
 }))
 vi.mock('../api/candeo', () => api)
 
@@ -72,6 +74,8 @@ beforeEach(() => {
   api.setPreviewBindings.mockResolvedValue(undefined)
   api.setBrightness.mockResolvedValue(undefined)
   api.rememberBrightness.mockResolvedValue(undefined)
+  api.setDimming.mockResolvedValue(undefined)
+  api.rememberDimming.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -595,5 +599,105 @@ describe('referencedEffects', () => {
     })
 
     expect([...s.referencedEffects.value].sort()).toEqual(['Radial wave', 'Rain'])
+  })
+})
+
+describe('regions', () => {
+  const lid = { ...keyboard, region: 'lid' }
+  const base = { ...keyboard, region: 'base' }
+  const split: Partial<Settings> = {
+    devices: [{ ...keyboard, state: 'adopted', brightness: 80, dimming: { source: 'sound:beat', floor: 20 } }],
+    activeEffects: [{ ...keyboard, effect: 'Wave' }],
+    effectParams: [{ ...keyboard, effect: 'Wave', values: { speed: 1.5 } }],
+    splitDevices: [
+      {
+        ...keyboard,
+        regions: [
+          { region: 'lid', effect: 'Wave', dimming: { source: 'system:cpuTemp', floor: 30 } },
+          { region: 'base' },
+        ],
+        effectParams: [
+          { region: 'lid', effect: 'Wave', values: { speed: 0.5 }, bindings: { color: 'signal:status' } },
+        ],
+      },
+    ],
+  }
+
+  it('reads each region apart from its device, whose own records stay', async () => {
+    const s = await fresh(split)
+
+    expect(s.valuesFor(lid, 'Wave', specs)).toEqual({ ...defaults, speed: 0.5 })
+    expect(s.bindingsFor(lid, 'Wave', specs)).toEqual({ color: 'signal:status' })
+    expect(s.lastAppliedOn(lid)).toBe('Wave')
+    expect(s.dimmingOf(lid)).toEqual({ source: 'system:cpuTemp', floor: 30 })
+
+    // A region whose record holds nothing runs nothing, follows nothing.
+    expect(s.valuesFor(base, 'Wave', specs)).toEqual(defaults)
+    expect(s.lastAppliedOn(base)).toBeNull()
+    expect(s.dimmingOf(base)).toBeNull()
+
+    // What making the device whole gives back.
+    expect(s.valuesFor(keyboard, 'Wave', specs)).toEqual({ ...defaults, speed: 1.5 })
+    expect(s.lastAppliedOn(keyboard)).toBe('Wave')
+    expect(s.dimmingOf(keyboard)).toEqual({ source: 'sound:beat', floor: 20 })
+    // The brightness stays the device's.
+    expect(s.brightnessOf(lid)).toBe(80)
+  })
+
+  it('reads a file written before regions as it did', async () => {
+    const s = await fresh({ effectParams: [{ ...keyboard, effect: 'Wave', values: { speed: 1.5 } }] })
+
+    expect(s.valuesFor(lid, 'Wave', specs)).toEqual(defaults)
+    expect(s.valuesFor(keyboard, 'Wave', specs)).toEqual({ ...defaults, speed: 1.5 })
+  })
+
+  it('writes a region setting for the region, and sends it to its part alone', async () => {
+    const s = await fresh(split)
+
+    s.adjust(lid, 'Wave', specs, 'speed', 0.8, true)
+    s.settle(lid, 'Wave')
+    s.adjust(base, 'Wave', specs, 'speed', 1.2, true)
+
+    expect(api.setEffectParams.mock.calls).toEqual([
+      [lid, { ...defaults, speed: 0.8 }],
+      [base, { ...defaults, speed: 1.2 }],
+    ])
+    expect(api.rememberEffectParams).toHaveBeenCalledWith(lid, 'Wave', { speed: 0.8 })
+    expect(s.valuesFor(keyboard, 'Wave', specs).speed).toBe(1.5)
+    expect(s.keptFor(base, 'Wave')).toBe(true)
+  })
+
+  it('binds and forgets per region', async () => {
+    const s = await fresh(split)
+
+    s.bind(base, 'Wave', specs, 'speed', 'sound:volume', false)
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(base, 'Wave', { speed: 'sound:volume' })
+    expect(s.bindingsFor(lid, 'Wave', specs)).toEqual({ color: 'signal:status' })
+
+    s.forget(lid, 'Wave', specs, false)
+    expect(api.rememberEffectParams).toHaveBeenLastCalledWith(lid, 'Wave', {})
+    expect(s.keptFor(lid, 'Wave')).toBe(false)
+    expect(s.keptFor(keyboard, 'Wave')).toBe(true)
+  })
+
+  it('makes a region follow its own source', async () => {
+    const s = await fresh(split)
+
+    s.setDimming(base, { source: 'sound:volume', floor: 10 }, true)
+
+    expect(api.setDimming).toHaveBeenCalledWith(base, { source: 'sound:volume', floor: 10 })
+    expect(api.rememberDimming).toHaveBeenCalledWith(base, { source: 'sound:volume', floor: 10 })
+    expect(s.dimmingOf(base)).toEqual({ source: 'sound:volume', floor: 10 })
+    expect(s.dimmingOf(lid)).toEqual({ source: 'system:cpuTemp', floor: 30 })
+  })
+
+  it('forgets a deleted effect on the regions too', async () => {
+    const s = await fresh(split)
+
+    expect([...s.referencedEffects.value]).toEqual(['Wave'])
+    s.dropEffect('Wave')
+
+    expect(s.lastAppliedOn(lid)).toBeNull()
+    expect(s.keptFor(lid, 'Wave')).toBe(false)
   })
 })
