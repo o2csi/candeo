@@ -94,7 +94,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_Globalization",
   # The icon in this executable's resources (`src/taskbar.rs`).
   "Win32_System_LibraryLoader",
-  # The Windows build in the copied diagnostic (`src/journal.rs`).
+  # The Windows build in the copied diagnostic (`src/journal.rs`), and the
+  # machine's model definitions are matched against (`src/machine.rs`).
   "Win32_System_Registry",
   # Whether this process runs from an MSIX package (`src/msix.rs`).
   "Win32_Storage_Packaging_Appx",

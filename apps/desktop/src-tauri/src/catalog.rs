@@ -2,6 +2,9 @@
 //! definitions and yours, read from `Documents/candeo/devices`, and for each
 //! device the one chosen.
 //!
+//! Only the definitions for this machine: one naming another model is not
+//! there, and one of yours says why (#326).
+//!
 //! One list, rebuilt whole when the folder is read again or a choice changes,
 //! and never changed in place: a device opened on a layout keeps it, and the
 //! next opening takes the new one. Each version is kept for the process's life,
@@ -106,7 +109,20 @@ fn install(catalog: Catalog) -> &'static Catalog {
 
 /// Reads the folder again, `None` for the built-in devices alone.
 pub fn reload(yours: Option<&Path>, choices: Choices) -> &'static Catalog {
-    install(build(yours, choices))
+    install(build(yours, choices, crate::machine::model()))
+}
+
+/// The unverified definitions that may describe a device of this machine: one
+/// naming another model is left out, as a built-in one is (#326).
+pub fn unverified() -> impl Iterator<Item = &'static (&'static str, &'static Layout)> {
+    fitting(definition::unverified(), crate::machine::model())
+}
+
+fn fitting<'a>(
+    all: &'a [(&'static str, &'static Layout)],
+    machine: Option<&'a str>,
+) -> impl Iterator<Item = &'a (&'static str, &'static Layout)> {
+    all.iter().filter(move |(_, l)| l.fits_machine(machine))
 }
 
 /// The same definitions with other choices: nothing is read again.
@@ -120,21 +136,27 @@ pub fn choose(choices: Choices) -> &'static Catalog {
     })
 }
 
-fn build(folder: Option<&Path>, choices: Choices) -> Catalog {
+/// The catalog on `machine`, the system's product name.
+fn build(folder: Option<&Path>, choices: Choices, machine: Option<&str>) -> Catalog {
     // Read once for the process: only yours are read again.
     let mut definitions: Vec<Definition> = definition::builtin()
         .iter()
         .zip(definition::BUILTIN)
+        .filter(|(layout, _)| layout.fits_machine(machine))
         .map(|(&layout, &(file, _))| Definition {
             file: file.to_owned(),
             origin: Origin::BuiltIn,
             layout,
         })
         .collect();
+    let built_in = definitions.len();
 
     let mut problems = Vec::new();
     for (file, text) in folder.map(files).unwrap_or_default() {
-        match text.and_then(|json| definition::load(&json)) {
+        let loaded = text
+            .and_then(|json| definition::load(&json))
+            .and_then(|layout| for_machine(layout, machine));
+        match loaded {
             Ok(layout) => definitions.push(Definition {
                 file,
                 origin: Origin::Yours,
@@ -143,7 +165,7 @@ fn build(folder: Option<&Path>, choices: Choices) -> Catalog {
             Err(reason) => problems.push(Problem { file, reason }),
         }
     }
-    let yours = definitions.len() - definition::BUILTIN.len();
+    let yours = definitions.len() - built_in;
     if yours > 0 || !problems.is_empty() {
         tracing::info!(
             loaded = yours,
@@ -156,6 +178,18 @@ fn build(folder: Option<&Path>, choices: Choices) -> Catalog {
         definitions,
         choices,
         problems,
+    }
+}
+
+/// A file of yours for another machine drives nothing, and says why with both
+/// models: its author may have copied it from that machine, or mistyped one.
+fn for_machine(layout: &'static Layout, machine: Option<&str>) -> Result<&'static Layout, String> {
+    match layout.machine {
+        Some(wanted) if !layout.fits_machine(machine) => Err(match machine {
+            Some(model) => format!("match.machine “{wanted}”: this machine is “{model}”"),
+            None => format!("match.machine “{wanted}”: this machine's model could not be read"),
+        }),
+        _ => Ok(layout),
     }
 }
 
@@ -217,6 +251,26 @@ mod tests {
 
     const ZONES: &str = definition::BUILTIN[2].1;
     const ZONES_ID: (u16, u16) = (0x187c, 0x0551);
+    /// The AW-ELC the 17 R5's built-in definition drives, on that machine only.
+    const AW_ELC: (u16, u16) = (0x187c, 0x0550);
+    /// A machine every built-in definition applies on.
+    const R5: Option<&str> = Some("Alienware 17 R5");
+    /// Another machine with an AW-ELC, wired otherwise.
+    const M15: Option<&str> = Some("Alienware m15 R1");
+
+    /// The m18 R1's zones, named for `machine`, under another product id.
+    fn zones_for(machine: &str) -> String {
+        let named = ZONES.replace(
+            "\"usage\": \"0001\" }",
+            &format!("\"usage\": \"0001\", \"machine\": \"{machine}\" }}"),
+        );
+        assert_ne!(named, ZONES);
+        named.replace("\"0551\"", "\"0999\"")
+    }
+
+    fn knows(c: &Catalog, id: (u16, u16)) -> bool {
+        c.layouts.iter().any(|l| (l.vid, l.pid) == id)
+    }
 
     fn folder(files: &[(&str, &str)]) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -237,7 +291,7 @@ mod tests {
 
     #[test]
     fn without_a_folder_the_built_in_devices_are_known() {
-        let c = build(None, Choices::new());
+        let c = build(None, Choices::new(), R5);
         assert_eq!(c.layouts.len(), definition::BUILTIN.len());
         assert!(c.layouts.iter().all(|l| c.origin(l) == Origin::BuiltIn));
         assert!(c.problems.is_empty());
@@ -249,7 +303,7 @@ mod tests {
             .replace("\"0551\"", "\"0999\"")
             .replace("m18 R1 zones", "test zones");
         let dir = folder(&[("test.json", &other), ("notes.txt", "not a definition")]);
-        let c = build(Some(dir.path()), Choices::new());
+        let c = build(Some(dir.path()), Choices::new(), R5);
         let added = c.layouts.last().unwrap();
         assert_eq!((added.name, added.pid), ("Alienware test zones", 0x0999));
         assert_eq!(c.origin(added), Origin::Yours);
@@ -264,7 +318,7 @@ mod tests {
     fn a_file_of_yours_drives_a_built_in_device_only_once_chosen() {
         let dir = folder(&[("a.json", ZONES), ("b.json", ZONES)]);
 
-        let c = build(Some(dir.path()), Choices::new());
+        let c = build(Some(dir.path()), Choices::new(), R5);
         assert_eq!(c.layouts.len(), definition::BUILTIN.len());
         assert_eq!(zones(&c).origin, Origin::BuiltIn);
         let files: Vec<&str> = c
@@ -276,6 +330,7 @@ mod tests {
         let c = build(
             Some(dir.path()),
             Choices::from([(ZONES_ID, "b.json".into())]),
+            R5,
         );
         assert_eq!(
             (zones(&c).origin, zones(&c).file.as_str()),
@@ -292,6 +347,7 @@ mod tests {
         let c = build(
             Some(dir.path()),
             Choices::from([(ZONES_ID, "mine.json".into())]),
+            R5,
         );
         assert_eq!(zones(&c).origin, Origin::BuiltIn);
         assert_eq!(c.unloaded_choice(zones(&c).layout), Some("mine.json"));
@@ -303,8 +359,92 @@ mod tests {
     fn a_device_nobody_built_in_uses_your_first_file_by_name() {
         let other = ZONES.replace("\"0551\"", "\"0999\"");
         let dir = folder(&[("b.json", &other), ("a.json", &other)]);
-        let c = build(Some(dir.path()), Choices::new());
+        let c = build(Some(dir.path()), Choices::new(), R5);
         let added = c.layouts.last().unwrap();
         assert_eq!(c.definition(added).unwrap().file, "a.json");
+    }
+
+    /// The issue's own case (#326): an AW-ELC on another machine is not taken
+    /// for the 17 R5's, nor where the model could not be read, and the 17 R5
+    /// still is. The m18 R1's definitions name no machine and stay everywhere.
+    #[test]
+    fn the_17_r5_is_known_on_the_17_r5_only() {
+        let c = build(None, Choices::new(), R5);
+        assert!(knows(&c, AW_ELC));
+        let r5 = c.candidates(AW_ELC.0, AW_ELC.1).next().unwrap();
+        assert_eq!(
+            (r5.file.as_str(), r5.origin),
+            ("alienware-17-r5-zones.json", Origin::BuiltIn)
+        );
+
+        for elsewhere in [M15, None] {
+            let c = build(None, Choices::new(), elsewhere);
+            assert!(!knows(&c, AW_ELC), "{elsewhere:?}");
+            assert_eq!(c.candidates(AW_ELC.0, AW_ELC.1).count(), 0);
+            assert!(knows(&c, ZONES_ID), "{elsewhere:?}");
+            assert_eq!(c.layouts.len(), definition::BUILTIN.len() - 1);
+            assert!(c.problems.is_empty(), "a built-in one is no problem");
+        }
+    }
+
+    /// A file of yours naming a machine drives its device there, and elsewhere
+    /// nothing, saying which machine it wants and which this one is.
+    #[test]
+    fn a_file_of_yours_for_another_machine_drives_nothing_and_says_why() {
+        let dir = folder(&[("m15.json", &zones_for("Alienware m15 R1"))]);
+
+        let c = build(Some(dir.path()), Choices::new(), M15);
+        let added = c.layouts.last().unwrap();
+        assert_eq!((added.pid, c.origin(added)), (0x0999, Origin::Yours));
+        assert!(c.problems.is_empty());
+
+        let c = build(Some(dir.path()), Choices::new(), R5);
+        assert!(!knows(&c, (0x187c, 0x0999)));
+        assert_eq!(c.problems.len(), 1);
+        assert_eq!(c.problems[0].file, "m15.json");
+        assert_eq!(
+            c.problems[0].reason,
+            "match.machine “Alienware m15 R1”: this machine is “Alienware 17 R5”"
+        );
+
+        let c = build(Some(dir.path()), Choices::new(), None);
+        assert!(c.problems[0].reason.contains("could not be read"));
+    }
+
+    /// A copy of the 17 R5's definition chosen for the AW-ELC: on the 17 R5 it
+    /// drives it; on another machine, the choice stays but nothing takes it.
+    #[test]
+    fn a_chosen_copy_for_another_machine_leaves_the_device_unknown() {
+        let r5 = definition::builtin_text("alienware-17-r5-zones.json").unwrap();
+        let dir = folder(&[("mine.json", r5)]);
+        let chosen = || Choices::from([(AW_ELC, "mine.json".to_string())]);
+
+        let c = build(Some(dir.path()), chosen(), R5);
+        let layout = c.layouts.iter().find(|l| (l.vid, l.pid) == AW_ELC);
+        let used = c.definition(layout.unwrap()).unwrap();
+        assert_eq!(
+            (used.origin, used.file.as_str()),
+            (Origin::Yours, "mine.json")
+        );
+
+        let c = build(Some(dir.path()), chosen(), M15);
+        assert!(!knows(&c, AW_ELC));
+        assert_eq!(c.problems.len(), 1);
+    }
+
+    /// The unverified definitions are filtered as the built-in ones are; none
+    /// names a machine today, so all of them stay on any.
+    #[test]
+    fn an_unverified_definition_naming_another_machine_is_left_out() {
+        let named = definition::load(&zones_for("Alienware m15 R1")).unwrap();
+        let any = definition::load(ZONES).unwrap();
+        let all = [("m15.json", named), ("any.json", any)];
+        let files = |machine| -> Vec<&str> { fitting(&all, machine).map(|(f, _)| *f).collect() };
+        assert_eq!(files(M15), ["m15.json", "any.json"]);
+        assert_eq!(files(R5), ["any.json"]);
+        assert_eq!(files(None), ["any.json"]);
+
+        let everything = definition::unverified();
+        assert_eq!(fitting(everything, M15).count(), everything.len());
     }
 }
