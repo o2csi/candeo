@@ -11,7 +11,7 @@ account, no extra services to install, nothing sent anywhere.
 **[o2csi.github.io/candeo](https://o2csi.github.io/candeo/)** ·
 **[Get it from the Microsoft Store](https://apps.microsoft.com/detail/9MXFM8QT1X7P)**
 
-![The Candeo gallery: the devices on the left, the effects in the middle, and the effect applied drawn on a keyboard with its settings.](site/assets/gallery.png)
+![The Candeo gallery: the devices on the left, the effects in the middle, and the effect selected drawn on a keyboard with its settings.](site/assets/gallery.png)
 
 ## Get started
 
@@ -24,7 +24,7 @@ account, no extra services to install, nothing sent anywhere.
 
 ## What it does
 
-- **Twenty-four effects, ready to go** — waves, rain, a starry night, a clock,
+- **Twenty-six effects, ready to go** — waves, rain, a starry night, a clock,
   scrolling text, ripples from the keys you press, fireworks on the beat. Tune
   each one while you watch it; your keyboard's own built-in effects are there
   too.

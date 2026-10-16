@@ -11,13 +11,16 @@ Your keyboard's lighting, exactly the way you want it, without the maker's softw
 
 ## Description
 
-Make your keyboard light up exactly the way you want. Candeo drives every key directly — twenty-four ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
+Make your keyboard light up exactly the way you want. Candeo drives every key directly — twenty-six ready-made effects, a live preview, rules that change the lighting on their own — without the maker's software, without a background service and without an account.
 
-Works with the Razer DeathStalker V2 Pro (wired), the Alienware m18 R1, its keyboard and its lighting zones, and the Alienware 17 R5. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
+Works with the Razer DeathStalker V2 Pro (wired), the Alienware m18 R1, its keyboard and its lighting zones, and the Alienware 17 R5 — and offers to try more keyboards and laptops from Razer, ASUS, SteelSeries, Logitech, HyperX, Alienware and Dell. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
 
 HIGHLIGHTS
-• Twenty-four effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it.
+• Twenty-six effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it.
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
+• One device, several effects: split a laptop's lights into regions, each with its own effect — the keyboard dancing to the music while the lid shows how hot the computer runs.
+• Your games on your keyboard: your health, ammo, flashes and the bomb in Counter-Strike 2, your hero's health, mana and stuns in Dota 2 — then your effect comes back after the match.
+• Your computer, at a glance: CPU and GPU load, memory and temperatures can drive any setting or the brightness.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
 • Signals from your other tools: a build script or Home Assistant tells Candeo what happened. A rule switches the lighting while it holds, or any setting of the effect running follows the value sent — a colour, a speed. Off until you turn it on.
@@ -29,9 +32,12 @@ Open source, under the GPL-3.0.
 
 ## Features (a short list, shown on the Store page)
 
-- Twenty-four ready-made effects, tuned while you watch them
+- Twenty-six ready-made effects, tuned while you watch them
 - Effects that dance to the music you play
 - Every key its own colour, plus your device's firmware effects
+- Split a device into regions, one effect each
+- Counter-Strike 2 and Dota 2 on your keyboard
+- CPU and GPU load and temperature drive the lighting
 - Automations: the time on the hour, dark at night or when you step away
 - Write your own effects in TypeScript, with a live preview
 - Keeps running with the window closed, from the notification area
