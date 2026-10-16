@@ -39,6 +39,12 @@
     "noDeviceNotice": "Aucun appareil piloté : la bibliothèque se parcourt et l'aperçu tourne sur le gabarit par défaut, mais appliquer un effet demande un appareil que Candeo a le droit de piloter.",
     "deviceStopped": "arrêté · retenu : {name}",
     "deviceIdle": "aucun effet",
+    "regionCount": "{n} région | {n} régions",
+    "regionOfDevice": "{device} · {region}",
+    "regionShare": {
+      "keys": "Région {region} · {n} touche sur {total} | Région {region} · {n} touches sur {total}",
+      "zones": "Région {region} · {n} zone sur {total} | Région {region} · {n} zones sur {total}"
+    },
     "groups": {
       "hardware": "matériel",
       "builtin": "intégrés",

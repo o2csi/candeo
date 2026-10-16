@@ -54,6 +54,11 @@
  * The engine runs one loop per device. The editor takes `current` without
  * asking: a single device is the common case, and choosing every time would be
  * one more ceremony. The gallery's devices column is where the choice is made.
+ *
+ * On a split device, the region chosen there: Apply and Stop act on it, and the
+ * simulator draws it as the gallery does, over the device's frames
+ * (`docs/design/regions.md` §3). A split device is never sent a command for all
+ * of it, which Rust refuses.
  */
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -76,18 +81,22 @@ import {
 } from '../api/candeo'
 import { effectName, userKey } from '../api/effectKey'
 import { error, message } from '../api/journal'
+import { targetKey } from '../api/target'
 import CodeEditor from '../components/CodeEditor.vue'
 import EditorShortcuts from '../components/EditorShortcuts.vue'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import { useDevice } from '../composables/useDevice'
+import { useLayouts } from '../composables/layouts'
+import { isSplit, regionStatus } from '../composables/regions'
 import { useSettings } from '../composables/useSettings'
 import { clearDraft, migrateDrafts, moveDraft, readDraft, writeDraft } from '../editor/draft'
 import { transpile } from '../editor/effect'
 import { refreshLibrary } from '../editor/library'
 import { errors } from '../editor/monaco'
 import { t } from '../i18n'
+import { localized } from '../i18n/text'
 import { NEW_EFFECT } from '../editor/template'
 import type { LayoutView } from '../keyboard/layout'
 import { useSimulatorFeed } from '../keyboard/simulatorFeed'
@@ -99,7 +108,8 @@ const STATUS_PERIOD = 1000
 
 const route = useRoute()
 const router = useRouter()
-const { devices, layout, current, refresh } = useDevice()
+const { devices, layout, current, target, regionOn, refresh } = useDevice()
+const { layoutOf, ensure: ensureLayouts } = useLayouts()
 const { load: loadSettings, reload: reloadSettings, valuesFor, bindingsFor } = useSettings()
 
 /** `/editor` without an identifier = new effect; with one = installed effect. */
@@ -252,9 +262,8 @@ const status = computed(() => {
   )
 })
 
-const deviceKey = computed(() =>
-  current.value ? `${current.value.vid}:${current.value.pid}` : null,
-)
+/** The device, or the region of a split one: what the applied code runs on. */
+const deviceKey = computed(() => (target.value ? targetKey(target.value) : null))
 
 /** The target device as listed, for its product name and its state. */
 const targetDevice = computed(() => {
@@ -263,8 +272,21 @@ const targetDevice = computed(() => {
   return devices.value.find((d) => d.vid === device.vid && d.pid === device.pid) ?? null
 })
 
-/** The product name, as the gallery's devices column shows it. */
-const deviceName = computed(() => targetDevice.value?.name ?? null)
+/** The region chosen in the gallery, while the device is split. */
+const region = computed(() => (targetDevice.value ? regionOn(targetDevice.value) : null))
+
+/** The region's part of the device's loop, while the loop runs its regions. */
+const regionState = computed(() =>
+  region.value ? regionStatus(status.value, region.value.id) : null,
+)
+
+/** The product name, as the gallery's devices column shows it, with the region on a split one. */
+const deviceName = computed(() => {
+  const d = targetDevice.value
+  if (!d) return null
+  const r = region.value
+  return r ? t('effects.regionOfDevice', { device: d.name, region: localized(r.name) }) : d.name
+})
 
 async function refreshStatus(): Promise<void> {
   try {
@@ -287,12 +309,12 @@ const unsaved = computed(() => creating.value || source.value !== saved.value)
  *
  * Stop stops whatever the device runs, so it is offered only then.
  */
-const runsHere = computed(
-  () =>
-    id.value !== null &&
-    status.value?.running === true &&
-    status.value.effectId === id.value,
-)
+const runsHere = computed(() => {
+  if (id.value === null) return false
+  // On a split device, the region's part: the device's own fields are null then.
+  const running = region.value ? regionState.value : status.value
+  return running?.running === true && running.effectId === id.value
+})
 
 /**
  * The saved text the device loop was started from, as far as this screen knows.
@@ -325,16 +347,43 @@ const ready = ref(false)
  * before anything is plugged in, or without owning the keyboard.
  */
 const fallback = ref<LayoutView | null>(null)
-const board = computed<LayoutView | null>(() => layout.value ?? fallback.value)
+
+/**
+ * A split device's own layout, open or not: its region's preview has the
+ * device's frame length, and is drawn over its lights.
+ */
+watch(
+  () => (targetDevice.value && isSplit(targetDevice.value) ? [targetDevice.value] : []),
+  (list) => void ensureLayouts(list),
+  { immediate: true },
+)
+const splitLayout = computed(() =>
+  targetDevice.value && isSplit(targetDevice.value) ? layoutOf(targetDevice.value) : null,
+)
+const board = computed<LayoutView | null>(
+  () => splitLayout.value ?? layout.value ?? fallback.value,
+)
+
+/** What the device's loop runs, for the feed to follow its frames under a region's preview. */
+const deviceLoop = computed<string | null>(() => {
+  const s = status.value
+  if (s?.running !== true) return null
+  const parts = s.regions
+    ? s.regions.map((r) => `${r.region}=${r.effectId ?? ''}`).join(',')
+    : (s.effectId ?? '')
+  return `${parts}|${s.interruption?.rule ?? ''}`
+})
 
 const { frame, restartPreview } = useSimulatorFeed({
   layout: () => board.value,
-  device: () => current.value,
+  device: () => target.value,
   showsDevice: () => showsDevice.value,
+  focus: () => region.value?.positions ?? null,
+  deviceLoop: () => deviceLoop.value,
   // A new effect has no file to preview until its first save.
   previewed: () => (ready.value ? id.value : null),
-  params: () => valuesFor(current.value, id.value ?? '', savedSpecs.value),
-  bindings: () => bindingsFor(current.value, id.value ?? '', savedSpecs.value),
+  params: () => valuesFor(target.value, id.value ?? '', savedSpecs.value),
+  bindings: () => bindingsFor(target.value, id.value ?? '', savedSpecs.value),
   onError: (e) => {
     problem.value = message(e)
   },
@@ -351,9 +400,10 @@ const previewError = computed<string | null>(() => {
  * fail where the saved code does not, and the other way round: the error shown
  * next to the code must be about what the simulator draws.
  */
-const effectError = computed<string | null>(() =>
-  showsDevice.value ? (status.value?.error ?? null) : previewError.value,
-)
+const effectError = computed<string | null>(() => {
+  if (!showsDevice.value) return previewError.value
+  return (region.value ? regionState.value?.error : status.value?.error) ?? null
+})
 
 /** Which source the simulator draws, as a state. */
 const simNote = computed(() => {
@@ -452,7 +502,7 @@ const save = () =>
  */
 const applyToDevice = () =>
   act(async () => {
-    const device = current.value
+    const device = target.value
     if (!device) return
     const effectId = (unsaved.value ? null : id.value) ?? (await install())
     // The gallery's rule, through the same helpers: manifest defaults overridden
@@ -465,7 +515,7 @@ const applyToDevice = () =>
       valuesFor(device, effectId, savedSpecs.value),
       bindingsFor(device, effectId, savedSpecs.value),
     )
-    appliedSource.value = { device: `${device.vid}:${device.pid}`, text: saved.value }
+    appliedSource.value = { device: targetKey(device), text: saved.value }
     // Rust has just remembered the applied effect. The gallery reads this shared
     // state back rather than guessing it.
     await reloadSettings()
@@ -495,7 +545,7 @@ const duplicate = () =>
  */
 const halt = () =>
   act(async () => {
-    const device = current.value
+    const device = target.value
     if (!device) return
     await stopEffect(device)
     // The stop forgot the applied effect on disk, for the same reason as above.
@@ -648,14 +698,21 @@ onBeforeUnmount(() => {
         <div class="sim-head">
           <h2>{{ t('editor.simulator') }}</h2>
           <p class="sim-note">{{ simNote }}</p>
-          <p v-if="!layout" class="sim-note">{{ t('editor.noKeyboard') }}</p>
+          <p v-if="!layout && !splitLayout" class="sim-note">{{ t('editor.noKeyboard') }}</p>
         </div>
 
         <!--
           The layout comes from Rust: it is null for the length of a round trip.
           No empty keyboard is drawn in the meantime.
         -->
-        <KeyboardSimulator v-if="board" class="sim-board" :layout="board" :frame="frame" />
+        <KeyboardSimulator
+          v-if="board"
+          class="sim-board"
+          :layout="board"
+          :frame="frame"
+          :focus="region?.positions"
+          :focus-name="region ? localized(region.name) : undefined"
+        />
       </div>
     </div>
   </section>

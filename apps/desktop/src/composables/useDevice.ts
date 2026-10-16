@@ -21,7 +21,9 @@ import { computed, readonly, ref } from 'vue'
 
 import * as api from '../api/candeo'
 import { message } from '../api/journal'
-import type { DeviceInfo, DeviceRef, LayoutInfo } from '../api/types'
+import { targetFor, type Target } from '../api/target'
+import type { DeviceInfo, DeviceRef, LayoutInfo, RegionInfo } from '../api/types'
+import { chosenRegion } from './regions'
 
 const devices = ref<DeviceInfo[]>([])
 const layout = ref<LayoutInfo | null>(null)
@@ -36,7 +38,17 @@ const error = ref<string | null>(null)
  */
 const chosen = ref<DeviceRef | null>(null)
 
+/**
+ * The region chosen on each split device, key `vid:pid`.
+ *
+ * Per device rather than one: going back to a split device finds the region
+ * left there, as going back to the screen finds the device. A device made whole
+ * keeps its entry, unread until it is split again.
+ */
+const chosenRegions = ref<Record<string, string>>({})
+
 const same = (a: DeviceRef, b: DeviceRef) => a.vid === b.vid && a.pid === b.pid
+const modelKey = (d: DeviceRef) => `${d.vid}:${d.pid}`
 
 /**
  * The device targeted by the engine's commands.
@@ -57,6 +69,27 @@ const current = computed<DeviceRef | null>(() => {
 
   const picked = list.find((d) => d.open) ?? list.find((d) => d.present) ?? list[0]
   return picked ? { vid: picked.vid, pid: picked.pid } : null
+})
+
+/** The region a device's selection falls on while it is split, `null` while it is whole. */
+function regionOn(device: Pick<DeviceInfo, 'vid' | 'pid' | 'split' | 'regions'>): RegionInfo | null {
+  return chosenRegion(device, chosenRegions.value[modelKey(device)])
+}
+
+/**
+ * What the engine's commands act on: the current device, or the region chosen
+ * on it while it is split (`docs/design/regions.md` §3).
+ *
+ * The whole application's choice, as {@link current} is: the editor applies to
+ * the region the gallery points to, and a split device is never sent a command
+ * for all of it, which Rust refuses.
+ */
+const target = computed<Target | null>(() => {
+  const device = current.value
+  if (!device) return null
+  const info = devices.value.find((d) => same(d, device))
+  const region = info ? regionOn(info) : null
+  return targetFor(device, region?.id ?? null)
 })
 
 /** Errors raised by Rust are already readable: they are shown as they are. */
@@ -82,6 +115,16 @@ export function useDevice() {
    */
   function select(device: DeviceRef | null) {
     chosen.value = device
+  }
+
+  /**
+   * Designates one region of a split device: the device becomes the current
+   * one, and the region what its commands act on. Touches nothing on the Rust
+   * side either.
+   */
+  function selectRegion(device: DeviceRef, region: string) {
+    chosen.value = { vid: device.vid, pid: device.pid }
+    chosenRegions.value = { ...chosenRegions.value, [modelKey(device)]: region }
   }
 
   /**
@@ -150,6 +193,9 @@ export function useDevice() {
     devices: readonly(devices),
     current,
     select,
+    target,
+    regionOn,
+    selectRegion,
     layout: readonly(layout),
     busy: readonly(busy),
     error: readonly(error),

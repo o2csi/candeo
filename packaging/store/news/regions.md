@@ -1,0 +1,2 @@
+en: Split into regions, in Devices, gives the keyboard, lid, base and power button of an Alienware 17 R5, or the ring and logo of an Alienware m18, each its own effect in Effects, with its own settings and what its brightness follows.
+fr: Scinder en régions, dans Périphériques, donne au clavier, au capot, à la base et au bouton d'alimentation d'un Alienware 17 R5, ou à l'anneau et au logo d'un Alienware m18, chacun son propre effet dans Effets, avec ses réglages et ce que suit sa luminosité.

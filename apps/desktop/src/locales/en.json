@@ -39,6 +39,12 @@
     "noDeviceNotice": "No device controlled: the library can be browsed and the preview runs on the default layout, but applying an effect needs a device Candeo is allowed to control.",
     "deviceStopped": "stopped · remembered: {name}",
     "deviceIdle": "no effect",
+    "regionCount": "{n} region | {n} regions",
+    "regionOfDevice": "{device} · {region}",
+    "regionShare": {
+      "keys": "Region {region} · {n} key of {total} | Region {region} · {n} keys of {total}",
+      "zones": "Region {region} · {n} zone of {total} | Region {region} · {n} zones of {total}"
+    },
     "groups": {
       "hardware": "hardware",
       "builtin": "built-in",
