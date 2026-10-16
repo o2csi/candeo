@@ -26,6 +26,15 @@
       "lights": "3 zones: the ring in two halves, the logo",
       "surveyed": "Firmware not read, 09/2026",
       "protocol": "docs/protocol/alienware-m18-r1.md"
+    },
+    {
+      "maker": "Alienware",
+      "model": "17 R5",
+      "kind": "Laptop keyboard and lighting zones",
+      "connection": "Built in",
+      "lights": "13 zones: the keyboard in four, the lid, the base, the touchpad",
+      "surveyed": "Firmware not read, 10/2026",
+      "protocol": "docs/protocol/alienware-17-r5.md"
     }
   ]
 }
