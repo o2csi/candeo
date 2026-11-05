@@ -75,7 +75,7 @@ jobs:
       # where cargo reads the profiles, so touching a profile opens a fresh
       # namespace, paid for once then reused. Do not remove it, taking it for
       # noise — this key is all that ties the cache to the profiles.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with: { key: "${{ hashFiles('Cargo.toml') }}" }
       # `clippy --all-targets` compiles `candeo-desktop`, and so links
       # webkit2gtk: without these packages, it fails at link time, not at
@@ -126,7 +126,7 @@ jobs:
       # job also compiles in debug, so under `[profile.dev.package."*"]`.
       # Expanded notation, not compact — two keys whose values already carry
       # quotes, which is where this file got caught once.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
           key: "${{ hashFiles('Cargo.toml') }}"
@@ -271,7 +271,7 @@ jobs:
       # `[profile.release]` lives in the **same** `Cargo.toml`: the day it
       # changes, this cache would freeze in exactly the same way, and nobody
       # would make the connection a second time.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
           key: "${{ hashFiles('Cargo.toml') }}"
