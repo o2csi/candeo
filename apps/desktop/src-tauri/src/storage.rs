@@ -698,6 +698,10 @@ pub struct Settings {
     /// See [`SplitDeviceRecord`]; absent while no device is split.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub split_devices: Vec<SplitDeviceRecord>,
+    /// Named settings for one effect, offered on every device and region. See
+    /// [`crate::presets::PresetRecord`]; absent while there is none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<crate::presets::PresetRecord>,
     /// The shipped effects copied into the folder, by name: the hash of the
     /// version copied, or `None` when a file of that name was already there and
     /// was left alone. See [`Store::seed_shipped`].
@@ -773,6 +777,7 @@ impl Default for Settings {
             active_effects: Vec::new(),
             effect_params: Vec::new(),
             split_devices: Vec::new(),
+            presets: Vec::new(),
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
             signals: crate::signals::SignalsConfig::default(),
@@ -1374,6 +1379,9 @@ impl Settings {
             }
             split.drop_empty();
         }
+        // Its presets too: named settings for an effect nothing holds any more
+        // (`docs/design/presets.md` §6).
+        self.presets.retain(|p| p.effect != effect);
         *self != before
     }
 
@@ -1400,6 +1408,7 @@ impl Settings {
             .map(|r| r.effect.as_str())
             .chain(self.effect_params.iter().map(|r| r.effect.as_str()))
             .chain(regions)
+            .chain(self.presets.iter().map(|p| p.effect.as_str()))
             .collect();
         references.into_iter().map(str::to_owned).collect()
     }
@@ -1420,11 +1429,13 @@ impl Settings {
             .map(|r| &mut r.effect)
             .chain(self.effect_params.iter_mut().map(|r| &mut r.effect))
             .chain(regions)
+            .chain(self.presets.iter_mut().map(|p| &mut p.effect))
         {
             if let Some(name) = renames.get(effect.as_str()) {
                 effect.clone_from(name);
             }
         }
+        self.number_twin_presets();
     }
 }
 
@@ -1636,7 +1647,7 @@ fn sanitize_name(wanted: &str) -> String {
 ///
 /// `taken` holds lowercased names: two names differing only by case are the
 /// same file on Windows.
-fn free_name(base: &str, taken: &BTreeSet<String>) -> String {
+pub(crate) fn free_name(base: &str, taken: &BTreeSet<String>) -> String {
     if !taken.contains(&base.to_lowercase()) {
         return base.to_owned();
     }
@@ -4853,6 +4864,13 @@ mod tests {
                     bindings: crate::runtime::Bindings::new(),
                 }],
             }],
+            presets: vec![crate::presets::PresetRecord {
+                effect: "shipped:Rain".into(),
+                name: "Storm".into(),
+                values: to_map(&[("speed", serde_json::json!(3))]),
+                bindings: [("hue".to_string(), "sound:tone".to_string())].into(),
+                unknown: serde_json::Map::new(),
+            }],
             shipped_effects: BTreeMap::from([
                 ("Breathing".to_owned(), Some("abc".to_owned())),
                 ("Sweep".to_owned(), None),
@@ -5801,6 +5819,17 @@ mod tests {
         assert!(!settings.forget_effect("user:Vague"));
     }
 
+    /// A preset names its effect as a setting does: the migration of version 2
+    /// names finds it among the references (`docs/design/presets.md` §6).
+    #[test]
+    fn a_preset_names_its_effect_among_the_references() {
+        let mut settings = Settings::default();
+        settings
+            .save_preset("Wave", "Calm", serde_json::Map::new(), Default::default())
+            .unwrap();
+        assert_eq!(settings.effect_references(), vec!["Wave".to_owned()]);
+    }
+
     /// The file as `regions.md` §11 b writes it reads back as it was written,
     /// and a file without the key reads as every device whole.
     #[test]
@@ -6154,11 +6183,20 @@ mod tests {
         mirror("SplitDeviceRecord", &split);
         mirror("RegionRecord", &region);
         mirror("RegionEffectParamsRecord", &region_params);
+        let preset = crate::presets::PresetRecord {
+            effect: "shipped:Rain".into(),
+            name: "Storm".into(),
+            values: serde_json::Map::new(),
+            bindings: [("speed".to_string(), "sound:volume".to_string())].into(),
+            unknown: serde_json::Map::new(),
+        };
+        mirror("PresetRecord", &preset);
         mirror(
             "Settings",
             &Settings {
                 preferences,
                 split_devices: vec![split],
+                presets: vec![preset],
                 ..Settings::default()
             },
         );

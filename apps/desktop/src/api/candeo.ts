@@ -731,6 +731,62 @@ export interface EffectParamsRecord {
 export type Bindings = Record<string, string>
 
 /**
+ * Named settings for one effect, offered on every device and region
+ * (`docs/design/presets.md`). Mirror of `PresetRecord`, in
+ * `src-tauri/src/presets.rs`.
+ *
+ * Unlike {@link EffectParamsRecord}, `values` holds every parameter the effect
+ * declared when the preset was saved: a later default does not change a look
+ * someone named. They are checked against what the effect declares when the
+ * preset is picked (`presetSettings`).
+ */
+export interface PresetRecord {
+  /** The key of the effect it sets. */
+  effect: string
+  /** Unique within its effect, ignoring case. */
+  name: string
+  values: EffectParams
+  bindings?: Bindings
+}
+
+/**
+ * Saves settings as a preset of `effect`, last of its list. Answers with the
+ * effect's presets. A name taken for this effect, ignoring case, is refused
+ * (`presetExists`), as are an empty one and one past 64 characters.
+ *
+ * Picking a preset needs no command of its own: the window writes the target's
+ * settings with {@link rememberEffectParams} and {@link rememberEffectBindings}.
+ */
+export function savePreset(
+  effect: string,
+  name: string,
+  values: EffectParams,
+  bindings: Bindings,
+): Promise<PresetRecord[]> {
+  return invoke('save_preset', { effect, name, values, bindings })
+}
+
+/** Replaces a preset's values and bindings, where it stands. Answers with the effect's presets. */
+export function updatePreset(
+  effect: string,
+  name: string,
+  values: EffectParams,
+  bindings: Bindings,
+): Promise<PresetRecord[]> {
+  return invoke('update_preset', { effect, name, values, bindings })
+}
+
+/** Renames a preset, where it stands. Answers with the effect's presets. */
+export function renamePreset(effect: string, from: string, to: string): Promise<PresetRecord[]> {
+  return invoke('rename_preset', { effect, from, to })
+}
+
+/** Deletes a preset; one already gone is no error. Answers with the effect's presets. */
+export function deletePreset(effect: string, name: string): Promise<PresetRecord[]> {
+  return invoke('delete_preset', { effect, name })
+}
+
+/**
  * Mirror of `Settings`, in `src-tauri/src/storage.rs`.
  *
  * A global preference in `preferences`, everything that depends on a keyboard in
@@ -753,6 +809,8 @@ export interface Settings {
   effectParams: EffectParamsRecord[]
   /** The devices split into regions. Absent when none is: an older build drops the key. */
   splitDevices?: SplitDeviceRecord[]
+  /** Named settings for one effect, in the order they were saved. Absent when there is none. */
+  presets?: PresetRecord[]
   /**
    * Automation rules, in their order, which is their priority. Kept here even by
    * code that does not read them: writing `Settings` back without them would

@@ -62,13 +62,20 @@
  * follows, and its settings per effect (`docs/design/regions.md` §3, §8): every
  * table here is keyed by a {@link Target}, the device's records untouched while
  * its regions have their own. The brightness alone stays the device's (§4).
+ *
+ * ## Presets
+ *
+ * Named settings for one effect, offered on every device and region
+ * (`docs/design/presets.md`): read with the rest, changed through their own
+ * commands, which answer with the effect's list. Picking one writes the
+ * target's settings as {@link forget} does, with the preset's values.
  */
 
 import { computed, readonly, ref } from 'vue'
 import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
-import type { Bindings, Dimming, EffectParams, Settings } from '../api/candeo'
+import type { Bindings, Dimming, EffectParams, PresetRecord, Settings } from '../api/candeo'
 import { message } from '../api/journal'
 import { targetKey, type Target } from '../api/target'
 import type { DeviceRef } from '../api/types'
@@ -152,6 +159,16 @@ const brightness = ref<Record<string, number>>({})
  */
 const dimming = ref<Record<string, Dimming>>({})
 
+/** Each effect's presets, in the order they were saved, key the effect's. Absent = none. */
+const presets = ref<Record<string, PresetRecord[]>>({})
+
+/**
+ * Lists installed from a preset command's answer. A read that left before one
+ * may land after it: counted, so that it does not put back the list the
+ * command has just replaced.
+ */
+let presetChanges = 0
+
 /** What prevented reading, adjusting or remembering. Already readable. */
 const error = ref<string | null>(null)
 
@@ -230,9 +247,10 @@ export function sameValue(a: ParamValue, b: ParamValue): boolean {
  *
  * Limited to the **declared** parameters: a setting remembered for a parameter
  * the effect no longer has disappears on its own, instead of travelling
- * indefinitely to a loop that no longer reads it.
+ * indefinitely to a loop that no longer reads it. A preset's values are read
+ * the same way when it is picked (`presets.ts`).
  */
-function merge(specs: Record<string, ParamSpec>, kept: EffectParams): EffectParams {
+export function merge(specs: Record<string, ParamSpec>, kept: EffectParams): EffectParams {
   const out: EffectParams = {}
   for (const [id, spec] of Object.entries(specs)) {
     const v = kept[id]
@@ -556,6 +574,13 @@ function onDisk(s: Settings): OnDisk {
   return out
 }
 
+/** The file's presets, by effect, each list in its order. */
+function presetsByEffect(records: readonly PresetRecord[]): Record<string, PresetRecord[]> {
+  const out: Record<string, PresetRecord[]> = {}
+  for (const p of records) (out[p.effect] ??= []).push(p)
+  return out
+}
+
 /**
  * Reads `settings.json` and replaces what is remembered.
  *
@@ -564,6 +589,7 @@ function onDisk(s: Settings): OnDisk {
  */
 function read(): Promise<void> {
   const mine = ++generation
+  const changes = presetChanges
 
   const run = api
     .getSettings()
@@ -571,6 +597,9 @@ function read(): Promise<void> {
       // A more recent read got ahead: ours is stale, and applying it would undo
       // what that one has just installed.
       if (mine !== generation) return
+
+      // A preset command answered meanwhile: its list is newer than this read.
+      if (changes === presetChanges) presets.value = presetsByEffect(s.presets ?? [])
 
       const disk = onDisk(s)
       const values = disk.values
@@ -916,24 +945,96 @@ export function useSettings() {
     specs: Record<string, ParamSpec>,
     applied: boolean,
   ): EffectParams {
+    return replace(device, effect, specs, {}, {}, applied).values
+  }
+
+  /**
+   * Replaces every setting of an effect on a device at once, values and
+   * bindings: memory, the device's loop, disk. What picking a preset does
+   * (`docs/design/presets.md` §5), and {@link forget} with nothing kept.
+   *
+   * Read against what the effect declares, as {@link valuesFor} reads the file:
+   * a value for a parameter it no longer has goes, one that no longer fits takes
+   * the default, and only what departs from the declaration is written.
+   *
+   * Writes without waiting: it is a click, not a drag, there is nothing to
+   * group. Returns the complete values and the bindings, for the caller to give
+   * the preview: only it knows what it is looking at.
+   */
+  function replace(
+    device: Target,
+    effect: string,
+    specs: Record<string, ParamSpec>,
+    values: EffectParams,
+    bindings: Bindings,
+    applied: boolean,
+  ): { values: EffectParams; bindings: Bindings } {
     error.value = null
-    const declared = merge(specs, {})
+    const complete = merge(specs, values)
+    const kept = apart(specs, complete)
+    const next = declaredBindings(specs, bindings)
     const k = key(device, effect)
-    remembered.value = { ...remembered.value, [k]: {} }
-    bound.value = { ...bound.value, [k]: {} }
-    // Same condition as {@link adjust}, and for the same reason: restoring the
+    remembered.value = { ...remembered.value, [k]: kept }
+    bound.value = { ...bound.value, [k]: next }
+    // Same condition as {@link adjust}, and for the same reason: replacing the
     // values of an effect being previewed has no reason to touch the keyboard,
     // which may be running something else.
     if (applied) {
-      hot(targetKey(device), (p) => api.setEffectParams(device, p), declared)
-      void api.setEffectBindings(device, {}).catch((e: unknown) => {
+      hot(targetKey(device), (p) => api.setEffectParams(device, p), complete)
+      void api.setEffectBindings(device, next).catch((e: unknown) => {
         error.value = message(e)
       })
     }
-    persist(device, effect, {})
+    persist(device, effect, kept)
     settleOne(device, effect, true)
-    rememberBindings(device, effect, {})
-    return declared
+    rememberBindings(device, effect, next)
+    return { values: complete, bindings: next }
+  }
+
+  /** An effect's presets, in the order they were saved. */
+  function presetsOf(effect: string): readonly PresetRecord[] {
+    return presets.value[effect] ?? []
+  }
+
+  /** Installs the list a preset command answered with. */
+  function installPresets(effect: string, list: PresetRecord[]): void {
+    presetChanges++
+    const all = { ...presets.value }
+    if (list.length > 0) all[effect] = list
+    else delete all[effect]
+    presets.value = all
+  }
+
+  /**
+   * Saves settings as a preset of `effect`: the complete values shown, and the
+   * bindings. Rejects with Rust's refusal — a name taken or empty — for the
+   * caller to say beside the name it asked for.
+   */
+  async function savePreset(
+    effect: string,
+    name: string,
+    values: EffectParams,
+    bindings: Bindings,
+  ): Promise<void> {
+    installPresets(effect, await api.savePreset(effect, name, values, bindings))
+  }
+
+  /** Replaces a preset's values and bindings with these. */
+  async function updatePreset(
+    effect: string,
+    name: string,
+    values: EffectParams,
+    bindings: Bindings,
+  ): Promise<void> {
+    installPresets(effect, await api.updatePreset(effect, name, values, bindings))
+  }
+
+  async function renamePreset(effect: string, from: string, to: string): Promise<void> {
+    installPresets(effect, await api.renamePreset(effect, from, to))
+  }
+
+  async function deletePreset(effect: string, name: string): Promise<void> {
+    installPresets(effect, await api.deletePreset(effect, name))
   }
 
   /**
@@ -965,6 +1066,8 @@ export function useSettings() {
     applied.value = Object.fromEntries(
       Object.entries(applied.value).filter(([, id]) => id !== effect),
     )
+    // Its presets went with it (`docs/design/presets.md` §6).
+    if (effect in presets.value) installPresets(effect, [])
   }
 
   /**
@@ -985,10 +1088,13 @@ export function useSettings() {
     applied.value = {}
     brightness.value = {}
     dimming.value = {}
+    presetChanges++
+    presets.value = {}
   }
 
   /**
-   * Every effect the settings refer to, applied or tuned on any device.
+   * Every effect the settings refer to, applied or tuned on any device, or
+   * holding presets.
    *
    * What the gallery compares with the library to tell someone that an effect
    * they tuned is no longer in the folder.
@@ -999,6 +1105,7 @@ export function useSettings() {
     for (const [key, bindings] of Object.entries(bound.value)) {
       if (Object.keys(bindings).length > 0) names.add(key.slice(key.indexOf('/') + 1))
     }
+    for (const effect of Object.keys(presets.value)) names.add(effect)
     return names
   })
 
@@ -1020,6 +1127,12 @@ export function useSettings() {
     bindPreview,
     settle,
     forget,
+    replace,
+    presetsOf,
+    savePreset,
+    updatePreset,
+    renamePreset,
+    deletePreset,
     dropEffect,
     dropAll,
     lastAppliedOn,

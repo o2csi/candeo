@@ -183,6 +183,10 @@ function clearDrafts(): void {
 // is not about these. The gallery keeps one form for every effect.
 watch(() => props.specs, clearDrafts)
 
+// A preset picked replaces every setting at once, as the reset does: a row still
+// waiting for a signal's name would contradict the bindings it brings.
+defineExpose({ clearDrafts })
+
 /** The signal a row reads, or `null` while it holds its value. */
 function readBy(id: string): string | null {
   const source = props.bindable ? props.bindings[id] : undefined

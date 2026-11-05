@@ -16,7 +16,7 @@ Make your keyboard light up exactly the way you want. Candeo drives every key di
 Works with the Razer DeathStalker V2 Pro (wired), the Alienware m18 R1, its keyboard and its lighting zones, and the Alienware 17 R5 — and offers to try more keyboards and laptops from Razer, ASUS, SteelSeries, Logitech, HyperX, Alienware and Dell. A supported device is required; the list grows at https://o2csi.github.io/candeo/devices.html.
 
 HIGHLIGHTS
-• Twenty-six effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it.
+• Twenty-six effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it, and keep the settings you like as presets, back in one click.
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • One device, several effects: split a laptop's lights into regions, each with its own effect — the keyboard dancing to the music while the lid shows how hot the computer runs.
 • Your games on your keyboard: your health, ammo, flashes and the bomb in Counter-Strike 2, your hero's health, mana and stuns in Dota 2 — then your effect comes back after the match.
@@ -33,6 +33,7 @@ Open source, under the GPL-3.0.
 ## Features (a short list, shown on the Store page)
 
 - Twenty-six ready-made effects, tuned while you watch them
+- Keep the settings you like as presets, back in one click
 - Effects that dance to the music you play
 - Every key its own colour, plus your device's firmware effects
 - Split a device into regions, one effect each

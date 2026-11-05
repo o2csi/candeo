@@ -26,8 +26,8 @@ account, no extra services to install, nothing sent anywhere.
 
 - **Twenty-six effects, ready to go** — waves, rain, a starry night, a clock,
   scrolling text, ripples from the keys you press, fireworks on the beat. Tune
-  each one while you watch it; your keyboard's own built-in effects are there
-  too.
+  each one while you watch it and keep the settings you like as presets; your
+  keyboard's own built-in effects are there too.
 - **Lights that dance to your music** — and any effect can follow the sound:
   faster when it gets loud, redder with the bass. Never your microphone, never
   recorded. [Sound](https://o2csi.github.io/candeo/sound.html)

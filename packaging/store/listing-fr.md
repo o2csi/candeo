@@ -15,7 +15,7 @@ Faites briller votre clavier exactement comme vous l'entendez. Candeo pilote cha
 Compatible avec le Razer DeathStalker V2 Pro (filaire), l'Alienware m18 R1, son clavier et ses zones lumineuses, et l'Alienware 17 R5 — et d'autres claviers et portables à essayer, de Razer, ASUS, SteelSeries, Logitech, HyperX, Alienware et Dell. Un appareil pris en charge est nécessaire ; la liste s'allonge sur https://o2csi.github.io/candeo/devices.html.
 
 POINTS FORTS
-• Vingt-six effets prêts à l'emploi : des ondes qui suivent votre frappe, la pluie, un ciel étoilé, des éclairs, une horloge qui fait défiler l'heure sur les touches, le texte de votre choix qui défile de la même façon, des barres et des gerbes qui dansent sur la musique que vous écoutez, une rangée d'état pour ce que disent vos autres outils… Réglez chacun en le regardant.
+• Vingt-six effets prêts à l'emploi : des ondes qui suivent votre frappe, la pluie, un ciel étoilé, des éclairs, une horloge qui fait défiler l'heure sur les touches, le texte de votre choix qui défile de la même façon, des barres et des gerbes qui dansent sur la musique que vous écoutez, une rangée d'état pour ce que disent vos autres outils… Réglez chacun en le regardant, et gardez les réglages qui vous plaisent en préréglages, retrouvés en un clic.
 • Chaque touche, sa couleur : toute la matrice, des dégradés, et les effets intégrés au micrologiciel de votre appareil.
 • Un appareil, plusieurs effets : scindez les lumières d'un portable en régions, chacune avec son effet — le clavier qui danse sur la musique pendant que le capot montre la chaleur de l'ordinateur.
 • Vos jeux sur votre clavier : votre santé, vos munitions, les flashs et la bombe dans Counter-Strike 2, la vie, le mana et les étourdissements de votre héros dans Dota 2 — puis votre effet revient après la partie.
@@ -32,6 +32,7 @@ Open source, sous licence GPL-3.0.
 ## Fonctionnalités (liste courte, affichée sur la page du Store)
 
 - Vingt-six effets prêts à l'emploi, réglables en les regardant
+- Gardez les réglages qui vous plaisent en préréglages, retrouvés en un clic
 - Des effets qui dansent sur la musique que vous écoutez
 - Chaque touche sa couleur, et les effets du micrologiciel de votre appareil
 - Scindez un appareil en régions, un effet chacune
