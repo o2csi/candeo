@@ -36,8 +36,9 @@ a dev launch while `candeo.exe` runs only brings the installed window forward
 and exits (`src-tauri/src/single_instance.rs`). Check with
 `Get-Process candeo -ErrorAction SilentlyContinue`; if it runs, ask whoever sits
 at the computer to quit it from the notification area rather than killing it.
-Both builds also share `settings.json` (`docs/design/msix.md` §2), and an older
-installed build drops the settings it does not know when it writes the file.
+Both builds also share `settings.json` (`docs/design/msix.md` §2). Since #373 a
+build writes back the settings it does not know; an installed build released
+before it drops them when it writes the file.
 
 ## Languages
 

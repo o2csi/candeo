@@ -294,7 +294,7 @@ pub enum DeviceState {
 /// `v1.4 / Unkown Variant` then `v1.5 / Quartz` during the protocol survey: a
 /// binding that matches on those fields breaks on update, and the adopted device
 /// becomes a stranger overnight.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRecord {
     pub vid: u16,
@@ -330,6 +330,10 @@ pub struct DeviceRecord {
     /// slider's brightness, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dimming: Option<Dimming>,
+    /// What this version does not know, written back unchanged: see
+    /// [`Settings::unknown`].
+    #[serde(flatten)]
+    pub unknown: serde_json::Map<String, serde_json::Value>,
 }
 
 impl DeviceRecord {
@@ -339,7 +343,11 @@ impl DeviceRecord {
     /// entry says. Keeping it would tell nothing to whoever rereads their
     /// settings, and would grow the file by one line per device touched once.
     fn is_inert(&self) -> bool {
-        self.state == DeviceState::Detected && self.brightness.is_none() && self.dimming.is_none()
+        // What a newer version keeps here is a decision too, even unread.
+        self.state == DeviceState::Detected
+            && self.brightness.is_none()
+            && self.dimming.is_none()
+            && self.unknown.is_empty()
     }
 
     /// True if this entry designates the enumerated device.
@@ -553,7 +561,7 @@ pub struct RegionEffectParamsRecord {
 /// prevents the confusion this module just came out of. Anything that depends on
 /// a keyboard lives in an indexed list; what does not lives here, and the
 /// language — when it arrives — will have nothing to decide.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     /// Log level, when someone changed it from the application.
@@ -596,6 +604,10 @@ pub struct Preferences {
     /// middle of it. Off by default, and written only when on.
     #[serde(skip_serializing_if = "is_false")]
     pub automations_paused: bool,
+    /// What this version does not know, written back unchanged: see
+    /// [`Settings::unknown`].
+    #[serde(flatten)]
+    pub unknown: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for Preferences {
@@ -608,6 +620,7 @@ impl Default for Preferences {
             theme: Theme::default(),
             check_for_updates: true,
             automations_paused: false,
+            unknown: serde_json::Map::new(),
         }
     }
 }
@@ -728,6 +741,18 @@ pub struct Settings {
     /// than v2.1 is around any more.
     #[serde(default, rename = "logLevel", skip_serializing)]
     legacy_log_level: Option<LogLevel>,
+    /// What this version does not know, kept as it was read and written back
+    /// unchanged (#373).
+    ///
+    /// A build used to write back only what it knew, so one older than the
+    /// file's last writer erased whatever came since. An old 0.5.1 left installed
+    /// beside the Store version erased every rule and the chosen definitions that
+    /// way in October 2026, and it happens whenever two builds alternate — the
+    /// Store's at logon, a development one beside it. From this version on, a
+    /// build changes only what it understands; the same goes for
+    /// [`Preferences`] and [`DeviceRecord`], where new settings land most.
+    #[serde(flatten)]
+    pub unknown: serde_json::Map<String, serde_json::Value>,
 }
 
 /// Current shape of `settings.json`.
@@ -753,6 +778,7 @@ impl Default for Settings {
             signals: crate::signals::SignalsConfig::default(),
             sound: crate::audio::analysis::Tuning::default(),
             legacy_log_level: None,
+            unknown: serde_json::Map::new(),
         }
     }
 }
@@ -846,6 +872,7 @@ impl Settings {
                 state,
                 brightness: None,
                 dimming: None,
+                unknown: serde_json::Map::new(),
             }),
         }
         self.prune();
@@ -882,6 +909,7 @@ impl Settings {
                     state: DeviceState::default(),
                     brightness: None,
                     dimming: Some(dimming),
+                    unknown: serde_json::Map::new(),
                 });
             }
         }
@@ -977,6 +1005,7 @@ impl Settings {
                     state: DeviceState::default(),
                     brightness: Some(level),
                     dimming: None,
+                    unknown: serde_json::Map::new(),
                 });
             }
         }
@@ -4778,6 +4807,7 @@ mod tests {
                 theme: Theme::Light,
                 check_for_updates: false,
                 automations_paused: true,
+                unknown: serde_json::Map::new(),
             },
             devices: vec![DeviceRecord {
                 vid: 0x1532,
@@ -4786,6 +4816,7 @@ mod tests {
                 state: DeviceState::Adopted,
                 brightness: Some(128),
                 dimming: None,
+                unknown: serde_json::Map::new(),
             }],
             definitions: vec![DefinitionChoice {
                 vid: 0x1532,
@@ -4846,6 +4877,7 @@ mod tests {
                 sensitivity: 0.7,
             },
             legacy_log_level: None,
+            unknown: serde_json::Map::new(),
         };
 
         store.write_settings(&settings).unwrap();
@@ -6015,6 +6047,57 @@ mod tests {
     ///
     /// Same guard as `STATE_CHANGED` and the window label: the word "mirror" is a
     /// promise, and this keeps it.
+    /// #373: a build writes back what it does not know. One that kept only its
+    /// own fields erased what a newer one had added: every rule, once.
+    #[test]
+    fn what_this_version_does_not_know_is_written_back() {
+        let file = serde_json::json!({
+            "version": SETTINGS_VERSION,
+            "preferences": { "language": "fr", "fromLater": { "on": true } },
+            "devices": [{ "vid": 5426, "pid": 658, "state": "adopted", "fromLater": [1, 2] }],
+            "activeEffects": [],
+            "effectParams": [],
+            "shippedEffects": {},
+            "rules": [],
+            "fromLater": { "kept": "as is" }
+        });
+        let settings: Settings = serde_json::from_value(file).expect("settings");
+        assert_eq!(
+            settings.preferences.language,
+            LanguageSetting::Fr,
+            "what it knows is read"
+        );
+        assert_eq!(settings.devices[0].state, DeviceState::Adopted);
+
+        let written = serde_json::to_value(&settings).expect("serialization");
+        assert_eq!(written["fromLater"], serde_json::json!({ "kept": "as is" }));
+        assert_eq!(
+            written["preferences"]["fromLater"],
+            serde_json::json!({ "on": true })
+        );
+        assert_eq!(
+            written["devices"][0]["fromLater"],
+            serde_json::json!([1, 2])
+        );
+        assert!(
+            written.get("logLevel").is_none(),
+            "the legacy root key is still not written"
+        );
+    }
+
+    /// A device entry back to `detected` goes, unless it holds what a newer
+    /// version decided: that is a decision too, even unread.
+    #[test]
+    fn an_entry_holding_unknown_fields_is_not_inert() {
+        let mut record: DeviceRecord = serde_json::from_value(serde_json::json!({
+            "vid": 5426, "pid": 658, "state": "detected", "fromLater": true
+        }))
+        .expect("a record");
+        assert!(!record.is_inert());
+        record.unknown.clear();
+        assert!(record.is_inert());
+    }
+
     #[test]
     fn settings_have_the_same_fields_on_both_sides() {
         // Every `Option` filled in: a field omitted by `skip_serializing_if`
@@ -6028,6 +6111,7 @@ mod tests {
             theme: Theme::Dark,
             check_for_updates: false,
             automations_paused: true,
+            unknown: serde_json::Map::new(),
         };
         mirror("Preferences", &preferences);
         // A rule with every part present.
@@ -6087,6 +6171,7 @@ mod tests {
                 state: DeviceState::Adopted,
                 brightness: Some(DEFAULT_BRIGHTNESS),
                 dimming: Some(following("sound:bass")),
+                unknown: serde_json::Map::new(),
             },
         );
         mirror("Dimming", &following("sound:bass"));
