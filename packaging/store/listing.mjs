@@ -7,7 +7,7 @@
 //   node packaging/store/listing.mjs <version> <submission.json> the submission, updated
 //   node packaging/store/listing.mjs <version> <submission.json> v<version>
 //                                                                the same, What's new as released:
-//                                                                the listing sent again (store-listing.yml)
+//                                                                the listing sent again between releases
 //   node packaging/store/listing.mjs --preview [<version>]       the release pull request's comment
 //
 // The submission is what `msstore submission get` prints. The updated one goes to
