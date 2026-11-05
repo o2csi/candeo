@@ -75,7 +75,7 @@ jobs:
       # where cargo reads the profiles, so touching a profile opens a fresh
       # namespace, paid for once then reused. Do not remove it, taking it for
       # noise — this key is all that ties the cache to the profiles.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with: { key: "${{ hashFiles('Cargo.toml') }}" }
       # `clippy --all-targets` compiles `candeo-desktop`, and so links
       # webkit2gtk: without these packages, it fails at link time, not at
@@ -126,7 +126,7 @@ jobs:
       # job also compiles in debug, so under `[profile.dev.package."*"]`.
       # Expanded notation, not compact — two keys whose values already carry
       # quotes, which is where this file got caught once.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
           key: "${{ hashFiles('Cargo.toml') }}"
@@ -201,7 +201,7 @@ jobs:
       # Official binaries published by RustSec, checksum verified: a few
       # seconds, where letting `cargo install cargo-audit` compile the tool
       # cost six of the job's 6 min 08.
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with: { tool: cargo-audit }
       # A direct call rather than `rustsec/audit-check@v2.0.0`: the wrapper runs
       # on a deprecated Node.js 20, which GitHub already forces onto Node 24
@@ -271,7 +271,7 @@ jobs:
       # `[profile.release]` lives in the **same** `Cargo.toml`: the day it
       # changes, this cache would freeze in exactly the same way, and nobody
       # would make the connection a second time.
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
           key: "${{ hashFiles('Cargo.toml') }}"
