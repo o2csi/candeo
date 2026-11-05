@@ -316,12 +316,13 @@ black outside the region; the window lays it over the device's own frames (§3).
   build ignores a field it does not know: a region's record would read as the
   device's, beside the device's own for the same effect, and its next write
   would keep it without the region.
-- **An older build drops the key when it rewrites the file**: `Settings` keeps
-  no key it does not know, and the Store, MSI and NSIS builds share the file
+- **An older build drops the key when it rewrites the file**: `Settings` kept
+  no key it did not know, and the Store, MSI and NSIS builds share the file
   ([`msix.md`](msix.md) §2). A device split in a newer build then comes back
   whole — with the effect and follow it had before it was split, which the split
   never touched. Accepted: it costs ticking again and choosing the regions'
-  effects again, and keeping it would need every older build to know the key.
+  effects again. Since #373 a build writes back the keys it does not know, so
+  this holds only for builds released before it.
 - **Same economy as the rest of the file**: no entry while the device is whole,
   no region record holding nothing.
 - **No version bump.** The key is optional and needs no migration;
