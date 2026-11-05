@@ -1,0 +1,20 @@
+[package]
+name = "oxc-transpile"
+description = "Effect TypeScript to the JavaScript QuickJS runs, with Oxc: the #364 proof of concept"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+
+# Oxc alone: what Candeo would add to its build, measured by `size-oxc`
+# against `size-baseline` (see docs/design/headless-transpile-poc.md §4).
+[dependencies]
+oxc = { version = "=0.157.0", features = ["semantic", "transformer", "codegen", "ast_visit"] }
+
+[[bin]]
+name = "size-baseline"
+path = "src/bin/size_baseline.rs"
+
+[[bin]]
+name = "size-oxc"
+path = "src/bin/size_oxc.rs"
