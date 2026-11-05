@@ -107,19 +107,27 @@ merge; `node packaging/store/listing.mjs X.Y.Z` prints everything that would be.
 features since the previous release next to whether `listing-*.md` changed, with
 a warning when they did not: v0.22.0 shipped regions with a description that did
 not name them. Before merging the release, check that the description, the
-features and the screenshots say what ships; the screenshots are set in Partner
-Center by hand.
+features and the screenshots say what ships; the release sends the texts, and
+the screenshots go with `store-listing.yml` below.
 
-**Between releases**, the listings alone can be sent again, without a package:
-in Partner Center choose *Update* on Candeo, set the screenshots and save the
-draft, then run
+**Between releases**, the listings and the screenshots can be sent alone, without
+a package, from what the repository holds:
 
 ```bash
-gh workflow run store-listing.yml -f tag=vX.Y.Z
+gh workflow run store-listing.yml -f tag=vX.Y.Z -f dry_run=false
 ```
 
-with the release the Store has. It writes the listings of `main` into that draft,
-keeps that release's *What's new*, and submits it for certification.
+with the release the Store has. `packaging/store/submit-listing.mjs` creates a
+submission from the last published one through Partner Center's API, writes the
+listings of `main` and `packaging/store/screenshots/<locale>/` into it (they
+replace the screenshots it had), keeps that release's *What's new*, and commits
+it for certification. Run it first without `dry_run=false`: it does everything
+but the commit, then deletes its draft. It stops when a submission is already
+pending.
+
+The screenshots are taken from the running app by
+`packaging/store/screenshots/capture.mjs` (its header says how), in English and
+French, with the site's gallery: look at each one before committing it.
 
 What the job needs, set once under *Settings → Secrets and variables → Actions*:
 
