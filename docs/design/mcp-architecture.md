@@ -1,26 +1,33 @@
-# Candeo — architecture des effets et interface agentique (proposition)
+# Candeo — effect architecture and an agent interface (proposal)
 
-> **Statut : proposition, non implémentée.** Cette note distingue la réalité du dépôt du design envisagé. Elle complète [`studio.md`](studio.md), [`effects-library.md`](effects-library.md), [`inputs-and-automations.md`](inputs-and-automations.md) et l'[issue MCP #359](https://github.com/o2csi/candeo/issues/359).
+> **Status: proposal, not implemented.** This note tells what the repository does
+> today apart from the design considered. It complements [`studio.md`](studio.md),
+> [`effects-library.md`](effects-library.md),
+> [`inputs-and-automations.md`](inputs-and-automations.md) and
+> [issue #359](https://github.com/o2csi/candeo/issues/359) (MCP).
 >
-> Objectif : permettre à un agent compatible MCP de créer, valider, prévisualiser puis proposer l'application d'un effet, sans copier-coller manuel. **Aucune modification de l'éclairage ne doit résulter d'une simple génération ou prévisualisation.** Aucun service réseau n'est activé implicitement.
+> The goal: let an MCP-compatible agent create, validate and preview an effect,
+> then propose applying it, without manual copy and paste. **No lighting change
+> may result from generating or previewing alone.** No network service is turned
+> on implicitly.
 
-## 1. Architecture actuelle — vérifiée dans le dépôt
+## 1. The architecture today — checked in the repository
 
 ```mermaid
 flowchart TB
-    subgraph Frontend["Fenêtre Tauri / Vue 3"]
-        Monaco["Monaco : édition, typage, diagnostics"]
+    subgraph Frontend["Tauri window / Vue 3"]
+        Monaco["Monaco: editing, types, diagnostics"]
         TS["TypeScript source (.ts)"]
-        Transpile["ts.transpileModule : TS → JS"]
-        Sim["Simulateur Vue : affichage des frames reçues"]
+        Transpile["ts.transpileModule: TS → JS"]
+        Sim["Vue simulator: draws the frames it receives"]
         Monaco --> TS --> Transpile
     end
-    subgraph Backend["Backend Rust de Candeo"]
-        IPC["Commandes Tauri IPC typées"]
-        Store["Bibliothèque d'effets : source + cache compilé"]
-        Runtime["Moteur QuickJS unique"]
-        Preview["Boucle de preview : aucun envoi au matériel"]
-        Applied["Boucle appliquée : sortie matérielle"]
+    subgraph Backend["Candeo's Rust backend"]
+        IPC["Typed Tauri IPC commands"]
+        Store["Effect library: source + compiled cache"]
+        Runtime["One QuickJS engine"]
+        Preview["Preview loop: nothing sent to the hardware"]
+        Applied["Applied loop: hardware output"]
         Store --> Runtime
         Runtime --> Preview
         Runtime --> Applied
@@ -28,38 +35,44 @@ flowchart TB
     Transpile -->|"save_effect_source / cache_effect"| IPC
     IPC --> Store
     Preview -->|"frames"| Sim
-    Applied --> Native["Périphérique HID natif"]
-    Ext["Applications locales / Home Assistant"] --> Signal["API HTTP locale de signaux : opt-in, token, capacités limitées"]
-    Signal --> Rules["Moteur de règles : cron / idle / signaux"]
+    Applied --> Native["Native HID device"]
+    Ext["Local applications / Home Assistant"] --> Signal["Local HTTP signals API: opt-in, token, limited capabilities"]
+    Signal --> Rules["Rule engine: cron / idle / signals"]
     Rules --> Runtime
 ```
 
-**Points de vérification :** `apps/desktop/src/editor/effect.ts`, `apps/desktop/src/editor/library.ts`, `apps/desktop/src/views/EditorView.vue`, `apps/desktop/src-tauri/src/storage.rs`, `docs/api/commands.md`. Le frontend compile les sources TypeScript avec le compilateur livré par Monaco. Le rendu de preview et le rendu appliqué utilisent le même runtime QuickJS ; seule la boucle appliquée écrit sur le matériel.
+**Checked in:** `apps/desktop/src/editor/effect.ts`, `apps/desktop/src/editor/library.ts`,
+`apps/desktop/src/views/EditorView.vue`, `apps/desktop/src-tauri/src/storage.rs`,
+`docs/api/commands.md`. The window compiles TypeScript sources with the compiler
+Monaco ships. Preview and applied rendering use the same QuickJS runtime; only the
+applied loop writes to the hardware.
 
-L'API HTTP de **signaux** existe déjà. Ce n'est **pas** une API de contrôle général de Candeo : l'émetteur fournit des valeurs nommées et l'utilisateur décide dans l'application des règles qu'elles déclenchent.
+The HTTP **signals** API exists already. It is **not** a general control API: the
+sender supplies named values, and the person decides in the application which
+rules they trigger.
 
-## 2. Architecture cible — à valider avant implémentation
+## 2. The target architecture — to validate before implementing
 
 ```mermaid
 flowchart TB
-    Agent["Assistant / client MCP"]
-    UI["Vue + Monaco / futur Composer"]
+    Agent["Assistant / MCP client"]
+    UI["Vue + Monaco / a future Composer"]
     Ext["Scripts / Home Assistant"]
-    subgraph Adaptateurs["Adaptateurs d'entrée (aucune logique métier dupliquée)"]
-        MCP["MCP local (opt-in) : outils + ressources"]
+    subgraph Adapters["Input adapters (no duplicated business logic)"]
+        MCP["Local MCP (opt-in): tools + resources"]
         Tauri["Tauri IPC"]
-        Signals["HTTP signaux existant (opt-in)"]
+        Signals["Existing HTTP signals (opt-in)"]
     end
-    subgraph Domaine["Services métier Rust / source de vérité"]
-        Effects["Bibliothèque + authoring + validation"]
-        Automations["Automatisations + paramètres"]
-        Devices["Découverte et capacités périphériques"]
+    subgraph Domain["Rust domain services / source of truth"]
+        Effects["Library + authoring + validation"]
+        Automations["Automations + settings"]
+        Devices["Device discovery and capabilities"]
     end
-    subgraph Runtime["Exécution"]
+    subgraph Runtime["Execution"]
         Engine["QuickJS / frames"]
-        Preview["Preview sans sortie matérielle"]
-        HID["Transport HID natif"]
-        OpenRGB["Adaptateur OpenRGB (PoC futur, facultatif)"]
+        Preview["Preview without hardware output"]
+        HID["Native HID transport"]
+        OpenRGB["OpenRGB adapter (future PoC, optional)"]
     end
     Agent --> MCP
     UI --> Tauri
@@ -78,91 +91,128 @@ flowchart TB
     Engine --> HID
     Engine -.-> OpenRGB
     Preview --> UI
-    REST["REST général : backlog, non requis pour MCP"]:::deferred
-    REST -.-> Domaine
+    REST["General REST: backlog, not needed by MCP"]:::deferred
+    REST -.-> Domain
     classDef deferred stroke-dasharray: 5 5,fill:#eee,color:#333
 ```
 
-**Principe :** MCP, Tauri IPC et l'API HTTP de signaux ne se parlent pas entre eux ; ils sollicitent les services métier communs. **Aucune API REST généraliste** n'est requise par le MCP. Le REST complet reste hors périmètre tant qu'un consommateur n'est pas identifié.
+**Principle:** MCP, Tauri IPC and the HTTP signals API do not talk to each other;
+each calls the shared domain services. **No general REST API** is needed by MCP.
+A full REST API stays out of scope until someone needs it.
 
-La couche de services est une **cible de refactoring**, pas un module unique déjà présent sous ce nom.
+The services layer is a **refactoring target**, not a module that already exists
+under that name.
 
-## 3. Création d'effets par agent : flux proposé
+## 3. Effects created by an agent: the proposed flow
 
 ```mermaid
 sequenceDiagram
-    actor User as Utilisateur
-    participant Agent as Client/agent MCP
-    participant MCP as Serveur MCP local
-    participant Domain as Domaine effets
+    actor User as Person
+    participant Agent as MCP client / agent
+    participant MCP as Local MCP server
+    participant Domain as Effects domain
     participant Compiler as Transpilation + validation
     participant Engine as QuickJS / preview
-    participant Hardware as Périphérique
-    User->>Agent: Décris l'effet souhaité
-    Agent->>MCP: Lire version API, dispositions, exemples
-    MCP-->>Agent: Ressources versionnées
-    Agent->>MCP: Valider TypeScript (sans appliquer)
-    MCP->>Compiler: Parser / transpiler / vérifier
-    Compiler-->>MCP: Diagnostics structurés
-    MCP-->>Agent: Erreurs ou code exécutable
-    loop Corrections si nécessaire
-        Agent->>MCP: Prévisualiser avec layout
-        MCP->>Domain: Créer contexte d'essai
-        Domain->>Engine: Exécuter sans sortie HID
-        Engine-->>MCP: Frames / état / erreurs
-        MCP-->>Agent: Rendu exploitable par l'agent
+    participant Hardware as Device
+    User->>Agent: Describes the effect wanted
+    Agent->>MCP: Reads the API version, layouts, examples
+    MCP-->>Agent: Versioned resources
+    Agent->>MCP: Validates TypeScript (without applying)
+    MCP->>Compiler: Parse / transpile / check
+    Compiler-->>MCP: Structured diagnostics
+    MCP-->>Agent: Errors or runnable code
+    loop Corrections when needed
+        Agent->>MCP: Previews with a layout
+        MCP->>Domain: Creates a trial context
+        Domain->>Engine: Runs without HID output
+        Engine-->>MCP: Frames / state / errors
+        MCP-->>Agent: A rendering the agent can use
     end
-    Agent->>MCP: Enregistrer effet utilisateur
-    MCP->>Domain: Écriture atomique validée dans la bibliothèque
-    MCP-->>Agent: Identifiant et confirmation
-    Agent->>User: Proposer l'application sur périphérique
-    User->>Agent: Confirmation explicite
-    Agent->>MCP: Appliquer l'effet
-    MCP->>Domain: Vérifier permissions, cible et état
-    Domain->>Engine: Démarrer boucle appliquée
-    Engine->>Hardware: Envoyer les frames
+    Agent->>MCP: Saves a user effect
+    MCP->>Domain: Atomic, validated write to the library
+    MCP-->>Agent: Id and confirmation
+    Agent->>User: Proposes applying it on a device
+    User->>Agent: Explicit confirmation
+    Agent->>MCP: Applies the effect
+    MCP->>Domain: Checks permissions, target and state
+    Domain->>Engine: Starts the applied loop
+    Engine->>Hardware: Sends the frames
 ```
 
-Les outils MCP sont **proposés**, pas implémentés : `list_effects`, `get_layout`, `validate_effect`, `preview_effect`, `save_effect`, `apply_effect`, `list_automations`. La confirmation de l'utilisateur doit être imposée par la politique du produit et le serveur pour les opérations sensibles, et ne doit pas reposer exclusivement sur les bonnes intentions de l'agent.
+The MCP tools are **proposed**, not implemented: `list_effects`, `get_layout`,
+`validate_effect`, `preview_effect`, `save_effect`, `apply_effect`,
+`list_automations`. The person's confirmation must be enforced by the product's
+policy and by the server for sensitive operations, not rest on the agent's good
+intentions alone.
 
-### Fourniture de documentation aux agents
+### Documentation for agents
 
-- Source de vérité : `@candeo/effects-api`, types, documentation, exemples et version d'API réellement installée.
-- **MCP resource** recommandée : `candeo://effects-api` (documentation synthétique et version), éventuellement complétée par `candeo://examples`. Pas besoin d'un outil redondant `get_effect_api` si le client sait lire les ressources.
-- **SKILL.md** optionnel et dérivé, pour guider les agents qui installent un skill : mode d'emploi et workflow, **pas** copie divergente du schéma d'API.
-- Fournir des métadonnées de capacités pour qu'un agent adapte ses appels à la version locale.
+- Source of truth: `@candeo/effects-api`, its types, documentation, examples and
+  the API version actually installed.
+- Recommended **MCP resource**: `candeo://effects-api` (a summary of the
+  documentation and its version), possibly with `candeo://examples`. No redundant
+  `get_effect_api` tool is needed when the client reads resources.
+- An optional, derived **SKILL.md** for agents that install skills: how to use it
+  and the workflow, **not** a copy of the API schema that could drift.
+- Capability metadata, so that an agent adapts its calls to the local version.
 
-## 4. Compiler TypeScript — décision ouverte
+## 4. The TypeScript compiler — an open decision
 
-**État actuel :** le service TypeScript fourni avec Monaco réalise les diagnostics et `transpileModule` dans la WebView. La coloration syntaxique simple de Monaco ne dépend pas du fait que le backend Rust dispose d'un compilateur, mais ses diagnostics sémantiques, sa complétion et l'outillage de types dépendent du service TypeScript côté éditeur.
+**Today:** the TypeScript service shipped with Monaco produces the diagnostics and
+runs `transpileModule` in the WebView. Monaco's plain syntax colouring does not
+depend on the Rust backend having a compiler, but its semantic diagnostics,
+completion and type tooling depend on the editor's TypeScript service.
 
-**Besoin potentiel :** un MCP accessible même sans fenêtre active ne doit pas dépendre d'un appel à une WebView cachée. Étudier une transpilation TS → JS côté Rust. **Oxc** est un candidat natif : parser et transformer TypeScript ; il ne remplace pas automatiquement la vérification sémantique complète de TypeScript.
+**The likely need:** an MCP server reachable without an open window must not
+depend on a call into a hidden WebView. A TS → JS transpilation on the Rust side
+is to be studied. **Oxc** is a native candidate: it parses and transforms
+TypeScript; it does not by itself replace TypeScript's full semantic checking.
 
-Décider par un PoC avec les effets fournis et des cas adverses :
-1. Comparer JS émis par Monaco TypeScript et Oxc, format ESM, imports `@candeo/effects-api`, syntaxe et cible ES2020 / QuickJS.
-2. Mesurer différences de diagnostics, taille binaire, temps de démarrage, mémoire et empreinte des dépendances.
-3. Tester erreurs de syntaxe, erreurs de types, code malveillant, timeouts, API inconnue, sources non sauvegardées.
-4. Retenir **un contrat de validation partagé** utilisable par Tauri IPC et MCP : aucune divergence silencieuse de comportement.
-5. Ne pas remplacer le compilateur de Monaco par principe ; préserver l'éditeur et ses fonctionnalités TypeScript.
+To decide through a PoC (#364), with the shipped effects and adversarial cases:
 
-## 5. Accès, sécurité et périmètre
+1. Compare the JS emitted by Monaco's TypeScript and by Oxc: ESM format,
+   `@candeo/effects-api` imports, syntax, and an ES2020 / QuickJS target.
+2. Measure the differences in diagnostics, binary size, startup time, memory and
+   dependency footprint.
+3. Test syntax errors, type errors, malicious code, timeouts, an unknown API,
+   unsaved sources.
+4. Keep **one shared validation contract** for Tauri IPC and MCP: no silent
+   divergence in behaviour.
+5. Do not replace Monaco's compiler on principle; keep the editor and its
+   TypeScript features.
 
-- MCP **désactivé par défaut**, uniquement local, aucune exigence d'Internet ou de compte.
-- Choisir `stdio` ou Streamable HTTP selon les clients visés et le cycle de vie Tauri ; si HTTP, protéger l'endpoint par authentification/autorisation et contrôles Origin / DNS rebinding. `127.0.0.1` seul n'est pas une authentification.
-- Lire et prévisualiser ne doivent ni toucher au matériel ni modifier les automatisations.
-- Restreindre les écritures aux effets utilisateur et opérations typées prévues ; pas d'accès arbitraire au système de fichiers, pas de commandes HID brutes, pas d'upload implicite de diagnostics ou de télémétrie.
-- Code agent non fiable : conserver sandbox QuickJS, quotas et validations, tests de chemins et de taille, journal local limité.
-- Séparer `save`, `preview` et `apply`. Demander confirmation avant toute action matérielle, remplacement d'effet actif ou modification des règles.
-- **Pas de serveur REST généraliste dans ce chantier.**
+## 5. Access, safety and scope
 
-## 6. Questions à trancher dans l'ADR
+- MCP **off by default**, local only, needing neither the Internet nor an account.
+- Choose `stdio` or Streamable HTTP according to the clients aimed at and Tauri's
+  lifecycle; over HTTP, protect the endpoint with authentication and
+  authorisation, and with Origin / DNS-rebinding checks. `127.0.0.1` alone is not
+  authentication.
+- Reading and previewing must neither touch the hardware nor change automations.
+- Writes limited to user effects and the typed operations designed for them: no
+  arbitrary file system access, no raw HID commands, no implicit upload of
+  diagnostics or telemetry.
+- Code from an agent is untrusted: keep QuickJS's sandbox, quotas and
+  validations, path and size checks, a bounded local log.
+- `save`, `preview` and `apply` kept apart. Ask for confirmation before any
+  hardware action, before replacing an active effect, and before changing rules.
+- **No general REST server in this work.**
 
-- Transport MCP et processus hôte (in-process Tauri vs sidecar local).
-- Transpilation tête-less : Oxc, autre option, ou réutilisation encadrée du pipeline existant.
-- Rendu des frames de preview au format image sans dupliquer l'algorithme de géométrie du simulateur.
-- Schémas de sortie, versionnement des ressources et erreurs standardisées.
-- Modèle de consentement pour effets appliqués et automatisations modifiées.
+## 6. Questions for the decision record
 
-**Références externes (inspiration, non implémentation à copier) :**
-- Hypercolor [MCP](https://github.com/hyperb1iss/hypercolor/blob/main/docs/content/api/mcp.md) et [authoring](https://github.com/hyperb1iss/hypercolor/blob/main/crates/hypercolor-daemon/src/mcp/tools/authoring.rs) : `install_effect` + `get_effect_console` + `capture_canvas`.
-- Hypercolor utilise des **effets HTML autonomes** (souvent produits depuis TypeScript via Bun). **Candeo n'exécute pas d'effets HTML** : il exécute du JS transpilé depuis des effets TS via QuickJS.
+- MCP transport and host process (in the Tauri process, or a local sidecar).
+- Headless transpilation: Oxc, another option, or a bounded reuse of the existing
+  pipeline.
+- Rendering preview frames as an image without duplicating the simulator's
+  geometry.
+- Output schemas, resource versioning and standard errors.
+- The consent model for applied effects and changed automations.
+
+**External references (inspiration, not an implementation to copy):**
+
+- Hypercolor's [MCP](https://github.com/hyperb1iss/hypercolor/blob/main/docs/content/api/mcp.md)
+  and [authoring](https://github.com/hyperb1iss/hypercolor/blob/main/crates/hypercolor-daemon/src/mcp/tools/authoring.rs):
+  `install_effect` + `get_effect_console` + `capture_canvas`.
+- Hypercolor runs **standalone HTML effects** (often built from TypeScript with
+  Bun). **Candeo does not run HTML effects**: it runs JS transpiled from TS effects,
+  in QuickJS.
