@@ -17,6 +17,10 @@ const api = vi.hoisted(() => ({
   rememberBrightness: vi.fn(),
   setDimming: vi.fn(),
   rememberDimming: vi.fn(),
+  savePreset: vi.fn(),
+  updatePreset: vi.fn(),
+  renamePreset: vi.fn(),
+  deletePreset: vi.fn(),
 }))
 vi.mock('../api/candeo', () => api)
 
@@ -585,6 +589,139 @@ describe('brightness', () => {
     expect(s.brightnessOf(keyboard)).toBe(100)
     expect(api.rememberBrightness).toHaveBeenCalledWith(keyboard, 100)
     expect(s.error.value).toBe('device not open')
+  })
+})
+
+describe('presets', () => {
+  const slow = { effect: 'Wave', name: 'Slow', values: { ...defaults, speed: 0.4 } }
+  const red = {
+    effect: 'Wave',
+    name: 'Red storm',
+    values: { ...defaults, speed: 2, mode: 'wild' },
+    bindings: { reverse: 'signal:alarm' },
+  }
+  const drizzle = { effect: 'Rain', name: 'Drizzle', values: { speed: 0.2 } }
+
+  it('reads each effect’s presets in their order', async () => {
+    const s = await fresh({ presets: [slow, drizzle, red] })
+
+    expect(s.presetsOf('Wave')).toEqual([slow, red])
+    expect(s.presetsOf('Rain')).toEqual([drizzle])
+    expect(s.presetsOf('Clock')).toEqual([])
+  })
+
+  it('reads a file without presets as none', async () => {
+    const s = await fresh()
+    expect(s.presetsOf('Wave')).toEqual([])
+  })
+
+  it('installs the list each command answers with', async () => {
+    const s = await fresh({ presets: [slow] })
+    api.savePreset.mockResolvedValue([slow, red])
+    api.renamePreset.mockResolvedValue([{ ...slow, name: 'Calm' }, red])
+    api.deletePreset.mockResolvedValue([red])
+
+    await s.savePreset('Wave', 'Red storm', red.values, red.bindings)
+    expect(api.savePreset).toHaveBeenCalledWith('Wave', 'Red storm', red.values, red.bindings)
+    expect(s.presetsOf('Wave')).toEqual([slow, red])
+
+    await s.renamePreset('Wave', 'Slow', 'Calm')
+    expect(s.presetsOf('Wave').map((p) => p.name)).toEqual(['Calm', 'Red storm'])
+
+    await s.deletePreset('Wave', 'Calm')
+    expect(s.presetsOf('Wave')).toEqual([red])
+  })
+
+  it('leaves the list as it was when Rust refuses, for the caller to say why', async () => {
+    const s = await fresh({ presets: [slow] })
+    api.savePreset.mockRejectedValue({ code: 'presetExists', params: { name: 'slow' } })
+
+    await expect(s.savePreset('Wave', 'slow', defaults, {})).rejects.toEqual({
+      code: 'presetExists',
+      params: { name: 'slow' },
+    })
+    expect(s.presetsOf('Wave')).toEqual([slow])
+    expect(s.error.value).toBeNull()
+  })
+
+  it('updates with the settings given', async () => {
+    const s = await fresh({ presets: [slow] })
+    const faster = { ...slow, values: { ...defaults, speed: 1.6 } }
+    api.updatePreset.mockResolvedValue([faster])
+
+    await s.updatePreset('Wave', 'Slow', faster.values, {})
+
+    expect(api.updatePreset).toHaveBeenCalledWith('Wave', 'Slow', faster.values, {})
+    expect(s.presetsOf('Wave')).toEqual([faster])
+  })
+
+  it('does not let a read that left before a command put back the old list', async () => {
+    const s = await fresh({ presets: [slow] })
+    const stale = deferred<Settings>()
+    api.getSettings.mockReturnValueOnce(stale.promise)
+    api.savePreset.mockResolvedValue([slow, red])
+
+    const reading = s.reload()
+    await s.savePreset('Wave', 'Red storm', red.values, red.bindings)
+    stale.resolve(settings({ presets: [slow] }))
+    await reading
+
+    expect(s.presetsOf('Wave')).toEqual([slow, red])
+  })
+
+  it('picking one replaces the values and bindings on the target, written at once', async () => {
+    const s = await fresh({
+      effectParams: [
+        { ...keyboard, effect: 'Wave', values: { speed: 1.5 }, bindings: { color: 'signal:status' } },
+      ],
+    })
+
+    const taken = s.replace(keyboard, 'Wave', specs, red.values, red.bindings, false)
+
+    expect(taken).toEqual({ values: red.values, bindings: red.bindings })
+    expect(s.valuesFor(keyboard, 'Wave', specs)).toEqual(red.values)
+    expect(s.bindingsFor(keyboard, 'Wave', specs)).toEqual(red.bindings)
+    // Only what departs from the declaration goes to disk, as for a slider.
+    expect(api.rememberEffectParams).toHaveBeenCalledWith(keyboard, 'Wave', {
+      speed: 2,
+      mode: 'wild',
+    })
+    expect(api.rememberEffectBindings).toHaveBeenCalledWith(keyboard, 'Wave', red.bindings)
+    expect(api.setEffectParams).not.toHaveBeenCalled()
+    expect(api.setEffectBindings).not.toHaveBeenCalled()
+    expect(s.valuesFor(other, 'Wave', specs), 'another device keeps its own').toEqual(defaults)
+  })
+
+  it('picking one reaches the loop only when the effect runs there', async () => {
+    const s = await fresh()
+
+    s.replace(keyboard, 'Wave', specs, red.values, red.bindings, true)
+
+    expect(api.setEffectParams).toHaveBeenCalledWith(keyboard, red.values)
+    expect(api.setEffectBindings).toHaveBeenCalledWith(keyboard, red.bindings)
+  })
+
+  it('picking one on a region writes the region’s settings', async () => {
+    const s = await fresh()
+    const lid = { ...keyboard, region: 'lid' }
+
+    s.replace(lid, 'Wave', specs, slow.values, {}, false)
+
+    expect(api.rememberEffectParams).toHaveBeenCalledWith(lid, 'Wave', { speed: 0.4 })
+    expect(s.valuesFor(lid, 'Wave', specs).speed).toBe(0.4)
+    expect(s.valuesFor(keyboard, 'Wave', specs).speed).toBe(1)
+  })
+
+  it('goes with its effect, and with everything', async () => {
+    const s = await fresh({ presets: [slow, drizzle] })
+
+    expect([...s.referencedEffects.value].sort()).toEqual(['Rain', 'Wave'])
+    s.dropEffect('Wave')
+    expect(s.presetsOf('Wave')).toEqual([])
+    expect(s.presetsOf('Rain')).toEqual([drizzle])
+
+    s.dropAll()
+    expect(s.presetsOf('Rain')).toEqual([])
   })
 })
 

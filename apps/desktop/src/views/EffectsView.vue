@@ -94,6 +94,7 @@ import {
   type EffectState,
   type EngineReport,
   type HeldSignal,
+  type PresetRecord,
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
@@ -101,6 +102,7 @@ import { deviceOf, regionOf, targetFor, targetKey, type Target } from '../api/ta
 import type { DeviceInfo, DeviceRef, LayoutInfo, RegionInfo, Rgb } from '../api/types'
 import BrightnessFollow from '../components/BrightnessFollow.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
+import EffectPresets from '../components/EffectPresets.vue'
 import { readsSignal, readsSound, readsSystem } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
@@ -111,6 +113,7 @@ import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { brightnessSlider } from '../composables/dimming'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
 import { deviceEffect } from '../composables/effectSelection'
+import { presetSettings } from '../composables/presets'
 import { useDevice } from '../composables/useDevice'
 import { useLayouts } from '../composables/layouts'
 import { isSplit, regionStatus } from '../composables/regions'
@@ -169,6 +172,12 @@ const {
   bindPreview,
   settle,
   forget,
+  replace,
+  presetsOf,
+  savePreset,
+  updatePreset,
+  renamePreset,
+  deletePreset,
   dropEffect,
   referencedEffects,
   lastAppliedOn,
@@ -1388,6 +1397,61 @@ function onParamReset(): void {
   }
 }
 
+// ---------------------------------------------------------------- presets
+
+/** The form, for a preset picked to clear what its rows were waiting for. */
+const paramsForm = ref<InstanceType<typeof EffectParamsForm> | null>(null)
+
+/**
+ * Presets, for a library effect with settings (`docs/design/presets.md` §5): a
+ * firmware effect's id is no library key, and an effect without parameters has
+ * nothing to name.
+ */
+const offersPresets = computed(() => {
+  const c = selectedEffect.value
+  return c !== null && c.hardware === null && Object.keys(specs.value).length > 0
+})
+
+const presets = computed(() => (selectedEffect.value ? presetsOf(selectedEffect.value.id) : []))
+
+/** The settings shown, as a preset keeps them and as the list marks them. */
+const shownSettings = computed(() => ({ values: paramValues.value, bindings: paramBindings.value }))
+
+/** A preset can be picked where the settings can be kept, and while the form is live. */
+const pickable = computed(() => target.value !== null && frozen.value === null)
+
+/**
+ * Gives the settings a preset's values and bindings, as if every slider had
+ * moved at once: on the selected device or region, on disk, in the preview, and
+ * on the device only when this effect runs there (#218). Nothing starts.
+ */
+function onPresetPick(preset: PresetRecord): void {
+  const where = target.value
+  const c = selectedEffect.value
+  if (!where || !c || c.hardware) return
+  const wanted = presetSettings(specs.value, preset)
+  paramsForm.value?.clearDrafts()
+  const taken = replace(where, c.id, specs.value, wanted.values, wanted.bindings, live(c.id))
+  if (preview.value) {
+    adjustPreview(taken.values)
+    bindPreview(taken.bindings)
+  }
+}
+
+/** The effect whose presets the commands below change: the one shown. */
+function presetEffect(): string {
+  const c = selectedEffect.value
+  if (!c || c.hardware) throw new Error('presets belong to a library effect')
+  return c.id
+}
+
+const onPresetSave = (name: string) =>
+  savePreset(presetEffect(), name, paramValues.value, paramBindings.value)
+const onPresetUpdate = (name: string) =>
+  updatePreset(presetEffect(), name, paramValues.value, paramBindings.value)
+const onPresetRename = (from: string, to: string) => renamePreset(presetEffect(), from, to)
+const onPresetDelete = (name: string) => deletePreset(presetEffect(), name)
+
 // ---------------------------------------------------------------- brightness
 
 /**
@@ -2074,10 +2138,28 @@ onBeforeUnmount(() => {
         </div>
 
         <!--
+          Named settings for this effect, above the settings they fill: a
+          preset is picked, then tuned.
+        -->
+        <EffectPresets
+          v-if="offersPresets"
+          :presets="presets"
+          :specs="specs"
+          :shown="shownSettings"
+          :pickable="pickable"
+          :save="onPresetSave"
+          :update="onPresetUpdate"
+          :rename="onPresetRename"
+          :remove="onPresetDelete"
+          @pick="onPresetPick"
+        />
+
+        <!--
           The settings, generated from the manifest. The form knows no effect in
           particular: it knows the four kinds of `ParamSpec`, and nothing else.
         -->
         <EffectParamsForm
+          ref="paramsForm"
           :specs="specs"
           :values="paramValues"
           :bindings="paramBindings"

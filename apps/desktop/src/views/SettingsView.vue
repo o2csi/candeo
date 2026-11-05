@@ -517,6 +517,7 @@ onMounted(() => {
           <li>{{ t('settings.config.forgetDevices') }}</li>
           <li>{{ t('settings.config.forgetParams') }}</li>
           <li>{{ t('settings.config.forgetRules') }}</li>
+          <li>{{ t('settings.config.forgetPresets') }}</li>
           <li>{{ t('settings.config.forgetSignals') }}</li>
           <li>
             <strong>{{ t('settings.config.effectsKept') }}</strong>
