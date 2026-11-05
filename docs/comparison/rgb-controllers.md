@@ -494,8 +494,9 @@ Observations drawn from the tables, each with the issue it concerns.
   read-only or destructive, confirmation left to the client, an audit log, and
   authoring by installing a whole HTML effect. Candeo's proposal differs on
   two points: an explicit authorisation before any hardware write, and
-  TypeScript validated without a window. SignalRGB announces an MCP endpoint
-  without documenting it.
+  TypeScript compiled and checked without a window ([#364]), where Hypercolor
+  takes HTML as it is. SignalRGB announces an MCP endpoint without documenting
+  it.
 - **LampArray ([#330]).** OpenRGB has a generic LampArray controller and turns
   it off where its Razer driver knows the device, the situation met on the
   DeathStalker V2 Pro. SignalRGB and Artemis drive Dynamic Lighting devices
@@ -515,7 +516,9 @@ Observations drawn from the tables, each with the issue it concerns.
   marking separating devices verified on hardware from devices listed was
   found.
 - **Privacy.** Outbound telemetry is stated in SignalRGB's privacy policy, and
-  stated absent in Candeo's; for the others none was found in the code read.
+  stated absent in Candeo's; none was found in the code read for OpenRGB,
+  Artemis, KeyGlow and Hypercolor, and Windows documents none specific to
+  Dynamic Lighting.
   An automatic update check is on by default in Candeo outside the Store build,
   in Artemis (hourly, with automatic install), KeyGlow and Hypercolor.
 
