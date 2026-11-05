@@ -79,6 +79,7 @@ mod tests {
             include_str!("failure.rs"),
             include_str!("journal.rs"),
             include_str!("lib.rs"),
+            include_str!("presets.rs"),
             include_str!("runtime/mod.rs"),
             include_str!("storage.rs"),
             include_str!("tray.rs"),

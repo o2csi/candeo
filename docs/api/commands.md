@@ -680,8 +680,8 @@ launch. Adding an effect is saving a `.ts` file there.
 ### `forget_effect_settings(id)`
 
 Forgets what `settings.json` keeps about an effect the folder no longer holds —
-its parameters on every device, and where it was applied — without touching any
-file. The gallery offers it next to the notice saying an effect it remembers is
+its parameters on every device, where it was applied, and its presets — without
+touching any file. The gallery offers it next to the notice saying an effect it remembers is
 missing; nothing is forgotten until then, so putting the file back under its name
 restores everything.
 
@@ -691,7 +691,7 @@ Deletes the file and its cache. A name that is not valid is refused before any
 disk access, and so is a built-in, before any loop is stopped.
 
 Also takes away everything `settings.json` remembered about it: the **settings**, on
-all devices, and its **application** (`activeEffects`). Forgetting comes after
+all devices, its **application** (`activeEffects`), and its **presets**. Forgetting comes after
 deletion: if deletion fails, the effect is still there and its settings must be
 too.
 
@@ -788,6 +788,12 @@ without duplicating an effect.
       values: Record<string, ParamValue>,
       bindings?: Record<string, string>
     }[]
+  }[],
+  presets?: {                    // absent while there is none — see Presets
+    effect: string,              // the key of the effect it sets
+    name: string,                // unique within its effect, ignoring case
+    values: Record<string, ParamValue>,  // every parameter declared when saved
+    bindings?: Record<string, string>
   }[],
   rules: Rule[]                  // in their order, which is their priority — see Automations
 }
@@ -893,8 +899,8 @@ hand — the first thing one looks for when something misbehaves, and what
 makes a bug report usable.
 
 What goes: the adoption decisions — everything goes back to `detected` —, the
-remembered brightness of each device, the effect applied on each, and the
-settings remembered per device / effect pair. `shippedEffects` stays: it describes
+remembered brightness of each device, the effect applied on each, the
+settings remembered per device / effect pair, and the presets. `shippedEffects` stays: it describes
 the folder, and without it every built-in would become the user's at the next
 launch.
 
@@ -950,6 +956,31 @@ different signals — beside their values: `{ colour: 'signal:status' }`. An emp
 entry goes when it holds neither values nor bindings. `bindingInvalid { param,
 source }` when a source does not name a signal as `signal:<name>` does. The
 running loop is set apart, by `set_effect_bindings`.
+
+### Presets: `save_preset` · `update_preset` · `rename_preset` · `delete_preset`
+
+Named settings for one effect, offered on every device and region
+([`presets.md`](../design/presets.md)). Each command reads, changes and writes
+`settings.json` in one go, and answers with the effect's presets after the
+change, in their order: `PresetRecord[]`. `effect` is a library effect's key; a
+firmware effect has no presets.
+
+| Command | Does | Refuses |
+|---|---|---|
+| `save_preset(effect, name, values, bindings)` | adds a preset, last of its effect's | `presetNameEmpty`, `presetNameTooLong { max }`, `presetExists { name }`, `bindingInvalid` |
+| `update_preset(effect, name, values, bindings)` | replaces its values and bindings, in place | `presetNotFound { name }`, `bindingInvalid` |
+| `rename_preset(effect, from, to)` | renames it, in place; a change of case alone is a rename | `presetNotFound`, `presetExists`, and the name's refusals |
+| `delete_preset(effect, name)` | deletes it; one already gone is no error | — |
+
+A name is trimmed, 1 to 64 characters, unique within its effect ignoring case,
+and any text otherwise. `values` is kept as given — the window sends every
+parameter the effect declares — and read against what the effect declares when
+the preset is picked. Picking one needs no command: the window writes the
+target's settings with `remember_effect_params` and `remember_effect_bindings`,
+and sends them live only to a loop running that effect.
+
+Deleting an effect, or forgetting its settings, deletes its presets; renaming it
+moves them, a name that would then appear twice taking a number.
 
 ### `remember_brightness(device, level)`
 

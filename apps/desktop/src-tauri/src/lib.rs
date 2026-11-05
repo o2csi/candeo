@@ -29,6 +29,7 @@ mod language;
 mod machine;
 mod msix;
 mod paths;
+mod presets;
 mod runtime;
 mod shipped;
 mod signals;
@@ -2067,6 +2068,10 @@ pub fn run() {
             storage::reset_settings,
             storage::remember_effect_params,
             storage::remember_effect_bindings,
+            presets::save_preset,
+            presets::update_preset,
+            presets::rename_preset,
+            presets::delete_preset,
             journal::get_journal,
             journal::set_log_level,
             journal::set_log_files_kept,
