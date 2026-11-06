@@ -231,6 +231,7 @@ const PAGES = [
   ['signals.html', 'Signals'],
   ['sound.html', 'Sound'],
   ['games.html', 'Games'],
+  ['assistants.html', 'Assistants'],
   ['sdk.html', 'Build on Candeo'],
   ['effects.html', 'Write an effect'],
   ['devices-guide.html', 'Describe a device'],
@@ -387,6 +388,7 @@ render('install.html')
 render('sdk.html')
 render('devices-guide.html')
 render('games.html')
+render('assistants.html')
 
 // The policy, rendered from the one copy of it.
 const policy = marked.parse(readFileSync(join(root, 'PRIVACY.md'), 'utf8'))

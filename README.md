@@ -53,6 +53,9 @@ Everything Candeo lights with is a file you can open, write and share:
   teach Candeo a new device with a JSON file, no code and no rebuild.
 - **[Send signals](https://o2csi.github.io/candeo/signals.html)** — let a
   script, a build or Home Assistant light the keyboard.
+- **[Connect an assistant](https://o2csi.github.io/candeo/assistants.html)** —
+  let Claude, Cursor or VS Code read your devices, effects and rules through
+  MCP, and help you write an effect. Off until you turn it on.
 
 This effect is a rainbow sweeping across any keyboard:
 
