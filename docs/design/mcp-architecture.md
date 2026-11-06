@@ -105,9 +105,10 @@ A full REST API stays out of scope until someone needs it.
 The services layer is a **refactoring target**, not a module that already exists
 under that name.
 
-The **OpenRGB adapter** is studied in [`openrgb-output.md`](openrgb-output.md)
-(#368): an optional output to an OpenRGB server the user runs, beside native
-HID and never in its place.
+The **OpenRGB adapter** is decided in [`openrgb-output.md`](openrgb-output.md)
+(#368): an optional output, beside native HID and never in its place. Candeo
+starts the OpenRGB the user installed, headless, with a private configuration,
+as Hypercolor does, or reuses an OpenRGB server already running.
 
 ## 3. Effects created by an agent: the proposed flow
 
@@ -226,7 +227,8 @@ review:
 - MCP transport and host process (in the Tauri process, or a local sidecar).
   **In the Tauri process**, on a local pipe only the user can open, reached
   through `candeo --mcp`, a stdio bridge that is Candeo's own executable: its
-  §2.
+  §2. Over a network, later, Streamable HTTP with TLS and a token per client:
+  its §2.7.
 - Headless transpilation: Oxc, another option, or a bounded reuse of the existing
   pipeline. Measured in [`headless-transpile-poc.md`](headless-transpile-poc.md):
   Oxc, under the conditions of its §6, carried out by
