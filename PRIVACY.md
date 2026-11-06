@@ -83,6 +83,29 @@ that your automation rules can react to. It is **off** until you turn it on.
   device or an effect, nor read your settings. What a value changes is decided
   by you — a rule that waits for it, or a setting you bound to it.
 
+## Assistants, if you turn them on
+
+Settings offers *Let assistants use Candeo*: an assistant on this computer that
+speaks the Model Context Protocol — Claude, Cursor, VS Code — can then read
+Candeo. It is **off** until you turn it on, and turning it off disconnects every
+assistant.
+
+- **What an assistant can read**: your devices and what runs on them, their
+  layouts, your effects and their source, presets, automation rules, the
+  installed effects API, and the names of the signals held. In this version it
+  can **change nothing**.
+- **What it reads goes to the assistant, and to whatever service the assistant
+  uses** to answer you — usually a model run by its publisher, under that
+  publisher's own policy. Candeo does not choose that service, and sends nothing
+  anywhere itself.
+- **What it is never given**: the values of signals, the key presses or sound an
+  effect reads, the error text of an effect that reads keys or signals, serial
+  numbers, file paths, machine and user names, and the diagnostic.
+- **Only your own programs can connect**: assistants reach Candeo through a local
+  channel only your account on this computer can open. No network port opens.
+- The log records when an assistant connects and leaves, by the name it gives,
+  and never what it reads.
+
 ## What you send, if you choose to
 
 **Copy the diagnostic**, in Settings, puts on the clipboard what a bug report

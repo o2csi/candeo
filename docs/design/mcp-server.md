@@ -1,6 +1,7 @@
 # The MCP server: decisions and plan
 
-> **Status: decided, pending review. Not implemented.** This note answers the
+> **Status: decided. Phase 1 implemented ([#384](https://github.com/o2csi/candeo/issues/384)),
+> the others not.** This note answers the
 > questions of [`mcp-architecture.md`](mcp-architecture.md) §6 for
 > [#359](https://github.com/o2csi/candeo/issues/359): where the server runs, how
 > assistants reach it, what the person confirms, and which tools, resources and
@@ -146,7 +147,10 @@ start `candeo --mcp`, which relays.**
 - **No console.** The release build is a Windows GUI program
   (`windows_subsystem = "windows"`). Started by an assistant with redirected
   handles, it reads and writes them all the same, and no console window
-  flashes. This is expected, not yet tried (§11).
+  flashes. Tried on 2026-11-06 with the release executable, started as Node
+  starts a server, with piped standard streams: it relayed both ways, exited 0
+  when its input closed, and with no pipe said so on standard error and exited
+  1. No console binary is needed. Not tried through the MSIX alias (§11).
 
 ### 2.4 The pipe
 
@@ -156,12 +160,16 @@ start `candeo --mcp`, which relays.**
   granting that user alone. The default DACL also grants read access to
   Everyone ([pipe security][w-pipe-security]), hence an explicit one. When the
   first instance cannot be created, something else holds the name: Settings
-  says so, and nothing listens. The bridge does not check which process serves
-  the pipe: only a program running as the user could take the name first, and
-  such a program is already inside the boundary of §3.3.
+  says so, and nothing listens. **The bridge checks who serves the pipe**: it
+  refuses one whose owner is another account. Anyone may create a named pipe
+  of a free name, so while Candeo is not running another person signed in on
+  the computer could take this one, read what the assistant sends and answer in
+  Candeo's place. One instance always exists while Candeo listens, the next
+  created before a client is handed over, so the name is never free between
+  two connections.
 - **Linux and macOS**: a Unix socket of mode 0600 in a directory only the user
   can open: `$XDG_RUNTIME_DIR/candeo/`, otherwise the application's data
-  folder. The peer's uid is checked at each connection.
+  folder. The peer's uid is checked at each connection, on both sides.
 - **Never logged**: the name holds the SID, or a path holding the user name.
 
 ### 2.5 Lifecycle
@@ -561,10 +569,10 @@ overwrite nothing.
 
 ## 11. Not verified
 
-- **A Windows GUI executable as a stdio server**, started by each assistant and
-  through the MSIX execution alias: expected to work, not tried. Phase 1 checks
-  it with Claude Desktop, Claude Code, VS Code and Cursor. If it fails, the
-  bridge becomes a small console binary installed next to Candeo.
+- **A Windows GUI executable as a stdio server**: works when started with
+  piped standard streams, as Node starts one (§2.3). Not tried through the
+  MSIX execution alias, nor with each assistant. If an assistant fails to read
+  it, the bridge becomes a small console binary installed next to Candeo.
 - **Elicitation in Claude Desktop, VS Code and Cursor.** The documentation of
   VS Code and Cursor lists it; Claude Desktop's says nothing. None was tried,
   nor which revision each assistant speaks.
