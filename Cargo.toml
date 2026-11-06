@@ -13,6 +13,7 @@ repository = "https://github.com/o2csi/candeo"
 [workspace.dependencies]
 candeo-protocol = { path = "crates/candeo-protocol" }
 candeo-device   = { path = "crates/candeo-device" }
+candeo-compiler = { path = "crates/candeo-compiler" }
 hidapi    = "2.6"
 thiserror = "2"
 serde     = { version = "1", features = ["derive"] }
