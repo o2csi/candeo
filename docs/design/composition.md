@@ -316,9 +316,12 @@ proof of concept copies it (`tools/transpile-poc/src/engine.rs`, the
 application's own `api.js` and `bootstrap.js`). Each of the 26 shipped effects,
 transpiled with Oxc, on each built-in layout: loaded five times, 30 frames to
 warm up, then 900 frames in a row with every input fed (`scenario::active`,
-repeated ten times). Two runs; the ranges are theirs. The harness, about 150
-lines over the proof of concept's `engine` and `scenario` modules, was not
-committed: it timed `load`, `render` and a blend loop, nothing else.
+repeated ten times). Two runs, with Candeo and other programs running on the
+same laptop, so the figures lean high; the ranges are theirs. *Sweep*, at 0.19
+to 0.23 ms, matches what [`effects-runtime.md`](effects-runtime.md) §8 measured
+for an ordinary effect. The harness, about 150 lines over the proof of
+concept's `engine` and `scenario` modules, was not committed: it timed `load`,
+`render` and a blend loop, nothing else.
 
 | Layout | Lights | Mean frame, over the 26 | Median effect | Heaviest | Worst 99th percentile | The 26 in a row |
 |---|---|---|---|---|---|---|
