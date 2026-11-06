@@ -338,9 +338,6 @@ struct Shared {
     /// [`MAX_DEVICE_WRITE_ERRORS`].
     device_failures: AtomicU32,
     /// The device's layout, which its layers' masks are resolved on.
-    // Read by `start_layer`, which the window's commands call from the next
-    // step of `composition.md` §5.1; the tests until then.
-    #[cfg_attr(not(test), allow(dead_code))]
     layout: &'static Layout,
     /// The device's regions, in its definition's order, while the loop runs
     /// them; `None` while it runs one stack on the whole device.
@@ -495,6 +492,7 @@ impl PartShared {
 }
 
 /// An effect to start: which one, its code, and what it starts with.
+#[derive(Clone)]
 pub struct EffectStart {
     pub effect_id: String,
     pub js: String,
@@ -580,9 +578,6 @@ impl LayerLoad {
 /// What a command asks of a running thread, between two frames: a QuickJS
 /// context lives and dies on the thread that runs it, so a new part is built
 /// there.
-// `Layer` and `Order` come from commands the next step of `composition.md`
-// §5.1 adds; the tests send them until then.
-#[cfg_attr(not(test), allow(dead_code))]
 enum Request {
     /// Start this effect as the base of this region's stack — the whole
     /// device's with `None` — in place of what it ran, its layers and the
@@ -1282,7 +1277,6 @@ impl DeviceLoop {
 
     /// Starts `layer` on one target's stack, in place of the layer with its id
     /// or on top, the rest of the composition untouched.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn start_layer(
         &self,
         device: DeviceRef,
@@ -1311,7 +1305,6 @@ impl DeviceLoop {
 
     /// Puts one target's layers in this order, bottom to top, each keeping its
     /// clock.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn order_layers(&self, region: Option<&str>, ids: Vec<String>) -> Result<(), PartError> {
         let _thread = self.thread.lock().unwrap();
         let (shared, target) = self.running_target(region)?;
@@ -1703,7 +1696,6 @@ impl Engine {
     }
 
     /// How one layer of the preview is drawn, from its next frame.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn set_preview_look(&self, layer: &str, look: Look) {
         if let Some(p) = self
             .preview
@@ -1809,9 +1801,6 @@ impl Engine {
     /// How a layer is drawn — its blend, its opacity, what that follows — from
     /// its next frame, its effect going on. A mask changed is another layout
     /// for the effect: that is [`Self::start_layer`].
-    // This and the other layer methods are what the window's commands call
-    // from the next step of `composition.md` §5.1; the tests until then.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn set_look(&self, device: DeviceRef, region: Option<&str>, layer: &str, look: Look) {
         if let Some(p) = self
             .shared(device)
@@ -2033,7 +2022,6 @@ impl Engine {
     /// other parts keep their clocks. A layer that does not load, a mask that
     /// lights nothing, a ninth effect: the stack goes on as it was, and the
     /// error says why.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn start_layer(
         &self,
         device: DeviceRef,
@@ -2047,7 +2035,6 @@ impl Engine {
     }
 
     /// The layer runs nothing from now on; the rest of the stack goes on.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn stop_layer(&self, device: DeviceRef, region: Option<&str>, layer: &str) {
         if let Some(l) = self.existing(device) {
             l.stop_part(device, region, Some(layer));
@@ -2056,7 +2043,6 @@ impl Engine {
 
     /// Puts one target's layers in this order, bottom to top: `ids` names each
     /// of them once, or the order is refused. Each keeps its clock.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn order_layers(
         &self,
         device: DeviceRef,
@@ -2067,6 +2053,24 @@ impl Engine {
             Some(l) => l.order_layers(region, ids),
             None => Err(PartError::NotRunning),
         }
+    }
+
+    /// The ids of a target's layers, bottom to top — those that did not load
+    /// or stopped on their own included — while its loop runs that target's
+    /// stack: a region's of a split device, or the whole device's with `None`.
+    /// `None` while it does not. The engine knows no rules: a rule's effect
+    /// over a whole device is that device's stack here, and the caller tells
+    /// them apart.
+    pub fn layers_of(&self, device: DeviceRef, region: Option<&str>) -> Option<Vec<String>> {
+        let (shared, _) = self.existing(device)?.running_target(region).ok()?;
+        let parts = shared.parts.lock().unwrap();
+        Some(
+            parts
+                .iter()
+                .filter(|p| p.region == region)
+                .filter_map(|p| p.layer.clone())
+                .collect(),
+        )
     }
 
     /// True while the device's loop runs its regions: a rule's interruption is
@@ -3394,7 +3398,7 @@ pub fn start_effect(
     let bindings = checked_bindings(bindings.unwrap_or_default())?;
     let part = crate::part_of(&app, device, region.as_deref(), false)?;
     match part {
-        Scope::Whole => run_effect(&app, device, &id, &params, bindings)?,
+        Scope::Whole => apply(&app, device, effect_start(&app, &id, &params, bindings)?)?,
         Scope::Region(region) => run_region(&app, device, region, || {
             effect_start(&app, &id, &params, bindings.clone())
         })?,
@@ -3413,13 +3417,14 @@ pub fn start_effect(
     Ok(())
 }
 
-/// Starts an effect on a device **without remembering it as applied**.
-///
-/// [`start_effect`] is this plus the record; an automation is this alone, since
-/// an interruption must never rewrite `activeEffects` — it would take the place
-/// of what the device goes back to (`docs/design/inputs-and-automations.md` §3.1).
-/// On a split device it runs over all of it — a rule's effect — its regions'
-/// follows still scaling their lights (`docs/design/regions.md` §4).
+/// Starts a rule's effect on a device, alone, **without remembering it as
+/// applied**: an interruption must never rewrite `activeEffects` — it would
+/// take the place of what the device goes back to
+/// (`docs/design/inputs-and-automations.md` §3.1). The device's layers wait
+/// under it; drawing over it is an overlay rule's, which step 3 of
+/// `docs/design/composition.md` §5.1 adds. On a split device it runs over all
+/// of it, its regions' follows still scaling their lights
+/// (`docs/design/regions.md` §4).
 pub(crate) fn run_effect(
     app: &AppHandle,
     device: DeviceRef,
@@ -3439,6 +3444,62 @@ pub(crate) fn run_effect(
         .engine
         .start(device, start, layout, out, split)
         .map_err(|error| not_started(id, error))
+}
+
+/// Starts `start` as the effect applied on a whole device: *Apply*, the tray.
+///
+/// While the loop runs the device's stack, only its base changes, between two
+/// frames: its layers keep their clocks (`docs/design/composition.md` §3.8).
+/// Otherwise — nothing runs, a firmware effect does, the device ran its regions
+/// — the whole stack starts, its layers read from the file. A rule's effect
+/// running there is no stack of the device's: it is replaced whole.
+pub(crate) fn apply(app: &AppHandle, device: DeviceRef, start: EffectStart) -> CmdResult<()> {
+    if !crate::automations::interrupts(app, device) {
+        let id = start.effect_id.clone();
+        match app
+            .state::<AppState>()
+            .engine
+            .start_base(device, None, start.clone())
+        {
+            Ok(()) => return Ok(()),
+            Err(PartError::NotRunning) => {}
+            Err(PartError::Refused(refused)) => return Err(not_started(&id, refused.to_string())),
+            Err(PartError::Failed(error)) => return Err(not_started(&id, error)),
+        }
+    }
+    run_stack(app, device, Some(start))
+}
+
+/// Starts a whole device's stack — `base`, or none, and the layers kept for it
+/// — replacing whatever ran there. A layer that cannot start is said in the
+/// log and waits in the file; a base that does not load is the command's
+/// error, and the device runs nothing, as before layers.
+pub(crate) fn run_stack(
+    app: &AppHandle,
+    device: DeviceRef,
+    base: Option<EffectStart>,
+) -> CmdResult<()> {
+    let layout = crate::find_layout(device)?;
+    let split = crate::is_split(app, device)?;
+    let settings = crate::storage::store(app)?.read_settings()?;
+    let layers = crate::layers::starts(app, &settings, layout, None);
+    let id = base.as_ref().map(|b| b.effect_id.clone());
+    let state = app.state::<AppState>();
+    let out = Box::new(state.handle(device));
+    let verdict = state
+        .engine
+        .start_stack(device, layout, out, StackStart { base, layers }, split);
+    let failed = match verdict {
+        Ok(verdict) => verdict.base.err(),
+        Err(refused) => Some(refused.to_string()),
+    };
+    match (failed, id) {
+        (None, _) => Ok(()),
+        (Some(error), Some(id)) => Err(not_started(&id, error)),
+        (Some(error), None) => Err(Failure::unexpected(format!(
+            "the layers of {device} did not start: {error}"
+        ))),
+    }
 }
 
 /// Starts an effect on one region of a split device, without remembering it.
@@ -3471,10 +3532,11 @@ fn run_region(
             *s = this.take();
         }
     }
+    let stacks = region_stacks(app, &settings, layout, starts);
     let out = Box::new(state.handle(device));
     let verdict = state
         .engine
-        .start_regions(device, layout, out, bases(starts))
+        .start_regions(device, layout, out, stacks)
         .map_err(|refused| refused.to_string())
         .and_then(|verdicts| {
             verdicts
@@ -3493,23 +3555,28 @@ pub(crate) fn run_regions(app: &AppHandle, device: DeviceRef) -> CmdResult<()> {
     let layout = crate::find_layout(device)?;
     let settings = crate::storage::store(app)?.read_settings()?;
     let starts = saved_region_starts(app, &settings, device, layout);
+    let stacks = region_stacks(app, &settings, layout, starts);
     let state = app.state::<AppState>();
     let out = Box::new(state.handle(device));
-    // Each verdict is in the log already, under the region's name; a base
-    // alone per region is within every limit.
-    let _ = state
-        .engine
-        .start_regions(device, layout, out, bases(starts));
+    // Each verdict is in the log already, under the region's name; the
+    // layers kept are within every limit (`crate::layers::planned`).
+    let _ = state.engine.start_regions(device, layout, out, stacks);
     Ok(())
 }
 
-/// Each region with its base alone: its stack as before layers.
-fn bases(
+/// Each region with its base and the layers kept for it.
+fn region_stacks(
+    app: &AppHandle,
+    settings: &crate::storage::Settings,
+    layout: &'static Layout,
     starts: Vec<(&'static Region, Option<EffectStart>)>,
 ) -> Vec<(&'static Region, StackStart)> {
     starts
         .into_iter()
-        .map(|(region, start)| (region, StackStart::base(start)))
+        .map(|(region, base)| {
+            let layers = crate::layers::starts(app, settings, layout, Some(region));
+            (region, StackStart { base, layers })
+        })
         .collect()
 }
 
@@ -3554,7 +3621,7 @@ fn saved_region_starts(
 }
 
 /// An effect from the library, ready to start: its code, its parameters.
-fn effect_start(
+pub(crate) fn effect_start(
     app: &AppHandle,
     id: &str,
     params: &serde_json::Value,
@@ -3586,8 +3653,8 @@ fn saved_start(
     effect_start(app, effect, &serde_json::Value::Object(params), bindings)
 }
 
-/// Starts `effect` on `device` with `stored` over its declared defaults, without
-/// remembering it: see [`run_effect`].
+/// Starts a rule's `effect` on `device` with `stored` over its declared
+/// defaults, alone and without remembering it: see [`run_effect`].
 pub(crate) fn run_with(
     app: &AppHandle,
     device: DeviceRef,
@@ -3610,19 +3677,44 @@ pub(crate) fn run_with(
     )
 }
 
+/// `effect` ready to start with `stored` over its declared defaults.
+fn stored_start(
+    app: &AppHandle,
+    effect: &str,
+    stored: Option<&serde_json::Map<String, serde_json::Value>>,
+    bindings: Bindings,
+) -> CmdResult<EffectStart> {
+    let library = crate::storage::store(app)?.list_effects()?;
+    saved_start(app, &library, effect, stored, bindings)
+}
+
+/// Gives a whole device its applied stack back, whole: the end of a rule's
+/// interruption. The rule's effect was no base of the device's: the base and
+/// every layer start again from the file, with their settings there.
+pub(crate) fn run_applied_with(
+    app: &AppHandle,
+    device: DeviceRef,
+    effect: &str,
+    stored: Option<&serde_json::Map<String, serde_json::Value>>,
+    bindings: Bindings,
+) -> CmdResult<()> {
+    let start = stored_start(app, effect, stored, bindings)?;
+    run_stack(app, device, Some(start))
+}
+
 /// Starts `effect` on `device` with the settings saved for it on that device.
 ///
 /// What the tray and resuming do: neither may start an effect differently from
 /// the gallery, and both remember it as applied.
 pub(crate) fn start_saved(app: &AppHandle, device: DeviceRef, effect: &str) -> CmdResult<()> {
     let settings = crate::storage::store(app)?.read_settings()?;
-    run_with(
+    let start = stored_start(
         app,
-        device,
         effect,
         settings.effect_params(device.vid, device.pid, effect),
         settings.effect_bindings(device.vid, device.pid, effect),
     )?;
+    apply(app, device, start)?;
     remember_active_effect(app, device, Some(effect));
     Ok(())
 }
@@ -3782,13 +3874,13 @@ pub(crate) fn resume_waiting(app: &AppHandle, effect: &str) {
 }
 
 /// The parameters as the loop reads them.
-fn serialised(params: &serde_json::Value) -> CmdResult<String> {
+pub(crate) fn serialised(params: &serde_json::Value) -> CmdResult<String> {
     serde_json::to_string(params)
         .map_err(|e| Failure::unexpected(format!("parameters not serialisable: {e}")))
 }
 
 /// A load that failed: the effect's own error, for its author, in English.
-fn not_started(id: &str, error: String) -> Failure {
+pub(crate) fn not_started(id: &str, error: String) -> Failure {
     Failure::new("effectNotStarted")
         .with("name", id)
         .with("error", error)
@@ -3805,11 +3897,26 @@ pub fn stop_effect(
 ) -> CmdResult<()> {
     match crate::part_of(&app, device, region.as_deref(), false)? {
         Scope::Whole => {
-            state.engine.stop(device);
+            let interrupted = crate::automations::interrupts(&app, device);
             // Stopping during an interruption ends it too: nothing is applied
-            // any more, so there is nothing to give back.
+            // any more, so there is nothing to give back but the layers.
             crate::automations::dismiss(&app, device);
             remember_active_effect(&app, device, None);
+            if interrupted {
+                // The rule's effect goes, and the device's layers come back
+                // over black; with none, nothing starts.
+                run_stack(&app, device, None)?;
+            } else if state
+                .engine
+                .layers_of(device, None)
+                .is_some_and(|layers| !layers.is_empty())
+            {
+                // The layers go on, over black (`docs/design/composition.md`
+                // §3.2): stopping the effect is not removing them.
+                state.engine.stop_base(device, None);
+            } else {
+                state.engine.stop(device);
+            }
         }
         Scope::Region(region) => {
             let interrupted = crate::automations::interrupts(&app, device);
@@ -4734,6 +4841,16 @@ mod tests {
                     .and_then(|i| starts.remove(i).1);
                 (r, start)
             })
+            .collect()
+    }
+
+    /// Each region with its base alone: its stack as before layers.
+    fn bases(
+        starts: Vec<(&'static Region, Option<EffectStart>)>,
+    ) -> Vec<(&'static Region, StackStart)> {
+        starts
+            .into_iter()
+            .map(|(region, start)| (region, StackStart::base(start)))
             .collect()
     }
 

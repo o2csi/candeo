@@ -733,6 +733,19 @@ pub struct Settings {
     /// [`crate::presets::PresetRecord`]; absent while there is none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub presets: Vec<crate::presets::PresetRecord>,
+    /// Each target's layers, over the base `activeEffects` or its region
+    /// keeps (`docs/design/composition.md` §3.11). A key of its own: an older
+    /// build sees the base alone and runs it, the right way to fall short. See
+    /// [`crate::layers::StackRecord`]; absent while no target has a layer.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<crate::layers::StackRecord>,
+    /// Named layers, in the order they were saved (`docs/design/layers-ui.md`
+    /// §5.5); absent while there is none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub saved_layers: Vec<crate::layers::SavedLayerRecord>,
+    /// Named masks, in the order they were saved; absent while there is none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub saved_masks: Vec<crate::layers::SavedMaskRecord>,
     /// The shipped effects copied into the folder, by name: the hash of the
     /// version copied, or `None` when a file of that name was already there and
     /// was left alone. See [`Store::seed_shipped`].
@@ -813,6 +826,9 @@ impl Default for Settings {
             effect_params: Vec::new(),
             split_devices: Vec::new(),
             presets: Vec::new(),
+            layers: Vec::new(),
+            saved_layers: Vec::new(),
+            saved_masks: Vec::new(),
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
             signals: crate::signals::SignalsConfig::default(),
@@ -1213,7 +1229,10 @@ impl Settings {
         let Some(regions) = regions else {
             let before = self.split_devices.len();
             self.split_devices.retain(|s| (s.vid, s.pid) != (vid, pid));
-            return self.split_devices.len() != before;
+            // The regions' stacks go with the rest of their records
+            // (`docs/design/composition.md` §3.11).
+            let stacks = self.forget_region_stacks(vid, pid);
+            return self.split_devices.len() != before || stacks;
         };
         if self.split(vid, pid).is_some() {
             return false;
@@ -1419,6 +1438,8 @@ impl Settings {
         // Its presets too: named settings for an effect nothing holds any more
         // (`docs/design/presets.md` §6).
         self.presets.retain(|p| p.effect != effect);
+        // Its layers and saved layers, as its presets.
+        self.forget_effect_layers(effect);
         *self != before
     }
 
@@ -1446,6 +1467,7 @@ impl Settings {
             .chain(self.effect_params.iter().map(|r| r.effect.as_str()))
             .chain(regions)
             .chain(self.presets.iter().map(|p| p.effect.as_str()))
+            .chain(self.layer_effects())
             .collect();
         references.into_iter().map(str::to_owned).collect()
     }
@@ -1468,6 +1490,11 @@ impl Settings {
             .chain(regions)
             .chain(self.presets.iter_mut().map(|p| &mut p.effect))
         {
+            if let Some(name) = renames.get(effect.as_str()) {
+                effect.clone_from(name);
+            }
+        }
+        for effect in self.layer_effects_mut() {
             if let Some(name) = renames.get(effect.as_str()) {
                 effect.clone_from(name);
             }
@@ -5048,6 +5075,36 @@ mod tests {
                 bindings: [("hue".to_string(), "sound:tone".to_string())].into(),
                 unknown: serde_json::Map::new(),
             }],
+            layers: serde_json::from_value(serde_json::json!([{
+                "vid": 5426, "pid": 658,
+                "stack": [{
+                    "id": "l1",
+                    "effect": "shipped:Equalizer",
+                    "values": { "bands": 16 },
+                    "mask": { "group": "numberRow" },
+                    "follows": { "source": "sound:volume", "floor": 0 }
+                }, {
+                    "id": "l2",
+                    "effect": "shipped:Breathing",
+                    "mask": { "saved": "k1" },
+                    "blend": "cover",
+                    "opacity": 80
+                }]
+            }]))
+            .unwrap(),
+            saved_layers: serde_json::from_value(serde_json::json!([{
+                "name": "CI on Escape",
+                "effect": "shipped:Breathing",
+                "values": { "speed": 1 },
+                "mask": { "group": "escape" },
+                "blend": "cover"
+            }]))
+            .unwrap(),
+            saved_masks: serde_json::from_value(serde_json::json!([
+                { "id": "k1", "name": "Game keys", "keys": ["11", "1e", "1f", "20"] },
+                { "id": "k2", "name": "Lid logo", "vid": 6268, "pid": 1360, "lights": [3, 7] }
+            ]))
+            .unwrap(),
             shipped_effects: BTreeMap::from([
                 ("Breathing".to_owned(), Some("abc".to_owned())),
                 ("Sweep".to_owned(), None),
@@ -6416,6 +6473,18 @@ mod tests {
                 preferences,
                 split_devices: vec![split],
                 presets: vec![preset],
+                layers: serde_json::from_value(serde_json::json!([
+                    { "vid": 5426, "pid": 658, "stack": [{ "id": "l1", "effect": "shipped:Rain" }] }
+                ]))
+                .expect("a stack"),
+                saved_layers: serde_json::from_value(serde_json::json!([
+                    { "name": "Rain", "effect": "shipped:Rain" }
+                ]))
+                .expect("a saved layer"),
+                saved_masks: serde_json::from_value(serde_json::json!([
+                    { "id": "k1", "name": "Escape", "keys": ["01"] }
+                ]))
+                .expect("a saved mask"),
                 ..Settings::default()
             },
         );
