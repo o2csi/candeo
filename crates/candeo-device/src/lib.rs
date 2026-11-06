@@ -6,6 +6,7 @@
 use candeo_protocol::{CommandId, Rgb};
 
 pub mod definition;
+pub mod groups;
 pub mod inspection;
 pub mod layout;
 pub mod lighting;
