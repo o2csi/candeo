@@ -360,7 +360,8 @@ slider under the same condition as a whole device's card.
   row and column, where a definition's region keeps the device's.
 - **Automations aimed at a region**: a rule naming a device's region rather than
   the device.
-- Layers and masks — several effects over the same lights — are not planned.
+- Layers and masks — several effects over the same lights — are under study in
+  [`composition.md`](composition.md) (#360).
 
 ## 11. Implementation contract
 

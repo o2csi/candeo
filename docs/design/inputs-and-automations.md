@@ -705,7 +705,8 @@ Each step is one pull request, with its issue:
 ## 5. Out of scope
 
 - Several effects composed on one device: side by side, one per region, is
-  [`regions.md`](regions.md); layered or masked over the same lights is not
-  planned.
+  [`regions.md`](regions.md); layered or masked over the same lights, and rules
+  adding a layer instead of interrupting, are under study in
+  [`composition.md`](composition.md) (#360).
 - Screen colors and game integrations beyond what signals carry.
 - macOS.
