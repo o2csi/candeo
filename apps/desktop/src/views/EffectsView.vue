@@ -2252,7 +2252,9 @@ async function finishChoosing(): Promise<void> {
   try {
     const mask = await maskOfPositions(where, s.positions)
     if (s.editing !== null) {
-      const n = await updateMask(s.editing, mask)
+      // Keys without a scancode come back as lights, which mean something on
+      // this definition only: its model goes with them.
+      const n = await updateMask(s.editing, mask, deviceOf(where))
       forgetResolved()
       announce(t('layers.announce.maskUpdated', { n }, n))
       await reloadSettings()

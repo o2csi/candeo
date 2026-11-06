@@ -303,9 +303,11 @@ export function saveMask(name: string, mask: Mask, model: DeviceRef | null): Pro
 /**
  * Changes a saved mask's lights. Every layer naming it follows, on every
  * device, live; answers with how many layers and saved layers name it.
+ * `model` is required when the mask names lights: keys without a scancode,
+ * Fn among them, come back from {@link maskOfPositions} as lights.
  */
-export function updateMask(id: string, mask: Mask): Promise<number> {
-  return invoke('update_mask', { id, mask })
+export function updateMask(id: string, mask: Mask, model: DeviceRef | null = null): Promise<number> {
+  return invoke('update_mask', { id, mask, model: model ? deviceOf(model) : null })
 }
 
 export function renameMask(id: string, name: string): Promise<SavedMaskRecord[]> {
