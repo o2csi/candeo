@@ -38,7 +38,7 @@ use crate::DeviceRef;
 ///
 /// > **Every hour** · **on** *DeathStalker V2 Pro* · **show** *Clock* · **for**
 /// > *10 seconds*
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Rule {
     pub id: String,
@@ -61,7 +61,7 @@ pub struct Rule {
 }
 
 /// When a rule applies.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Trigger {
     /// An occurrence starts each time the expression matches the local time: five
@@ -93,7 +93,7 @@ fn holds() -> bool {
 /// What a rule shows: an effect id, as `activeEffects` names them, and its own
 /// settings — never the ones saved for that effect on the device, since the
 /// clock on the hour and the clock applied by hand need not look alike.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, schemars::JsonSchema)]
 pub struct Show {
     pub effect: String,
     #[serde(default)]
@@ -105,7 +105,7 @@ pub struct Show {
 }
 
 /// How long an occurrence lasts.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, schemars::JsonSchema)]
 pub struct Lasts {
     pub seconds: u32,
 }

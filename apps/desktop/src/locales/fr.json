@@ -444,7 +444,9 @@
     "noFirmwareEffect": "« {device} » n'exécute aucun effet par lui-même : choisissez-en un dans la bibliothèque.",
     "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
     "deviceWrite": "Écriture impossible vers cet appareil : {detail}",
-    "deviceClosed": "Appareil refermé après trop d'écritures refusées : reconnectez-le depuis Périphériques, et éteignez puis rallumez la machine s'il persiste."
+    "deviceClosed": "Appareil refermé après trop d'écritures refusées : reconnectez-le depuis Périphériques, et éteignez puis rallumez la machine s'il persiste.",
+    "mcpInvalidArguments": "Les arguments ne conviennent pas à l'outil : {detail}",
+    "mcpTooManyCalls": "Trop d'appels : {max} par seconde au plus."
   },
   "settings": {
     "title": "Réglages",
@@ -530,6 +532,36 @@
       "valve": "Intégration de l’état de jeu de Valve",
       "note": "Un onglet Jeux apparaît, avec les jeux qu’elle prend en charge."
     },
+    "assistants": {
+      "title": "Assistants",
+      "allow": "Permettre aux assistants d'utiliser Candeo",
+      "allowDetail": "Les assistants de cet ordinateur qui parlent MCP, comme Claude ou Cursor, lisent les périphériques, les dispositions, les effets, les préréglages et les règles. Ils ne changent rien.",
+      "none": "Aucun assistant connecté.",
+      "connected": "Connectés en ce moment",
+      "unnamed": "Un assistant qui n'a pas donné de nom",
+      "taken": "Un autre programme occupe le canal par lequel les assistants se connectent : quittez-le, puis désactivez et réactivez ce réglage.",
+      "failed": "Le canal par lequel les assistants se connectent n'a pas pu être ouvert : le journal dit pourquoi.",
+      "connect": "Connecter un assistant",
+      "assistant": "Assistant",
+      "names": {
+        "claudeDesktop": "Claude Desktop",
+        "claudeCode": "Claude Code",
+        "vscode": "VS Code",
+        "cursor": "Cursor",
+        "other": "Un autre assistant"
+      },
+      "where": {
+        "claudeDesktop": "Ajoutez-le à claude_desktop_config.json, à côté des serveurs déjà présents, puis redémarrez Claude Desktop.",
+        "claudeCode": "Exécutez-la dans un terminal : l'assistant est ajouté pour tous vos projets.",
+        "vscode": "Ajoutez-le à mcp.json, dans votre profil utilisateur ou dans le dossier .vscode d'un espace de travail.",
+        "cursor": "Ajoutez-le à ~/.cursor/mcp.json, à côté des serveurs déjà présents.",
+        "other": "La commande qu'un assistant démarre, comme serveur local."
+      },
+      "copy": "Copier",
+      "copied": "Copié dans le presse-papiers.",
+      "copyRefused": "Copie refusée par le système : sélectionnez le texte.",
+      "noCommand": "Candeo ne sait pas où son programme est installé : connectez un assistant à la main, avec --mcp."
+    },
     "version": {
       "title": "Candeo {version}",
       "check": "Vérifier les nouvelles versions",
@@ -575,6 +607,7 @@
       "forgetRules": "Les règles d'automatisation sont supprimées.",
       "forgetPresets": "Les préréglages sont supprimés.",
       "forgetSignals": "Les signaux ne sont plus reçus, et leur jeton est oublié.",
+      "forgetAssistants": "Les assistants ne peuvent plus se connecter.",
       "effectsKept": "Vos effets ne sont pas touchés.",
       "effectsKeptDetail": "Les supprimer est une autre action, une par effet, depuis la bibliothèque.",
       "confirm": "Remettre au défaut",

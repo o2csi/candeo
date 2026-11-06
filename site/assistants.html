@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Candeo — assistants</title>
+    <meta
+      name="description"
+      content="Let an AI assistant on your computer — Claude, Cursor, VS Code — read your devices, effects and rules through MCP, to help you write an effect. Off until you turn it on, and it changes nothing."
+    />
+    <link rel="icon" href="assets/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="copy.js" defer></script>
+  </head>
+  <body>
+    <main class="subpage">
+{{nav}}
+      <h1>Assistants</h1>
+      <p class="lead">
+        An AI assistant on your computer — Claude Desktop, Claude Code, VS Code, Cursor — can read
+        Candeo through the Model Context Protocol: your devices and what runs on them, their
+        layouts, your effects, presets and rules, and the effects API. Ask it to explain an effect,
+        or to write one for your keyboard.
+      </p>
+
+      <section>
+        <h2>It reads, and changes nothing</h2>
+        <p>
+          In this version an assistant <strong>changes nothing</strong>: no tool applies an effect,
+          saves a file or edits a rule. It gives you the effect it wrote, and you create it in
+          Candeo's editor, preview it, and apply it yourself.
+        </p>
+        <p>
+          It never reads the values of signals, the key presses or sound an effect reads, serial
+          numbers or file paths. What it reads goes to the assistant and to the service it uses to
+          answer you, under its own policy; Candeo sends nothing itself.
+        </p>
+      </section>
+
+      <section>
+        <h2>Turning it on</h2>
+        <p>
+          In <strong>Settings › Assistants</strong>, turn on <em>Let assistants use Candeo</em>,
+          choose your assistant, and <strong>Copy</strong> the text shown into its settings — for
+          Claude Desktop, <code>claude_desktop_config.json</code>:
+        </p>
+        <pre data-lang="json">{
+  "mcpServers": {
+    "candeo": {
+      "command": "C:\\Users\\you\\AppData\\Local\\Microsoft\\WindowsApps\\candeo.exe",
+      "args": ["--mcp"]
+    }
+  }
+}</pre>
+        <p>
+          Settings writes the path of your own Candeo, one that survives updates. For Claude Code,
+          it is a command to run once:
+        </p>
+        <pre data-lang="powershell">claude mcp add --transport stdio --scope user candeo -- "C:\Users\you\AppData\Local\Microsoft\WindowsApps\candeo.exe" --mcp</pre>
+        <p>
+          Restart the assistant: Settings lists it, by its name, once it is connected. Turning the
+          setting off disconnects every assistant.
+        </p>
+      </section>
+
+      <section>
+        <h2>Only your programs</h2>
+        <p>
+          The assistant starts Candeo's own program with <code>--mcp</code>, which starts nothing:
+          it relays to the Candeo already running, through a channel only your account on this
+          computer can open. No network port opens, and there is no token to copy or leak. With
+          Candeo closed, or the setting off, the assistant's log says so.
+        </p>
+      </section>
+
+      <section>
+        <h2>Further</h2>
+        <p>
+          Every tool and resource, what each returns and what is never handed out, is in
+          <a href="{{repository}}/blob/main/docs/api/mcp.md">docs/api/mcp.md</a>; the reasons behind
+          these choices, and what comes next, in
+          <a href="{{repository}}/blob/main/docs/design/mcp-server.md">docs/design/mcp-server.md</a>.
+          The rest is in the <a href="privacy.html">privacy policy</a>.
+        </p>
+      </section>
+    </main>
+
+{{footer}}
+  </body>
+</html>

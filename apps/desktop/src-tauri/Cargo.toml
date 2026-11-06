@@ -91,6 +91,20 @@ tiny_http = "0.12"
 if-addrs = "0.15"
 getrandom = "0.4"
 
+# The MCP server (#359, `docs/design/mcp-server.md`): rmcp is the official Rust
+# SDK, 3.9 the first to implement the 2026-07-28 revision. `server` serves over
+# any byte stream, the local pipe included; no HTTP feature, no macros: the
+# tools are listed and dispatched by hand, so that an error is always a tool
+# result the model can read. See `src/mcp/`.
+rmcp = { version = "3.9", default-features = false, features = ["server", "base64"] }
+# The tool schemas, from the Rust types: rmcp's own major version.
+schemars = "1"
+# Already in the tree through Tauri, whose runtime the server runs on: `net` for
+# the named pipe and the Unix socket, `io-std` for `candeo --mcp`, which relays
+# stdio to the pipe on a runtime of its own.
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-util = "0.7"
+
 # Key names in the active keyboard layout (`GetKeyNameTextW`, `src/keys.rs`), key
 # presses through Raw Input (`src/runtime/presses.rs`) and the display language
 # (`src/language.rs`). Already in the tree through Tauri.
@@ -108,6 +122,11 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Registry",
   # Whether this process runs from an MSIX package (`src/msix.rs`).
   "Win32_Storage_Packaging_Appx",
+  # The MCP pipe that only the signed-in user can open (`src/mcp/pipe.rs`): the
+  # user's SID, and a security descriptor granting it alone.
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading",
   # How long the session has been idle, with `GetLastInputInfo` (`src/idle.rs`).
   "Win32_System_SystemInformation",
   # What the computer is doing (`src/system/windows.rs`, #242): performance
@@ -148,12 +167,16 @@ features = [
   "Win32_System_Variant",
 ]
 
-# Kernel uevents for devices plugged in and unplugged (`src/hotplug.rs`). Already
-# in the tree.
-[target.'cfg(target_os = "linux")'.dependencies]
+# Kernel uevents for devices plugged in and unplugged on Linux (`src/hotplug.rs`),
+# and the user id the MCP socket checks its peers against (`src/mcp/pipe.rs`).
+# Already in the tree.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
 # Storage is tested in a temporary folder, never in the user's — and without
 # starting Tauri.
 tempfile = "3"
+# The MCP server is tested through rmcp's own client, over an in-memory stream.
+rmcp = { version = "3.9", default-features = false, features = ["server", "base64", "client"] }
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt", "rt-multi-thread", "sync", "time"] }

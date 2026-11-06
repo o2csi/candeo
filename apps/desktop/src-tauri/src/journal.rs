@@ -172,7 +172,7 @@ impl fmt::Display for LogLevel {
 /// The `min` covers the only case where the rule flips: asking for `error` is
 /// asking for silence, and leaving third parties at `warn` would then be chattier
 /// than what was asked for ourselves.
-fn directives(level: LogLevel) -> String {
+pub(crate) fn directives(level: LogLevel) -> String {
     let third_party = level.min(LogLevel::Warn);
     let mut out = String::from(third_party.name());
     for target in OUR_CRATES {
@@ -181,8 +181,19 @@ fn directives(level: LogLevel) -> String {
         out.push('=');
         out.push_str(level.name());
     }
+    for target in QUIET_CRATES {
+        out.push(',');
+        out.push_str(target);
+        out.push_str("=error");
+    }
     out
 }
+
+/// Third parties held at `error` whatever the level: what they would say at
+/// `warn` can quote what an assistant sent, and what MCP carries never reaches
+/// the log (`docs/design/mcp-server.md` §3.5). Candeo logs its connections
+/// itself.
+const QUIET_CRATES: &[&str] = &["rmcp"];
 
 /// What the priority rule decided.
 #[derive(Debug, PartialEq, Eq)]
@@ -1293,6 +1304,18 @@ mod tests {
     fn asking_for_silence_quiets_third_parties_too() {
         let d = directives(LogLevel::Error);
         assert!(d.starts_with("error,"), "{d}");
+    }
+
+    /// The MCP SDK stays at `error` even when chasing a failure at `trace`.
+    #[test]
+    fn the_mcp_sdk_never_logs_what_it_carries() {
+        for level in [LogLevel::Info, LogLevel::Trace] {
+            assert!(
+                directives(level).ends_with(",rmcp=error"),
+                "{}",
+                directives(level)
+            );
+        }
     }
 
     #[test]

@@ -444,7 +444,9 @@
     "noFirmwareEffect": "“{device}” runs no effect of its own: choose one from the library.",
     "wrongUnit": "The plugged-in unit (serial {fingerprint}) is not the one that was controlled: it stays closed. “Control” adopts it too.",
     "deviceWrite": "Cannot write to this device: {detail}",
-    "deviceClosed": "Device closed after too many refused writes: reconnect it from Devices, and power the machine off and on if it keeps refusing."
+    "deviceClosed": "Device closed after too many refused writes: reconnect it from Devices, and power the machine off and on if it keeps refusing.",
+    "mcpInvalidArguments": "The arguments do not fit the tool: {detail}",
+    "mcpTooManyCalls": "Too many calls: at most {max} a second."
   },
   "settings": {
     "title": "Settings",
@@ -530,6 +532,36 @@
       "valve": "Valve's game state integration",
       "note": "A Games tab appears, with the games it supports."
     },
+    "assistants": {
+      "title": "Assistants",
+      "allow": "Let assistants use Candeo",
+      "allowDetail": "Assistants on this computer that speak MCP, such as Claude or Cursor, read the devices, layouts, effects, presets and rules. They change nothing.",
+      "none": "No assistant connected.",
+      "connected": "Connected now",
+      "unnamed": "An assistant that gave no name",
+      "taken": "Another program holds the pipe assistants connect through: quit it, then turn this setting off and on again.",
+      "failed": "The pipe assistants connect through could not be opened: the log says why.",
+      "connect": "Connect an assistant",
+      "assistant": "Assistant",
+      "names": {
+        "claudeDesktop": "Claude Desktop",
+        "claudeCode": "Claude Code",
+        "vscode": "VS Code",
+        "cursor": "Cursor",
+        "other": "Another assistant"
+      },
+      "where": {
+        "claudeDesktop": "Add it to claude_desktop_config.json, beside the servers already there, then restart Claude Desktop.",
+        "claudeCode": "Run it in a terminal: the assistant is added for all your projects.",
+        "vscode": "Add it to mcp.json, in your user profile or in a workspace's .vscode folder.",
+        "cursor": "Add it to ~/.cursor/mcp.json, beside the servers already there.",
+        "other": "The command an assistant starts, as a local server."
+      },
+      "copy": "Copy",
+      "copied": "Copied to the clipboard.",
+      "copyRefused": "The system refused to copy: select the text instead.",
+      "noCommand": "Candeo cannot tell where its program is installed: connect an assistant by hand, with --mcp."
+    },
     "version": {
       "title": "Candeo {version}",
       "check": "Check for new versions",
@@ -575,6 +607,7 @@
       "forgetRules": "Automation rules are deleted.",
       "forgetPresets": "Presets are deleted.",
       "forgetSignals": "Signals are no longer received, and their token is forgotten.",
+      "forgetAssistants": "Assistants can no longer connect.",
       "effectsKept": "Your effects are not touched.",
       "effectsKeptDetail": "Deleting them is another action, one effect at a time, from the library.",
       "confirm": "Reset to default",

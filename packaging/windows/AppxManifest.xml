@@ -60,6 +60,18 @@
           EntryPoint="Windows.FullTrustApplication">
           <uap5:StartupTask TaskId="CandeoStartup" Enabled="false" DisplayName="Candeo" />
         </uap5:Extension>
+        <!-- `candeo` on the PATH, at a path that survives updates: the package's
+             own folder carries its version in its name. Assistants start the
+             alias as their MCP server (`docs/design/mcp-server.md` §2.6); typed
+             in a terminal, `candeo` starts Candeo as the Start menu does. -->
+        <uap5:Extension
+          Category="windows.appExecutionAlias"
+          Executable="candeo.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="candeo.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>

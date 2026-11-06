@@ -1,0 +1,2 @@
+en: Assistants, in Settings: let Claude, Cursor or VS Code on this computer read your devices, effects and rules through MCP, to help you write an effect. They change nothing, and it is off until you turn it on.
+fr: Assistants, dans Réglages : laissez Claude, Cursor ou VS Code sur cet ordinateur lire vos périphériques, vos effets et vos règles par MCP, pour vous aider à écrire un effet. Ils ne changent rien, et c'est désactivé tant que vous ne l'activez pas.
