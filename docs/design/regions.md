@@ -637,6 +637,11 @@ impl Engine {
 // enum RegionStart { NotRunningRegions, Failed(String) }
 ```
 
+Since layers ([`composition.md`](composition.md) §7), `start_regions` takes a
+stack per region and answers each region's `StackVerdict`, `start_preview` takes
+the device's layout and the `&'static Region`, and `start_region` and
+`stop_region` start and stop a region's base.
+
 - **`start_region` reaches the running thread** through a channel the thread
   reads between two frames: *replace this part*, with a sender for the verdict.
   The thread builds the context; on success the part is replaced, on failure the

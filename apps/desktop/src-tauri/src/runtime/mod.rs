@@ -27,6 +27,16 @@
 //! last frame it sent, and two writers on one device would each find the
 //! other's frame too soon or changed.
 //!
+//! # A target runs a stack
+//!
+//! Each target — the whole device, or one region — runs a **stack**
+//! (`docs/design/composition.md` §3.8): its base, the applied effect, and
+//! layers over it, each a part of its own drawn through a mask, a blend mode
+//! and an opacity. A layer's effect sees its mask as its device. The frame is
+//! composed from the parts in that order, then the follows scale it, then it
+//! leaves once. A base, a layer or an order changes between two frames, the
+//! other parts keeping their clock. See [`composition`].
+//!
 //! # And one preview loop, which belongs to no device
 //!
 //! **Previewing must never interrupt the effect running on the keyboard.**
@@ -99,10 +109,12 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 
 use crate::journal;
 
+pub mod composition;
 pub mod dimming;
 pub mod presses;
 pub mod swatch;
 
+use composition::{Drawn, LayerStart, Look, Refusal, StackStart};
 use presses::Presses;
 
 /// Parameters bound to a live value, by parameter: `{"colour": "signal:status"}`
@@ -280,19 +292,29 @@ struct Shared {
     /// Consecutive failed writes, reset by any successful write. See
     /// [`MAX_DEVICE_WRITE_ERRORS`].
     device_failures: AtomicU32,
+    /// The device's layout, which its layers' masks are resolved on.
+    // Read by `start_layer`, which the window's commands call from the next
+    // step of `composition.md` §5.1; the tests until then.
+    #[cfg_attr(not(test), allow(dead_code))]
+    layout: &'static Layout,
     /// The device's regions, in its definition's order, while the loop runs
-    /// them; `None` while it runs one effect on the whole device.
+    /// them; `None` while it runs one stack on the whole device.
     regions: Option<&'static [Region]>,
-    /// The parts as the commands and the status reach them: the one on the
-    /// whole device, or one per region running an effect or stopped on its own
-    /// — a region running nothing has none.
+    /// The parts as the commands and the status reach them, in the order they
+    /// are composed: each target's base, then its layers, bottom to top. A
+    /// part stopped on its own keeps its place, with its error; a target
+    /// running nothing has none.
     parts: Mutex<Vec<Arc<PartShared>>>,
     /// What the commands ask of the running thread, read between two frames.
     requests: Mutex<Option<Sender<Request>>>,
 }
 
 impl Shared {
-    fn new(regions: Option<&'static [Region]>, requests: Sender<Request>) -> Self {
+    fn new(
+        layout: &'static Layout,
+        regions: Option<&'static [Region]>,
+        requests: Sender<Request>,
+    ) -> Self {
         Self {
             stop: AtomicBool::new(false),
             to_keyboard: AtomicBool::new(true),
@@ -300,19 +322,32 @@ impl Shared {
             device_error: Mutex::new(None),
             reaching: AtomicBool::new(false),
             device_failures: AtomicU32::new(0),
+            layout,
             regions,
             parts: Mutex::new(Vec::new()),
             requests: Mutex::new(Some(requests)),
         }
     }
 
-    /// The part on this region, or on the whole device with `None`.
-    fn part(&self, region: Option<&str>) -> Option<Arc<PartShared>> {
+    /// The base of this region's stack — the whole device's with `None` — or,
+    /// with `layer`, that layer of it.
+    fn part(&self, region: Option<&str>, layer: Option<&str>) -> Option<Arc<PartShared>> {
         self.parts
             .lock()
             .unwrap()
             .iter()
-            .find(|p| p.region == region)
+            .find(|p| p.is(region, layer))
+            .cloned()
+    }
+
+    /// A part of the preview's one stack, its base with `None`: the preview is
+    /// named by no region.
+    fn preview_part(&self, layer: Option<&str>) -> Option<Arc<PartShared>> {
+        self.parts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|p| p.layer.as_deref() == layer)
             .cloned()
     }
 
@@ -327,8 +362,13 @@ impl Shared {
 struct PartShared {
     /// The region it runs on, `None` on the whole device.
     region: Option<&'static str>,
-    /// Stopped on its own after [`MAX_CONSECUTIVE_ERRORS`]: its lights are
-    /// black, and its error says why.
+    /// Its layer's id in the region's stack, `None` for the base.
+    layer: Option<String>,
+    /// How it is drawn over what is under it, re-read on every frame: setting
+    /// it does not restart the effect. A base covers its target at full.
+    look: Mutex<Look>,
+    /// Stopped on its own after [`MAX_CONSECUTIVE_ERRORS`], or a layer that did
+    /// not load: it draws nothing, and its error says why.
     stopped: AtomicBool,
     /// Effect parameters, as JSON. Re-read on every frame: setting them does
     /// not restart the loop.
@@ -348,15 +388,47 @@ struct PartShared {
 }
 
 impl PartShared {
-    fn new(region: Option<&'static str>, start: &EffectStart) -> Self {
+    /// A base, on its region or on the whole device with `None`.
+    fn base(region: Option<&'static str>, start: &EffectStart) -> Self {
+        Self::new(region, None, Look::base(), start)
+    }
+
+    fn new(
+        region: Option<&'static str>,
+        layer: Option<String>,
+        look: Look,
+        start: &EffectStart,
+    ) -> Self {
         Self {
             region,
+            layer,
+            look: Mutex::new(look),
             stopped: AtomicBool::new(false),
             params: Mutex::new(start.params.clone()),
             bindings: Mutex::new(start.bindings.clone()),
             effect_id: Mutex::new(Some(start.effect_id.clone())),
             error: Mutex::new(None),
             reads_private: AtomicBool::new(false),
+        }
+    }
+
+    /// True for the base of `region`'s stack, or for its `layer`.
+    fn is(&self, region: Option<&str>, layer: Option<&str>) -> bool {
+        self.region == region && self.layer.as_deref() == layer
+    }
+
+    fn look(&self) -> Look {
+        self.look.lock().unwrap().clone()
+    }
+
+    /// As the status reads it while the loop runs.
+    fn layer_status(&self, ended: bool) -> LayerEngineStatus {
+        LayerEngineStatus {
+            layer: self.layer.clone().unwrap_or_default(),
+            running: !ended && self.running(),
+            effect_id: self.effect_id(),
+            error: self.error(),
+            reads_private: self.private(),
         }
     }
 
@@ -397,21 +469,101 @@ pub enum RegionStart {
     Failed(String),
 }
 
+/// Why a change to one part of a running loop did not happen: a base, a layer,
+/// an order (`docs/design/composition.md` §3.8).
+#[derive(Debug, PartialEq, Eq)]
+pub enum PartError {
+    /// The loop does not run this target's stack — nothing runs, a rule
+    /// interrupts the device, or the device is split one way and asked the
+    /// other: the caller starts the whole composition.
+    NotRunning,
+    /// Refused before anything loaded: the stack goes on as it was.
+    Refused(Refusal),
+    /// The effect did not load: the stack goes on as it was.
+    Failed(String),
+}
+
+/// How a target's stack started.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StackVerdict {
+    /// The base's, `Ok` when there is none. A target whose base does not load
+    /// runs nothing, its layers included, as a device whose effect did not
+    /// load ran nothing before layers.
+    pub base: Result<(), String>,
+    /// Each layer's, by id, in the stack's order. A layer that does not load,
+    /// or whose mask lights nothing, runs nothing; the rest of the stack runs
+    /// without it.
+    pub layers: Vec<(String, Result<(), PartError>)>,
+}
+
+impl StackVerdict {
+    fn failed(error: String) -> Self {
+        Self {
+            base: Err(error),
+            layers: Vec::new(),
+        }
+    }
+}
+
+/// A layer resolved for its thread: its mask turned into the layout its effect
+/// sees and the positions it may touch.
+struct LayerLoad {
+    id: String,
+    start: EffectStart,
+    layout: &'static Layout,
+    owns: Vec<u16>,
+    look: Look,
+}
+
+impl LayerLoad {
+    fn of(
+        device: &'static Layout,
+        target: Option<&'static Region>,
+        layer: LayerStart,
+    ) -> Result<Self, Refusal> {
+        let masked = composition::masked(device, target, &layer.mask).map_err(Refusal::Mask)?;
+        Ok(Self {
+            id: layer.id,
+            start: layer.start,
+            layout: masked.layout,
+            owns: masked.owns,
+            look: layer.look,
+        })
+    }
+}
+
 /// What a command asks of a running thread, between two frames: a QuickJS
-/// context lives and dies on the thread that runs it, so a region's new effect
-/// is built there.
+/// context lives and dies on the thread that runs it, so a new part is built
+/// there.
+// `Layer` and `Order` come from commands the next step of `composition.md`
+// §5.1 adds; the tests send them until then.
+#[cfg_attr(not(test), allow(dead_code))]
 enum Request {
-    /// Start this effect on this region in place of what it ran, the other
-    /// regions untouched; the verdict comes back.
-    Replace {
-        region: &'static Region,
+    /// Start this effect as the base of this region's stack — the whole
+    /// device's with `None` — in place of what it ran, its layers and the
+    /// other targets untouched; the verdict comes back.
+    Base {
+        region: Option<&'static Region>,
         start: EffectStart,
-        verdict: Sender<Result<(), String>>,
+        verdict: Sender<Result<(), PartError>>,
     },
-    /// The region runs nothing from now on.
+    /// Start this layer in place of the one with its id, or on top.
+    Layer {
+        region: Option<&'static str>,
+        layer: LayerLoad,
+        verdict: Sender<Result<(), PartError>>,
+    },
+    /// The base, with `layer` `None`, or that layer, runs nothing from now on.
     Stop {
-        region: &'static str,
+        region: Option<&'static str>,
+        layer: Option<String>,
         done: Sender<()>,
+    },
+    /// The target's layers in this order, bottom to top.
+    Order {
+        region: Option<&'static str>,
+        ids: Vec<String>,
+        verdict: Sender<Result<(), PartError>>,
     },
 }
 
@@ -442,10 +594,14 @@ pub struct EngineStatus {
     /// Error coming from the effect code, already readable: shown as is.
     pub error: Option<String>,
     /// One per region of the definition, in its order, while the loop runs
-    /// them; absent while one effect runs on the whole device — a rule's
+    /// them; absent while one stack runs on the whole device — a rule's
     /// included, on a split device.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regions: Option<Vec<RegionEngineStatus>>,
+    /// The layers over the whole device's base, bottom to top; each region's
+    /// are in `regions`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerEngineStatus>,
     /// Failed write to the keyboard — nothing to do with the effect code.
     pub device_error: Option<Failure>,
     /// True if the frames actually reach a keyboard.
@@ -470,6 +626,26 @@ pub struct RegionEngineStatus {
     /// What it runs, or ran until it stopped on its own; `None` for nothing.
     pub effect_id: Option<String>,
     /// Error coming from the region's effect, already readable.
+    pub error: Option<String>,
+    /// For the diagnostic: see [`loggable`].
+    #[serde(skip)]
+    pub reads_private: bool,
+    /// The layers over its base, bottom to top.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerEngineStatus>,
+}
+
+/// One layer of a stack, as the interface reads it: its row says what it
+/// runs, and why it stopped (`docs/design/composition.md` §3.8).
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerEngineStatus {
+    /// Its id in the stack.
+    pub layer: String,
+    pub running: bool,
+    pub effect_id: Option<String>,
+    /// Error coming from its effect, already readable: why it did not load,
+    /// or why it stopped.
     pub error: Option<String>,
     /// For the diagnostic: see [`loggable`].
     #[serde(skip)]
@@ -527,6 +703,9 @@ pub struct PreviewStatus {
     /// For the diagnostic: see [`loggable`].
     #[serde(skip)]
     pub reads_private: bool,
+    /// The layers of the stack previewed, over its base, bottom to top.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub layers: Vec<LayerEngineStatus>,
 }
 
 /// Everything the engine knows, **arranged so that nothing gets confused**.
@@ -687,35 +866,88 @@ pub struct Engine {
     /// the lights, and outlives the effect — a rule's effect over a split
     /// device is scaled by its regions' follows.
     dimming: dimming::Table,
+    /// Where the loops' effects read the time.
+    clock: Clock,
 }
 
-/// One part to start: an effect, or nothing, on a layout.
-struct PartStart {
-    /// The region it runs on, `None` on the whole device.
-    region: Option<&'static str>,
-    layout: &'static Layout,
-    /// The positions it owns in the device's frame, `None` for every one.
-    owns: Option<Vec<u16>>,
-    start: Option<EffectStart>,
+/// Where a loop's effects read the time (`docs/design/composition.md` §3.9).
+#[derive(Clone, Copy, Debug, Default)]
+enum Clock {
+    /// The machine's: each part's time counts from its load, and the wall
+    /// clock is the system's.
+    #[default]
+    System,
+    /// Frame `n` of every part at `n / FPS` seconds, and the wall clock at
+    /// `epoch_ms` plus as much. Two loops then render the same instants, which
+    /// the machine's clock never gives them: each starts its parts' time at
+    /// load, a few milliseconds apart.
+    #[cfg(test)]
+    Frames { epoch_ms: f64 },
 }
 
-impl PartStart {
-    fn whole(layout: &'static Layout, start: EffectStart) -> Self {
-        Self {
-            region: None,
-            layout,
-            owns: None,
-            start: Some(start),
+// Only the tests' clock reads the frame's index.
+#[cfg_attr(not(test), allow(unused_variables))]
+impl Clock {
+    /// A part's time, in seconds, and the wall clock, in milliseconds since
+    /// the epoch, for its frame `index` rendered at `now`.
+    fn at(self, started: Instant, now: Instant, index: u32) -> (f64, f64) {
+        match self {
+            Clock::System => (now.duration_since(started).as_secs_f64(), wall_clock_ms()),
+            #[cfg(test)]
+            Clock::Frames { epoch_ms } => {
+                let time = f64::from(index) / f64::from(FPS);
+                (time, epoch_ms + time * 1000.0)
+            }
         }
     }
 
-    fn region(region: &'static Region, start: Option<EffectStart>) -> Self {
-        Self {
-            region: Some(region.id),
-            layout: region.layout,
-            owns: Some(region.positions.to_vec()),
-            start,
+    /// The wall clock a loop's follows read at its frame `index`.
+    fn wall_ms(self, index: u32) -> f64 {
+        match self {
+            Clock::System => wall_clock_ms(),
+            #[cfg(test)]
+            Clock::Frames { epoch_ms } => epoch_ms + f64::from(index) * 1000.0 / f64::from(FPS),
         }
+    }
+}
+
+/// One target's stack to load in a starting thread.
+struct StackLoad {
+    /// The region it runs on, `None` for the whole device.
+    region: Option<&'static Region>,
+    base: Option<EffectStart>,
+    /// Bottom to top: each layer's id and effect, and the layer resolved on
+    /// its device, or refused with why.
+    layers: Vec<(String, String, Result<LayerLoad, Refusal>)>,
+}
+
+impl StackLoad {
+    /// `stack` on `region` of `device`, each layer's mask resolved.
+    fn of(device: &'static Layout, region: Option<&'static Region>, stack: StackStart) -> Self {
+        Self {
+            region,
+            base: stack.base,
+            layers: stack
+                .layers
+                .into_iter()
+                .map(|l| {
+                    let (id, effect) = (l.id.clone(), l.start.effect_id.clone());
+                    (id, effect, LayerLoad::of(device, region, l))
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The layout a target's base runs on, and the positions it owns in the
+/// device's frame: a region's, or every one for the whole device.
+fn target_of(
+    device: &'static Layout,
+    region: Option<&'static Region>,
+) -> (&'static Layout, Option<Vec<u16>>) {
+    match region {
+        Some(region) => (region.layout, Some(region.positions.to_vec())),
+        None => (device, None),
     }
 }
 
@@ -786,6 +1018,13 @@ impl DeviceLoop {
         };
         let parts = s.parts.lock().unwrap().clone();
         let ended = s.stop.load(Ordering::Relaxed);
+        let layers = |region: Option<&str>| -> Vec<LayerEngineStatus> {
+            parts
+                .iter()
+                .filter(|p| p.region == region && p.layer.is_some())
+                .map(|p| p.layer_status(ended))
+                .collect()
+        };
         let device = |running, regions: Option<Vec<RegionEngineStatus>>| EngineStatus {
             running,
             effect_id: None,
@@ -797,14 +1036,16 @@ impl DeviceLoop {
             // The engine knows nothing of rules: see [`engine_status`].
             interruption: None,
             regions,
+            layers: Vec::new(),
         };
         match s.regions {
             None => {
-                let part = parts.first();
+                let base = parts.iter().find(|p| p.is(None, None));
                 EngineStatus {
-                    effect_id: part.and_then(|p| p.effect_id()),
-                    error: part.and_then(|p| p.error()),
-                    reads_private: part.is_some_and(|p| p.private()),
+                    effect_id: base.and_then(|p| p.effect_id()),
+                    error: base.and_then(|p| p.error()),
+                    reads_private: base.is_some_and(|p| p.private()),
+                    layers: layers(None),
                     ..device(!ended, None)
                 }
             }
@@ -812,19 +1053,23 @@ impl DeviceLoop {
                 let regions: Vec<RegionEngineStatus> = regions
                     .iter()
                     .map(|r| {
-                        let part = parts.iter().find(|p| p.region == Some(r.id));
+                        let base = parts.iter().find(|p| p.is(Some(r.id), None));
                         RegionEngineStatus {
                             region: r.id.to_owned(),
-                            running: !ended && part.is_some_and(|p| p.running()),
-                            effect_id: part.and_then(|p| p.effect_id()),
-                            error: part.and_then(|p| p.error()),
-                            reads_private: part.is_some_and(|p| p.private()),
+                            running: !ended && base.is_some_and(|p| p.running()),
+                            effect_id: base.and_then(|p| p.effect_id()),
+                            error: base.and_then(|p| p.error()),
+                            reads_private: base.is_some_and(|p| p.private()),
+                            layers: layers(Some(r.id)),
                         }
                     })
                     .collect();
+                // The loop draws while any part runs: a region's base, or a
+                // layer over a region with none.
+                let running = !ended && parts.iter().any(|p| p.running());
                 EngineStatus {
                     reads_private: regions.iter().any(|r| r.reads_private),
-                    ..device(regions.iter().any(|r| r.running), Some(regions))
+                    ..device(running, Some(regions))
                 }
             }
         }
@@ -852,7 +1097,7 @@ impl DeviceLoop {
         // common action of all — every effect deletion goes through it — and
         // tells nobody anything.
         if let Some(s) = was_running {
-            let effect = s.part(None).and_then(|p| p.effect_id());
+            let effect = s.part(None, None).and_then(|p| p.effect_id());
             match (target, s.regions) {
                 (Target::Device(d), None) => tracing::info!(device = %d, effect, "effect stopped"),
                 (Target::Device(d), Some(_)) => tracing::info!(device = %d, "regions stopped"),
@@ -863,13 +1108,13 @@ impl DeviceLoop {
         }
     }
 
-    /// Starts parts on this target — one effect on the whole layout, or the
-    /// device's regions — and replaces whatever ran. Each part's verdict comes
-    /// back in order; `Err` when the thread itself did not start.
+    /// Starts stacks on this target — one on the whole layout, or one per
+    /// region of the device — and replaces whatever ran. Each stack's verdict
+    /// comes back in order; `Err` when the thread itself did not start.
     ///
-    /// A whole device whose effect does not load runs nothing, as before
-    /// regions. A region whose effect does not load runs nothing, and the
-    /// others start all the same.
+    /// A whole device whose base does not load runs nothing, as before regions
+    /// and layers; nor does one left with no part at all. A region whose base
+    /// does not load runs nothing, and the others start all the same.
     #[allow(clippy::too_many_arguments)]
     fn start(
         &self,
@@ -877,10 +1122,10 @@ impl DeviceLoop {
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
         inputs: Inputs,
-        parts: Vec<PartStart>,
+        stacks: Vec<StackLoad>,
         regions: Option<&'static [Region]>,
         follows: Follows,
-    ) -> Result<Vec<Result<(), String>>, String> {
+    ) -> Result<Vec<StackVerdict>, String> {
         // Held from start to finish: this lock is what forbids two loops from
         // overlapping on this device. It is taken only here, in [`Self::stop`]
         // and by a region's start or stop, and the render thread does not know
@@ -895,7 +1140,7 @@ impl DeviceLoop {
         }
 
         let (requests, requested) = std::sync::mpsc::channel::<Request>();
-        let shared = Arc::new(Shared::new(regions, requests));
+        let shared = Arc::new(Shared::new(layout, regions, requests));
         // The simulator listens to a target, not to an effect: whoever subscribed
         // keeps the frames when another effect starts there. An automation
         // restarts a device's loop without the window knowing — a rule's effect,
@@ -906,40 +1151,54 @@ impl DeviceLoop {
             *shared.frames.lock().unwrap() = previous.frames.lock().unwrap().take();
         }
 
-        // What was asked, for the log once the verdicts are in.
-        let asked: Vec<(Option<&'static str>, Option<String>)> = parts
+        // What was asked, for the log once the verdicts are in: each stack's
+        // region and base, and its layers' ids and effects.
+        type Asked = (Option<&'static str>, Option<String>, Vec<(String, String)>);
+        let asked: Vec<Asked> = stacks
             .iter()
-            .map(|p| (p.region, p.start.as_ref().map(|s| s.effect_id.clone())))
+            .map(|s| {
+                let layers = s
+                    .layers
+                    .iter()
+                    .map(|(id, effect, _)| (id.clone(), effect.clone()))
+                    .collect();
+                let base = s.base.as_ref().map(|b| b.effect_id.clone());
+                (s.region.map(|r| r.id), base, layers)
+            })
             .collect();
 
         // The JavaScript contexts are built **inside** the thread and never
         // leave it: QuickJS types do not cross threads, and confining them
         // here is safer than making them shareable.
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Vec<Result<(), String>>>();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Loaded>();
         let s = Arc::clone(&shared);
         let handle = std::thread::Builder::new()
             .name("candeo-effect".into())
             .spawn(move || {
                 render_loop(
-                    target, s, layout, out, inputs, parts, follows, ready_tx, requested,
+                    target, s, layout, out, inputs, stacks, follows, ready_tx, requested,
                 )
             })
             .map_err(|e| format!("render thread not started: {e}"))?;
 
         // Wait for the load verdicts: a syntax error must surface to the call,
         // not be discovered in a status later.
-        let Ok(verdicts) = ready_rx.recv() else {
+        let Ok(Loaded { verdicts, runs }) = ready_rx.recv() else {
             let _ = handle.join();
             let e = "the render thread stopped before loading the effect".to_string();
             tracing::error!(target = ?target, "{e}");
             return Err(e);
         };
-        for ((region, effect), verdict) in asked.iter().zip(&verdicts) {
-            if let Some(effect) = effect {
-                log_start(target, *region, effect, verdict);
+        for ((region, base, layers), verdict) in asked.iter().zip(&verdicts) {
+            if let Some(effect) = base {
+                log_start(target, *region, None, effect, &verdict.base);
+            }
+            for ((id, effect), (_, verdict)) in layers.iter().zip(&verdict.layers) {
+                let verdict = verdict.as_ref().map(|_| ()).map_err(ToString::to_string);
+                log_start(target, *region, Some(id), effect, &verdict);
             }
         }
-        if regions.is_none() && verdicts.iter().any(Result::is_err) {
+        if !runs {
             let _ = handle.join();
             return Ok(verdicts);
         }
@@ -948,105 +1207,167 @@ impl DeviceLoop {
         Ok(verdicts)
     }
 
-    /// Starts `start` on one region of the loop running the device's regions,
-    /// the others untouched (`docs/design/regions.md` §7). The thread builds
-    /// the context between two frames; on failure the region goes on with what
-    /// it ran.
-    fn start_region(
+    /// Starts `start` as the base of one target's stack, its layers and the
+    /// other targets untouched (`docs/design/regions.md` §7,
+    /// `docs/design/composition.md` §3.8). The thread builds the context
+    /// between two frames; on failure the target goes on with what it ran.
+    fn start_base(
         &self,
         device: DeviceRef,
-        region: &str,
+        region: Option<&str>,
         start: EffectStart,
-    ) -> Result<(), RegionStart> {
+    ) -> Result<(), PartError> {
         // Held while the thread answers, as `start` holds it: starts on one
         // device are serialised, and the thread never takes it.
         let _thread = self.thread.lock().unwrap();
-        let (shared, region) = self.running_region(region)?;
+        let (shared, target) = self.running_target(region)?;
         let effect = start.effect_id.clone();
         let (verdict, answer) = std::sync::mpsc::channel();
-        shared.request(Request::Replace {
-            region,
+        shared.request(Request::Base {
+            region: target,
             start,
             verdict,
         })?;
         // No answer: the thread ended meanwhile, on its own.
-        let verdict = answer.recv().map_err(|_| RegionStart::NotRunningRegions)?;
-        log_start(Target::Device(device), Some(region.id), &effect, &verdict);
-        verdict.map_err(RegionStart::Failed)
+        let verdict = answer.recv().map_err(|_| PartError::NotRunning)?;
+        let logged = verdict.as_ref().map(|_| ()).map_err(ToString::to_string);
+        log_start(Target::Device(device), region, None, &effect, &logged);
+        verdict
     }
 
-    /// The region runs nothing from now on, its lights black; the others go
-    /// on. The loop goes on too, even with no region running anything: see
-    /// [`render_loop`].
-    fn stop_region(&self, device: DeviceRef, region: &str) {
+    /// Starts `layer` on one target's stack, in place of the layer with its id
+    /// or on top, the rest of the composition untouched.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn start_layer(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        layer: LayerStart,
+    ) -> Result<(), PartError> {
+        let _thread = self.thread.lock().unwrap();
+        let (shared, target) = self.running_target(region)?;
+        let (id, effect) = (layer.id.clone(), layer.start.effect_id.clone());
+        let verdict = match LayerLoad::of(shared.layout, target, layer) {
+            Err(refused) => Err(PartError::Refused(refused)),
+            Ok(layer) => {
+                let (verdict, answer) = std::sync::mpsc::channel();
+                shared.request(Request::Layer {
+                    region: target.map(|r| r.id),
+                    layer,
+                    verdict,
+                })?;
+                answer.recv().map_err(|_| PartError::NotRunning)?
+            }
+        };
+        let logged = verdict.as_ref().map(|_| ()).map_err(ToString::to_string);
+        log_start(Target::Device(device), region, Some(&id), &effect, &logged);
+        verdict
+    }
+
+    /// Puts one target's layers in this order, bottom to top, each keeping its
+    /// clock.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn order_layers(&self, region: Option<&str>, ids: Vec<String>) -> Result<(), PartError> {
+        let _thread = self.thread.lock().unwrap();
+        let (shared, target) = self.running_target(region)?;
+        let (verdict, answer) = std::sync::mpsc::channel();
+        shared.request(Request::Order {
+            region: target.map(|r| r.id),
+            ids,
+            verdict,
+        })?;
+        answer.recv().map_err(|_| PartError::NotRunning)?
+    }
+
+    /// The base of one target's stack, with `layer` `None`, or that layer,
+    /// runs nothing from now on; the rest goes on. A base gone leaves its
+    /// layers over black, and a region with nothing left is black. The loop
+    /// goes on too, even with no part left: see [`render_loop`].
+    fn stop_part(&self, device: DeviceRef, region: Option<&str>, layer: Option<&str>) {
         let _thread = self.thread.lock().unwrap();
         let Some(shared) = self.current() else {
             return;
         };
-        let stopped = shared.part(Some(region)).and_then(|p| p.effect_id());
-        match self.running_region(region) {
-            Ok((shared, region)) => {
+        let stopped = shared.part(region, layer).and_then(|p| p.effect_id());
+        match self.running_target(region) {
+            Ok((shared, target)) => {
                 let (done, answer) = std::sync::mpsc::channel();
-                if shared
-                    .request(Request::Stop {
-                        region: region.id,
-                        done,
-                    })
-                    .is_ok()
-                {
+                let request = Request::Stop {
+                    region: target.map(|r| r.id),
+                    layer: layer.map(str::to_owned),
+                    done,
+                };
+                if shared.request(request).is_ok() {
                     let _ = answer.recv();
                 }
             }
             // No thread to race with: a loop ended on its own still shows the
-            // region's error, which goes with the effect.
+            // part's error, which goes with the effect.
             Err(_) => shared
                 .parts
                 .lock()
                 .unwrap()
-                .retain(|p| p.region != Some(region)),
+                .retain(|p| !p.is(region, layer)),
         }
-        if let Some(effect) = stopped {
-            tracing::info!(device = %device, region, effect, "effect stopped");
+        let Some(effect) = stopped else { return };
+        match (region, layer) {
+            (None, None) => tracing::info!(device = %device, effect, "effect stopped"),
+            (Some(region), None) => {
+                tracing::info!(device = %device, region, effect, "effect stopped")
+            }
+            (None, Some(layer)) => tracing::info!(device = %device, layer, effect, "layer stopped"),
+            (Some(region), Some(layer)) => {
+                tracing::info!(device = %device, region, layer, effect, "layer stopped")
+            }
         }
     }
 
-    /// The loop's shared state and the region named, while its thread runs
-    /// the device's regions.
-    fn running_region(&self, region: &str) -> Result<(Arc<Shared>, &'static Region), RegionStart> {
+    /// The loop's shared state and the target named — a region, or the whole
+    /// device with `None` — while its thread runs that target's stack: a
+    /// region of a split device, or the whole device of one left whole.
+    fn running_target(
+        &self,
+        region: Option<&str>,
+    ) -> Result<(Arc<Shared>, Option<&'static Region>), PartError> {
         let shared = self
             .current()
-            .filter(|s| s.runs_regions())
-            .ok_or(RegionStart::NotRunningRegions)?;
-        let region = shared
-            .regions
-            .and_then(|regions| regions.iter().find(|r| r.id == region))
-            .ok_or(RegionStart::NotRunningRegions)?;
-        Ok((shared, region))
+            .filter(|s| !s.stop.load(Ordering::Relaxed))
+            .ok_or(PartError::NotRunning)?;
+        let target = match (region, shared.regions) {
+            (None, None) => None,
+            (Some(id), Some(regions)) => Some(
+                regions
+                    .iter()
+                    .find(|r| r.id == id)
+                    .ok_or(PartError::NotRunning)?,
+            ),
+            _ => return Err(PartError::NotRunning),
+        };
+        Ok((shared, target))
     }
 
-    /// Stops `effect` wherever this loop runs it — the loop on a whole device,
-    /// the regions running it on a split one — and says whether it ran here.
+    /// Stops `effect` wherever this loop runs it — the loop on a whole device
+    /// running nothing else, the bases and layers running it otherwise — and
+    /// says whether it ran here.
     fn stop_effect(&self, device: DeviceRef, effect: &str) -> bool {
         let Some(s) = self.current() else {
             return false;
         };
-        let running: Vec<Option<&'static str>> = s
-            .parts
-            .lock()
-            .unwrap()
+        let parts = s.parts.lock().unwrap().clone();
+        let running: Vec<(Option<&'static str>, Option<String>)> = parts
             .iter()
             .filter(|p| p.effect_id().as_deref() == Some(effect))
-            .map(|p| p.region)
+            .map(|p| (p.region, p.layer.clone()))
             .collect();
         if running.is_empty() {
             return false;
         }
-        match s.regions {
-            None => self.stop(Target::Device(device)),
-            Some(_) => {
-                for region in running.into_iter().flatten() {
-                    self.stop_region(device, region);
-                }
+        // As before layers: a whole device left with nothing stops.
+        if s.regions.is_none() && running.len() == parts.len() {
+            self.stop(Target::Device(device));
+        } else {
+            for (region, layer) in running {
+                self.stop_part(device, region, layer.as_deref());
             }
         }
         true
@@ -1054,50 +1375,85 @@ impl DeviceLoop {
 }
 
 impl Shared {
-    /// Hands a request to the thread; `NotRunningRegions` when it is gone.
-    fn request(&self, request: Request) -> Result<(), RegionStart> {
+    /// Hands a request to the thread; `NotRunning` when it is gone.
+    fn request(&self, request: Request) -> Result<(), PartError> {
         let sender = self.requests.lock().unwrap().clone();
         sender
-            .ok_or(RegionStart::NotRunningRegions)?
+            .ok_or(PartError::NotRunning)?
             .send(request)
-            .map_err(|_| RegionStart::NotRunningRegions)
+            .map_err(|_| PartError::NotRunning)
     }
 }
 
-/// A start's verdict, in the log.
-fn log_start(target: Target, region: Option<&str>, effect: &str, verdict: &Result<(), String>) {
+impl std::fmt::Display for PartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PartError::NotRunning => write!(f, "the loop does not run this target's stack"),
+            PartError::Refused(refused) => refused.fmt(f),
+            PartError::Failed(e) => f.write_str(e),
+        }
+    }
+}
+
+/// A start's verdict, in the log: a base's, or with `layer` a layer's.
+fn log_start(
+    target: Target,
+    region: Option<&str>,
+    layer: Option<&str>,
+    effect: &str,
+    verdict: &Result<(), String>,
+) {
     match (target, verdict) {
-        (Target::Device(d), Ok(())) => match region {
-            None => tracing::info!(device = %d, effect, "effect started"),
-            Some(region) => tracing::info!(device = %d, region, effect, "effect started"),
+        (Target::Device(d), Ok(())) => match (region, layer) {
+            (None, None) => tracing::info!(device = %d, effect, "effect started"),
+            (Some(region), None) => tracing::info!(device = %d, region, effect, "effect started"),
+            (None, Some(layer)) => tracing::info!(device = %d, layer, effect, "layer started"),
+            (Some(region), Some(layer)) => {
+                tracing::info!(device = %d, region, layer, effect, "layer started")
+            }
         },
         // `error`: the requested effect will not run, so the lighting is not
         // the one requested. The caller gets the same message — the log is for
         // whoever reads it afterwards, and for whoever does not have the window
         // in front of them.
-        (Target::Device(d), Err(e)) => match region {
-            None => tracing::error!(device = %d, effect, "effect not started: {e}"),
-            Some(region) => {
+        (Target::Device(d), Err(e)) => match (region, layer) {
+            (None, None) => tracing::error!(device = %d, effect, "effect not started: {e}"),
+            (Some(region), None) => {
                 tracing::error!(device = %d, region, effect, "effect not started: {e}")
+            }
+            (None, Some(layer)) => {
+                tracing::error!(device = %d, layer, effect, "layer not started: {e}")
+            }
+            (Some(region), Some(layer)) => {
+                tracing::error!(device = %d, region, layer, effect, "layer not started: {e}")
             }
         },
         // `debug` and not `info`, and this is not shyness: "lifecycle" is the
         // level that describes **what the keyboard does**, and a preview does
         // not touch it. Browsing the gallery would otherwise fill the log with
         // lines that match nothing lit.
-        (Target::Preview(d), Ok(())) => tracing::debug!(layout = %d, effect, "preview started"),
+        (Target::Preview(d), Ok(())) => match layer {
+            None => tracing::debug!(layout = %d, effect, "preview started"),
+            Some(layer) => tracing::debug!(layout = %d, layer, effect, "preview layer started"),
+        },
         // `warn`: nothing is broken on the hardware, but the screen will not
         // show what was requested — and that is precisely the first place where
         // a freshly written effect breaks.
-        (Target::Preview(d), Err(e)) => {
-            tracing::warn!(layout = %d, effect, "preview not started: {e}")
-        }
+        (Target::Preview(d), Err(e)) => match layer {
+            None => tracing::warn!(layout = %d, effect, "preview not started: {e}"),
+            Some(layer) => {
+                tracing::warn!(layout = %d, layer, effect, "preview layer not started: {e}")
+            }
+        },
     }
 }
 
-/// The verdict of a start of one part.
-fn single(verdicts: Vec<Result<(), String>>) -> Result<(), String> {
-    verdicts.into_iter().next().unwrap_or(Ok(()))
+/// The verdict of a start of one stack on the whole device or the preview.
+fn single(verdicts: Vec<StackVerdict>) -> StackVerdict {
+    verdicts
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| StackVerdict::failed("nothing was started".into()))
 }
 
 impl Engine {
@@ -1162,14 +1518,24 @@ impl Engine {
     pub fn preview_status(&self) -> Option<PreviewStatus> {
         let (layout_of, region) = self.preview_layout.lock().unwrap().clone()?;
         let s = self.preview.current()?;
-        let part = s.part(None);
+        let part = s.preview_part(None);
+        let ended = s.stop.load(Ordering::Relaxed);
+        let layers = s
+            .parts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.layer.is_some())
+            .map(|p| p.layer_status(ended))
+            .collect();
         let status = PreviewStatus {
             layout_of,
             region,
-            running: !s.stop.load(Ordering::Relaxed),
+            running: !ended,
             effect_id: part.as_ref().and_then(|p| p.effect_id()),
             error: part.as_ref().and_then(|p| p.error()),
             reads_private: part.is_some_and(|p| p.private()),
+            layers,
         };
         Some(status)
     }
@@ -1210,49 +1576,61 @@ impl Engine {
 
     // ------------------------------------------------------------ preview
 
-    /// Starts — or replaces — the preview, **without touching any device**.
-    ///
-    /// `layout_of` names the device whose layout is borrowed; it is neither
-    /// open, nor controlled, nor even necessarily plugged in. With `region`,
-    /// `layout` is that region's: the effect sees the region alone, the frames
-    /// keep the device's length, black outside it, and its follow is the
-    /// region's. The output is [`NoOutput`]: not a single byte goes to a
-    /// keyboard, whatever happens.
-    ///
-    /// Replacing costs one QuickJS context destroyed and another one built.
-    /// That is not free, and that is why the rate is bounded **on the gesture
-    /// side** — the window waits for the selection to settle before calling.
-    /// Bounding it here would have forced a choice between making the last
-    /// selection wait and losing it, and the window would have had to reconcile
-    /// what it believed it had requested with what is running.
+    /// Starts — or replaces — the preview of one effect, **without touching
+    /// any device**: [`Self::start_preview_stack`] with a base alone.
     pub fn start_preview(
         &self,
         layout_of: DeviceRef,
-        region: Option<&str>,
+        region: Option<&'static Region>,
         start: EffectStart,
         layout: &'static Layout,
     ) -> Result<(), String> {
+        match self.start_preview_stack(layout_of, region, StackStart::base(Some(start)), layout) {
+            Ok(verdict) => verdict.base,
+            Err(refused) => Err(refused.to_string()),
+        }
+    }
+
+    /// Starts — or replaces — the preview of a stack, **without touching any
+    /// device** (`docs/design/composition.md` §3.9).
+    ///
+    /// `layout_of` names the device whose layout is borrowed; it is neither
+    /// open, nor controlled, nor even necessarily plugged in, and `layout` is
+    /// its. With `region`, the stack runs on that region: its effects see the
+    /// region alone, the frames keep the device's length, black outside it,
+    /// and its follow is the region's. The output is [`NoOutput`]: not a single
+    /// byte goes to a keyboard, whatever happens. The frames are composed by
+    /// the function the device loops compose with, so the same stack at the
+    /// same instants gives the same bytes in both.
+    ///
+    /// Replacing costs a QuickJS context destroyed and another one built per
+    /// part. That is not free, and that is why the rate is bounded **on the
+    /// gesture side** — the window waits for the selection to settle before
+    /// calling. Bounding it here would have forced a choice between making the
+    /// last selection wait and losing it, and the window would have had to
+    /// reconcile what it believed it had requested with what is running.
+    pub fn start_preview_stack(
+        &self,
+        layout_of: DeviceRef,
+        region: Option<&'static Region>,
+        stack: StackStart,
+        layout: &'static Layout,
+    ) -> Result<StackVerdict, Refusal> {
+        stack.check()?;
         // Written **before** the start: if the start fails, the loop is empty
         // and `preview_status` returns `None` anyway — whereas a layout set
         // afterwards would be missing for the whole load.
-        *self.preview_layout.lock().unwrap() = Some((layout_of, region.map(str::to_owned)));
-        let part = PartStart {
-            region: None,
-            layout,
-            // Black outside the region, whatever the effect paints there.
-            owns: region.map(|_| layout.keys.iter().map(|k| k.index).collect()),
-            start: Some(start),
-        };
-        let verdicts = self.preview.start(
+        *self.preview_layout.lock().unwrap() = Some((layout_of, region.map(|r| r.id.to_owned())));
+        let started = self.preview.start(
             Target::Preview(layout_of),
             layout,
             Box::new(NoOutput),
             self.inputs(),
-            vec![part],
+            vec![StackLoad::of(layout, region, stack)],
             None,
-            Follows::Whole(region.map(str::to_owned)),
-        )?;
-        single(verdicts)
+            Follows::Whole(region.map(|r| r.id.to_owned())),
+        );
+        Ok(started.map_or_else(StackVerdict::failed, single))
     }
 
     /// Stops the preview. No device effect is touched.
@@ -1265,15 +1643,29 @@ impl Engine {
         }
     }
 
-    pub fn set_preview_params(&self, params: String) {
-        if let Some(p) = self.preview.current().and_then(|s| s.part(None)) {
+    /// The parameters of the preview's base, or of its `layer`.
+    pub fn set_preview_params(&self, layer: Option<&str>, params: String) {
+        if let Some(p) = self.preview.current().and_then(|s| s.preview_part(layer)) {
             *p.params.lock().unwrap() = params;
         }
     }
 
-    pub fn set_preview_bindings(&self, bindings: Bindings) {
-        if let Some(p) = self.preview.current().and_then(|s| s.part(None)) {
+    /// The bindings of the preview's base, or of its `layer`.
+    pub fn set_preview_bindings(&self, layer: Option<&str>, bindings: Bindings) {
+        if let Some(p) = self.preview.current().and_then(|s| s.preview_part(layer)) {
             *p.bindings.lock().unwrap() = bindings;
+        }
+    }
+
+    /// How one layer of the preview is drawn, from its next frame.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn set_preview_look(&self, layer: &str, look: Look) {
+        if let Some(p) = self
+            .preview
+            .current()
+            .and_then(|s| s.preview_part(Some(layer)))
+        {
+            *p.look.lock().unwrap() = look;
         }
     }
 
@@ -1341,19 +1733,46 @@ impl Engine {
         }
     }
 
-    /// The parameters of the part on `region`, or on the whole device with
-    /// `None`, re-read from its next frame. Nothing when that part does not
-    /// run — a region during a rule's interruption among others.
-    pub fn set_params(&self, device: DeviceRef, region: Option<&str>, params: String) {
-        if let Some(p) = self.shared(device).and_then(|s| s.part(region)) {
+    /// The parameters of the base on `region` — the whole device's with `None`
+    /// — or of its `layer`, re-read from its next frame. Nothing when that part
+    /// does not run — a region during a rule's interruption among others.
+    pub fn set_params(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        layer: Option<&str>,
+        params: String,
+    ) {
+        if let Some(p) = self.shared(device).and_then(|s| s.part(region, layer)) {
             *p.params.lock().unwrap() = params;
         }
     }
 
-    /// The bindings of the part on `region`, as [`Self::set_params`].
-    pub fn set_bindings(&self, device: DeviceRef, region: Option<&str>, bindings: Bindings) {
-        if let Some(p) = self.shared(device).and_then(|s| s.part(region)) {
+    /// The bindings of a base or a layer, as [`Self::set_params`].
+    pub fn set_bindings(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        layer: Option<&str>,
+        bindings: Bindings,
+    ) {
+        if let Some(p) = self.shared(device).and_then(|s| s.part(region, layer)) {
             *p.bindings.lock().unwrap() = bindings;
+        }
+    }
+
+    /// How a layer is drawn — its blend, its opacity, what that follows — from
+    /// its next frame, its effect going on. A mask changed is another layout
+    /// for the effect: that is [`Self::start_layer`].
+    // This and the other layer methods are what the window's commands call
+    // from the next step of `composition.md` §5.1; the tests until then.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn set_look(&self, device: DeviceRef, region: Option<&str>, layer: &str, look: Look) {
+        if let Some(p) = self
+            .shared(device)
+            .and_then(|s| s.part(region, Some(layer)))
+        {
+            *p.look.lock().unwrap() = look;
         }
     }
 
@@ -1379,6 +1798,7 @@ impl Engine {
             sound: Arc::clone(&self.sound),
             system: Arc::clone(&self.system),
             dimming: Arc::clone(&self.dimming),
+            clock: self.clock,
         }
     }
 
@@ -1417,14 +1837,9 @@ impl Engine {
         }
     }
 
-    /// Starts an effect on a whole device. Replaces whatever ran there, its
-    /// regions included.
-    ///
-    /// `split` says whose follows scale the frame: the regions' on a split
-    /// device a rule interrupts, the device's otherwise.
-    ///
-    /// The other devices are not touched — not their loop, not their frame
-    /// rate, not their error state.
+    /// Starts an effect on a whole device, with no layer: [`Self::start_stack`]
+    /// with a base alone, as a rule's interruption runs. Replaces whatever ran
+    /// there, its regions included.
     pub fn start(
         &self,
         device: DeviceRef,
@@ -1433,52 +1848,94 @@ impl Engine {
         out: Box<dyn DeviceOut>,
         split: bool,
     ) -> Result<(), String> {
+        match self.start_stack(device, layout, out, StackStart::base(Some(start)), split) {
+            Ok(verdict) => verdict.base,
+            Err(refused) => Err(refused.to_string()),
+        }
+    }
+
+    /// Starts a stack on a whole device — its base, and its layers over it —
+    /// replacing whatever ran there, its regions included
+    /// (`docs/design/composition.md` §3.8).
+    ///
+    /// Refused, with what ran left running, when the stack holds too many
+    /// effects or an id twice. A base that does not load leaves the device
+    /// running nothing, as before layers; a layer that does not load, or whose
+    /// mask lights nothing here, runs nothing, and its verdict says why.
+    ///
+    /// `split` says whose follows scale the frame: the regions' on a split
+    /// device a rule interrupts, the device's otherwise.
+    ///
+    /// The other devices are not touched — not their loop, not their frame
+    /// rate, not their error state.
+    pub fn start_stack(
+        &self,
+        device: DeviceRef,
+        layout: &'static Layout,
+        out: Box<dyn DeviceOut>,
+        stack: StackStart,
+        split: bool,
+    ) -> Result<StackVerdict, Refusal> {
+        stack.check()?;
         let follows = if split && !layout.regions.is_empty() {
             Follows::Regions(layout.regions)
         } else {
             Follows::Whole(None)
         };
-        let verdicts = self.device_loop(device).start(
+        let started = self.device_loop(device).start(
             Target::Device(device),
             layout,
             out,
             self.inputs(),
-            vec![PartStart::whole(layout, start)],
+            vec![StackLoad::of(layout, None, stack)],
             None,
             follows,
-        )?;
-        single(verdicts)
+        );
+        Ok(started.map_or_else(StackVerdict::failed, single))
     }
 
-    /// Starts the device's regions, each with its effect or none, replacing
-    /// whatever ran. A region whose effect does not load runs nothing, and its
-    /// verdict says why; the loop runs even when no region runs anything,
-    /// keeping their lights black.
+    /// Starts the device's regions, each with its stack — a base or none, and
+    /// layers — replacing whatever ran; a region not given one runs nothing.
+    /// Refused as a whole, before anything stops, when one stack is. A region
+    /// whose base does not load runs nothing, and its verdict says why; the
+    /// loop runs even when no region runs anything, keeping their lights black.
+    /// The verdicts come in the definition's order.
     pub fn start_regions(
         &self,
         device: DeviceRef,
         layout: &'static Layout,
         out: Box<dyn DeviceOut>,
-        regions: Vec<(&'static Region, Option<EffectStart>)>,
-    ) -> Vec<(&'static str, Result<(), String>)> {
-        let ids: Vec<&'static str> = regions.iter().map(|(r, _)| r.id).collect();
-        let parts = regions
-            .into_iter()
-            .map(|(region, start)| PartStart::region(region, start))
+        mut regions: Vec<(&'static Region, StackStart)>,
+    ) -> Result<Vec<(&'static str, StackVerdict)>, Refusal> {
+        for (_, stack) in &regions {
+            stack.check()?;
+        }
+        let ids: Vec<&'static str> = layout.regions.iter().map(|r| r.id).collect();
+        let stacks = layout
+            .regions
+            .iter()
+            .map(|region| {
+                let given = regions.iter().position(|(r, _)| r.id == region.id);
+                let stack = given.map_or_else(StackStart::default, |at| regions.swap_remove(at).1);
+                StackLoad::of(layout, Some(region), stack)
+            })
             .collect();
         let started = self.device_loop(device).start(
             Target::Device(device),
             layout,
             out,
             self.inputs(),
-            parts,
+            stacks,
             Some(layout.regions),
             Follows::Regions(layout.regions),
         );
-        match started {
+        Ok(match started {
             Ok(verdicts) => ids.into_iter().zip(verdicts).collect(),
-            Err(e) => ids.into_iter().map(|id| (id, Err(e.clone()))).collect(),
-        }
+            Err(e) => ids
+                .into_iter()
+                .map(|id| (id, StackVerdict::failed(e.clone())))
+                .collect(),
+        })
     }
 
     /// Starts an effect on one region, the others untouched: their clocks go
@@ -1490,16 +1947,80 @@ impl Engine {
         region: &str,
         start: EffectStart,
     ) -> Result<(), RegionStart> {
-        match self.existing(device) {
-            Some(l) => l.start_region(device, region, start),
-            None => Err(RegionStart::NotRunningRegions),
+        match self.start_base(device, Some(region), start) {
+            Ok(()) => Ok(()),
+            Err(PartError::NotRunning) => Err(RegionStart::NotRunningRegions),
+            Err(e) => Err(RegionStart::Failed(e.to_string())),
         }
     }
 
     /// The region runs nothing, its lights black; the others go on.
     pub fn stop_region(&self, device: DeviceRef, region: &str) {
+        self.stop_base(device, Some(region));
+    }
+
+    /// Starts an effect as the base of one target's stack — a region's, or
+    /// the whole device's with `None` — between two frames: its layers and the
+    /// other targets keep their clocks. What the tray and *Apply* do to a
+    /// device with layers. `Err(NotRunning)` when the loop does not run that
+    /// target's stack: the caller starts the whole composition.
+    pub fn start_base(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        start: EffectStart,
+    ) -> Result<(), PartError> {
+        match self.existing(device) {
+            Some(l) => l.start_base(device, region, start),
+            None => Err(PartError::NotRunning),
+        }
+    }
+
+    /// The target's base runs nothing; its layers go on, over black.
+    pub fn stop_base(&self, device: DeviceRef, region: Option<&str>) {
         if let Some(l) = self.existing(device) {
-            l.stop_region(device, region);
+            l.stop_part(device, region, None);
+        }
+    }
+
+    /// Starts a layer on one target's stack between two frames, in place of the
+    /// layer with its id — its new effect or its new mask — or on top. The
+    /// other parts keep their clocks. A layer that does not load, a mask that
+    /// lights nothing, a ninth effect: the stack goes on as it was, and the
+    /// error says why.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn start_layer(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        layer: LayerStart,
+    ) -> Result<(), PartError> {
+        match self.existing(device) {
+            Some(l) => l.start_layer(device, region, layer),
+            None => Err(PartError::NotRunning),
+        }
+    }
+
+    /// The layer runs nothing from now on; the rest of the stack goes on.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn stop_layer(&self, device: DeviceRef, region: Option<&str>, layer: &str) {
+        if let Some(l) = self.existing(device) {
+            l.stop_part(device, region, Some(layer));
+        }
+    }
+
+    /// Puts one target's layers in this order, bottom to top: `ids` names each
+    /// of them once, or the order is refused. Each keeps its clock.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn order_layers(
+        &self,
+        device: DeviceRef,
+        region: Option<&str>,
+        ids: Vec<String>,
+    ) -> Result<(), PartError> {
+        match self.existing(device) {
+            Some(l) => l.order_layers(region, ids),
+            None => Err(PartError::NotRunning),
         }
     }
 
@@ -1559,18 +2080,23 @@ enum Outcome {
 }
 
 impl Part {
-    /// Loads an effect on a part's layout, under [`LOAD_BUDGET`].
+    /// Loads `js` for the part `shared` describes, on its layout, under
+    /// [`LOAD_BUDGET`].
     fn load(
-        region: Option<&'static str>,
+        shared: Arc<PartShared>,
         layout: &'static Layout,
         owns: Option<Vec<u16>>,
-        start: EffectStart,
+        js: &str,
         inputs: &Inputs,
     ) -> Result<Self, String> {
-        let shared = Arc::new(PartShared::new(region, &start));
-        let span = match region {
-            Some(region) => tracing::info_span!("region", region, effect = %start.effect_id),
-            None => tracing::Span::none(),
+        let effect = shared.effect_id().unwrap_or_default();
+        let span = match (shared.region, shared.layer.as_deref()) {
+            (Some(region), None) => tracing::info_span!("region", region, effect = %effect),
+            (None, Some(layer)) => tracing::info_span!("layer", layer, effect = %effect),
+            (Some(region), Some(layer)) => {
+                tracing::info_span!("layer", region, layer, effect = %effect)
+            }
+            (None, None) => tracing::Span::none(),
         };
 
         // The budget is born here and never leaves the thread: the interrupt
@@ -1583,7 +2109,7 @@ impl Part {
         // The runtime must live as long as the context: it carries the module
         // resolver. Dropping it would make every `import` unresolvable on the
         // first frame.
-        let (rt, ctx) = prepare_budgeted(&start.js, layout, &budget).map_err(|e| {
+        let (rt, ctx) = prepare_budgeted(js, layout, &budget).map_err(|e| {
             name_the_cause(
                 e,
                 &budget,
@@ -1696,7 +2222,8 @@ impl Part {
     ) -> Result<(), String> {
         let params = self.shared.params.lock().unwrap().clone();
         let bindings = self.shared.bindings.lock().unwrap().clone();
-        let clock_ms = wall_clock_ms();
+        let now = Instant::now();
+        let (time, clock_ms) = inputs.clock.at(self.started, now, self.frame_index);
         // The store is touched only when something reads it: most effects bind
         // nothing and declare nothing.
         let (mut bound, held) = if bindings.is_empty() && !self.reads_signals {
@@ -1733,8 +2260,6 @@ impl Part {
         if follows_system {
             bound = with_levels(&bound, system_bound(&bindings, &inputs.system));
         }
-        let now = Instant::now();
-        let time = now.duration_since(self.started).as_secs_f64();
         let heard = if self.reads_audio {
             inputs.sound.latest()
         } else {
@@ -1788,34 +2313,6 @@ impl Part {
     }
 }
 
-/// The device's frame from its parts' (`docs/design/regions.md` §7): black,
-/// then each position takes the colour of the part owning it — every position
-/// for a part owning them all. A part that has drawn nothing yet leaves its
-/// lights black.
-fn compose<'a>(
-    len: usize,
-    parts: impl IntoIterator<Item = (Option<&'a [u16]>, Option<&'a [u8]>)>,
-) -> Vec<u8> {
-    let mut frame = vec![0; len];
-    for (owns, bytes) in parts {
-        let Some(bytes) = bytes else { continue };
-        match owns {
-            None => frame.copy_from_slice(&bytes[..len]),
-            Some(positions) => {
-                for &position in positions {
-                    let at = usize::from(position) * 3;
-                    if let (Some(to), Some(from)) =
-                        (frame.get_mut(at..at + 3), bytes.get(at..at + 3))
-                    {
-                        to.copy_from_slice(from);
-                    }
-                }
-            }
-        }
-    }
-    frame
-}
-
 /// The factor a follow gives this frame, from its floor to 1 (§2.2.2): the
 /// sound, the computer, or a signal. A value that cannot be read leaves the
 /// brightness the slider sets.
@@ -1842,52 +2339,274 @@ fn hold<T>(lease: &mut Option<T>, wanted: bool, take: impl FnOnce() -> T) {
     }
 }
 
-/// Serves a command's request between two frames.
-fn serve(request: Request, parts: &mut Vec<Part>, shared: &Shared, inputs: &Inputs) {
+/// What a device's loop draws, in the order it composes it
+/// (`docs/design/composition.md` §3.2): one stack per target, each its base,
+/// then its layers, bottom to top.
+struct Composition {
+    stacks: Vec<Stack>,
+}
+
+/// One target's stack, as its thread runs it.
+struct Stack {
+    /// The region it runs on, `None` for the whole device.
+    region: Option<&'static Region>,
+    base: Option<Slot>,
+    layers: Vec<Slot>,
+}
+
+/// A place in a stack, and what runs there.
+struct Slot {
+    shared: Arc<PartShared>,
+    /// `None` once its effect stopped on its own, or for a layer that did not
+    /// load: its context and what it held are gone, its place and its error
+    /// stay, for its row to say why.
+    part: Option<Part>,
+}
+
+impl Slot {
+    fn running(part: Part) -> Self {
+        Self {
+            shared: Arc::clone(&part.shared),
+            part: Some(part),
+        }
+    }
+
+    /// A layer that did not load, kept with why.
+    fn failed(shared: Arc<PartShared>, error: String) -> Self {
+        shared.stopped.store(true, Ordering::Relaxed);
+        *shared.error.lock().unwrap() = Some(error);
+        Self { shared, part: None }
+    }
+}
+
+impl Composition {
+    fn slots(&self) -> impl Iterator<Item = &Slot> {
+        self.stacks
+            .iter()
+            .flat_map(|s| s.base.iter().chain(s.layers.iter()))
+    }
+
+    fn slots_mut(&mut self) -> impl Iterator<Item = &mut Slot> {
+        self.stacks
+            .iter_mut()
+            .flat_map(|s| s.base.iter_mut().chain(s.layers.iter_mut()))
+    }
+
+    /// How many parts still run.
+    fn running(&self) -> usize {
+        self.slots().filter(|s| s.part.is_some()).count()
+    }
+
+    fn stack(&mut self, region: Option<&str>) -> Option<&mut Stack> {
+        self.stacks
+            .iter_mut()
+            .find(|s| s.region.map(|r| r.id) == region)
+    }
+
+    /// The parts as the commands and the status reach them, in this order.
+    fn publish(&self, shared: &Shared) {
+        *shared.parts.lock().unwrap() = self.slots().map(|s| Arc::clone(&s.shared)).collect();
+    }
+}
+
+impl Stack {
+    /// Loads `load` for its thread, and says how it went. `named` is what its
+    /// parts answer to: the region, except in the preview, which is named by
+    /// none.
+    fn load(
+        load: StackLoad,
+        named: Option<&'static str>,
+        device: &'static Layout,
+        inputs: &Inputs,
+    ) -> (Self, StackVerdict) {
+        let mut stack = Self {
+            region: load.region,
+            base: None,
+            layers: Vec::new(),
+        };
+        let mut verdict = StackVerdict {
+            base: Ok(()),
+            layers: Vec::new(),
+        };
+        if let Some(start) = load.base {
+            let (layout, owns) = target_of(device, load.region);
+            let shared = Arc::new(PartShared::base(named, &start));
+            match Part::load(shared, layout, owns, &start.js, inputs) {
+                Ok(part) => stack.base = Some(Slot::running(part)),
+                // Nothing runs on a target whose base did not load.
+                Err(e) => return (stack, StackVerdict::failed(e)),
+            }
+        }
+        for (id, _, layer) in load.layers {
+            // A mask lighting nothing here is the settings' to say, from the
+            // verdict: the layer takes no place.
+            let layer = match layer {
+                Ok(layer) => layer,
+                Err(refused) => {
+                    verdict.layers.push((id, Err(PartError::Refused(refused))));
+                    continue;
+                }
+            };
+            let part_shared = Arc::new(PartShared::new(
+                named,
+                Some(id.clone()),
+                layer.look,
+                &layer.start,
+            ));
+            let loaded = Part::load(
+                Arc::clone(&part_shared),
+                layer.layout,
+                Some(layer.owns),
+                &layer.start.js,
+                inputs,
+            );
+            match loaded {
+                Ok(part) => {
+                    stack.layers.push(Slot::running(part));
+                    verdict.layers.push((id, Ok(())));
+                }
+                // An effect that does not load keeps its place, for its row
+                // to say why.
+                Err(e) => {
+                    stack.layers.push(Slot::failed(part_shared, e.clone()));
+                    verdict.layers.push((id, Err(PartError::Failed(e))));
+                }
+            }
+        }
+        (stack, verdict)
+    }
+}
+
+/// Serves a command's request between two frames. A part replaced goes with
+/// its context, on this thread; one that does not load leaves what ran.
+fn serve(
+    request: Request,
+    composition: &mut Composition,
+    shared: &Shared,
+    device: &'static Layout,
+    inputs: &Inputs,
+) {
     match request {
-        Request::Replace {
+        Request::Base {
             region,
             start,
             verdict,
         } => {
-            let owns = Some(region.positions.to_vec());
-            match Part::load(Some(region.id), region.layout, owns, start, inputs) {
-                Ok(part) => {
-                    // The part replaced goes with its context, on this thread.
-                    parts.retain(|p| p.shared.region != Some(region.id));
-                    {
-                        let mut table = shared.parts.lock().unwrap();
-                        table.retain(|p| p.region != Some(region.id));
-                        table.push(Arc::clone(&part.shared));
-                    }
-                    parts.push(part);
-                    let _ = verdict.send(Ok(()));
+            let result = (|| {
+                let stack = composition
+                    .stack(region.map(|r| r.id))
+                    .ok_or(PartError::NotRunning)?;
+                if stack.base.is_none() {
+                    composition::within_limits(true, stack.layers.len())
+                        .map_err(PartError::Refused)?;
                 }
-                // The region goes on with what it ran.
-                Err(e) => {
-                    let _ = verdict.send(Err(e));
+                let (layout, owns) = target_of(device, region);
+                let part_shared = Arc::new(PartShared::base(region.map(|r| r.id), &start));
+                let part = Part::load(part_shared, layout, owns, &start.js, inputs)
+                    .map_err(PartError::Failed)?;
+                stack.base = Some(Slot::running(part));
+                Ok(())
+            })();
+            if result.is_ok() {
+                composition.publish(shared);
+            }
+            let _ = verdict.send(result);
+        }
+        Request::Layer {
+            region,
+            layer,
+            verdict,
+        } => {
+            let result = (|| {
+                let stack = composition.stack(region).ok_or(PartError::NotRunning)?;
+                let at = stack
+                    .layers
+                    .iter()
+                    .position(|s| s.shared.layer.as_deref() == Some(layer.id.as_str()));
+                if at.is_none() {
+                    composition::within_limits(stack.base.is_some(), stack.layers.len() + 1)
+                        .map_err(PartError::Refused)?;
+                }
+                let part_shared = PartShared::new(region, Some(layer.id), layer.look, &layer.start);
+                let part = Part::load(
+                    Arc::new(part_shared),
+                    layer.layout,
+                    Some(layer.owns),
+                    &layer.start.js,
+                    inputs,
+                )
+                .map_err(PartError::Failed)?;
+                match at {
+                    Some(at) => stack.layers[at] = Slot::running(part),
+                    None => stack.layers.push(Slot::running(part)),
+                }
+                Ok(())
+            })();
+            if result.is_ok() {
+                composition.publish(shared);
+            }
+            let _ = verdict.send(result);
+        }
+        Request::Stop {
+            region,
+            layer,
+            done,
+        } => {
+            if let Some(stack) = composition.stack(region) {
+                match &layer {
+                    None => stack.base = None,
+                    Some(id) => stack
+                        .layers
+                        .retain(|s| s.shared.layer.as_deref() != Some(id.as_str())),
                 }
             }
-        }
-        Request::Stop { region, done } => {
-            parts.retain(|p| p.shared.region != Some(region));
-            shared
-                .parts
-                .lock()
-                .unwrap()
-                .retain(|p| p.region != Some(region));
+            composition.publish(shared);
             let _ = done.send(());
+        }
+        Request::Order {
+            region,
+            ids,
+            verdict,
+        } => {
+            let result = (|| {
+                let stack = composition.stack(region).ok_or(PartError::NotRunning)?;
+                let place = |slot: &Slot| {
+                    ids.iter()
+                        .position(|id| slot.shared.layer.as_deref() == Some(id.as_str()))
+                };
+                let each_once = ids.len() == stack.layers.len()
+                    && stack.layers.iter().all(|s| place(s).is_some())
+                    && ids.iter().enumerate().all(|(n, id)| !ids[..n].contains(id));
+                if !each_once {
+                    return Err(PartError::Refused(Refusal::Order));
+                }
+                stack.layers.sort_by_key(place);
+                Ok(())
+            })();
+            if result.is_ok() {
+                composition.publish(shared);
+            }
+            let _ = verdict.send(result);
         }
     }
 }
 
-/// Loads the parts, then runs until stopped.
+/// What a starting thread answers: each stack's verdict, and whether the loop
+/// runs — a whole device whose base did not load, or left with no part, does
+/// not.
+struct Loaded {
+    verdicts: Vec<StackVerdict>,
+    runs: bool,
+}
+
+/// Loads the stacks, then runs until stopped.
 ///
 /// A loop on a split device goes on with no part left once its last region is
 /// stopped, writing black: a family's pace drops a frame sent too soon after the
 /// last (`Template::frame` in `definition.rs`), so a single black frame on the
 /// way out would be lost three times out of four on the Alienware zones. An
-/// unchanged frame costs a comparison there.
+/// unchanged frame costs a comparison there. A whole device's loop does the
+/// same once its base and layers are stopped one by one.
 #[allow(clippy::too_many_arguments)]
 fn render_loop(
     target: Target,
@@ -1895,15 +2614,15 @@ fn render_loop(
     layout: &'static Layout,
     out: Box<dyn DeviceOut>,
     inputs: Inputs,
-    starts: Vec<PartStart>,
+    stacks: Vec<StackLoad>,
     follows: Follows,
-    ready: Sender<Vec<Result<(), String>>>,
+    ready: Sender<Loaded>,
     requests: Receiver<Request>,
 ) {
     let whole = shared.regions.is_none();
-    let effect_id = match starts.as_slice() {
+    let effect_id = match stacks.as_slice() {
         [only] => only
-            .start
+            .base
             .as_ref()
             .map_or_else(String::new, |s| s.effect_id.clone()),
         _ => String::new(),
@@ -1933,27 +2652,23 @@ fn render_loop(
     let _entered = span.enter();
 
     let frame_len = layout.led_count();
-    let mut parts: Vec<Part> = Vec::new();
+    let mut composition = Composition { stacks: Vec::new() };
     let mut verdicts = Vec::new();
-    for part in starts {
-        let Some(start) = part.start else {
-            verdicts.push(Ok(()));
-            continue;
+    for load in stacks {
+        let named = match target {
+            Target::Device(_) => load.region.map(|r| r.id),
+            Target::Preview(_) => None,
         };
-        match Part::load(part.region, part.layout, part.owns, start, &inputs) {
-            Ok(loaded) => {
-                verdicts.push(Ok(()));
-                parts.push(loaded);
-            }
-            Err(e) => verdicts.push(Err(e)),
-        }
+        let (stack, verdict) = Stack::load(load, named, layout, &inputs);
+        composition.stacks.push(stack);
+        verdicts.push(verdict);
     }
-    *shared.parts.lock().unwrap() = parts.iter().map(|p| Arc::clone(&p.shared)).collect();
-    // A whole device's effect that does not load runs nothing; the command
-    // says why.
-    let loaded = !whole || !parts.is_empty();
-    let _ = ready.send(verdicts);
-    if !loaded {
+    composition.publish(&shared);
+    // A whole device whose base does not load runs nothing — its stack holds
+    // no part then — and the command says why.
+    let runs = !whole || composition.running() > 0;
+    let _ = ready.send(Loaded { verdicts, runs });
+    if !runs {
         return;
     }
 
@@ -1972,30 +2687,35 @@ fn render_loop(
     let period = Duration::from_nanos(1_000_000_000 / u64::from(FPS));
     let mut deadline = Instant::now();
     // What the follows read, held by the loop rather than by a part: they
-    // belong to the device and its regions, not to an effect.
+    // belong to the device, its regions and its layers' opacity, not to an
+    // effect.
     let mut hearing = None;
     let mut watching = None;
+    // The loop's own frames, which the follows read the clock at.
+    let mut frame: u32 = 0;
 
     while !shared.stop.load(Ordering::Relaxed) {
         for request in requests.try_iter() {
-            serve(request, &mut parts, &shared, &inputs);
+            serve(request, &mut composition, &shared, layout, &inputs);
         }
 
         let mut rendered = false;
-        let mut stopped = Vec::new();
-        for (i, part) in parts.iter_mut().enumerate() {
+        let mut stopped: Vec<(Part, String)> = Vec::new();
+        for slot in composition.slots_mut() {
+            let Some(part) = slot.part.as_mut() else {
+                continue;
+            };
             match part.frame(&inputs, keyboard, frame_len) {
                 Outcome::Rendered => rendered = true,
                 Outcome::Failed => {}
-                Outcome::Stopped(e) => stopped.push((i, e)),
+                // Its context and what it held go with it; its place and its
+                // status stay, with the error that stopped it.
+                Outcome::Stopped(e) => stopped.extend(slot.part.take().map(|p| (p, e))),
             }
         }
         if !stopped.is_empty() {
-            let left = parts.len() - stopped.len();
-            for (i, e) in stopped.into_iter().rev() {
-                // Its context and what it held go with it; its status stays,
-                // with the error that stopped it.
-                let part = parts.remove(i);
+            let left = composition.running();
+            for (part, e) in stopped {
                 let _in = part.span.enter();
                 let error = loggable(&e, part.shared.private());
                 if left == 0 {
@@ -2003,6 +2723,12 @@ fn render_loop(
                         failures = MAX_CONSECUTIVE_ERRORS,
                         "effect stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
                          backlight turned off: {error}"
+                    );
+                } else if part.shared.layer.is_some() {
+                    tracing::error!(
+                        failures = MAX_CONSECUTIVE_ERRORS,
+                        "layer stopped after {MAX_CONSECUTIVE_ERRORS} consecutive failures, \
+                         the rest of its stack going on: {error}"
                     );
                 } else {
                     tracing::error!(
@@ -2022,14 +2748,10 @@ fn render_loop(
             }
         }
 
-        // A whole device whose effect failed this frame keeps its last frame,
-        // as before regions; a split one goes on composing, so that a region
-        // stopping goes black whatever the others do.
+        // A whole device whose parts all failed this frame keeps its last
+        // frame, as before regions; a split one goes on composing, so that a
+        // region stopping goes black whatever the others do.
         if rendered || !whole {
-            let mut bytes = compose(
-                frame_len * 3,
-                parts.iter().map(|p| (p.owns.as_deref(), p.last.as_deref())),
-            );
             let dims: Vec<(Option<&'static [u16]>, Option<dimming::Dimming>)> = {
                 let table = inputs.dimming.lock().unwrap();
                 follows
@@ -2041,8 +2763,17 @@ fn render_loop(
                     })
                     .collect()
             };
+            // Each running part's look, read once this frame.
+            let looks: Vec<Option<Look>> = composition
+                .slots()
+                .map(|s| s.part.as_ref().map(|_| s.shared.look()))
+                .collect();
             let by = |what: fn(&dimming::Dimming) -> bool| {
                 dims.iter().any(|(_, d)| d.as_ref().is_some_and(what))
+                    || looks
+                        .iter()
+                        .flatten()
+                        .any(|l| l.follows.as_ref().is_some_and(what))
             };
             hold(&mut hearing, by(|d| d.sound().is_some()), || {
                 inputs.sound.lease()
@@ -2050,7 +2781,21 @@ fn render_loop(
             hold(&mut watching, by(|d| d.system().is_some()), || {
                 inputs.system.lease()
             });
-            let clock_ms = wall_clock_ms();
+            let clock_ms = inputs.clock.wall_ms(frame);
+            let drawn = composition.slots().zip(&looks).filter_map(|(slot, look)| {
+                let (part, look) = (slot.part.as_ref()?, look.as_ref()?);
+                let factor = look
+                    .follows
+                    .as_ref()
+                    .map_or(1.0, |d| follow_factor(d, &inputs, clock_ms));
+                Some(Drawn {
+                    owns: part.owns.as_deref(),
+                    bytes: part.last.as_deref(),
+                    blend: look.blend,
+                    alpha: look.alpha(factor),
+                })
+            });
+            let mut bytes = composition::compose(frame_len * 3, drawn);
             for (positions, d) in &dims {
                 let Some(d) = d else { continue };
                 let factor = follow_factor(d, &inputs, clock_ms);
@@ -2061,6 +2806,7 @@ fn render_loop(
             }
             emit(&shared, out.as_ref(), &bytes);
         }
+        frame = frame.wrapping_add(1);
 
         // Absolute deadline rather than `sleep(period)`: a slow frame must not
         // shift all the following ones. If we fell behind, start again from now
@@ -2326,6 +3072,7 @@ struct Inputs {
     sound: Arc<crate::audio::Sound>,
     system: Arc<crate::system::System>,
     dimming: dimming::Table,
+    clock: Clock,
 }
 
 fn render_with(
@@ -2680,10 +3427,14 @@ fn run_region(
     let out = Box::new(state.handle(device));
     let verdict = state
         .engine
-        .start_regions(device, layout, out, starts)
-        .into_iter()
-        .find(|(r, _)| *r == region.id)
-        .map_or(Ok(()), |(_, verdict)| verdict);
+        .start_regions(device, layout, out, bases(starts))
+        .map_err(|refused| refused.to_string())
+        .and_then(|verdicts| {
+            verdicts
+                .into_iter()
+                .find(|(r, _)| *r == region.id)
+                .map_or(Ok(()), |(_, verdict)| verdict.base)
+        });
     verdict.map_err(|error| not_started(&id, error))
 }
 
@@ -2697,9 +3448,22 @@ pub(crate) fn run_regions(app: &AppHandle, device: DeviceRef) -> CmdResult<()> {
     let starts = saved_region_starts(app, &settings, device, layout);
     let state = app.state::<AppState>();
     let out = Box::new(state.handle(device));
-    // Each verdict is in the log already, under the region's name.
-    state.engine.start_regions(device, layout, out, starts);
+    // Each verdict is in the log already, under the region's name; a base
+    // alone per region is within every limit.
+    let _ = state
+        .engine
+        .start_regions(device, layout, out, bases(starts));
     Ok(())
+}
+
+/// Each region with its base alone: its stack as before layers.
+fn bases(
+    starts: Vec<(&'static Region, Option<EffectStart>)>,
+) -> Vec<(&'static Region, StackStart)> {
+    starts
+        .into_iter()
+        .map(|(region, start)| (region, StackStart::base(start)))
+        .collect()
 }
 
 /// Each region of `layout` with its applied effect on `device`, ready to start
@@ -3099,7 +3863,7 @@ pub fn start_preview(
         }
         (Some(d), region) => match crate::part_of(&app, d, region, true)? {
             Scope::Whole => (crate::find_layout(d)?, None),
-            Scope::Region(region) => (region.layout, Some(region.id)),
+            Scope::Region(region) => (crate::find_layout(d)?, Some(region)),
         },
     };
     let start = effect_start(&app, &id, &params, bindings)?;
@@ -3119,7 +3883,7 @@ pub fn stop_preview(state: State<'_, AppState>) {
 /// device. The loop re-reads the JSON on every frame.
 #[tauri::command]
 pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value) -> CmdResult<()> {
-    state.engine.set_preview_params(serialised(&params)?);
+    state.engine.set_preview_params(None, serialised(&params)?);
     Ok(())
 }
 
@@ -3129,7 +3893,7 @@ pub fn set_preview_params(state: State<'_, AppState>, params: serde_json::Value)
 pub fn set_preview_bindings(state: State<'_, AppState>, bindings: Bindings) -> CmdResult<()> {
     state
         .engine
-        .set_preview_bindings(checked_bindings(bindings)?);
+        .set_preview_bindings(None, checked_bindings(bindings)?);
     Ok(())
 }
 
@@ -3162,7 +3926,7 @@ pub fn set_effect_params(
     let part = crate::part_of(&app, device, region.as_deref(), false)?;
     state
         .engine
-        .set_params(device, part.region(), serialised(&params)?);
+        .set_params(device, part.region(), None, serialised(&params)?);
     Ok(())
 }
 
@@ -3181,7 +3945,7 @@ pub fn set_effect_bindings(
     let part = crate::part_of(&app, device, region.as_deref(), false)?;
     state
         .engine
-        .set_bindings(device, part.region(), checked_bindings(bindings)?);
+        .set_bindings(device, part.region(), None, checked_bindings(bindings)?);
     Ok(())
 }
 
@@ -3382,6 +4146,7 @@ mod tests {
             effect_id: effect.map(str::to_owned),
             error: None,
             reads_private: false,
+            layers: Vec::new(),
         };
 
         assert!(regions_to_resume(&settings, &applied, None), "nothing runs");
@@ -3433,7 +4198,12 @@ mod tests {
         taken_over: AtomicU32,
         /// The last frame written.
         last: Mutex<Vec<Rgb>>,
+        /// The first frames written, in order.
+        first: Mutex<Vec<Vec<Rgb>>>,
     }
+
+    /// Frames [`Output::first`] keeps.
+    const FIRST_FRAMES: usize = 64;
 
     impl DeviceOut for Arc<Output> {
         fn present(&self, colors: &[Rgb], abandon: bool) -> Option<Result<(), String>> {
@@ -3451,6 +4221,10 @@ mod tests {
                 return Some(Err("write refused by the device".into()));
             }
             *self.last.lock().unwrap() = colors.to_vec();
+            let mut first = self.first.lock().unwrap();
+            if first.len() < FIRST_FRAMES {
+                first.push(colors.to_vec());
+            }
             self.written.fetch_add(1, Ordering::Relaxed);
             Some(Ok(()))
         }
@@ -3917,8 +4691,10 @@ mod tests {
     }
 
     fn start_regions(engine: &Engine, out: &Arc<Output>, starts: Vec<(&str, Option<EffectStart>)>) {
-        let verdicts = engine.start_regions(R5, r5(), Box::new(Arc::clone(out)), regions(starts));
-        assert!(verdicts.iter().all(|(_, v)| v.is_ok()), "{verdicts:?}");
+        let verdicts = engine
+            .start_regions(R5, r5(), Box::new(Arc::clone(out)), bases(regions(starts)))
+            .expect("within the limits");
+        assert!(verdicts.iter().all(|(_, v)| v.base.is_ok()), "{verdicts:?}");
     }
 
     fn region_status(engine: &Engine, region: &str) -> RegionEngineStatus {
@@ -4172,7 +4948,7 @@ mod tests {
                 ("lid", Some(with_params("level", LEVEL, r#"{"r":200}"#))),
             ],
         );
-        engine.set_params(R5, Some("lid"), r#"{"r":100}"#.into());
+        engine.set_params(R5, Some("lid"), None, r#"{"r":100}"#.into());
         wait_for("the lid's parameters were not set", || {
             colour(&out, 0).r == 100
         });
@@ -4248,7 +5024,7 @@ mod tests {
         });
         let lid = r5().region("lid").unwrap();
         engine
-            .start_preview(R5, Some("lid"), effect("blue", FILL), lid.layout)
+            .start_preview(R5, Some(lid), effect("blue", FILL), r5())
             .expect("preview start");
         engine.set_preview_channel(Some(channel));
         wait_for("no preview frame", || !frames.lock().unwrap().is_empty());
@@ -4272,23 +5048,936 @@ mod tests {
         engine.stop_preview();
     }
 
-    /// The device's frame from its parts', as a pure function: black where no
-    /// part owns, each owned position from its part, a part owning everything
-    /// copied whole.
+    // The device's frame from its parts', as a pure function, is tested with
+    // the blend modes in `composition.rs`.
+
+    // ------------------------------------------------------------ layers
+
+    use composition::{Blend, Mask, MaskError};
+
+    /// Every light of its layout in `params.r`, `params.g` and `params.b`.
+    const SOLID: &str = r#"export default {
+        render({ layout, frame, params }) {
+            const colour = { r: Number(params.r ?? 0), g: Number(params.g ?? 0), b: Number(params.b ?? 0) }
+            for (const key of layout.keys) frame.set(key, colour)
+        },
+    }"#;
+
+    /// Every light of its layout in a red as bright as it has lights: what a
+    /// layer's effect counts as its device.
+    const COUNT: &str = r#"export default {
+        render({ layout, frame }) {
+            for (const key of layout.keys) frame.set(key, { r: layout.keys.length, g: 0, b: 0 })
+        },
+    }"#;
+
+    /// White everywhere: what no stack below draws, to tell a preview's first
+    /// frames from those of the one it replaced.
+    const WHITE: &str =
+        "export default { render({ frame }) { frame.fill({ r: 255, g: 255, b: 255 }) } }";
+
+    fn solid(effect_id: &str, [r, g, b]: [u8; 3]) -> EffectStart {
+        with_params(effect_id, SOLID, &format!(r#"{{"r":{r},"g":{g},"b":{b}}}"#))
+    }
+
+    fn mask_group(id: &str) -> Mask {
+        Mask {
+            group: Some(id.into()),
+            ..Mask::default()
+        }
+    }
+
+    fn mask_keys(codes: &[&str]) -> Mask {
+        Mask {
+            keys: codes.iter().map(|c| (*c).to_owned()).collect(),
+            ..Mask::default()
+        }
+    }
+
+    fn mask_lights(addresses: &[u16]) -> Mask {
+        Mask {
+            lights: addresses.to_vec(),
+            ..Mask::default()
+        }
+    }
+
+    fn mask_region(id: &str) -> Mask {
+        Mask {
+            region: Some(id.into()),
+            ..Mask::default()
+        }
+    }
+
+    fn layer_of(id: &str, start: EffectStart, mask: Mask, blend: Blend, opacity: u8) -> LayerStart {
+        LayerStart {
+            id: id.into(),
+            start,
+            mask,
+            look: Look {
+                blend,
+                opacity,
+                follows: None,
+            },
+        }
+    }
+
+    /// The position of the DeathStalker's key sending `scancode`.
+    fn key_at(scancode: u16) -> usize {
+        let key = layout().keys.iter().find(|k| k.scancode == scancode);
+        usize::from(key.expect("a key of the DeathStalker").index)
+    }
+
+    fn start_stack(
+        engine: &Engine,
+        device: DeviceRef,
+        l: &'static Layout,
+        out: &Arc<Output>,
+        stack: StackStart,
+    ) -> StackVerdict {
+        engine
+            .start_stack(device, l, Box::new(Arc::clone(out)), stack, false)
+            .expect("within the limits")
+    }
+
+    fn layer_ids(engine: &Engine, device: DeviceRef) -> Vec<String> {
+        status(engine, device)
+            .layers
+            .into_iter()
+            .map(|l| l.layer)
+            .collect()
+    }
+
+    /// The two-layer fixture of `composition.md` §3.11 on a per-key keyboard:
+    /// a base; a layer screened on the number row; another covering half-way
+    /// the two keys left of it and Escape. Then the two in the other order, and
+    /// the top one made invisible, live.
     #[test]
-    fn the_device_s_frame_takes_each_position_from_its_part() {
-        let keyboard = [9u8; 4 * 3];
-        let lid = [7u8; 4 * 3];
-        let frame = compose(
-            12,
-            [
-                (Some(&[0u16, 2][..]), Some(&keyboard[..])),
-                (Some(&[1u16][..]), Some(&lid[..])),
-                (Some(&[3u16][..]), None),
-            ],
+    fn two_layers_compose_in_order_on_a_per_key_keyboard() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let verdict = start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("base", [100, 50, 0])),
+                layers: vec![
+                    layer_of(
+                        "a3",
+                        solid("blue", [0, 0, 200]),
+                        mask_group("numberRow"),
+                        Blend::Screen,
+                        100,
+                    ),
+                    layer_of(
+                        "b7",
+                        solid("red", [255, 0, 0]),
+                        mask_keys(&["29", "02", "01"]),
+                        Blend::Cover,
+                        50,
+                    ),
+                ],
+            },
         );
-        assert_eq!(frame, [9, 9, 9, 7, 7, 7, 9, 9, 9, 0, 0, 0]);
-        assert_eq!(compose(12, [(None, Some(&lid[..]))]), lid.to_vec());
+        assert_eq!(
+            verdict,
+            StackVerdict {
+                base: Ok(()),
+                layers: vec![("a3".into(), Ok(())), ("b7".into(), Ok(()))],
+            }
+        );
+        let (a, two, one, escape) = (key_at(0x1E), key_at(0x03), key_at(0x02), key_at(0x01));
+        // 1: screened to (100, 50, 200), then half-way to red, rounded once.
+        wait_for("the stack was never drawn", || {
+            colour(&out, one) == Rgb::new(178, 25, 100)
+        });
+        assert_eq!(colour(&out, a), Rgb::new(100, 50, 0), "under no layer");
+        assert_eq!(colour(&out, two), Rgb::new(100, 50, 200), "screened");
+        assert_eq!(
+            colour(&out, escape),
+            Rgb::new(178, 25, 0),
+            "covered half-way"
+        );
+        assert_eq!(layer_ids(&engine, FIRST), ["a3", "b7"], "bottom to top");
+
+        assert_eq!(
+            engine.order_layers(FIRST, None, vec!["b7".into(), "a3".into()]),
+            Ok(())
+        );
+        // 1: half-way to red first, (177.5, 25, 0), then screened.
+        wait_for("the order did not change", || {
+            colour(&out, one) == Rgb::new(178, 25, 200)
+        });
+        assert_eq!(colour(&out, escape), Rgb::new(178, 25, 0));
+        assert_eq!(layer_ids(&engine, FIRST), ["b7", "a3"]);
+
+        engine.set_look(
+            FIRST,
+            None,
+            "b7",
+            Look {
+                blend: Blend::Cover,
+                opacity: 0,
+                follows: None,
+            },
+        );
+        wait_for("the opacity was not set live", || {
+            colour(&out, escape) == Rgb::new(100, 50, 0)
+        });
+        assert_eq!(colour(&out, one), Rgb::new(100, 50, 200));
+        engine.stop(FIRST);
+    }
+
+    /// A layer's effect sees its mask as its device: four lights on WASD.
+    /// Without a base, it is drawn over black.
+    #[test]
+    fn a_layer_s_effect_sees_its_mask_as_its_device() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: None,
+                layers: vec![layer_of(
+                    "w",
+                    effect("count", COUNT),
+                    mask_group("wasd"),
+                    Blend::Cover,
+                    100,
+                )],
+            },
+        );
+        wait_for("the layer never drew", || colour(&out, key_at(0x11)).r == 4);
+        assert_eq!(colour(&out, key_at(0x20)), Rgb::new(4, 0, 0));
+        assert_eq!(
+            colour(&out, key_at(0x01)),
+            Rgb::default(),
+            "black around it"
+        );
+        assert_eq!(status(&engine, FIRST).effect_id, None, "no base");
+        engine.stop(FIRST);
+    }
+
+    /// The fixture on a zones device. The 17 R5 split: the Lid region's stack
+    /// with a layer added on its logo, and a Keyboard layer masked to the lid,
+    /// which lights nothing there. Then the 17 R5 whole, with a layer on its
+    /// Lid region only.
+    #[test]
+    fn two_layers_compose_on_a_zones_device() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let lid = r5().region("lid").unwrap();
+        let keyboard = r5().region("keyboard").unwrap();
+        let logo = 1u16;
+        let verdicts = engine
+            .start_regions(
+                R5,
+                r5(),
+                Box::new(Arc::clone(&out)),
+                vec![
+                    (
+                        lid,
+                        StackStart {
+                            base: Some(solid("blue", [0, 0, 100])),
+                            layers: vec![layer_of(
+                                "t",
+                                solid("amber", [200, 100, 0]),
+                                mask_lights(&[logo]),
+                                Blend::Add,
+                                100,
+                            )],
+                        },
+                    ),
+                    (
+                        keyboard,
+                        StackStart {
+                            base: Some(solid("dim", [50, 0, 0])),
+                            layers: vec![layer_of(
+                                "k",
+                                solid("blue", [0, 0, 255]),
+                                mask_region("lid"),
+                                Blend::Cover,
+                                100,
+                            )],
+                        },
+                    ),
+                ],
+            )
+            .expect("within the limits");
+        let ids: Vec<&str> = verdicts.iter().map(|(r, _)| *r).collect();
+        assert_eq!(
+            ids,
+            ["keyboard", "lid", "base", "power"],
+            "the definition's order"
+        );
+        assert_eq!(
+            verdicts[0].1.layers,
+            [(
+                "k".to_owned(),
+                Err(PartError::Refused(Refusal::Mask(MaskError::NothingToLight)))
+            )]
+        );
+        assert_eq!(verdicts[1].1.layers, [("t".to_owned(), Ok(()))]);
+        // Positions and addresses alike on the 17 R5.
+        wait_for("the logo never lit", || {
+            colour(&out, usize::from(logo)) == Rgb::new(200, 100, 100)
+        });
+        for position in [0, 10, 11] {
+            assert_eq!(
+                colour(&out, position),
+                Rgb::new(0, 0, 100),
+                "lid {position}"
+            );
+        }
+        for position in [4, 5, 6, 7, 12] {
+            assert_eq!(
+                colour(&out, position),
+                Rgb::new(50, 0, 0),
+                "keyboard {position}"
+            );
+        }
+        assert_eq!(region_status(&engine, "lid").layers.len(), 1);
+        assert!(
+            region_status(&engine, "keyboard").layers.is_empty(),
+            "a mask lighting nothing takes no row"
+        );
+
+        let whole = Arc::new(Output::default());
+        start_stack(
+            &engine,
+            R5,
+            r5(),
+            &whole,
+            StackStart {
+                base: Some(solid("grey", [100, 100, 100])),
+                layers: vec![layer_of(
+                    "red lid",
+                    solid("red", [255, 0, 0]),
+                    mask_region("lid"),
+                    Blend::Multiply,
+                    100,
+                )],
+            },
+        );
+        wait_for("the lid was never tinted", || {
+            colour(&whole, 0) == Rgb::new(100, 0, 0)
+        });
+        for position in 0..r5().led_count() {
+            let want = if lid.positions.contains(&(position as u16)) {
+                Rgb::new(100, 0, 0)
+            } else {
+                Rgb::new(100, 100, 100)
+            };
+            assert_eq!(colour(&whole, position), want, "{position}");
+        }
+        engine.stop(R5);
+    }
+
+    /// The stack both loops run in
+    /// [`the_preview_and_the_device_give_the_same_frames`]: everything moves
+    /// from frame to frame.
+    fn moving_stack() -> StackStart {
+        StackStart {
+            base: Some(with_params("hues", EFFECT, r#"{"speed":90}"#)),
+            layers: vec![
+                layer_of(
+                    "w",
+                    effect("ramp", RAMP),
+                    mask_group("wasd"),
+                    Blend::Screen,
+                    70,
+                ),
+                layer_of(
+                    "f",
+                    with_params("hues", EFFECT, r#"{"speed":300}"#),
+                    mask_group("functionRow"),
+                    Blend::Multiply,
+                    100,
+                ),
+            ],
+        }
+    }
+
+    /// `composition.md` §3.9: the same stack, given the same instants, renders
+    /// the same bytes in a preview loop and in a device loop. The clocks are
+    /// injected: the machine's would start each loop's parts a few
+    /// milliseconds apart.
+    #[test]
+    fn the_preview_and_the_device_give_the_same_frames() {
+        const FRAMES: usize = 8;
+        let mut engine = Engine::default();
+        engine.clock = Clock::Frames {
+            epoch_ms: 1_800_000_000_000.0,
+        };
+        let out = Arc::new(Output::default());
+        start_stack(&engine, FIRST, layout(), &out, moving_stack());
+
+        let previewed: Arc<Mutex<Vec<Vec<u8>>>> = Arc::default();
+        let kept = Arc::clone(&previewed);
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Raw(bytes) = body {
+                kept.lock().unwrap().push(bytes);
+            }
+            Ok(())
+        });
+        // The channel passes to the next preview with the loop it replaces,
+        // before that one's first frame.
+        engine
+            .start_preview(FIRST, None, effect("white", WHITE), layout())
+            .expect("preview start");
+        engine.set_preview_channel(Some(channel));
+        let verdict = engine
+            .start_preview_stack(FIRST, None, moving_stack(), layout())
+            .expect("within the limits");
+        assert!(verdict.base.is_ok() && verdict.layers.iter().all(|(_, v)| v.is_ok()));
+        let stack_frames = || -> Vec<Vec<u8>> {
+            let all = previewed.lock().unwrap();
+            all.iter()
+                .filter(|f| f.iter().any(|&b| b != 255))
+                .cloned()
+                .collect()
+        };
+        wait_for("too few frames", || {
+            stack_frames().len() >= FRAMES && out.first.lock().unwrap().len() >= FRAMES
+        });
+
+        let device: Vec<Vec<u8>> = out.first.lock().unwrap()[..FRAMES]
+            .iter()
+            .map(|f| f.iter().flat_map(|c| [c.r, c.g, c.b]).collect())
+            .collect();
+        assert_ne!(device[0], device[FRAMES - 1], "the frames move");
+        assert_eq!(
+            stack_frames()[..FRAMES],
+            device[..],
+            "the same instants give the same bytes"
+        );
+        let layers: Vec<String> = engine
+            .preview_status()
+            .unwrap()
+            .layers
+            .into_iter()
+            .map(|l| l.layer)
+            .collect();
+        assert_eq!(layers, ["w", "f"]);
+        engine.stop_preview();
+        engine.stop(FIRST);
+    }
+
+    /// The preview's layers take their look and their settings live, as a
+    /// device's do, and nothing reaches a device.
+    #[test]
+    fn the_preview_s_layers_change_live() {
+        let engine = Engine::default();
+        let last: Arc<Mutex<Vec<u8>>> = Arc::default();
+        let kept = Arc::clone(&last);
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Raw(bytes) = body {
+                *kept.lock().unwrap() = bytes;
+            }
+            Ok(())
+        });
+        let stack = StackStart {
+            base: Some(solid("base", [100, 0, 0])),
+            layers: vec![layer_of(
+                "e",
+                solid("blue", [0, 0, 200]),
+                mask_group("escape"),
+                Blend::Cover,
+                100,
+            )],
+        };
+        engine
+            .start_preview_stack(FIRST, None, stack, layout())
+            .expect("within the limits");
+        engine.set_preview_channel(Some(channel));
+        let escape = key_at(0x01) * 3;
+        let at = |i: usize| last.lock().unwrap().get(i..i + 3).map(<[u8]>::to_vec);
+        wait_for("the preview never drew its layer", || {
+            at(escape) == Some(vec![0, 0, 200])
+        });
+        engine.set_preview_params(Some("e"), r#"{"g":200}"#.into());
+        wait_for("the layer's parameters were not set", || {
+            at(escape) == Some(vec![0, 200, 0])
+        });
+        engine.set_preview_look(
+            "e",
+            Look {
+                blend: Blend::Cover,
+                opacity: 0,
+                follows: None,
+            },
+        );
+        wait_for("the layer's look was not set", || {
+            at(escape) == Some(vec![100, 0, 0])
+        });
+        assert!(engine.device_status().is_empty(), "no device touched");
+        engine.stop_preview();
+    }
+
+    /// A layer failing thirty frames in a row stops alone: it draws nothing
+    /// more, its row says why, the base goes on and the device stays on.
+    #[test]
+    fn a_layer_failing_stops_alone() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("base", [100, 0, 0])),
+                layers: vec![layer_of(
+                    "x",
+                    effect("broken", THROWS),
+                    mask_group("wasd"),
+                    Blend::Cover,
+                    100,
+                )],
+            },
+        );
+        wait_for("the failing layer never stopped", || {
+            status(&engine, FIRST)
+                .layers
+                .first()
+                .is_some_and(|l| !l.running)
+        });
+        let x = status(&engine, FIRST).layers.remove(0);
+        assert!(
+            x.error.as_deref().is_some_and(|e| e.contains("boum")),
+            "{x:?}"
+        );
+        assert_eq!(
+            x.effect_id.as_deref(),
+            Some("broken"),
+            "it says what failed"
+        );
+        let device = status(&engine, FIRST);
+        assert!(device.running);
+        assert_eq!(device.error, None, "the base's own");
+        assert!(!out.turned_off.load(Ordering::Relaxed));
+        let before = out.written.load(Ordering::Relaxed);
+        wait_for("the base stopped with it", || {
+            out.written.load(Ordering::Relaxed) > before + 2
+        });
+        assert_eq!(
+            colour(&out, key_at(0x11)),
+            Rgb::new(100, 0, 0),
+            "nothing drawn"
+        );
+        engine.stop(FIRST);
+    }
+
+    /// A base failing stops alone too: its layers go on, over black.
+    #[test]
+    fn a_base_failing_leaves_its_layers() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(effect("broken", THROWS)),
+                layers: vec![layer_of(
+                    "w",
+                    solid("blue", [0, 0, 200]),
+                    mask_group("wasd"),
+                    Blend::Cover,
+                    100,
+                )],
+            },
+        );
+        let base = || {
+            engine
+                .shared(FIRST)
+                .and_then(|s| s.part(None, None))
+                .unwrap()
+        };
+        wait_for("the failing base never stopped", || !base().running());
+        assert!(base().error().is_some_and(|e| e.contains("boum")));
+        let before = out.written.load(Ordering::Relaxed);
+        wait_for("the layer stopped with it", || {
+            out.written.load(Ordering::Relaxed) > before + 2
+        });
+        assert_eq!(colour(&out, key_at(0x11)), Rgb::new(0, 0, 200));
+        assert_eq!(colour(&out, key_at(0x01)), Rgb::default());
+        assert!(status(&engine, FIRST).running);
+        assert!(!out.turned_off.load(Ordering::Relaxed));
+        engine.stop(FIRST);
+    }
+
+    /// A layer that does not load keeps its row, with why, and takes its
+    /// place again when started under its id; one whose mask lights nothing on
+    /// this keyboard takes none, and its verdict says so.
+    #[test]
+    fn a_layer_that_does_not_start_says_why() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let verdict = start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("base", [0, 100, 0])),
+                layers: vec![
+                    layer_of(
+                        "bad",
+                        effect("bad", "not JavaScript {{{"),
+                        Mask::default(),
+                        Blend::Cover,
+                        100,
+                    ),
+                    // No right Windows key on the DeathStalker.
+                    layer_of(
+                        "win",
+                        solid("red", [255, 0, 0]),
+                        mask_keys(&["e05c"]),
+                        Blend::Cover,
+                        100,
+                    ),
+                ],
+            },
+        );
+        assert!(
+            matches!(&verdict.layers[0], (id, Err(PartError::Failed(e))) if id == "bad" && e.contains("loading the effect")),
+            "{verdict:?}"
+        );
+        assert_eq!(
+            verdict.layers[1],
+            (
+                "win".to_owned(),
+                Err(PartError::Refused(Refusal::Mask(MaskError::NothingToLight)))
+            )
+        );
+        let rows = status(&engine, FIRST).layers;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].layer == "bad" && !rows[0].running && rows[0].error.is_some());
+        wait_for("the base never drew", || {
+            colour(&out, key_at(0x01)) == Rgb::new(0, 100, 0)
+        });
+
+        let again = layer_of(
+            "bad",
+            solid("blue", [0, 0, 200]),
+            mask_group("escape"),
+            Blend::Cover,
+            100,
+        );
+        assert_eq!(engine.start_layer(FIRST, None, again), Ok(()));
+        wait_for("the layer never drew", || {
+            colour(&out, key_at(0x01)) == Rgb::new(0, 0, 200)
+        });
+        let rows = status(&engine, FIRST).layers;
+        assert!(rows.len() == 1 && rows[0].running && rows[0].error.is_none());
+        engine.stop(FIRST);
+    }
+
+    /// Eight effects per target, the base included: a ninth is refused,
+    /// whether in a stack or added live, and what ran goes on. Replacing a
+    /// layer is no ninth.
+    #[test]
+    fn the_limits_are_refused() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let dot = |id: &str| {
+            layer_of(
+                id,
+                solid("dot", [0, 0, 1]),
+                mask_group("escape"),
+                Blend::Add,
+                100,
+            )
+        };
+        let layers = |n: usize| (0..n).map(|i| dot(&format!("l{i}"))).collect::<Vec<_>>();
+        start(&engine, FIRST, "applied", Arc::clone(&out));
+        let nine = StackStart {
+            base: Some(solid("base", [1, 1, 1])),
+            layers: layers(8),
+        };
+        let refused = engine.start_stack(FIRST, layout(), Box::new(Arc::clone(&out)), nine, false);
+        assert_eq!(refused, Err(Refusal::TooManyEffects));
+        let twice = StackStart {
+            base: None,
+            layers: vec![dot("a"), dot("a")],
+        };
+        let refused = engine.start_stack(FIRST, layout(), Box::new(Arc::clone(&out)), twice, false);
+        assert_eq!(refused, Err(Refusal::LayerTwice("a".into())));
+        let device = status(&engine, FIRST);
+        assert!(device.running);
+        assert_eq!(
+            device.effect_id.as_deref(),
+            Some("applied"),
+            "what ran goes on"
+        );
+
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("base", [1, 1, 1])),
+                layers: layers(7),
+            },
+        );
+        assert_eq!(layer_ids(&engine, FIRST).len(), 7);
+        assert_eq!(
+            engine.start_layer(FIRST, None, dot("ninth")),
+            Err(PartError::Refused(Refusal::TooManyEffects))
+        );
+        assert_eq!(
+            engine.start_layer(FIRST, None, dot("l3")),
+            Ok(()),
+            "a replacement"
+        );
+        engine.stop_base(FIRST, None);
+        assert_eq!(
+            engine.start_layer(FIRST, None, dot("eighth")),
+            Ok(()),
+            "eight without a base"
+        );
+        assert_eq!(
+            engine.start_base(FIRST, None, solid("base", [1, 1, 1])),
+            Err(PartError::Refused(Refusal::TooManyEffects))
+        );
+        assert_eq!(
+            engine.order_layers(FIRST, None, vec!["l0".into()]),
+            Err(PartError::Refused(Refusal::Order))
+        );
+        assert_eq!(layer_ids(&engine, FIRST).len(), 8);
+        engine.stop(FIRST);
+    }
+
+    /// Adding a layer or changing the base happens between two frames: the
+    /// other parts keep their clocks.
+    #[test]
+    fn a_layer_or_a_base_started_leaves_the_others_clocks() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let (w, escape) = (key_at(0x11), key_at(0x01));
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart::base(Some(effect("ramp", RAMP))),
+        );
+        wait_for("the base's clock never reached 0.64 s", || {
+            colour(&out, escape).r == 255
+        });
+        let ramp = layer_of(
+            "w",
+            effect("ramp", RAMP),
+            mask_group("wasd"),
+            Blend::Cover,
+            100,
+        );
+        assert_eq!(engine.start_layer(FIRST, None, ramp), Ok(()));
+        wait_for("the layer did not start from zero", || {
+            colour(&out, w).r < 200
+        });
+        assert_eq!(colour(&out, escape).r, 255, "the base's clock went back");
+        wait_for("the layer's clock never reached 0.64 s", || {
+            colour(&out, w).r == 255
+        });
+
+        assert_eq!(
+            engine.start_base(FIRST, None, effect("again", RAMP)),
+            Ok(())
+        );
+        wait_for("the base did not start again from zero", || {
+            colour(&out, escape).r < 200
+        });
+        assert_eq!(colour(&out, w).r, 255, "the layer's clock went back");
+        assert_eq!(status(&engine, FIRST).effect_id.as_deref(), Some("again"));
+
+        engine.stop_layer(FIRST, None, "w");
+        assert!(layer_ids(&engine, FIRST).is_empty());
+        wait_for("the layer stayed drawn", || {
+            let last = out.last.lock().unwrap();
+            last[w] == last[escape]
+        });
+        engine.stop(FIRST);
+    }
+
+    /// A layer goes to a stack the loop runs, or the caller starts the whole
+    /// composition: nothing running, a split device asked for its whole
+    /// stack, a region it does not declare, a rule over the whole device. A
+    /// mask lighting nothing changes nothing.
+    #[test]
+    fn a_layer_goes_to_a_stack_the_loop_runs() {
+        let engine = Engine::default();
+        let fill = || {
+            layer_of(
+                "x",
+                effect("blue", FILL),
+                Mask::default(),
+                Blend::Cover,
+                100,
+            )
+        };
+        assert_eq!(
+            engine.start_layer(R5, None, fill()),
+            Err(PartError::NotRunning),
+            "nothing runs"
+        );
+        let out = Arc::new(Output::default());
+        start_regions(&engine, &out, vec![("lid", Some(effect("blue", FILL)))]);
+        assert_eq!(
+            engine.start_layer(R5, None, fill()),
+            Err(PartError::NotRunning)
+        );
+        assert_eq!(
+            engine.start_layer(R5, Some("screen"), fill()),
+            Err(PartError::NotRunning)
+        );
+        let wasd = layer_of(
+            "x",
+            effect("blue", FILL),
+            mask_group("wasd"),
+            Blend::Cover,
+            100,
+        );
+        assert_eq!(
+            engine.start_layer(R5, Some("lid"), wasd),
+            Err(PartError::Refused(Refusal::Mask(MaskError::NothingToLight)))
+        );
+        assert_eq!(
+            engine.start_layer(R5, Some("base"), fill()),
+            Ok(()),
+            "a region running nothing takes a layer, over black"
+        );
+        wait_for("the base region never lit", || colour(&out, 8).b == 255);
+        assert_eq!(colour(&out, 4), Rgb::default(), "the keyboard runs nothing");
+        assert_eq!(region_status(&engine, "base").layers.len(), 1);
+
+        engine
+            .start(
+                R5,
+                effect("rule", FILL),
+                r5(),
+                Box::new(Arc::clone(&out)),
+                true,
+            )
+            .expect("start");
+        assert_eq!(
+            engine.start_layer(R5, Some("lid"), fill()),
+            Err(PartError::NotRunning),
+            "a rule over the whole device"
+        );
+        engine.stop(R5);
+    }
+
+    /// A layer's opacity follows a signal as a brightness does, and its
+    /// settings are its own.
+    #[test]
+    fn a_layer_s_opacity_follows_and_its_settings_are_its_own() {
+        let engine = Engine::default();
+        let now = wall_clock_ms() as i64;
+        engine
+            .signals()
+            .lock()
+            .unwrap()
+            .apply(&serde_json::json!({ "lux": 50 }), None, now)
+            .unwrap();
+        let out = Arc::new(Output::default());
+        let following = LayerStart {
+            look: Look {
+                blend: Blend::Cover,
+                opacity: 100,
+                follows: Some(dimming::Dimming {
+                    source: "signal:lux".into(),
+                    floor: 0,
+                }),
+            },
+            ..layer_of(
+                "half",
+                solid("red", [200, 0, 0]),
+                mask_group("escape"),
+                Blend::Cover,
+                100,
+            )
+        };
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("black", [0, 0, 0])),
+                layers: vec![
+                    following,
+                    layer_of(
+                        "space",
+                        solid("red", [200, 0, 0]),
+                        mask_group("space"),
+                        Blend::Cover,
+                        100,
+                    ),
+                ],
+            },
+        );
+        wait_for("the opacity did not follow the signal", || {
+            colour(&out, key_at(0x01)).r == 100
+        });
+        engine.set_params(FIRST, None, Some("space"), r#"{"b":40}"#.into());
+        wait_for("the layer's parameters were not set", || {
+            colour(&out, key_at(0x39)) == Rgb::new(0, 0, 40)
+        });
+        assert_eq!(colour(&out, key_at(0x01)).r, 100, "the other layer's moved");
+        engine.stop(FIRST);
+    }
+
+    /// Deleting an effect stops the layers running it, and those alone; a
+    /// whole device running nothing else stops, as before layers.
+    #[test]
+    fn deleting_an_effect_stops_the_layers_running_it() {
+        let engine = Engine::default();
+        let out = Arc::new(Output::default());
+        let gone = |id: &str| {
+            layer_of(
+                id,
+                effect("gone", FILL),
+                mask_group("wasd"),
+                Blend::Cover,
+                100,
+            )
+        };
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(solid("kept", [1, 1, 1])),
+                layers: vec![gone("g")],
+            },
+        );
+        assert_eq!(engine.stop_everywhere("gone"), vec![FIRST]);
+        assert!(layer_ids(&engine, FIRST).is_empty());
+        let device = status(&engine, FIRST);
+        assert!(device.running);
+        assert_eq!(device.effect_id.as_deref(), Some("kept"));
+
+        start_stack(
+            &engine,
+            FIRST,
+            layout(),
+            &out,
+            StackStart {
+                base: Some(effect("gone", FILL)),
+                layers: vec![gone("g")],
+            },
+        );
+        assert_eq!(engine.stop_everywhere("gone"), vec![FIRST]);
+        assert!(!status(&engine, FIRST).running);
     }
 
     // ------------------------------------------------------------ preview

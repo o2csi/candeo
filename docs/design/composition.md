@@ -11,9 +11,10 @@ settles **composition**, the second increment of
 Candeo already has, the model for layers, ideas the products compared do not
 have, and the first version.
 
-Status: decided on 2026-11-06, not implemented. The maintainer took every
-recommendation of the study; §6 lists the decisions, and §5.1 the three pull
-requests that build the first version, in their order.
+Status: decided on 2026-11-06. The maintainer took every recommendation of the
+study; §6 lists the decisions, and §5.1 the three pull requests that build the
+first version, in their order. The first, the engine, is built (§7); layers in
+the settings and the window, and overlay rules, are not.
 
 ## 1. Terms
 
@@ -631,3 +632,69 @@ the French name of *Add* moved when the words were settled (§3.10).
     *Teinter*.
 11. **Press to acknowledge comes in a second version**, first in the order of
     §5.2, which stands as written.
+
+## 7. The engine, as step 1 built it
+
+What §5.1 step 1 settled in `apps/desktop/src-tauri/src/runtime/`, for step 2
+to call. No command, setting or screen reaches it yet, and every call made
+before layers behaves as before, byte for byte.
+
+**Types**, in `runtime::composition`, pure and tested without a loop:
+
+| Type | What it is |
+|---|---|
+| `Blend` | `cover`, `add`, `screen` (the default) or `multiply`; `apply` is §3.4's formula on one channel |
+| `Look` | `blend`, `opacity` from 0 to 100, and `follows`, a brightness follow's `Dimming` |
+| `Mask` | `group`, `keys` (scancodes as definitions write them), `lights` (addresses) and `region`: their union, the whole target when it names nothing. `resolve(device, target)` gives its positions, or a `MaskError`: a group or a region nobody knows, a text that is no scancode, nothing to light |
+| `LayerStart` | an `id`, the `EffectStart`, its `Mask` and its `Look` |
+| `StackStart` | `base`, an `Option<EffectStart>`, and `layers`, bottom to top. `check` refuses a ninth effect and an id given twice |
+| `Refusal` | `TooManyEffects`, `LayerTwice`, `Order`, or `Mask` |
+| `MAX_EFFECTS` | 8, the base included |
+
+`Blend`, `Look` and `Mask` read and write as §3.11 writes them, unknown fields
+refused, so that step 2's `layers` records are made of them. The key groups are
+`candeo_device::groups::KEY_GROUPS`, by scancode, checked against both built-in
+keyboards; their names for people come into the catalogs with step 2. A mask's
+layout, the device narrowed to its lights, is built once per set of lights
+(`Layout::masked`).
+
+**The `Engine`**. A target is named by its region, `None` for the whole device:
+
+| Method | What it does |
+|---|---|
+| `start_stack(device, layout, out, stack, split)` | a whole device's stack, replacing what ran; `start` is it with a base alone |
+| `start_regions(device, layout, out, stacks)` | a stack per region, in the definition's order; a region given none runs nothing |
+| `start_base(device, region, start)` | the base, between two frames, its layers keeping their clocks: *Apply* and the tray on a target with layers |
+| `stop_base(device, region)` | the layers go on, over black |
+| `start_layer(device, region, layer)` | on top, or in place of the layer with its id: another effect, or another mask |
+| `stop_layer(device, region, id)`, `order_layers(device, region, ids)` | `ids` names each layer of the stack once |
+| `set_look(device, region, id, look)` | blend, opacity and follow, live |
+| `set_params`, `set_bindings(device, region, layer, …)` | a base's with `layer` `None`, a layer's otherwise |
+| `start_preview_stack(layout_of, region, stack, layout)` | the preview of a stack; `start_preview` is it with a base alone. `set_preview_params`, `set_preview_bindings` and `set_preview_look` name a layer the same way |
+
+- **Refused before anything stops**: a stack or a set of region stacks that
+  `check` refuses comes back as a `Refusal`, and what ran goes on.
+- **A change between two frames** answers `Ok`, or a `PartError`: `NotRunning`
+  when the loop does not run that target's stack — nothing runs, a split device
+  asked for its whole stack or a whole one for a region — and the caller starts
+  the whole composition; `Refused`, with a mask lighting nothing or a ninth
+  effect among the reasons; `Failed`, with the effect's load error. In every
+  case the stack goes on as it was.
+- **A start's verdict**, `StackVerdict`, holds the base's and each layer's. A
+  target whose base does not load runs nothing, its layers included, as a
+  device whose effect did not load ran nothing before layers. A layer that does
+  not load runs nothing and keeps its row, with why; one whose mask lights
+  nothing on this device runs nothing and has no row: step 2 says *nothing to
+  light here* from the verdict, or from `Mask::resolve`.
+- **The status**: `EngineStatus`, `RegionEngineStatus` and `PreviewStatus` gain
+  `layers`, each a `LayerEngineStatus` — `layer`, `running`, `effectId`,
+  `error` — bottom to top, left out when empty. A layer stopped after thirty
+  failed frames keeps its row with its error. The copied diagnostic lists them.
+- **The engine knows no rules.** A whole device's stack may be a rule's: before
+  `start_base` or `start_layer`, the command ends an interruption and starts
+  the applied stack whole, as `start_effect` ends one today.
+- **Identical frames** are tested with a clock that gives every part's frame
+  `n` the instant `n / 30` s, in a preview loop and a device loop.
+- **Not in step 1**: overlays and their limit of four per device, which come
+  with overlay rules (step 3) as a list drawn over the targets' stacks; the
+  TypeScript mirrors of the new status fields, with step 2.
