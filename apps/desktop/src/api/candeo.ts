@@ -10,6 +10,7 @@ import { Channel, invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { ParamSpec, ParamValue, Text } from '@candeo/effects-api'
 
+import type { LayerEngineStatus, SavedLayerRecord, SavedMaskRecord, StackRecord } from './layers'
 import { deviceOf, regionOf, type Target } from './target'
 import type {
   DeviceInfo,
@@ -821,6 +822,12 @@ export interface Settings {
   splitDevices?: SplitDeviceRecord[]
   /** Named settings for one effect, in the order they were saved. Absent when there is none. */
   presets?: PresetRecord[]
+  /** Each target's layers, over the base `activeEffects` or its region keeps. Absent when none has any. */
+  layers?: StackRecord[]
+  /** Named layers, in the order they were saved. Absent when there is none. */
+  savedLayers?: SavedLayerRecord[]
+  /** Named masks, in the order they were saved. Absent when there is none. */
+  savedMasks?: SavedMaskRecord[]
   /**
    * Automation rules, in their order, which is their priority. Kept here even by
    * code that does not read them: writing `Settings` back without them would
@@ -999,6 +1006,8 @@ export interface EngineStatus {
   toKeyboard: boolean
   /** The rule interrupting this device, when one does (#106). */
   interruption?: InterruptionStatus
+  /** The layers over its effect, bottom to top. Absent when it has none. */
+  layers?: LayerEngineStatus[]
 }
 
 /**
@@ -1011,6 +1020,8 @@ export interface RegionEngineStatus {
   effectId: string | null
   /** Error coming from the region's effect. Already readable. */
   error: string | null
+  /** The layers over its effect, bottom to top. Absent when it has none. */
+  layers?: LayerEngineStatus[]
 }
 
 /** A rule interrupting a device, as the engine reports it. */
@@ -1089,6 +1100,8 @@ export interface PreviewStatus {
   effectId: string | null
   /** Error coming from the effect's code. Already readable: to be shown as it is. */
   error: string | null
+  /** The layers of a previewed stack, bottom to top. Absent when it has none. */
+  layers?: LayerEngineStatus[]
 }
 
 /**
