@@ -1538,6 +1538,48 @@ export function onSignalsChanged(handler: () => void): Promise<UnlistenFn> {
   })
 }
 
+// ---------------------------------------------------------------- assistants
+
+/**
+ * Where the pipe assistants connect through stands (#384): `taken` when another
+ * program holds its name, `failed` when it could not be created. Mirror of
+ * `Listening`, in `src-tauri/src/mcp/mod.rs`.
+ */
+export type McpListening = 'off' | 'on' | 'taken' | 'failed'
+
+/** MCP as Settings › Assistants shows it. Mirror of `McpStatus`. */
+export interface McpStatus {
+  enabled: boolean
+  listening: McpListening
+  /** The assistants connected now, by the names they gave; empty for one that gave none yet. */
+  assistants: string[]
+  /** The program an assistant starts with `--mcp`, at a path that survives updates; `null` when Candeo cannot tell. */
+  command: string | null
+}
+
+export function getMcp(): Promise<McpStatus> {
+  return invoke('get_mcp')
+}
+
+/** Turns MCP on or off. Off closes the pipe and drops every assistant connected. */
+export function setMcp(enabled: boolean): Promise<McpStatus> {
+  return invoke('set_mcp', { enabled })
+}
+
+/**
+ * Emitted by Rust when MCP is turned on or off and when an assistant connects,
+ * names itself or leaves. Written here and as `CHANGED` in
+ * `src-tauri/src/mcp/mod.rs`, which a Rust test compares.
+ */
+const MCP_CHANGED = 'candeo://mcp-changed'
+
+/** Tells when MCP or its connections change, so Settings follows without polling. */
+export function onMcpChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen(MCP_CHANGED, () => {
+    handler()
+  })
+}
+
 // ---------------------------------------------------------------- log
 
 /** Mirror of `LogLevel`, in `src-tauri/src/journal.rs`. */

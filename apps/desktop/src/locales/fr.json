@@ -442,7 +442,9 @@
     "noFirmwareEffect": "« {device} » n'exécute aucun effet par lui-même : choisissez-en un dans la bibliothèque.",
     "wrongUnit": "L'exemplaire branché (série {fingerprint}) n'est pas celui qui a été piloté : il reste fermé. « Piloter » l'adopte à son tour.",
     "deviceWrite": "Écriture impossible vers cet appareil : {detail}",
-    "deviceClosed": "Appareil refermé après trop d'écritures refusées : reconnectez-le depuis Périphériques, et éteignez puis rallumez la machine s'il persiste."
+    "deviceClosed": "Appareil refermé après trop d'écritures refusées : reconnectez-le depuis Périphériques, et éteignez puis rallumez la machine s'il persiste.",
+    "mcpInvalidArguments": "Les arguments ne conviennent pas à l'outil : {detail}",
+    "mcpTooManyCalls": "Trop d'appels : {max} par seconde au plus."
   },
   "settings": {
     "title": "Réglages",

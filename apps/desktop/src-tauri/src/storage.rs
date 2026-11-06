@@ -755,6 +755,10 @@ pub struct Settings {
     /// from the file until someone turns it on. See [`crate::signals`].
     #[serde(skip_serializing_if = "crate::signals::SignalsConfig::is_default")]
     pub signals: crate::signals::SignalsConfig,
+    /// Whether assistants may connect through MCP (#359). Absent from the file
+    /// until someone turns it on. See [`crate::mcp`].
+    #[serde(skip_serializing_if = "crate::mcp::McpConfig::is_default")]
+    pub mcp: crate::mcp::McpConfig,
     /// How the sound playing is heard (#107): the gain and beat sensitivity set
     /// in Settings. Absent while they are the defaults.
     #[serde(
@@ -812,6 +816,7 @@ impl Default for Settings {
             shipped_effects: BTreeMap::new(),
             rules: Vec::new(),
             signals: crate::signals::SignalsConfig::default(),
+            mcp: crate::mcp::McpConfig::default(),
             sound: crate::audio::analysis::Tuning::default(),
             legacy_log_level: None,
             unknown: serde_json::Map::new(),
@@ -3407,6 +3412,8 @@ pub fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> CmdResult<(
     // The API goes off with the rest, and stops listening now rather than at
     // the next look.
     crate::signals::reconcile(&app);
+    // MCP off again: the pipe closes, and every assistant is dropped.
+    crate::mcp::reconcile(&app);
     Ok(())
 }
 
@@ -5069,6 +5076,10 @@ mod tests {
                 interfaces: vec!["Wi-Fi".into()],
                 game_token: "ab".repeat(32),
                 valve_games: true,
+            },
+            mcp: crate::mcp::McpConfig {
+                enabled: true,
+                unknown: serde_json::Map::new(),
             },
             sound: crate::audio::analysis::Tuning {
                 gain: 1.5,

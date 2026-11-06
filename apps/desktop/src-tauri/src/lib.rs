@@ -27,6 +27,7 @@ mod journal;
 mod keys;
 mod language;
 mod machine;
+mod mcp;
 mod msix;
 mod paths;
 mod presets;
@@ -72,7 +73,7 @@ pub(crate) fn layouts() -> &'static [&'static Layout] {
 /// A type rather than two integers carried side by side: it appears as a
 /// command argument **and** in the state the engine returns, and swapping them
 /// would only show at runtime.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRef {
     pub vid: u16,
@@ -1133,9 +1134,18 @@ pub struct DefinitionInfo {
 /// Lists the known layouts: plugged in or not, and above all **in which state**.
 #[tauri::command]
 fn list_devices(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Vec<DeviceInfo>> {
-    let settings = storage::store(&app)?.read_settings()?;
+    device_infos(&app, &state, language::current(&app))
+}
+
+/// [`list_devices`], its warnings in `language`: the window's, or English for
+/// an assistant's model (`docs/design/mcp-server.md` §4.1).
+pub(crate) fn device_infos(
+    app: &AppHandle,
+    state: &AppState,
+    language: language::Language,
+) -> CmdResult<Vec<DeviceInfo>> {
+    let settings = storage::store(app)?.read_settings()?;
     let api = hid()?;
-    let language = language::current(&app);
     // The readings are taken one after another, each releasing its lock before
     // the next. That is the rule documented on [`AppState`], and it comes from a
     // real deadlock: this command took the keyboard then the failures,
@@ -1865,6 +1875,12 @@ fn write_row(
 
 // ---------------------------------------------------------------- entry point
 
+/// `candeo --mcp`: the bridge an assistant starts, and its exit code. Nothing
+/// of the application starts in that mode. See [`mcp::relay`].
+pub fn mcp_bridge() -> i32 {
+    mcp::relay::run()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1915,6 +1931,7 @@ pub fn run() {
             // The store the engine's loops read bound values from: one for both.
             let store = app.state::<AppState>().engine.signals();
             app.manage(signals::Signals::sharing(store));
+            app.manage(mcp::Mcp::default());
 
             // After `manage`, since starting goes through the command path, which
             // reads the state from the manager; before the tray, so its first menu
@@ -1935,6 +1952,9 @@ pub fn run() {
             automations::start(app.handle());
             // After the automations, which a request wakes.
             signals::start(app.handle());
+            // Last, once everything a tool reads is managed: an assistant may
+            // connect the moment the pipe opens.
+            mcp::start(app.handle());
 
             // The window is declared `create: false`, and built here once the
             // state it reads is managed. Launched at login, no window is built
@@ -2037,6 +2057,8 @@ pub fn run() {
             signals::set_valve_games,
             signals::connect_game,
             signals::disconnect_game,
+            mcp::get_mcp,
+            mcp::set_mcp,
             idle::idle_available,
             storage::list_effects,
             storage::save_effect_source,
