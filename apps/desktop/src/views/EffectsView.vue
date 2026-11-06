@@ -3295,7 +3295,13 @@ onBeforeUnmount(() => {
         drawn in the meantime.
       -->
       <div v-if="board" class="preview">
-        <div v-if="selecting" class="bar choosing" role="toolbar" :aria-label="t('layers.select.bar')">
+        <div
+          v-if="selecting"
+          class="bar choosing"
+          role="toolbar"
+          :aria-label="t('layers.select.bar')"
+          @keydown.esc.prevent="cancelChoosing"
+        >
           <span class="hint">{{ selectingHint }}</span>
           <span class="count" aria-live="polite">{{ selectingCount }}</span>
           <span class="spacer" />
