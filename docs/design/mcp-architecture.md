@@ -103,6 +103,10 @@ A full REST API stays out of scope until someone needs it.
 The services layer is a **refactoring target**, not a module that already exists
 under that name.
 
+The **OpenRGB adapter** is studied in [`openrgb-output.md`](openrgb-output.md)
+(#368): an optional output to an OpenRGB server the user runs, beside native
+HID and never in its place.
+
 ## 3. Effects created by an agent: the proposed flow
 
 ```mermaid
