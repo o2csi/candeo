@@ -367,12 +367,6 @@ could not be verified.
 
 - The column describes `main` at `e273c65`: presets were merged after 0.22.1
   and are not released yet.
-- Three design notes have status lines older than the code:
-  [`key-input.md`](../design/key-input.md) and
-  [`game-state-integration.md`](../design/game-state-integration.md) say
-  *proposed*, and [`inputs-and-automations.md`](../design/inputs-and-automations.md)
-  says sound is proposed. Key presses, games and sound ship ([code][c-presses],
-  [code][c-gsi-code], [code][c-audio]); the tables follow the code.
 - Composition: [#360] plans layers as its second increment, while
   [`regions.md`](../design/regions.md) §10 and
   [`inputs-and-automations.md`](../design/inputs-and-automations.md) §5 still

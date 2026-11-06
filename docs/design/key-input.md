@@ -1,7 +1,9 @@
 # Key presses for effects
 
 Effects that react to the keys someone presses: a ring spreading from each
-pressed key (Ripples), and whatever an author writes next. Status: proposed.
+pressed key (Ripples), and whatever an author writes next. Status: implemented
+in #100, with Ripples, in the first release (0.1.0); the gallery's mark came in
+#235. Capture is Windows only (§6).
 
 ## Why this needs a design
 

@@ -2,9 +2,11 @@
 
 Lighting that reacts to more than key presses — the time, the music playing,
 signals sent by other software — and rules that interrupt the configured effect
-for a while. Status: steps 1, 2, 3, 5 and 6 of §4 are implemented (#102, #105,
-#106, #108, #179); sound (#107) is proposed. Each part lands in its own pull
-request, in the order at the end.
+for a while. Status: implemented. Every step of §4 has shipped (#102, #105,
+#106, #107, #108, #179), sound in #236 and #237, released in 0.13.0; the
+computer's activity (§2.4, #242) followed in 0.20.0. Network rates (#241) and
+the idle trigger on Linux (#183) wait. Each part landed in its own pull request,
+in the order at the end.
 
 ## Why this needs a design
 
@@ -489,7 +491,7 @@ not run elevated. What that leaves, measured on the Alienware m18 R1 (Windows
 | Source | What an effect would see | Why later |
 |---|---|---|
 | Screen colors | average colors along the screen's edges | screen capture (Windows Graphics Capture, a PipeWire portal): costly, and the most sensitive input there is |
-| Games | health, ammunition, round state | per-game integrations (CS2 and Dota "Game State Integration" post JSON locally): signals (§2.3) can carry them first |
+| Games | health, ammunition, round state | per-game integrations (CS2 and Dota "Game State Integration" post JSON locally): signals (§2.3) can carry them first. Shipped that way for both games: [`game-state-integration.md`](game-state-integration.md) |
 
 ## 3. Automations
 
