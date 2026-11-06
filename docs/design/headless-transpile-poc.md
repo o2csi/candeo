@@ -1,10 +1,12 @@
 # Headless TypeScript transpilation — proof of concept (#364)
 
-> **Status: proof of concept, measured on 2026-11-06. Nothing in the
-> application uses it.** It answers the open decision of
-> [`mcp-architecture.md`](mcp-architecture.md) §4 with numbers, for the MCP work
-> of [#365](https://github.com/o2csi/candeo/issues/365). The code is in
-> [`tools/transpile-poc/`](../../tools/transpile-poc/).
+> **Status: proof of concept, measured on 2026-11-06, then adopted.** It
+> answers the open decision of [`mcp-architecture.md`](mcp-architecture.md) §4
+> with numbers, for the MCP work of
+> [#365](https://github.com/o2csi/candeo/issues/365). The code is in
+> [`tools/transpile-poc/`](../../tools/transpile-poc/). Since #381 the
+> application compiles every effect this way: §9 says what it kept, what it
+> changed, and why.
 
 **In short:** Oxc can transpile Candeo's effects without a WebView, and the
 engine renders the same thing either way. All 26 shipped effects and every
@@ -61,7 +63,9 @@ cargo run --release -- typescript-in-quickjs --stack-mb 64   # §5, after compar
 ```
 
 The harness needs Node 22.18 or later: it relies on Node's type stripping to
-import `effect.ts` as it is.
+import `effect.ts` as it is. #381 removed `effect.ts`: the TypeScript side now
+runs from a checkout of a668a44 or earlier, and what it gave the shipped effects
+is kept in `apps/desktop/src-tauri/fixtures/typescript/` (§9).
 
 **Why a workspace of its own.** Oxc brings in 109 crates and takes about
 1 min 45 s for a clean release build (§4). As a member of the repository's
@@ -318,14 +322,16 @@ optional and bounded, not part of every validation.
 1. **These settings, kept together:** `esnext` target, with no lowering and no
    helpers; TypeScript's ES2020 class-field semantics (§3.1); semantic checks
    and regex parsing on; every source parsed as a module. With them, every
-   tested effect renders the same frames.
+   tested effect renders the same frames. One was missing, found in the
+   product (§9): enum evaluation.
 2. **One validation contract in Rust**, the same function for Tauri IPC and for
    the MCP, so that neither can drift from the other (§4 point 4 of the
    proposal):
    1. a size limit. 1 MiB is proposed: the 1.3 MB case loads within the
       32 MB budget, the 10.6 MB case does not. No limit exists today;
    2. Oxc on a dedicated thread that reserves 1 KiB of stack per byte of
-      source (1 GiB for 1 MiB);
+      source (1 GiB for 1 MiB). Measured since on more constructs, that was
+      short: the product reserves 2 KiB (§9);
    3. syntax errors, early errors and refused constructs, with their line and
       column;
    4. the import check against `api.js`'s exports;
@@ -389,3 +395,97 @@ Not chosen:
 - **Whether Rust can read `typescriptServices.js` from the frontend assets
   Tauri embeds**, rather than shipping it a second time, for the type check of
   §5.
+
+## 9. In the product (#381)
+
+What the application took from §6, and where it departs from it.
+
+**Where it lives.** [`crates/candeo-compiler`](../../crates/candeo-compiler/),
+a crate of the workspace next to `candeo-protocol` and `candeo-device`, rather
+than a module of `candeo-desktop`. It needs neither Tauri nor the window, so its
+tests run without them, and an MCP server in a process of its own
+([`mcp-architecture.md`](mcp-architecture.md) §6) can link it. Its contract is
+one function, `compile(source, api)`: JavaScript, a version 3 source map, or
+every problem with its line and column. The application calls it through
+`runtime::compile`, which hands it `api.js`'s exports; the MCP server's
+validation is to call the same function.
+
+**The window compiles through it (§6.3).** `cache_effect(key, hash, js)`
+became `compile_effect(key, hash)`: Rust reads the file, checks its hash,
+compiles it, loads it and records the result. The window still asks for what is
+stale, at startup and on Refresh, and the editor for what it saves.
+`editor/effect.ts`, its test and the declaration of Monaco's
+`typescriptServices` are gone. Monaco keeps editing, completion and type
+diagnostics, and both npm packages stay: `monaco-editor` for the editor,
+`typescript` for `vue-tsc` and `effectFormat.test.ts`.
+
+**The four conditions, as built:**
+
+1. The settings of §6.1, and one the PoC missed:
+   `SemanticBuilder::with_enum_eval(true)`. The enum transform reads the
+   members' values from the semantic pass; without them, `Quick = Fast`, a
+   string, gets a reverse mapping TypeScript does not give it (oxc#21667).
+   Only a debug assertion says so, and the PoC ran in release. The product's
+   debug tests hit it on *Typed namespaces*.
+2. The size limit, 1 MiB, refused before anything is parsed.
+3. The thread, with **2 KiB of stack per byte** of source, not 1. Bisecting the
+   smallest stack 40 constructs nested 20 000 deep compile on: tuple types left
+   open, `type T = [[[…`, need 1 171 bytes per byte in release and 1 344 in a
+   debug build; parentheses left open 944, arrays 817, `!` 627. At 1 KiB, a
+   1 MiB file of the first would have aborted the process. The thread reserves
+   2 GiB at the limit, 24 MiB for an 8 KB effect, and commits what it uses.
+4. `rust-version` 1.97, and Oxc pinned at `=0.157.0`. The new minimum turns on
+   two clippy lints for APIs newer than 1.82, fixed where they fired.
+
+**The engine's stack (§3.9, §7).** Recording an effect loads it in QuickJS.
+That ran in the command, on the main thread, where 744 nested arrays abort the
+process; TypeScript, in V8, let nothing deeper than 585 through. Oxc lets through
+whatever the size limit allows, so a record is now built on a thread of its own
+with the 2 MiB a render loop has (`runtime::on_engine_thread`). There QuickJS's
+own limit refuses deep nesting with an error, and the effect is recorded
+broken. A test compiles 20 000 levels from a 1 MiB thread.
+
+**How errors show.** A file that does not compile is recorded `broken`, like a
+module that does not load, with its first problem: ``compiling the effect:
+line 4, column 35: Expected `)` but found `Identifier` ``. The editor shows it
+when saving and the effects list next to the effect, where a load error shows.
+The import check of §3.6 is part of the contract. A file that is not UTF-8 text
+is recorded broken too; it used to stay stale, with a warning in the log.
+
+**The cache.** `CACHE_FORMAT` 7: every record holds Oxc's JavaScript. A record
+of an older format is compiled again from its file at startup, without the
+window (`Store::recompile_cache`, which replaces `redeclare_cache`: that one
+declared again from the record's own JavaScript, having no compiler). A record
+whose file changed since is left stale for the next Refresh.
+
+**The comparison, kept.** `runtime::equivalence` loads, through the engine's
+own `prepare_with` and `render_with`, on the four built-in layouts, what the
+window's TypeScript gave before the move (`apps/desktop/src-tauri/fixtures/typescript/`)
+and what Oxc gives: the 26 shipped effects, the typed fixtures and the template of §1, and both
+class-field cases of §3.1, 95 frames a layout, plus the manifest. All identical.
+Without the class-field cases, it did not notice `set_public_class_fields`
+turned off. It is what an upgrade of Oxc reruns. A shipped effect changed since
+the move fails it until its fixture goes: no TypeScript output describes it any
+more.
+
+**Measured** on the same laptop, clean builds one after the other, with the
+front end built as `tauri build` builds it:
+
+| | Before (a668a44) | After | Difference |
+|---|---:|---:|---:|
+| `candeo-desktop.exe`, release | 22 408 192 bytes | 24 004 096 bytes | +1 595 904 bytes (+1.52 MiB) |
+| Front end (`dist/`) | 16 188 214 bytes | 12 741 867 bytes | −3 446 347 bytes (−3.29 MiB) |
+| Clean release build | 420 s | 459 s | +39 s (+9 %) |
+
+The front end loses its own copy of TypeScript, `typescriptServices-*.js`,
+which the window loaded at the first save; the language service's worker keeps
+the one it bundles. The executable embeds the front end compressed, so its
+1.52 MiB are Oxc less that copy: Oxc alone was 2.33 MiB (§4).
+
+**Not done here:**
+
+- Runtime errors brought back to the source through the source map (§6.2.6):
+  the contract produces the map, but nothing stores or reads it yet.
+- A command validating a source that is not saved, for the MCP server (#365):
+  `runtime::compile` is what it will call.
+- The optional type check of §5.

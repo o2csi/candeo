@@ -259,6 +259,12 @@ Monaco (TS)
 - Imports from `@candeo/effects-api` (`hsv`, `mix`…) are resolved by the
   `rquickjs` module loader to an internal module. **No bundler.**
 
+> **Since #381, the transpiler is Oxc, in Rust.** Where it happens turned out to
+> matter: an MCP server and a launch at login have no window to compile in. The
+> argument above holds for the engine, which is still the only one: Oxc only
+> strips types, and every shipped effect renders the same frames as with
+> `transpileModule` (`headless-transpile-poc.md` §9).
+
 The simulator costs 396 bytes per frame, 30 times per second — the figure already
 judged trivial above. It travels over a **channel**, `tauri::ipc::Channel`, and not
 a global event: the scope is explicit and the binary passes raw, with no

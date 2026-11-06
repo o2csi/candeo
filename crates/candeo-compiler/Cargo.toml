@@ -1,0 +1,22 @@
+[package]
+name = "candeo-compiler"
+description = "An effect's TypeScript to the JavaScript Candeo's engine runs, with Oxc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# A crate of its own rather than a module of `candeo-desktop`: it needs neither
+# Tauri nor the window, so its tests run without them, and an MCP server living
+# in a process of its own can link it (docs/design/headless-transpile-poc.md §9).
+[dependencies]
+# Pinned to the version #364 compared, frame by frame, with the window's
+# TypeScript. Oxc 0.x changes its API between minor versions: an upgrade reruns
+# that comparison (`tools/transpile-poc`) before it lands.
+oxc = { version = "=0.157.0", features = ["semantic", "transformer", "codegen", "ast_visit"] }
+
+[dev-dependencies]
+# To read back the source map the compiler writes. Already in the tree through
+# `oxc_codegen`, at this version.
+oxc_sourcemap = "=9.0.0"

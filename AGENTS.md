@@ -8,6 +8,7 @@ the way it is.
 
 - `crates/candeo-protocol`: report construction, pure and tested without hardware.
 - `crates/candeo-device`: HID transport and device layouts.
+- `crates/candeo-compiler`: effect TypeScript compiled to JavaScript with Oxc, pure and tested without the window.
 - `apps/desktop`: the Tauri application (Vue 3 + TypeScript, Rust in `src-tauri`).
 - `packages/effects-api`: TypeScript types for effect authors.
 

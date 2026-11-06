@@ -340,8 +340,10 @@ pub(crate) const OFF: &str = "hardware:off";
 /// trailing byte or two is dropped rather than made into a colour.
 pub(crate) fn triplets(bytes: &[u8]) -> Vec<Rgb> {
     bytes
-        .chunks_exact(3)
-        .map(|c| Rgb::new(c[0], c[1], c[2]))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|&[r, g, b]| Rgb::new(r, g, b))
         .collect()
 }
 
@@ -785,8 +787,8 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
 }
 
 /// Brings the effect library up to date at startup — see
-/// [`storage::Store::migrate`] — copies the shipped effects, and declares again
-/// the caches of an older format ([`storage::Store::redeclare_cache`]).
+/// [`storage::Store::migrate`] — copies the shipped effects, and compiles again
+/// the caches of an older format ([`storage::Store::recompile_cache`]).
 ///
 /// A failure is logged and the startup goes on: the effects it did not reach are
 /// only missing from the library until the next launch, and the window is what
@@ -813,9 +815,9 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
     };
     // After the moves above, which may rename an effect and its cache.
     if let Ok(store) = storage::store(app) {
-        let redeclared = store.redeclare_cache();
-        if redeclared > 0 {
-            tracing::info!(effects = redeclared, "effect caches declared again");
+        let recompiled = store.recompile_cache();
+        if recompiled > 0 {
+            tracing::info!(effects = recompiled, "effect caches compiled again");
         }
     }
     renames
@@ -1820,8 +1822,10 @@ fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> Cmd
             )));
         }
         let colors: Vec<Rgb> = frame
-            .chunks_exact(3)
-            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         Ok(kb.present(&colors)?)
     })
@@ -1844,14 +1848,16 @@ fn write_row(
     colors: Vec<u8>,
 ) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
-        if colors.len() % 3 != 0 || colors.is_empty() {
+        if !colors.len().is_multiple_of(3) || colors.is_empty() {
             return Err(Failure::unexpected(
                 "colors must be a non-empty list of RGB triplets",
             ));
         }
         let c: Vec<Rgb> = colors
-            .chunks_exact(3)
-            .map(|x| Rgb::new(x[0], x[1], x[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         Ok(kb.write_row(row, col_start, &c)?)
     })
@@ -2034,7 +2040,7 @@ pub fn run() {
             idle::idle_available,
             storage::list_effects,
             storage::save_effect_source,
-            storage::cache_effect,
+            storage::compile_effect,
             storage::rename_effect,
             storage::delete_effect,
             storage::read_effect_source,
