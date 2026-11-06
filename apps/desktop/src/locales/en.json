@@ -258,7 +258,8 @@
     "pauseAutomations": "Pause automations",
     "notOpenTitle": "{name} — not open",
     "notOpenReason": "Plugged in but not open — see the window",
-    "unpluggedTitle": "{name} — unplugged"
+    "unpluggedTitle": "{name} — unplugged",
+    "withLayers": "{effect} + {n} layer | {effect} + {n} layers"
   },
   "automations": {
     "title": "Automations",

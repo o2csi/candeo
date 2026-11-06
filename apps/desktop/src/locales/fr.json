@@ -258,7 +258,8 @@
     "pauseAutomations": "Mettre en pause les automatisations",
     "notOpenTitle": "{name} — non ouvert",
     "notOpenReason": "Branché mais non ouvert — voir la fenêtre",
-    "unpluggedTitle": "{name} — débranché"
+    "unpluggedTitle": "{name} — débranché",
+    "withLayers": "{effect} + {n} calque | {effect} + {n} calques"
   },
   "automations": {
     "title": "Automatisations",
