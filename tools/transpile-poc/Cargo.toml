@@ -1,0 +1,29 @@
+[package]
+name = "transpile-poc"
+description = "Compares Oxc with ts.transpileModule on Candeo's effects (#364)"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "GPL-3.0-only"
+
+# A workspace of its own, not a member of the repository's: Oxc is about 60
+# crates, and a proof of concept must not add them to `cargo test --workspace`,
+# to clippy or to the release builds. See docs/design/headless-transpile-poc.md.
+[workspace]
+members = ["oxc-transpile"]
+
+[dependencies]
+oxc-transpile = { path = "oxc-transpile" }
+# The engine's own version and feature, to run both outputs as the app does.
+rquickjs = { version = "0.14", features = ["loader"] }
+candeo-device = { path = "../../crates/candeo-device" }
+serde_json = "1"
+
+# The repository's release profile, so that sizes and times compare.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2

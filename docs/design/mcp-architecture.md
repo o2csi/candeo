@@ -181,6 +181,15 @@ To decide through a PoC (#364), with the shipped effects and adversarial cases:
 5. Do not replace Monaco's compiler on principle; keep the editor and its
    TypeScript features.
 
+**Result of the PoC (#364):** Oxc, under conditions. Every shipped and typed
+effect renders the same frames through Oxc as through `transpileModule`, about
+30 times faster, for about 2.3 MiB of binary. The conditions: settings for
+TypeScript's class-field semantics, a size limit and a large stack because Oxc
+can crash the process on deep nesting, one Rust validation contract shared by
+IPC and MCP, and Rust 1.97. Types stay with the editor; TypeScript's checker
+running in QuickJS is the measured option for an explicit check. Tables,
+differences and what remains: [`headless-transpile-poc.md`](headless-transpile-poc.md).
+
 ## 5. Access, safety and scope
 
 - MCP **off by default**, local only, needing neither the Internet nor an account.
@@ -202,7 +211,8 @@ To decide through a PoC (#364), with the shipped effects and adversarial cases:
 
 - MCP transport and host process (in the Tauri process, or a local sidecar).
 - Headless transpilation: Oxc, another option, or a bounded reuse of the existing
-  pipeline.
+  pipeline. Measured in [`headless-transpile-poc.md`](headless-transpile-poc.md):
+  Oxc, under the conditions of its §6.
 - Rendering preview frames as an image without duplicating the simulator's
   geometry.
 - Output schemas, resource versioning and standard errors.
