@@ -180,6 +180,9 @@ export function maskOfValue(value: string): MaskPick {
   return { kind: 'keep' }
 }
 
+/** What a mask's ⋯ menu asks for (§5.4). */
+export type MaskAction = 'edit' | 'rename' | 'delete' | 'saveAs'
+
 /** What names a mask's parts on one target. */
 export interface MaskContext {
   /** What the target's lights are: keys are counted as keys, zones as zones. */
@@ -320,6 +323,34 @@ export function layerLine(layer: Look & { mask?: Mask }, ctx: MaskContext, count
     blend: blendName(blendOf(layer)),
     opacity: t('effects.percent', { n: opacityOf(layer) }),
   })
+}
+
+/** A layer's row, as the view words it for `LayerStack`. */
+export interface StackRowView {
+  kind: 'layer'
+  id: string
+  name: string
+  line: string
+  swatch: string[]
+  state: RowState
+  /** 1 for the layer just over the base. */
+  position: number
+}
+
+/** A saved layer in the gallery, as the view words it for `SavedLayers`. */
+export interface SavedLayerView {
+  name: string
+  line: string
+  swatch: string[]
+  pressed: boolean
+}
+
+/** One action of a ⋯ menu. */
+export interface MenuItem {
+  id: string
+  label: string
+  /** Deleting something: said in the danger colour, after its word. */
+  danger?: boolean
 }
 
 /** What the stack lists between *Add a layer* and the base, top first. */

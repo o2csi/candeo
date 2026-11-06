@@ -53,7 +53,7 @@ function onDragStart(e: DragEvent): void {
     >
     <button
       type="button"
-      class="move"
+      class="move up"
       :disabled="!canUp"
       :aria-label="upLabel"
       :title="upTitle ?? upLabel"
@@ -65,7 +65,7 @@ function onDragStart(e: DragEvent): void {
     </button>
     <button
       type="button"
-      class="move"
+      class="move down"
       :disabled="!canDown"
       :aria-label="downLabel"
       :title="downTitle ?? downLabel"
