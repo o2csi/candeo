@@ -1,8 +1,10 @@
 # OpenRGB as an optional output (#368)
 
-> **Status: decided, 2026-11-06. Not implemented.** Candeo drives, through
-> OpenRGB, a device it has no definition for, while native HID stays the
-> default ([#368]). §1 to §5 are the study that prepared the decision: how
+> **Status: decided, 2026-11-06. Proof of concept in
+> [`crates/candeo-openrgb`](../../crates/candeo-openrgb), behind the desktop
+> application's `openrgb` feature, off by default and wired into nothing
+> (§8).** Candeo drives, through OpenRGB, a device it has no definition for,
+> while native HID stays the default ([#368]). §1 to §5 are the study that prepared the decision: how
 > Hypercolor does it, and whether Candeo may embed OpenRGB. **The decision is
 > option B′ of §5: do as Hypercolor does.** Candeo never ships OpenRGB; when
 > the user has installed it and turns the option on, Candeo starts that
@@ -735,28 +737,32 @@ Everything else is as in the MSI and NSIS builds.
 
 ## 8. The proof of concept
 
-In a pull request of its own, after this one: the client and the process
-management in a crate of their own, behind an `openrgb` feature of the desktop
-application, off by default, wired into nothing yet. Mapped to [#368]'s steps:
+[`crates/candeo-openrgb`](../../crates/candeo-openrgb): the client and the
+process management, behind the desktop application's `openrgb` feature, off by
+default. Nothing uses it yet: no setting, no *Devices* entry, no frame from the
+engine. Mapped to [#368]'s steps:
 
-1. **Connect**: framing, negotiation from 4 to 6, the packets of §6.6 and the
-   refusal of every other, the reader thread, the list kept in step with
-   `DEVICE_LIST_UPDATED`.
-2. **Capabilities as reported**: the controller data of protocols 4, 5 and 6
-   parsed into zones and LEDs, matrix maps into positions, the direct mode
-   chosen or refused (§6.7), serial and location kept out (§6.9).
-3. **One effect**: `UPDATELEDS` from a frame; running a real effect needs the
-   wiring.
-4. **Reconnects**: ids against indexes, fingerprints.
-5. **Native first**: the guard of §6.8 on Windows paths and Linux sysfs.
-6. **Trust and lifecycle**: discovery, the version check, the configuration
-   writer, the launch decision of §6.3, the arguments of §6.5, the child tied
-   to the process.
-7. **Measures** and 8. **attribution**: §9, and none owed (§1.3).
+| Step | Module | What it holds |
+|---|---|---|
+| 1. Connect | `wire`, `client` | the header, every documented id, the six packets of §6.6 and the refusal of every other; negotiation from 4 to 6; the reader thread; packets nobody asked for dropped, `DEVICE_LIST_UPDATED` noted, failed `ACK`s kept |
+| 2. Capabilities as reported | `controller`, `model` | the controller data of protocols 4, 5 and 6, bounded; zones, LEDs, matrix maps as positions, regional names; the direct mode chosen or refused (§6.7) |
+| 3. One effect | `model::frame`, `client` | `UPDATEMODE` to the direct mode and one `UPDATELEDS` frame; a real effect needs the wiring |
+| 4. Reconnects | `client::Roster`, `identity` | ids against indexes on a list update, a controller gone between count and request skipped; fingerprints |
+| 5. Native first | `guard` | §6.8: Windows paths, Linux sysfs, serial fingerprints, fail closed, duplicates |
+| 6. Trust and lifecycle | `discovery`, `config`, `launch`, `process` | the search of §6.2 and `--version`; `OpenRGB.json` rewritten; the decision of §6.3; the arguments of §6.5; the child in a kill-on-close job on Windows, with a parent-death signal on Linux |
+| 7, 8. Measures, attribution | — | §9; none owed (§1.3) |
 
-Tested without OpenRGB: byte fixtures built from the documents, each citing
-its section; a fake server in the test process for the round trip; the
-configuration writer on a sample file; discovery on a fake file system.
+**Tested without OpenRGB**: controller data built by hand from the
+document's tables, each block naming its section (`fixtures.rs`); packets
+checked byte by byte against *NetPacketHeader structure* and each packet's
+section; a fake server in the test process for the round trip, which fails
+the test if the client sends anything outside the six; the configuration
+writer on a sample `OpenRGB.json` in a temporary folder; discovery on a fake
+file system; the child started and stopped with a harmless program in
+OpenRGB's place.
+
+**Not in it**: the detector map and its generator (§6.4), the process-name
+check of §6.3, the supervisor thread, the setting, *Devices*, the catalogs.
 
 ## 9. Not verified
 
