@@ -454,6 +454,7 @@ version = "0.22.1"
 dependencies = [
  "candeo-compiler",
  "candeo-device",
+ "candeo-openrgb",
  "candeo-protocol",
  "chrono",
  "croner",
@@ -491,6 +492,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "candeo-openrgb"
+version = "0.22.1"
+dependencies = [
+ "libc",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

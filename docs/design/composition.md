@@ -6,13 +6,14 @@ is what these ask for: a spectrum on the number row over your own effect, a red
 Escape key while a build is broken, the Counter-Strike 2 health bar over the
 rest of your lighting. Each needs a second effect on lights the first one
 already draws. This note
-studies **composition**, the second increment of
+settles **composition**, the second increment of
 [#360](https://github.com/o2csi/candeo/issues/360): what other products do, what
-Candeo already has, a model for layers, ideas the products compared do not
-have, and a first version.
+Candeo already has, the model for layers, ideas the products compared do not
+have, and the first version.
 
-Status: proposal. Nothing here is implemented. The decisions listed in §6 are
-the maintainer's to take before any code.
+Status: decided on 2026-11-06, not implemented. The maintainer took every
+recommendation of the study; §6 lists the decisions, and §5.1 the three pull
+requests that build the first version, in their order.
 
 ## 1. Terms
 
@@ -26,11 +27,11 @@ first four exist today.
 | **Preset** | named settings for one effect, offered everywhere ([`presets.md`](presets.md)) | `presets` |
 | **Region** | a part of a device that its definition declares, each light in exactly one region; split, each region runs its own effect | the definition, `splitDevices` ([`regions.md`](regions.md)) |
 | **Target** | what a stack runs on: a whole device, or one region of a split device | — |
-| **Layer** | an effect with its settings, drawn over what is under it through a mask, a blend mode and an opacity | proposed: §3.1 |
-| **Mask** | the lights of the target a layer may touch | proposed: §3.3 |
-| **Stack** | the base, the applied effect as today, and the layers above it, on one target | proposed: §3.2 |
-| **Overlay** | a layer a rule adds while it is under way, instead of interrupting the device | proposed: §3.6 |
-| **Saved stack** | a named stack, picked again later, as a preset is | proposed: §4, idea 9 |
+| **Layer** | an effect with its settings, drawn over what is under it through a mask, a blend mode and an opacity | §3.1 |
+| **Mask** | the lights of the target a layer may touch | §3.3 |
+| **Stack** | the base, the applied effect as today, and the layers above it, on one target | §3.2 |
+| **Overlay** | a layer a rule adds while it is under way, instead of interrupting the device | §3.6 |
+| **Saved stack** | a named stack, picked again later, as a preset is | after the first version: §4, idea 9 |
 | **Saved setup** | effects assigned to several devices at once | [#367](https://github.com/o2csi/candeo/issues/367) |
 | **Spatial scene** | devices placed on one canvas, one animation sampled across them | not planned (#360) |
 
@@ -224,8 +225,8 @@ layer changes nothing.
 - **Computed on the bytes sent**, as the brightness follow already scales them.
   LED brightness is not linear in those bytes, so a 50 % opacity may not look
   half-way on the device. Blending in linear light would need each device's
-  curve, which nobody has measured: to look at on the hardware before deciding
-  anything else (§6).
+  curve, which nobody has measured; it waits for that measurement, made on the
+  hardware.
 - **An effect's own transparency, later.** KeyGlow's reactive effects return
   transparency. In Candeo it would be an optional third argument,
   `frame.set(key, colour, alpha)`, and the bootstrap would hand Rust four bytes
@@ -245,7 +246,8 @@ layer changes nothing.
   Temperature layer on its logo, the Keyboard region its own stack.
 - **A region is also a mask** on a device left whole: the 17 R5 whole, with a
   layer on its Lid region only. It costs nothing, since the region's lights are
-  known. Whether both ways should exist is a question for §6.
+  known. Both ways exist: a stack per region on a split device, a region mask on
+  a whole one.
 - **The follow scales the lights after the stack**: a region's brightness
   follow still scales its lights whatever drew them
   ([`regions.md`](regions.md) §4), layers and overlays included.
@@ -274,16 +276,16 @@ of what runs, for as long as it is under way, and takes it away after:
 - **What ends one.** Its trigger, as for any rule; *Resume*, which ends every run
   under way on the device, overlays included; *Pause automations*. Applying
   another effect by hand changes the base and **leaves overlays**: they hide
-  nothing the gesture chose. To decide (§6).
+  nothing the gesture chose.
 - **Where it shows.** The device's card and the tray name it as they name an
   interruption: *Build failed — over Escape*, with *Resume*.
 - **On a split device**, overlays are drawn over the composed device frame; their
   mask may name a region or keys anywhere. Most of what rules aimed at a region
   ([`regions.md`](regions.md) §10) were for comes this way, as overlays.
-- **Games.** The *while playing* rule of a game's card could become an overlay:
-  the Counter-Strike 2 effect on the function and number rows, over the person's
-  own effect. The card would offer both: *the whole keyboard*, as today, or *the
-  two top rows, over my effect*.
+- **Games.** The *while playing* rule of a game's card can be an overlay: the
+  Counter-Strike 2 effect on the function and number rows, over the person's
+  own effect. The card offers both: *the whole keyboard*, as today, or *the two
+  top rows, over my effect*.
 
 **In the file, an overlay rule carries `layer` instead of `show`:**
 
@@ -355,11 +357,10 @@ blending is three orders of magnitude below it.
   two seconds at worst under `LOAD_BUDGET`: well within one frame.
 - **The preview doubles it while it runs**: it runs its own copy of the stack
   being edited, on its own thread.
-- **Memory is the open point.** One runtime per part caps each at 32 MB, so a
-  device's ceiling grows with its parts. One runtime per device, a context per
-  part, would cap the device as a whole, but one part running out of memory
-  would then fail its neighbours. The first version keeps one per part, under
-  the caps above.
+- **One runtime per part.** Each is capped at 32 MB, so a device's ceiling
+  grows with its parts, within the limits above. One runtime per device, a
+  context per part, would cap the device as a whole, but one part running out of
+  memory would then fail its neighbours.
 
 ### 3.8 The engine
 
@@ -424,11 +425,26 @@ blending is three orders of magnitude below it.
 whole device* (an interruption, as today) or *over* a group or keys (an
 overlay), with the blend and opacity under it.
 
-**Words to settle before the strings** (AGENTS.md): *layer* / *calque*;
-*mask* / *masque*; *Add a layer* / *Ajouter un calque*; the four modes, by what
-they do rather than by image-editing names — *Cover* / *Couvrir*, *Add* /
-*Ajouter*, *Screen* / *Éclaircir*, *Multiply* / *Teinter*; the rule's chip,
-*over* / *par-dessus*.
+**Words, settled before the strings** (AGENTS.md):
+
+| English | French |
+|---|---|
+| *layer* | *calque* |
+| *mask* | *masque* |
+| *Add a layer* | *Ajouter un calque* |
+| *Cover* | *Couvrir* |
+| *Add* | *Additionner* |
+| *Screen* | *Éclaircir* |
+| *Multiply* | *Teinter* |
+| *over*, the rule's chip | *par-dessus* |
+
+- **The French modes say what they do**, not the image editors' names; they are
+  infinitives, as the English names are verbs, and each is a choice of the
+  layer, said in its row and in its settings.
+- ***Additionner*, not *Ajouter***, which the study proposed. *Ajouter* is the
+  interface's verb for adding something — *Ajouter les exemples* in
+  *Automations*, *Ajouter un calque* in the same block — and a mode named like
+  the button above it would read as an action.
 
 ### 3.11 `settings.json`
 
@@ -537,9 +553,9 @@ shared across devices, which #360 keeps out.
 feature; 1 and 10 have neighbours, and what Candeo would add is the rule list
 and the data an agent assembles. 11 is striking too, and the most expensive.
 
-## 5. Recommendation
+## 5. The plan
 
-### 5.1 A first version
+### 5.1 The first version
 
 **Layers on one target, and overlay rules.** In order, each a pull request:
 
@@ -585,24 +601,33 @@ wait for #359; the tray's editing of layers; masks computed per frame.
 | A schema, with negative tests for capabilities, unknown ids and invalid masks | §3.11 |
 | The pointer-driven interface and MCP on one schema | §3.10, §3.12 |
 
-## 6. Decisions for the maintainer
+## 6. Decisions
 
-1. **The model**: a stack per target, the base being today's applied effect, the
-   layers in their own `layers` key (§3.8, §3.11). Or a different shape.
-2. **What a layer's effect sees**: its mask as its device, as a region's does
-   (§3.1), or the whole target with the mask applied after.
-3. **Overlay rules in the first version**, or layers alone first (§5.1 step 3).
-4. **What ends an overlay**: does applying an effect by hand leave overlays,
-   as proposed, or end them as it ends interruptions (§3.6)?
-5. **The default blend** of a new layer: *screen*, as proposed, or *cover*.
-6. **The blend modes**: the four of §3.4, or fewer. Blending on the bytes sent
-   until someone measures the devices' response.
-7. **The limits**: eight effects per target, base included; four overlays at
-   once per device (§3.7). And one runtime per part, or one per device.
-8. **Region masks on a whole device** as well as a stack per region, or only the
-   latter (§3.5).
-9. **Does the tray** keep the layers when it changes the base (§3.10)?
-10. **The words**: *layer* / *calque*, *mask* / *masque*, the four modes' names,
-    *over* / *par-dessus* (§3.10).
-11. **The order after the first version** (§5.2), and whether press to
-    acknowledge (idea 2) should join it.
+Taken by the maintainer on 2026-11-06, each as the study recommended it; only
+the French name of *Add* moved when the words were settled (§3.10).
+
+1. **The model**: a stack per target, a whole device or one region of a split
+   device; the base is today's applied effect, where it is kept today, and the
+   layers live under a key of their own, `layers` (§3.8, §3.11).
+2. **A layer's effect sees its mask as its device**, as a region's effect sees
+   the region (§3.1). No effect changes, and `apiVersion` stays 1.
+3. **Overlay rules are in the first version**, its third step (§5.1).
+4. **Applying an effect by hand leaves overlays**: it changes the base, and the
+   overlays under way go on drawing over it (§3.6).
+5. **A new layer blends with *screen***, so that adding one never hides what is
+   under it (§3.1).
+6. **Four blend modes**, *cover*, *add*, *screen* and *multiply*, computed on the
+   bytes sent; blending in linear light waits for a measurement of the devices'
+   response (§3.4).
+7. **The limits**: eight effects per target, the base included; four overlays
+   drawn at once per device, the highest in the list; one runtime per part
+   (§3.7).
+8. **Both stacks per region and region masks**: a split device has a stack per
+   region, and a region is a mask on a device left whole (§3.5).
+9. **The tray changes the base and keeps the layers** (§3.10).
+10. **The words** of §3.10: *layer* / *calque*, *mask* / *masque*, *over* /
+    *par-dessus*, and the four modes named by what they do: *Cover* /
+    *Couvrir*, *Add* / *Additionner*, *Screen* / *Éclaircir*, *Multiply* /
+    *Teinter*.
+11. **Press to acknowledge comes in a second version**, first in the order of
+    §5.2, which stands as written.
