@@ -5,7 +5,7 @@ An effect's settings are kept per device, and per region of a split device
 reading a signal, the sound or the computer. Nothing lets someone keep two looks
 of one effect — *slow blue*, *fast red* — and go back to one without moving
 every slider again. This note settles **presets**, the first increment of #360;
-composition, layers and masks stay open there.
+composition, layers and masks are decided in [`composition.md`](composition.md).
 
 Status: implemented.
 
@@ -17,7 +17,7 @@ Status: implemented.
 | **Settings** | the values and bindings an effect runs with on one device or region | `effectParams`, `splitDevices[].effectParams` |
 | **Preset** | named settings for one effect, offered on every device and region | `presets` |
 | **Region** | a part of a device running its own effect | its definition, and `splitDevices` ([`regions.md`](regions.md)) |
-| **Composition** | several effects layered over one device or region | not built: #360, second increment, proposed in [`composition.md`](composition.md) |
+| **Composition** | several effects layered over one device or region | not built: #360, second increment, decided in [`composition.md`](composition.md) |
 | **Saved setup** | effects assigned to several devices at once | #367 |
 
 A preset is data: no code, no new runtime, no new effect. **Picking one changes
