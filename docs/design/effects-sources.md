@@ -148,7 +148,54 @@ file held is copied in the same launch.
 - **Placeholder that cannot be read** (offline): the effect is listed with an
   error state, like a file that does not load.
 
-## 7. Out of scope
+## 7. Controlled folder access
+
+Status: **implemented** (#394).
+
+Windows Security's *Controlled folder access* refuses writes to `Documents`, and
+the other folders it protects, from the programs it has not allowed. The user
+folder is there, and so are device definitions (`device-sdk.md` §9). Defender's
+log showed the Store build refused once (2026-09-29), and a development build
+on 2026-11-06: neither is allowed by default.
+
+- **The refusal, as measured** on 2026-11-06 (Windows 11 build 26300, Defender
+  4.18.26100.4), by an unallowed program: creating a file or a folder, or copying
+  one in, fails with `ERROR_FILE_NOT_FOUND` (os error 2), which reads as a
+  missing file; renaming, overwriting or deleting fails with
+  `ERROR_ACCESS_DENIED` (os error 5).
+- **Recognised only after a failure.** A write under `Documents` failing with
+  one of these two codes makes Candeo read `EnableControlledFolderAccess` from
+  WMI (`MSFT_MpPreference`, `root\Microsoft\Windows\Defender`); `1` blocks, `2`
+  only audits. Nothing is read at startup or on a write that succeeds. The query
+  takes 0.5 to 1.6 s and runs in a thread of its own, given 3 s: past that the
+  failure is said as the system gave it, so a broken WMI never holds a save.
+- **What a standard user can read.** The setting, yes. The allowed programs,
+  only as administrator: anyone else reads *N/A: Must be an administrator to
+  view exclusions*. When they can be read and name Candeo, the refusal is not
+  the protection's. Folders added to the protection are not looked at: Candeo
+  writes nowhere else a default would cover.
+- **Defender's event 1123** names the folder and the program, and a standard
+  user can read it, but it is not read: Defender records one event for several
+  refusals, so its absence proves nothing, and the setting already decides.
+- **What the window says:** one sentence, *allow Candeo's program, not the
+  folder, in Windows Security*, with a button opening
+  `windowsdefender://ransomwareprotection`. The system's error and the path, as
+  `~`, go to the log and to the copied diagnostic's `controlled folder access`
+  line.
+- **Detect, never change.** Allowing a program takes administrator rights, and a
+  program allowing itself would behave like the malware the protection is for:
+  the person allows Candeo, Candeo does not.
+- **An allowed program is a path.** The Store build's changes with each version
+  (`WindowsApps\…_<version>_…`); whether Windows keeps allowing it after an
+  update is not verified.
+
+**macOS** protects `Documents`, `Desktop` and `Downloads` the same way (TCC): the
+system asks the person the first time, and the answer lives in *System Settings ›
+Privacy & Security › Files and Folders*. Candeo does not run there yet; when it
+does, a refusal there needs the same sentence pointing to that page. Linux has
+nothing of the kind by default.
+
+## 8. Out of scope
 
 - Choosing the user folder in Settings.
 - Listing subfolders.

@@ -1106,6 +1106,12 @@ language (`message()` in `api/journal.ts`). Rust logs the English text. What
 nobody can act on — a disk refusing a write — is `unexpected`, with an English
 `detail`.
 
+A write Windows' Controlled folder access refused is `controlledFolderAccess`,
+with no parameter: the system's error goes to the log and the copied diagnostic
+(`docs/design/effects-sources.md` §7). The note showing it offers
+`open_controlled_folder_access()`, which opens Windows Security on
+*Ransomware protection*, the page where the person allows Candeo's program.
+
 An effect's own load or render error (`EffectEntry.error`, the engine's
 `error`) stays an English string, for its author.
 
@@ -1250,6 +1256,10 @@ see above what the status byte does not tell.
 Cannot fail because of a device: being unable to enumerate USB or read back the
 settings is exactly what a diagnostic must **say**, not what should
 interrupt it.
+
+Once Controlled folder access has refused a write since startup, a
+`controlled folder access` line gives the last one in the system's words: the
+path and the error the window does not show.
 
 Every path Candeo writes as text — here, in the "Candeo starting" log line, in
 error messages — has the home directory as `~` (`src-tauri/src/paths.rs`): the
