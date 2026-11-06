@@ -219,7 +219,8 @@ review:
 - MCP transport and host process (in the Tauri process, or a local sidecar).
   **In the Tauri process**, on a local pipe only the user can open, reached
   through `candeo --mcp`, a stdio bridge that is Candeo's own executable: its
-  §2.
+  §2. Over a network, later, Streamable HTTP with TLS and a token per client:
+  its §2.7.
 - Headless transpilation: Oxc, another option, or a bounded reuse of the existing
   pipeline. Measured in [`headless-transpile-poc.md`](headless-transpile-poc.md):
   Oxc, under the conditions of its §6, carried out by

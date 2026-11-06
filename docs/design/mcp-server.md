@@ -30,6 +30,9 @@
 - **21 tools, six kinds of resource, two prompts, in four pull requests**:
   read-only first; then validate, preview and save without hardware, after #381;
   then confirmed changes; then automations.
+- **Over the network, fifth**: Streamable HTTP, off by default, TLS on every
+  interface but loopback, a token per client, and the same consent, with
+  per-token permissions for assistants that cannot ask (§2.7).
 
 ## 1. The specification this targets
 
@@ -195,13 +198,266 @@ An assistant's configuration holds a path. It must not change with each update.
 
 The window resolves the path and shows it (§8). The log does not record it.
 
-### 2.7 Streamable HTTP: later, on conditions
+### 2.7 Streamable HTTP, for assistants elsewhere (phase 5)
 
-Not in this work. If an assistant that cannot start a command matters later,
-HTTP comes as a second listener of the same server, under the signals API's
-rules: off by default, loopback only, a token of its own on every request,
-`Origin` refused (rmcp's `allowed_origins` set, or `enforce_origin_validation`),
-`Host` checked, and nothing on other interfaces.
+The pipe stays the way in, and nothing above changes. Streamable HTTP is a
+second listener of the same server, for an assistant on another computer, or
+one that cannot start a command. It is phase 5
+([#391](https://github.com/o2csi/candeo/issues/391)), after the
+confirmations of phase 3: an assistant reaching Candeo over a network needs the
+same consent, and more of it. Decided on 2026-11-06.
+
+#### 2.7.1 Who it is for
+
+| Assistant | Over the network |
+|---|---|
+| Claude Code, VS Code, Cursor on another computer | yes: each takes a URL and an `Authorization` header ([Claude Code][c-claude-code], [VS Code][c-vscode], [Cursor][c-cursor]) |
+| Claude's custom connectors | only at an address reachable from the Internet: they connect from Anthropic's cloud. They take fixed request headers as well as OAuth ([connectors][c-claude-connectors]). Candeo opens nothing to the Internet itself (§2.7.3) |
+| An assistant on this computer | the pipe, as before. Loopback HTTP is for one that speaks nothing else |
+
+#### 2.7.2 Listening
+
+- **Off by default**, with a switch of its own beside the pipe's: *Let
+  assistants connect over the network*. Turning it off closes the listener and
+  every request in flight; a confirmation still waiting is refused.
+- **Where**: loopback (`127.0.0.1`, `::1`) always, and the network interfaces
+  ticked **by name**, as the signals API does (`signals/interfaces.rs`): an
+  interface's address is followed when it changes. Port 7318 by default, the
+  one after the signals API's; 1024 or above.
+- **One endpoint**, `/mcp`, served by rmcp's `StreamableHttpService` (feature
+  `transport-streamable-http-server`). Both revisions, as on the pipe:
+  2026-07-28 without sessions; 2025-11-25 through rmcp's legacy sessions
+  (`legacy_session_mode`, on by default), each bound to the token that opened
+  it.
+- **`Host` checked.** rmcp accepts loopback names only, by default
+  (`allowed_hosts`). Candeo sets the list to loopback, the ticked interfaces'
+  addresses, the names on its certificate and the public name of §2.7.3; any
+  other `Host` gets a 403. That is what defeats DNS rebinding, where a page's
+  own name is made to resolve to Candeo's address.
+- **`Origin` refused.** Servers must validate it and answer 403 to an invalid
+  one ([Streamable HTTP][s-http]). rmcp leaves validation off while its list is
+  empty; Candeo calls `enforce_origin_validation()` with an empty list, so every
+  request carrying an `Origin` gets a 403 ([rmcp][s-rmcp-http]). Assistants are
+  not browsers and send none (§11); a page's request always carries one. No
+  CORS header is ever sent, and `OPTIONS` is refused.
+- **A request passes `Host`, `Origin` and the token (§2.7.4)**, or it reaches
+  no tool.
+
+#### 2.7.3 TLS
+
+- **Required on every interface but loopback.** Candeo does not listen on a
+  network interface without a certificate: a token sent in clear over a network
+  is a token given away. Loopback stays plain HTTP: nothing leaves the computer.
+- **A certificate Candeo generates, by default; or yours.**
+
+| | Generated, the default | Yours |
+|---|---|---|
+| What it is | self-signed, `CA:FALSE`, ECDSA P-256, valid one year. It names `localhost`, the ticked interfaces' addresses, and a host name if one is given | a PEM chain and its key, chosen in Settings: from your own authority, or a public one for a domain you hold |
+| What a client needs | to trust it, once: Settings shows its SHA-256 fingerprint and saves the certificate (never the key) as a file to install in the client computer's trust store | what any certificate from that authority needs |
+| When an address changes | Settings says the certificate no longer names an address listened on, and offers *New certificate*. Never replaced silently: every client would have to trust it again | Settings says so; renewing it is yours |
+
+- **Generated by default**: a network address has no public name, so no public
+  authority will certify it. Without one, Candeo would listen nowhere until the
+  person ran an authority.
+- **Self-signed rather than a local authority**: a root that may sign makes its
+  key able to vouch for any site to every client that trusts it. A certificate
+  with `CA:FALSE` vouches for itself alone, whoever reads its key.
+- **Yours as well**: whoever already has an authority, or a domain and a public
+  certificate, should not have to trust one more.
+- **What clients trust.** Claude Code trusts its bundled authorities, the
+  system's store and `NODE_EXTRA_CA_CERTS`
+  ([network configuration][c-claude-code-network]). VS Code and Cursor were not
+  checked (§11). No client checked pins a certificate per server: the
+  fingerprint is for the person to compare.
+- **The key** is generated on this computer and never leaves it: a file in
+  Candeo's configuration folder that the user alone can read (a DACL granting
+  the user on Windows, mode 0600 elsewhere). Not `settings.json`, which builds
+  share and people copy. A certificate of yours is copied there with its key, so
+  that moving the original breaks nothing. Neither the key, nor the
+  fingerprint, nor a path reaches the log.
+- **Behind a proxy.** Candeo opens nothing to the Internet. Whoever wants an
+  assistant to connect from there (Claude's connectors) runs a reverse proxy or
+  a tunnel with a public certificate, forwarding to Candeo's loopback listener,
+  and gives Settings its public name, which joins the `Host` list. The token is
+  still required: a request from loopback proves nothing. `Forwarded` and
+  `X-Forwarded-For` are neither trusted nor logged.
+- **New dependencies**: a TLS stack (rustls, through tokio-rustls), an HTTP
+  server under rmcp's service (hyper), and certificate generation. Their weight
+  is measured in the pull request.
+
+#### 2.7.4 Tokens
+
+- **One per client**, created in *Settings › Assistants* with a name the person
+  chooses (*Laptop, VS Code*) and its permissions (§2.7.6): 32 random bytes in
+  base64url after the prefix `candeo_`, so that a secret scanner recognises one
+  pasted where it should not be.
+- **Shown once**, with *Copy* and the text to paste (§2.7.8). Afterwards Candeo
+  keeps its SHA-256 digest alone: 256 random bits need no slow hash, and the
+  digest in `settings.json` gives nothing to whoever reads the file.
+- **On every request**, `Authorization: Bearer <token>`, never in the URL: what
+  the specification asks of an OAuth access token ([authorization][s-auth]).
+  The digest of the token presented is compared with each stored one in
+  constant time. A token missing or unknown: 401, with `WWW-Authenticate:
+  Bearer` and nothing more.
+- **Listed** by name, with its permissions, the day it was created and the day
+  it was last used; never its address. 16 at most.
+- **Revoked** from the list: its digest is deleted, its requests in flight and
+  `subscriptions/listen` streams close, its legacy sessions end, and a
+  confirmation it waits for is refused.
+- **Not the specification's authorization.** Authorization is optional
+  ([authorization][s-auth]). The token is Candeo's own credential, issued and
+  checked by Candeo for itself alone, like the signals token. It is what the
+  best practices ask of a local server over HTTP: an authorization token, or an
+  IPC channel with restricted access ([best practices][s-security]), which is
+  the pipe.
+- **Failed attempts are limited**: ten a minute from one address, then 429 for
+  a minute. Behind a proxy every request comes from loopback, and they share
+  the limit. The log counts failures once a minute, with neither the token
+  tried nor the address.
+
+#### 2.7.5 OAuth 2.1, when a client requires it
+
+Every assistant checked sends a fixed header: Claude Code, VS Code, Cursor and
+Claude's connectors ([Claude Code][c-claude-code], [VS Code][c-vscode],
+[Cursor][c-cursor], [connectors][c-claude-connectors]). So tokens come first,
+and OAuth is built when an assistant people use offers nothing else; it gets
+its issue then. What it takes under 2026-07-28:
+
+| Role | What the specification requires | Source |
+|---|---|---|
+| Candeo, the resource server | Protected Resource Metadata (RFC 9728), whose `authorization_servers` names at least one; found through `resource_metadata` in the 401's `WWW-Authenticate`, or at the well-known URI. Tokens validated as OAuth 2.1 §5.2 says, and only those issued for Candeo's canonical URI (RFC 8707): no other is accepted or passed on. 401 for an invalid or expired token; 403 with `insufficient_scope` and the scopes the call needs. | [authorization][s-auth], [discovery][s-auth-discovery], [security][s-auth-security] |
+| Its authorization server | OAuth 2.1. Metadata through RFC 8414 or OpenID Connect Discovery. Every endpoint over HTTPS. PKCE, with `code_challenge_methods_supported` in the metadata: clients refuse to go on without it. Redirect URIs matched exactly. `iss` in responses (SHOULD, RFC 9207). Short-lived access tokens (SHOULD); refresh tokens rotated for public clients (MUST). | [authorization][s-auth], [security][s-auth-security] |
+| Client registration | Client ID Metadata Documents, SHOULD; Dynamic Client Registration, MAY, and deprecated; pre-registration. | [registration][s-auth-registration] |
+
+- **Candeo is its own authorization server.** It has no accounts, and no outside
+  server knows who may light this keyboard. Delegating to one the person runs
+  would mean validating another issuer's tokens: not planned.
+- **The person approves in Candeo's window.** The browser that opens
+  `/authorize` may be on another computer, and Candeo cannot tell who sits at
+  it. The page shows a short code; Candeo's window shows the client's name, its
+  redirect host and the same code, with *Allow* and *Refuse*. Allowing adds an
+  entry to the token list, with permissions, revoked the same way.
+- **Scopes are the permission classes** of §2.7.6. `scopes_supported` lists
+  reading alone; the others come through step-up, when a tool first needs one.
+- **Over TLS only, loopback included**: every endpoint of the authorization
+  server must be HTTPS ([security][s-auth-security]).
+- **Registration.** A Client ID Metadata Document makes Candeo fetch a URL the
+  client names: HTTPS only, public addresses only, a size limit, against the
+  request forgery the specification warns of ([best practices][s-security]).
+  A pre-registered client is entered in Settings: VS Code and Cursor take a
+  client id in their configuration ([VS Code][c-vscode], [Cursor][c-cursor]).
+  Dynamic Client Registration is not implemented.
+- **rmcp brings the transport, not this.** Its `auth` feature is a client's
+  ([OAuth support][s-rmcp-oauth]); its example server checks tokens and serves
+  both metadata documents in its own code ([example][s-rmcp-auth-example]).
+
+#### 2.7.6 Consent without a screen
+
+On the pipe, the person sits at the computer that runs Candeo. Over a network
+they may not: the assistant is elsewhere, and so perhaps are they. A write that
+asks (§3.1) is agreed to in one of two ways, and never silently.
+
+1. **The assistant's dialog**, when it declared form elicitation: §3.3 as it
+   stands, the description naming the token too (*“Laptop, VS Code” asks: …*).
+   The request of §3.2 belongs to the token, since HTTP has no connection: a
+   retry presenting another token is `mcpNotConfirmed`. The specification has
+   servers bind elicitation to the client and user identity
+   ([elicitation][s-elicitation]), and never take a state handle for
+   authentication ([best practices][s-security]).
+2. **The token's permission**, given in advance, in Candeo's window only.
+
+| Class (§3.1) | Tools | Permissions offered | By default |
+|---|---|---|---|
+| Read, validate, preview, check | §4.2, §4.3 | always, while the token exists | — |
+| Add something new | `save_effect` and `save_preset` under a new name, `rename_preset` | allowed, refused | allowed |
+| Change the lighting | `apply_effect`, `stop_effect`, `try_automation` | ask, allowed without asking, refused | ask |
+| Replace or delete | `save_effect` and `save_preset` with `replace`, `delete_effect`, `delete_preset`, `delete_automation` | ask, refused | ask |
+| Change rules | `save_automation` | ask, refused | ask |
+
+- **Allowed without asking, for the lighting alone.** What it changes shows at
+  once and is undone with one gesture. Replacing or deleting loses what the
+  person had, and a rule acts later with nobody watching: those ask, or are
+  refused. A token for a script that sets the lighting from another computer is
+  what this is for.
+- **When it should ask and the assistant cannot**, the call is refused at once
+  with `mcpCannotAsk`: this assistant cannot ask; allow it on the token, or use
+  one that asks. Unless *Confirm in Candeo* is on, it does not wait in Candeo's
+  window: nobody may be in front of it, a dialog found an hour later answers
+  nothing, and whoever is there may not be whoever asked.
+- **Confirm in Candeo** keeps its meaning. On, every write that asks goes to
+  Candeo's window, from the pipe and the network alike, and no answer from an
+  assistant is taken. *Allowed* and *refused* stand: both were decided in that
+  window already.
+- **A token sees what it may call.** The tools and resources are the pipe's,
+  from the same handler; those a token's permissions refuse are left out of its
+  `tools/list`, and refused with `mcpNotPermitted` if called anyway. A change of
+  permissions sends `notifications/tools/list_changed` on its listen streams.
+
+#### 2.7.7 Limits and the audit log
+
+- **No tool of its own.** Phase 5 serves what the pipe serves when it ships.
+- **Bounds**: 4 MiB per request body, rmcp's `max_request_body_bytes`, its
+  default and the pipe's bound; 20 calls a second per token, as per connection
+  on the pipe; four requests at once per token, and one listen stream.
+  Beyond, 429, or `mcpTooManyCalls` for a tool call.
+- **One `info` line per write**, as §3.5 says, and: `http` as the way in; the
+  token's name, never the token; where from, `loopback` or `a network
+  interface`, never the address, as the signals API logs its listeners
+  (`signals/mod.rs`); and how it was agreed to: `elicitation`, `window`,
+  `token permission` or `not needed`.
+- **Token created, permissions changed, token revoked, certificate generated
+  or replaced**: one `info` line each, naming the token. Failed
+  authentication: one `warn` line a minute, with a count.
+
+#### 2.7.8 Settings and the window
+
+- **`settings.json`**, in `mcp`: `"http": { "enabled": false, "port": 7318,
+  "interfaces": [], "publicName": "", "certificate": "generated", "tokens":
+  [{ "name", "digest", "created", "lastUsed", "permissions" }] }`, absent until
+  first turned on. The key and the certificates are files beside it (§2.7.3).
+- **Settings › Assistants** gains a block, *Over the network*:
+  - the switch, the port, and *Listen on*: loopback ticked and disabled, then
+    the interfaces by name. When one is ticked, a warning, once: other computers
+    on that network can reach Candeo, with a token;
+  - the certificate: generated or yours, the names it holds, its fingerprint
+    with *Copy*, its expiry; *Save certificate*, *New certificate*, *Use mine*;
+  - *Public name*, for a proxy;
+  - the tokens, by name, with their permissions, created and last used;
+    *New token*; *Revoke*, which asks first.
+- **A new token** is shown once, with *Copy* and the text to paste, which also
+  says how to trust a generated certificate:
+
+  | Assistant | What to paste |
+  |---|---|
+  | Claude Code | `claude mcp add --transport http candeo https://<address>:7318/mcp --header "Authorization: Bearer <token>"` |
+  | VS Code | in `mcp.json`: `{ "servers": { "candeo": { "type": "http", "url": "https://<address>:7318/mcp", "headers": { "Authorization": "Bearer ${input:candeo-token}" } } }, "inputs": [{ "id": "candeo-token", "type": "promptString", "password": true }] }`. VS Code asks for the token rather than keeping it in the file |
+  | Cursor | in `~/.cursor/mcp.json`: `{ "mcpServers": { "candeo": { "url": "https://<address>:7318/mcp", "headers": { "Authorization": "Bearer ${env:CANDEO_TOKEN}" } } } }` |
+  | Claude's connectors | through a proxy only: its public URL, and the header under *Request headers* |
+  | Another | the URL and the header |
+
+- **For the window**, granted to the main window alone: `get_mcp_http`,
+  `set_mcp_http`, `create_mcp_token` (which returns the token, once),
+  `set_mcp_token`, `revoke_mcp_token`, `new_mcp_certificate`,
+  `use_mcp_certificate`, `save_mcp_certificate`. No MCP tool reaches any of it.
+- **Terms**: *token* (FR *jeton*), as the signals API says; *Revoke* (FR
+  *Révoquer*).
+
+#### 2.7.9 What it protects against
+
+| Who | What stops them |
+|---|---|
+| A web page in the person's browser, through DNS rebinding or not | a `Host` not on the list, an `Origin`, no CORS, no token |
+| Another computer on a ticked network, without a token | 401; failed attempts limited |
+| Someone listening on that network | TLS |
+| Someone between the client and Candeo | the client verifying the certificate it was told to trust. A client told to skip verification has no such protection |
+| Another account on this computer | the token: loopback, unlike the pipe, is open to every account |
+| A leaked token | its permissions; what asks still asks; *Last used* shows it; *Revoke* ends it |
+
+Not protected against: a program running as the person, on either computer,
+which can read a token from an assistant's configuration or click in Candeo's
+window, the boundary of §3.3; a token allowed to change the lighting doing so;
+and whatever a proxy the person opens to the Internet exposes beyond TLS and
+the token.
 
 ### 2.8 Threads
 
@@ -282,6 +538,10 @@ on its own, through a hook or an automatic mode. With it on, the only answer
 Candeo takes is a click in its own window, which no assistant reaches through
 MCP.
 
+Over a network (§2.7.6), a token's permission is a third answer, given in
+advance in Candeo's window; and an assistant that cannot ask is refused rather
+than left waiting in a window nobody may watch.
+
 What none of this protects against: a program running as the user can write
 `settings.json`, or click in the window as a person would. That is the
 boundary `effects-library.md` draws for the effects folder, and it stays where
@@ -302,7 +562,8 @@ assistant's name as it gave it; how it was confirmed (`elicitation`, `window`,
 `not needed`); and the outcome (done, declined, not confirmed, or refused with
 its code). In English. No source, no parameter value, no signal, no path.
 Reads and previews log at `debug`; connections and disconnections at `info`.
-The log already rotates daily and keeps seven files.
+The log already rotates daily and keeps seven files. Over HTTP, the line also
+names the token and where the request came from, as a class (§2.7.7).
 
 ### 3.6 What MCP never hands out
 
@@ -506,8 +767,9 @@ effect to another device.
 - **Turning it off is the revocation.** The pipe closes, connections drop, a
   request waiting is refused. An assistant's configuration may stay; it then
   gets the bridge's message.
-- **No pairing step, no token.** The switch is the person's consent to let
-  assistants connect; each change is consented to on its own.
+- **No pairing step, no token**, on the pipe. The switch is the person's
+  consent to let assistants connect; each change is consented to on its own.
+  Over the network, tokens (§2.7.4).
 - **The request in the window**: a dialog over the current screen, naming the
   assistant and saying what will happen, with the action's verb and *Refuse*.
   For an effect to apply, the simulator previews it.
@@ -526,7 +788,7 @@ effect to another device.
 
 ## 9. Phases
 
-Four pull requests, in this order, each usable on its own. Each one documents
+Five pull requests, in this order, each usable on its own. Each one documents
 its part in `docs/api/mcp.md`, a new reference next to
 [`signals.md`](../api/signals.md), and adds its *What's new* line in English and
 French. Each is tried with a real assistant in the running app before review
@@ -538,23 +800,36 @@ French. Each is tried with a real assistant in the running app before review
 | 2. Validate, preview, save | [#385](https://github.com/o2csi/candeo/issues/385) | `validate_effect`, `preview_effect` and its contact sheet, `save_effect` and `save_preset` for new names (`replace` refused until phase 3), `rename_preset`, the `create_effect` prompt, the guide's test, `candeo://library-changed`. An end-to-end test through rmcp's client and no device: a broken effect, its diagnostic, the fix, a preview, a save. It meets #365's acceptance. | #384, #381 |
 | 3. Confirmed changes | [#386](https://github.com/o2csi/candeo/issues/386) | Consent (§3): requests, elicitation in both revisions, the window's dialog, *Confirm in Candeo*, the audit log. `apply_effect`, `stop_effect`, `save_effect` with `replace`, `delete_effect`, `save_preset` with `replace`, `delete_preset`. | #385 |
 | 4. Automations | [#387](https://github.com/o2csi/candeo/issues/387) | `save_automation`, `delete_automation`, `try_automation`, the `create_automation` prompt, subscriptions to `candeo://state` and to the lists. | #386 |
+| 5. Over the network | [#391](https://github.com/o2csi/candeo/issues/391) | Streamable HTTP (§2.7): the listener, off by default, on loopback and the interfaces ticked; `Host` and `Origin` checked; TLS off loopback, generated or yours; tokens per client, created, listed and revoked in *Settings › Assistants*; per-token permissions and `mcpCannotAsk`; the audit line per write. The tools and resources the pipe has by then. OAuth 2.1 (§2.7.5) later, in its own issue, once an assistant needs it. | #386 |
 
 Phases 1 and 2 need no confirmation: they change nothing that lights, and
-overwrite nothing.
+overwrite nothing. Phase 5 can follow phase 3 or 4: it adds no tool.
 
 ## 10. Not chosen
 
 - **HTTP first** (§2.1).
 - **A second binary** for the bridge (§2.3).
 - **The bridge starting Candeo** (§2.3).
-- **A token, or a pairing code.** HTTP would need them. On a pipe, the system
-  already says who connects: a token in an assistant's JSON file would add a
-  secret to leak, and nothing to that check.
+- **A token, or a pairing code, on the pipe.** HTTP needs them (§2.7.4). On a
+  pipe, the system already says who connects: a token in an assistant's JSON
+  file would add a secret to leak, and nothing to that check.
 - **Confirmation left to the assistant**, as Hypercolor does. Annotations are
   hints, and #359 asks for an affirmative action Candeo can enforce.
 - **A grant for a while** (*allow for ten minutes*). Fewer questions, but a
   stretch of time during which nothing is asked. To revisit if confirmations
-  prove tiring; the authoring loop, through preview, needs none.
+  prove tiring; the authoring loop, through preview, needs none. Over the
+  network, the one grant is a token's, for the lighting alone, set in Candeo's
+  window (§2.7.6).
+- **Plain HTTP on a network interface**, **a local certificate authority**, and
+  **Candeo obtaining a public certificate itself** (ACME), which needs a domain
+  and a challenge a home network cannot answer (§2.7.3).
+- **Trusting `X-Forwarded-For`** behind a proxy (§2.7.3).
+- **A remote request waiting in Candeo's window** when the assistant cannot ask,
+  unless *Confirm in Candeo* is on (§2.7.6).
+- **Replacing, deleting or changing rules without asking**, even on a token
+  (§2.7.6).
+- **Dynamic Client Registration**, deprecated by the specification, and **an
+  outside authorization server** (§2.7.5).
 - **Sampling**, to have Candeo write effects itself: deprecated, and #359
   rules out a model Candeo would call on its own.
 - **Tasks**: a preview is bounded to seconds.
@@ -581,6 +856,18 @@ overwrite nothing.
 - **Whether a model makes good use of the contact sheet**: measured in phase 2.
 - **That the contact sheet and the simulator look alike.** Both read one
   geometry; no test compares the two drawings.
+- **Over the network** (phase 5), none of it tried:
+  - that Claude Code, VS Code and Cursor send no `Origin` over HTTP. One that
+    did would be refused, and its `Origin` would have to be allowed by name;
+  - how VS Code and Cursor trust a certificate the system does not, and whether
+    Claude Code's system store and `NODE_EXTRA_CA_CERTS`, documented for its
+    network configuration, apply to its MCP connections too;
+  - that every client accepts the generated certificate once trusted: ECDSA
+    P-256, `CA:FALSE`, one year;
+  - rmcp's legacy sessions bound to a token: its session store knows no token,
+    so Candeo's layer would keep the pairing;
+  - the weight of rustls, hyper and certificate generation in the binary;
+  - whether any assistant people use needs OAuth.
 
 ## 12. Sources
 
@@ -592,13 +879,21 @@ Checked on 2026-11-06.
   [multi round-trip requests][s-mrtr], [elicitation][s-elicitation],
   [elicitation in 2025-11-25][s-elicitation-old], [tools][s-tools],
   [resources][s-resources], [prompts][s-prompts], [stdio][s-stdio],
-  [Streamable HTTP][s-http], [authorization][s-auth], [SDKs][s-sdks].
+  [Streamable HTTP][s-http], [authorization][s-auth],
+  [authorization server discovery][s-auth-discovery],
+  [client registration][s-auth-registration],
+  [authorization security][s-auth-security],
+  [security best practices][s-security], [SDKs][s-sdks].
 - **rmcp**: [repository and README][s-rmcp], [crates.io][s-rmcp-crate] (3.9.0,
   2026-11-05, Rust 1.88), [features][s-rmcp-features],
-  [`StreamableHttpServerConfig`][s-rmcp-http].
+  [`StreamableHttpServerConfig`][s-rmcp-http] (its source in 3.9.0 for the
+  defaults: `allowed_hosts` loopback, `allowed_origins` empty and validation
+  off, `max_request_body_bytes` 4 MiB, `legacy_session_mode` on),
+  [OAuth support][s-rmcp-oauth], [example server with OAuth][s-rmcp-auth-example].
 - **Assistants**: [connecting local servers to Claude Desktop][c-claude-local],
   [Claude's custom connectors][c-claude-connectors],
   [Claude Code and MCP][c-claude-code],
+  [Claude Code's network configuration][c-claude-code-network],
   [VS Code's `mcp.json`][c-vscode], [VS Code's MCP support][c-vscode-api],
   [Cursor and MCP][c-cursor].
 - **Windows**: [`CreateFileW`][w-createfile],
@@ -618,14 +913,21 @@ Checked on 2026-11-06.
 [s-stdio]: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio
 [s-http]: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
 [s-auth]: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
+[s-auth-discovery]: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery
+[s-auth-registration]: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration
+[s-auth-security]: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations
+[s-security]: https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices
 [s-sdks]: https://modelcontextprotocol.io/docs/sdk
 [s-rmcp]: https://github.com/modelcontextprotocol/rust-sdk
 [s-rmcp-crate]: https://crates.io/crates/rmcp
 [s-rmcp-features]: https://docs.rs/crate/rmcp/latest/features
 [s-rmcp-http]: https://docs.rs/rmcp/latest/rmcp/transport/streamable_http_server/tower/struct.StreamableHttpServerConfig.html
+[s-rmcp-oauth]: https://github.com/modelcontextprotocol/rust-sdk/blob/main/docs/OAUTH_SUPPORT.md
+[s-rmcp-auth-example]: https://github.com/modelcontextprotocol/rust-sdk/blob/main/examples/servers/src/complex_auth_streamhttp.rs
 [c-claude-local]: https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers
 [c-claude-connectors]: https://support.claude.com/en/articles/11175166
 [c-claude-code]: https://code.claude.com/docs/en/mcp
+[c-claude-code-network]: https://code.claude.com/docs/en/network-config
 [c-vscode]: https://code.visualstudio.com/docs/agents/reference/mcp-configuration
 [c-vscode-api]: https://code.visualstudio.com/api/extension-guides/ai/mcp
 [c-cursor]: https://cursor.com/docs/context/mcp
