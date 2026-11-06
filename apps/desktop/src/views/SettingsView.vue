@@ -2,8 +2,8 @@
 /**
  * Settings: what concerns the application as a whole, and no device.
  *
- * The language, startup, the version, the signals other software sends, the log
- * and the configuration reset.
+ * The language, startup, the version, the signals other software sends, the
+ * assistants that read Candeo through MCP, the log and the configuration reset.
  *
  * The reset stays **out of the library**: the neighbouring gesture there deletes
  * hand-written code.
@@ -32,6 +32,7 @@ import {
   type LogLevel,
 } from '../api/candeo'
 import { error, message } from '../api/journal'
+import AssistantsSettings from '../components/AssistantsSettings.vue'
 import FailureNote from '../components/FailureNote.vue'
 import SignalsSettings from '../components/SignalsSettings.vue'
 import SoundSettings from '../components/SoundSettings.vue'
@@ -396,6 +397,8 @@ onMounted(() => {
       <FailureNote v-if="gamesProblem" @close="gamesProblem = null">{{ gamesProblem }}</FailureNote>
     </section>
 
+    <AssistantsSettings :key="resets" />
+
     <SoundSettings :key="resets" />
     <SystemSettings />
 
@@ -519,6 +522,7 @@ onMounted(() => {
           <li>{{ t('settings.config.forgetRules') }}</li>
           <li>{{ t('settings.config.forgetPresets') }}</li>
           <li>{{ t('settings.config.forgetSignals') }}</li>
+          <li>{{ t('settings.config.forgetAssistants') }}</li>
           <li>
             <strong>{{ t('settings.config.effectsKept') }}</strong>
             {{ t('settings.config.effectsKeptDetail') }}
