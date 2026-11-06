@@ -1,0 +1,34 @@
+[package]
+name = "candeo-openrgb"
+description = "An OpenRGB SDK client, and the installed OpenRGB Candeo starts, for devices without a definition"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# A crate of its own: its tests need neither Tauri nor a device nor OpenRGB,
+# and the desktop application links it only behind its `openrgb` feature, off
+# by default (docs/design/openrgb-output.md §8).
+[dependencies]
+thiserror.workspace = true
+# `OpenRGB.json`, rewritten before each start (§6.4). `preserve_order`: the
+# keys Candeo does not manage are written back where OpenRGB put them.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# The job object that ties the child to Candeo (§6.5). Already in the tree.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
+# `PR_SET_PDEATHSIG` and the child's process group (§6.5). Already in the tree.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+# The configuration writer is tested in a temporary folder.
+tempfile = "3"

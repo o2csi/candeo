@@ -15,11 +15,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# The OpenRGB output (#368, docs/design/openrgb-output.md): a proof of concept,
+# off by default and wired into nothing yet, so the default build and its
+# startup are unchanged.
+openrgb = ["dep:candeo-openrgb"]
+
 [dependencies]
 candeo-protocol.workspace = true
 candeo-device.workspace = true
 # Effects from TypeScript to JavaScript, in Rust (#381): see `runtime::compile`.
 candeo-compiler.workspace = true
+candeo-openrgb = { workspace = true, optional = true }
 hidapi.workspace = true
 serde.workspace = true
 # `tray-icon`: the notification area icon — see `src/tray.rs`. It is not an
