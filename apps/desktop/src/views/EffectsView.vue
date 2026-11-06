@@ -66,6 +66,18 @@ const shut = { devices: ref(false), effects: ref(false) }
  * follows are the selected region's. The brightness slider, the state, the
  * interruption and *Resume* stay the device's, and the drawing stays the whole
  * device, the region in full colour.
+ *
+ * ## Layers: a stack under the target, a card per selected row
+ *
+ * The selected device's card, or the selected region's, lists its layers
+ * (`docs/design/layers-ui.md` §2): *Add a layer*, the layers top first, the
+ * base. The selected row is what the gallery previews into — the rest of the
+ * stack around it — and what the sending button sends to, labelled by its
+ * outcome: *Apply*, *Apply to this layer*, *Add the layer*. Selecting writes
+ * nothing, as before. The detail panel frames that row as a card (§3): the
+ * base's is the panel as it was, a layer's adds *Mask and blend* and *Save the
+ * layer…*. A layer's look and settings change live on the device and are
+ * saved at once, as an applied effect's are (#218).
  */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
@@ -89,8 +101,10 @@ import {
   resumeDevice,
   startEffect,
   stopEffect,
+  type Bindings,
   type Dimming,
   type EffectEntry,
+  type EffectParams,
   type EffectState,
   type EngineReport,
   type HeldSignal,
@@ -98,17 +112,105 @@ import {
 } from '../api/candeo'
 import { effectName as nameOfKey, isShippedKey } from '../api/effectKey'
 import { message } from '../api/journal'
+import {
+  addLayer,
+  deleteMask,
+  deleteSavedLayer,
+  maskChoices,
+  maskOfPositions,
+  orderLayers,
+  rememberLayerLook,
+  rememberLayerParams,
+  removeLayer,
+  renameMask,
+  renameSavedLayer,
+  replaceLayer,
+  resolveMask,
+  restoreSavedLayer,
+  saveLayer,
+  saveMask,
+  setLayerBindings,
+  setLayerLook,
+  setLayerParams,
+  setPreviewLayerBindings,
+  setPreviewLayerParams,
+  setPreviewLook,
+  undeleteMask,
+  updateMask,
+  type Blend,
+  type DeletedMask,
+  type LayerRecord,
+  type Look,
+  type Mask,
+  type MaskChoices,
+  type PreviewBase,
+  type SavedLayerRecord,
+} from '../api/layers'
 import { deviceOf, regionOf, targetFor, targetKey, type Target } from '../api/target'
 import type { DeviceInfo, DeviceRef, LayoutInfo, RegionInfo, Rgb } from '../api/types'
 import BrightnessFollow from '../components/BrightnessFollow.vue'
+import DetailCard from '../components/DetailCard.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import EffectPresets from '../components/EffectPresets.vue'
-import { readsSignal, readsSound, readsSystem } from '../composables/bindings'
+import LayerLook from '../components/LayerLook.vue'
+import LayerStack from '../components/LayerStack.vue'
+import SaveDialog from '../components/SaveDialog.vue'
+import SavedLayers from '../components/SavedLayers.vue'
+import { declaredBindings, readsSignal, readsSound, readsSystem, rebound } from '../composables/bindings'
 import DeviceStatusDot from '../components/DeviceStatusDot.vue'
 import EffectSwatch from '../components/EffectSwatch.vue'
 import FailureNote from '../components/FailureNote.vue'
 import KeyboardSimulator from '../components/KeyboardSimulator.vue'
 import RegionGlyph from '../components/RegionGlyph.vue'
+import {
+  applyLabel,
+  atLimit,
+  BASE,
+  cardKicker,
+  cleanLook,
+  cleanMask,
+  countText,
+  droppedOrder,
+  freshId,
+  inOrder,
+  layerLine,
+  layerRecord,
+  layerRow,
+  layerSaveItems,
+  layerToSave,
+  lookOf,
+  maskKey,
+  maskName,
+  maskSaveItems,
+  movedOrder,
+  nameTaken,
+  newLayer,
+  previewKey,
+  previewLayers,
+  previewState,
+  previews,
+  proposedName,
+  rowState,
+  savedLine,
+  savedLook,
+  savedMaskName,
+  selectedLayer,
+  standing,
+  stackItems,
+  usageOf,
+  withLayers,
+  withLook,
+  withMask,
+  withSettings,
+  type EditedLayer,
+  type MaskAction,
+  type MaskContext,
+  type MaskPick,
+  type SavedItem,
+  type SavedLayerView,
+  type Selection,
+  type StackRowView,
+} from '../composables/layers'
 import { deviceStatus, statusLabel } from '../composables/deviceStatus'
 import { brightnessSlider } from '../composables/dimming'
 import { goesLive, interruptionLine, showsDeviceFrames } from '../composables/interruption'
@@ -127,11 +229,12 @@ import {
   useEffects,
   type HardwareEffect,
 } from '../composables/useEffects'
-import { useSettings } from '../composables/useSettings'
+import { apart, merge, sendLive, useSettings } from '../composables/useSettings'
 import { refreshLibrary } from '../editor/library'
 import { t } from '../i18n'
 import { localized } from '../i18n/text'
-import { useSimulatorFeed } from '../keyboard/simulatorFeed'
+import { painted, toggled } from '../keyboard/keySelection'
+import { useSimulatorFeed, type PreviewedStack } from '../keyboard/simulatorFeed'
 
 /** Engine polling period, in milliseconds. */
 const STATUS_PERIOD = 1000
@@ -185,6 +288,13 @@ const {
   setBrightness,
   dimmingOf,
   setDimming,
+  stacks,
+  stackOf,
+  installStack,
+  savedLayers,
+  installSavedLayers,
+  savedMasks,
+  installSavedMasks,
   flush: flushParams,
   error: paramsError,
   dismissError: dismissParamsError,
@@ -302,6 +412,50 @@ watch(
  * announcing an absence not yet checked.
  */
 const noDevice = computed(() => controlled.value.length === 0 && !busy.value)
+
+// ---------------------------------------------------------------- layers
+
+/** The selected target's layers, bottom to top. */
+const stack = computed<LayerRecord[]>(() => stackOf(target.value))
+
+/**
+ * The row each target has selected, by target key: the base until someone
+ * picks another. Kept per target as a split device keeps its region, and
+ * written nowhere: selecting is a preview (`layers-ui.md` §9, P0 2).
+ */
+const selections = ref<Record<string, Selection>>({})
+
+/** The selected row, the base when the layer it named is gone. */
+const selection = computed<Selection>(() => {
+  const k = targetId.value
+  return standing((k !== null ? selections.value[k] : undefined) ?? BASE, stack.value)
+})
+
+/** The layer selected, `null` for the base and the new layer. */
+const layer = computed(() => selectedLayer(selection.value, stack.value))
+
+/** A saved layer picked in *Your layers*, previewed whole in the selected row's place (§5.3). */
+const savedPicked = ref<string | null>(null)
+const savedPick = computed<SavedLayerRecord | null>(() =>
+  savedPicked.value === null
+    ? null
+    : (savedLayers.value.find((s) => s.name === savedPicked.value) ?? null),
+)
+
+/** *Only this layer*: the layer alone over black, in the preview only. */
+const solo = ref(false)
+
+/** The new layer's mask and look, kept while the gallery is browsed (§4.1). */
+const pending = ref<{ mask?: Mask; look: Look }>({ look: {} })
+
+/** Said to screen readers: a layer moved, removed, added (§4.5). */
+const announcement = ref('')
+
+function announce(text: string): void {
+  // Emptied first: the same sentence twice is still news.
+  announcement.value = ''
+  void nextTick(() => (announcement.value = text))
+}
 
 // ---------------------------------------------------------------- library
 
@@ -477,7 +631,10 @@ const grouped = computed(() =>
   })).filter(
     // *Off* keeps the hardware section on any whole device; a split one has none.
     (g) => (g.nature !== 'game' && g.nature !== 'hardware') || g.items.length > 0,
-  ),
+  )
+    // A layer is composed from frames, which a firmware effect never sends
+    // (`composition.md` §3.2): the base alone is offered one.
+    .filter((g) => g.nature !== 'hardware' || selection.value.kind === 'base'),
 )
 
 /**
@@ -548,11 +705,14 @@ const chosenEffect = ref<string | null>(null)
  */
 const loaded = ref(false)
 
-const selectedEffect = computed<Choice | null>(() =>
-  loaded.value
-    ? (choices.value.find((c) => c.id === chosenEffect.value) ?? choices.value[0] ?? null)
-    : null,
-)
+const selectedEffect = computed<Choice | null>(() => {
+  if (!loaded.value) return null
+  const found = choices.value.find((c) => c.id === chosenEffect.value)
+  if (found) return found
+  // The base falls back on the first effect; a new layer waits for one to be
+  // chosen (*Choose an effect*), and a layer runs the effect it names.
+  return selection.value.kind === 'base' ? (choices.value[0] ?? null) : null
+})
 
 /** The effects column's body, to bring the selected entry into view. */
 const effectsList = ref<HTMLElement | null>(null)
@@ -566,11 +726,18 @@ const effectsList = ref<HTMLElement | null>(null)
  */
 async function followDevice(): Promise<void> {
   const d = target.value
-  chosenEffect.value = deviceEffect(
-    runningOn(d),
-    lastAppliedOn(d),
-    choices.value.map((c) => c.id),
-  )
+  const row = selection.value
+  // A layer's row shows the effect it runs; the new layer, none yet.
+  chosenEffect.value =
+    row.kind === 'new'
+      ? null
+      : row.kind === 'layer'
+        ? (layer.value?.effect ?? null)
+        : deviceEffect(
+            runningOn(d),
+            lastAppliedOn(d),
+            choices.value.map((c) => c.id),
+          )
   const c = selectedEffect.value
   if (!c) return
   // Unfolded for this visit only: the fold the viewer saved stays theirs.
@@ -582,6 +749,9 @@ async function followDevice(): Promise<void> {
 }
 
 watch(targetId, () => {
+  // What the previous target's row previewed is not this one's.
+  leaveRow()
+  pending.value = { look: {} }
   if (loaded.value) void followDevice()
 })
 
@@ -647,11 +817,13 @@ function deviceLine(d: { vid: number; pid: number }): string {
     const line = interruptionLine(interruption, rule, applied, Date.now())
     return t(line.key, line.params)
   }
+  // *Diagonal wave + 2 layers* (`layers-ui.md` §4.8).
+  const layers = stackOf({ vid: d.vid, pid: d.pid }).length
   const running = effectName(runningOn(d))
-  if (running !== null) return running
+  if (running !== null) return withLayers(running, layers)
   const remembered = effectName(lastAppliedOn({ vid: d.vid, pid: d.pid }))
   return remembered !== null
-    ? t('effects.deviceStopped', { name: remembered })
+    ? t('effects.deviceStopped', { name: withLayers(remembered, layers) })
     : t('effects.deviceIdle')
 }
 
@@ -686,16 +858,30 @@ function regionFailure(d: DeviceRef, r: RegionInfo): string | null {
  */
 function regionLine(d: DeviceRef, r: RegionInfo): string {
   const region = targetFor(d, r.id)
+  const layers = stackOf(region).length
   const s = regionStatus(statusOf(d), r.id)
-  if (s?.running === true && s.effectId !== null) return effectName(s.effectId) ?? s.effectId
+  if (s?.running === true && s.effectId !== null) {
+    return withLayers(effectName(s.effectId) ?? s.effectId, layers)
+  }
   if (regionFailure(d, r) !== null) return t('effects.entryBroken')
   const remembered = effectName(lastAppliedOn(region))
   if (remembered === null) return t('effects.deviceIdle')
-  return statusOf(d)?.interruption ? remembered : t('effects.deviceStopped', { name: remembered })
+  const line = withLayers(remembered, layers)
+  return statusOf(d)?.interruption ? line : t('effects.deviceStopped', { name: line })
 }
 
 /** The only effect marked **applied**: the selected device's, or the selected region's. */
 const activeId = computed(() => runningOn(target.value))
+
+/**
+ * The effect the gallery marks as the selected row's: the base's applied
+ * effect, the layer's own, none for a new layer (`layers-ui.md` §4.2).
+ */
+const rowEffectId = computed<string | null>(() => {
+  const row = selection.value
+  if (row.kind === 'base') return activeId.value
+  return row.kind === 'layer' ? (layer.value?.effect ?? null) : null
+})
 
 const status = computed(() => statusOf(selectedDevice.value))
 
@@ -718,12 +904,28 @@ const effectError = computed(() =>
   selectedRegion.value ? (regionState.value?.error ?? null) : (status.value?.error ?? null),
 )
 
-/** The preview in progress, when it does show the selected effect. */
+/**
+ * The preview in progress, when it does show the selected effect — or, for a
+ * stack, the base asked for with layers under way: its own report carries
+ * them, a single effect's does not.
+ */
 const preview = computed(() => {
   const p = report.value.preview
-  if (!p || !p.running) return null
+  const wanted = stackPreview.value
+  if (!p) return null
+  if (wanted) {
+    const runs = p.running || (p.layers ?? []).some((l) => l.running)
+    const sameBase = (p.effectId ?? null) === (wanted.base?.effect ?? null)
+    return runs && sameBase && (p.layers !== undefined || wanted.layers.length === 0) ? p : null
+  }
+  if (!p.running) return null
   return p.effectId === selectedEffect.value?.id ? p : null
 })
+
+/** Whether the preview runs the layer `id` now: what its live changes go to. */
+function previewRuns(id: string | null): boolean {
+  return id !== null && (preview.value?.layers ?? []).some((l) => l.layer === id)
+}
 
 /**
  * A preview's failure, **when it concerns the effect being watched**.
@@ -736,7 +938,16 @@ const preview = computed(() => {
  */
 const previewError = computed<string | null>(() => {
   const p = report.value.preview
-  if (!p || p.running || p.effectId !== selectedEffect.value?.id) return null
+  if (!p) return null
+  const wanted = stackPreview.value
+  if (wanted) {
+    // The row being edited first: it is the one being looked at.
+    const edited = (p.layers ?? []).find((l) => l.layer === editedId.value)
+    if (edited?.error) return edited.error
+    const base = wanted.base?.effect ?? null
+    return base !== null && !p.running && p.effectId === base ? p.error : null
+  }
+  if (p.running || p.effectId !== selectedEffect.value?.id) return null
   return p.error
 })
 
@@ -817,10 +1028,173 @@ const deviceTrouble = computed(() => {
   return said === hushed.value ? null : said
 })
 
-/** True when the simulator must show the device's stream: not a rule's, under the applied effect's name. */
-const showsDevice = computed(() =>
-  showsDeviceFrames(runningHere.value, applied.value, Boolean(status.value?.interruption)),
+// ---------------------------------------------------------------- selected row
+
+/** The parameters declared by the effect being watched. */
+const specs = computed<Record<string, ParamSpec>>(() => selectedEffect.value?.params ?? {})
+
+/**
+ * Whether the row previews what the device does not run: another effect, a
+ * saved layer, a new layer with its effect (`layers-ui.md` §3). What the state
+ * line, *Cancel preview* and the sending button follow.
+ */
+const previewing = computed(() =>
+  previews(
+    selection.value,
+    selectedEffect.value?.id ?? null,
+    layer.value,
+    savedPicked.value,
+    applied.value,
+  ),
 )
+
+/** The selected layer shows the effect it runs: its own settings are shown, and changed live. */
+const ownLayer = computed(
+  () =>
+    layer.value !== null &&
+    savedPick.value === null &&
+    selectedEffect.value?.id === layer.value.effect,
+)
+
+/**
+ * Settings changed on an effect previewed in a layer's row, before it is sent:
+ * that row's and that effect's only, a layer's settings being its own
+ * (`composition.md` §3.1). Dropped with the row or the effect.
+ */
+const draft = ref<{ key: string; values: EffectParams; bindings: Bindings } | null>(null)
+const draftKey = computed(
+  () =>
+    `${targetId.value}|${JSON.stringify(selection.value)}|${selectedEffect.value?.id ?? ''}|${savedPicked.value ?? ''}`,
+)
+
+/** A layer row's settings: the layer's own, the draft, else the saved layer's or the effect's. */
+const layerSettings = computed<{ values: EffectParams; bindings: Bindings }>(() => {
+  const s = specs.value
+  const l = layer.value
+  if (ownLayer.value && l) {
+    return { values: merge(s, l.values ?? {}), bindings: declaredBindings(s, l.bindings ?? {}) }
+  }
+  if (draft.value?.key === draftKey.value) {
+    return { values: draft.value.values, bindings: draft.value.bindings }
+  }
+  const saved = savedPick.value
+  return {
+    values: merge(s, saved?.values ?? {}),
+    bindings: declaredBindings(s, saved?.bindings ?? {}),
+  }
+})
+
+/**
+ * The values this effect runs on, or would run on, on this device: its
+ * manifest, overridden by what was remembered for this pair. On a split
+ * device, for the selected region: each keeps its own per effect. In a layer's
+ * row, the layer's own (`layerSettings`).
+ */
+const paramValues = computed(() =>
+  selection.value.kind === 'base'
+    ? valuesFor(target.value, selectedEffect.value?.id ?? '', specs.value)
+    : layerSettings.value.values,
+)
+
+/**
+ * Its parameters reading a signal on this device. None for a firmware effect:
+ * it has no loop of ours to read one, and its colours reach the firmware only
+ * when it is applied.
+ */
+const paramBindings = computed(() => {
+  const c = selectedEffect.value
+  if (!c || c.hardware) return {}
+  return selection.value.kind === 'base'
+    ? bindingsFor(target.value, c.id, specs.value)
+    : layerSettings.value.bindings
+})
+
+/** The selected row's mask and look: a saved layer's while one is previewed, the layer's, the new one's. */
+const rowLook = computed<{ mask?: Mask; look: Look } | null>(() => {
+  const saved = savedPick.value
+  if (saved && selection.value.kind !== 'base') {
+    const look = savedLook(saved)
+    return { mask: look.mask, look: lookOf(look) }
+  }
+  const l = layer.value
+  if (l) return { mask: cleanMask(l.mask), look: lookOf(l) }
+  return selection.value.kind === 'new' ? pending.value : null
+})
+
+/** The row as the preview runs it in the gallery's effect; `null` while it runs as it is. */
+const edited = computed<EditedLayer | null>(() => {
+  const c = selectedEffect.value
+  const row = selection.value
+  if (row.kind === 'base' || !c || c.hardware || c.state !== 'ready') return null
+  if (row.kind === 'layer' && !previewing.value) return null
+  const look = rowLook.value ?? { look: {} }
+  return {
+    effect: c.id,
+    values: apart(specs.value, paramValues.value),
+    bindings: paramBindings.value,
+    mask: look.mask,
+    look: look.look,
+  }
+})
+
+/** The id the selected row has in the preview: its own, or the new layer's. */
+const editedId = computed<string | null>(() => {
+  const row = selection.value
+  if (row.kind === 'layer') return row.id
+  return row.kind === 'new' && edited.value ? freshId(stack.value) : null
+})
+
+/**
+ * The base a stack preview runs under the layers: the gallery's choice on the
+ * base's row, the applied base otherwise; none for *Only this layer*.
+ */
+const previewBase = computed<PreviewBase | null>(() => {
+  const row = selection.value
+  if (solo.value && row.kind !== 'base') return null
+  const where = target.value
+  if (row.kind === 'base') {
+    const c = selectedEffect.value
+    return c && !c.hardware && c.state === 'ready'
+      ? { effect: c.id, params: paramValues.value, bindings: paramBindings.value }
+      : null
+  }
+  const id = runningOn(where) ?? lastAppliedOn(where)
+  const c = choices.value.find((x) => x.id === id)
+  if (!c || c.hardware || c.state !== 'ready') return null
+  return {
+    effect: c.id,
+    params: valuesFor(where, c.id, c.params),
+    bindings: bindingsFor(where, c.id, c.params),
+  }
+})
+
+/**
+ * What the simulator previews when it does not show the device: the stack, as
+ * soon as the target has layers or a layer's row is selected, with the
+ * selected row in the gallery's effect (`composition.md` §3.9). `null` keeps
+ * the single effect's preview of a target without layers, as before them.
+ */
+const stackPreview = computed<PreviewedStack | null>(() => {
+  const row = selection.value
+  if (row.kind === 'base' && (stack.value.length === 0 || selectedEffect.value?.hardware)) return null
+  const layers = previewLayers(stack.value, row, edited.value, solo.value && row.kind !== 'base')
+  const base = previewBase.value
+  if (base === null && layers.length === 0) return null
+  return { key: previewKey(target.value, base?.effect ?? null, layers), base, layers }
+})
+
+/**
+ * True when the simulator must show the device's stream: not a rule's, under
+ * the applied effect's name. A layer's row as it runs, and the new layer before
+ * its effect, show the device's frames: the stack, composed.
+ */
+const showsDevice = computed(() => {
+  const interrupted = Boolean(status.value?.interruption)
+  if (selection.value.kind === 'base') {
+    return showsDeviceFrames(runningHere.value, applied.value, interrupted)
+  }
+  return showsDeviceFrames(runningHere.value, !previewing.value && !solo.value, interrupted)
+})
 
 /**
  * What the device's loop runs, as the feed needs it to follow its frames: it
@@ -845,10 +1219,14 @@ const { frame, restartPreview } = useSimulatorFeed({
   // A hardware effect is run by the firmware and the app never sees its frames:
   // previewing it would mean inventing them.
   previewed: () => {
+    if (stackPreview.value) return null
     const c = selectedEffect.value
     // Nor an effect that cannot run: its JavaScript is not there, or does not load.
     return c && !c.hardware && c.state === 'ready' ? c.id : null
   },
+  // A stack wins over the single effect: the target's layers around the row
+  // being edited.
+  previewedStack: () => stackPreview.value,
   // What it *is* drawn as, which is a different promise: a legend of what the
   // effect was seen doing, not the device's frames. The note below says so.
   illustrated: () => {
@@ -870,43 +1248,13 @@ const { frame, restartPreview } = useSimulatorFeed({
   },
 })
 
-/**
- * What the simulator shows, spelled out rather than guessed.
- *
- * **This is where the refusal to lie plays out.** A preview that looks like an
- * applied effect costs a debugging session: it is the fourth time this pattern
- * has come up in this project. So the sentence says both things at once: what
- * is being watched, and what the keyboard is doing meanwhile.
+/*
+ * What the simulator shows is said in one state line over it — *Live on the
+ * device*, *Preview · nothing is sent*, *Hardware effect · approximate preview*
+ * (`layers-ui.md` §3, `stateLine`) — where a sentence used to say both what was
+ * watched and what the keyboard did. A preview that looks like an applied
+ * effect costs a debugging session: the line never leaves it unsaid.
  */
-const previewNote = computed(() => {
-  const c = selectedEffect.value
-  if (showsDevice.value) return t('effects.preview.device')
-  if (c?.hardware) {
-    // Two different promises, and the sentence must not confuse them: a drawing
-    // of what the effect does, or nothing at all.
-    return isLook(c.hardware.looks)
-      ? t('effects.preview.illustration')
-      : t('effects.preview.hardware')
-  }
-
-  // Under an interruption, what the keyboard shows is the rule's effect.
-  const interruption = status.value?.interruption
-  const running = interruption
-    ? interruption.name || (effectName(interruption.effect) ?? interruption.effect)
-    : effectName(activeId.value)
-  const elsewhere = (runningHere.value || Boolean(interruption)) && running !== null
-  if (preview.value) {
-    // Without a controlled device, do not promise Apply: the button is
-    // disabled, and announcing it would send people looking for why it does not
-    // respond.
-    if (!selectedDevice.value) return t('effects.preview.noDevice')
-    return elsewhere
-      ? t('effects.preview.elsewhere', { name: running })
-      : t('effects.preview.apply')
-  }
-  if (previewError.value !== null) return t('effects.preview.stopped')
-  return t('effects.preview.starting')
-})
 
 // ---------------------------------------------------------------- actions
 
@@ -1203,27 +1551,8 @@ async function removeEffect(): Promise<void> {
 
 // ---------------------------------------------------------------- settings
 
-/** The parameters declared by the effect being watched. */
-const specs = computed<Record<string, ParamSpec>>(() => selectedEffect.value?.params ?? {})
-
-/**
- * The values this effect runs on, or would run on, on this device: its
- * manifest, overridden by what was remembered for this pair. On a split
- * device, for the selected region: each keeps its own per effect.
- */
-const paramValues = computed(() =>
-  valuesFor(target.value, selectedEffect.value?.id ?? '', specs.value),
-)
-
-/**
- * Its parameters reading a signal on this device. None for a firmware effect:
- * it has no loop of ours to read one, and its colours reach the firmware only
- * when it is applied.
- */
-const paramBindings = computed(() => {
-  const c = selectedEffect.value
-  return c && !c.hardware ? bindingsFor(target.value, c.id, specs.value) : {}
-})
+// `specs`, `paramValues` and `paramBindings` are declared with the selected
+// row, before the simulator feed whose first start reads them.
 
 /** The signals held now: suggested to a setting that reads one, and what it reads. */
 const held = ref<HeldSignal[]>([])
@@ -1257,7 +1586,7 @@ function readsSystemHere(c: Choice): boolean {
 
 /** An entry as it is read out: its name, applied or not, and whether it reads a signal. */
 function entryLabel(c: Choice): string {
-  const name = activeId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
+  const name = rowEffectId.value === c.id ? t('effects.appliedOnDevice', { name: c.name }) : c.name
   const marks = [
     c.readsKeys ? t('effects.readsKeys') : null,
     readsSoundHere(c) ? t('effects.readsAudio') : null,
@@ -1323,6 +1652,8 @@ const noParams = computed(() =>
 const savedNote = computed<string | null>(() => {
   const c = selectedEffect.value
   const where = target.value
+  // A layer's settings are its own, kept with it: the card says what it is.
+  if (selection.value.kind !== 'base') return null
   if (!c || c.hardware || Object.keys(specs.value).length === 0) return null
   if (!where || targetName.value === null) return t('effects.savedNoDevice')
   // *Alienware 17 R5 · Keyboard* on a split device: the region keeps them.
@@ -1350,8 +1681,65 @@ function onParamChange(id: string, value: ParamValue): void {
   const where = target.value
   const c = selectedEffect.value
   if (!where || !c) return
+  if (selection.value.kind !== 'base') {
+    setLayerSettings({ ...paramValues.value, [id]: value }, paramBindings.value, false)
+    return
+  }
   const complete = adjust(where, c.id, specs.value, id, value, live(c.id))
   if (preview.value) adjustPreview(complete)
+}
+
+/**
+ * A layer row's settings: the applied layer's, live on the device and in the
+ * preview, written at the end of the gesture (`commit`) as an effect's are; or
+ * the draft of an effect previewed in the row, to the preview alone.
+ */
+function setLayerSettings(values: EffectParams, bindings: Bindings, commit: boolean): void {
+  const where = target.value
+  const l = layer.value
+  if (!where) return
+  if (ownLayer.value && l) {
+    const kept = apart(specs.value, values)
+    installStack(
+      where,
+      stack.value.map((x) => (x.id === l.id ? withSettings(x, kept, bindings) : x)),
+    )
+    sendLive(`layer:${targetKey(where)}#${l.id}`, (v) => setLayerParams(where, l.id, v), values)
+    if (previewRuns(l.id)) {
+      sendLive(`preview-layer:${l.id}`, (v) => setPreviewLayerParams(l.id, v), values)
+    }
+    if (commit) void rememberLayerParams(where, l.id, values).catch(fail)
+    return
+  }
+  draft.value = { key: draftKey.value, values, bindings }
+  const id = editedId.value
+  if (previewRuns(id)) {
+    sendLive(`preview-layer:${id}`, (v) => setPreviewLayerParams(id!, v), values)
+  }
+}
+
+/** A layer row's bindings: live and kept at once for an applied layer, a binding changing rarely. */
+function setLayerBindingsHere(bindings: Bindings): void {
+  const where = target.value
+  const l = layer.value
+  if (!where) return
+  if (ownLayer.value && l) {
+    installStack(
+      where,
+      stack.value.map((x) => (x.id === l.id ? withSettings(x, apart(specs.value, paramValues.value), bindings) : x)),
+    )
+    void setLayerBindings(where, l.id, bindings).catch(fail)
+    if (previewRuns(l.id)) void setPreviewLayerBindings(l.id, bindings).catch(fail)
+    return
+  }
+  draft.value = { key: draftKey.value, values: paramValues.value, bindings }
+  const id = editedId.value
+  if (previewRuns(id)) void setPreviewLayerBindings(id!, bindings).catch(fail)
+}
+
+/** What a layer command refused, said where the others are. */
+function fail(e: unknown): void {
+  problem.value = e
 }
 
 /** The gesture is over (slider released, box checked): write now. */
@@ -1359,6 +1747,11 @@ function onParamCommit(): void {
   const where = target.value
   const c = selectedEffect.value
   if (!where || !c) return
+  if (selection.value.kind !== 'base') {
+    const l = layer.value
+    if (ownLayer.value && l) void rememberLayerParams(where, l.id, paramValues.value).catch(fail)
+    return
+  }
   settle(where, c.id)
 
   // **One rule for every effect: a setting changed reaches the one running.** A
@@ -1381,6 +1774,10 @@ function onParamBind(id: string, source: string | null): void {
   const where = target.value
   const c = selectedEffect.value
   if (!where || !c || c.hardware) return
+  if (selection.value.kind !== 'base') {
+    setLayerBindingsHere(declaredBindings(specs.value, rebound(paramBindings.value, id, source)))
+    return
+  }
   const bindings = bind(where, c.id, specs.value, id, source, live(c.id))
   if (preview.value) bindPreview(bindings)
 }
@@ -1390,6 +1787,11 @@ function onParamReset(): void {
   const where = target.value
   const c = selectedEffect.value
   if (!where || !c) return
+  if (selection.value.kind !== 'base') {
+    setLayerSettings(merge(specs.value, {}), {}, true)
+    setLayerBindingsHere({})
+    return
+  }
   const declared = forget(where, c.id, specs.value, live(c.id))
   if (preview.value) {
     adjustPreview(declared)
@@ -1431,6 +1833,13 @@ function onPresetPick(preset: PresetRecord): void {
   if (!where || !c || c.hardware) return
   const wanted = presetSettings(specs.value, preset)
   paramsForm.value?.clearDrafts()
+  // Copied into a layer, as a preset is (`composition.md` §3.1): renaming or
+  // deleting it later leaves the layer as it is.
+  if (selection.value.kind !== 'base') {
+    setLayerSettings(wanted.values, wanted.bindings, true)
+    setLayerBindingsHere(wanted.bindings)
+    return
+  }
   const taken = replace(where, c.id, specs.value, wanted.values, wanted.bindings, live(c.id))
   if (preview.value) {
     adjustPreview(taken.values)
@@ -1451,6 +1860,753 @@ const onPresetUpdate = (name: string) =>
   updatePreset(presetEffect(), name, paramValues.value, paramBindings.value)
 const onPresetRename = (from: string, to: string) => renamePreset(presetEffect(), from, to)
 const onPresetDelete = (name: string) => deletePreset(presetEffect(), name)
+
+// ---------------------------------------------------------------- layers: rows
+
+/** What names masks on the selected target: its lights, its regions, the saved masks. */
+const maskCtx = computed<MaskContext>(() => ({
+  lights: selectedRegion.value?.lights ?? board.value?.lights ?? 'keys',
+  region: selectedRegion.value !== null,
+  regionName: (id) => {
+    const r =
+      board.value?.regions.find((x) => x.id === id) ??
+      selectedDevice.value?.regions.find((x) => x.id === id)
+    return r ? localized(r.name) : id
+  },
+  savedMasks: savedMasks.value,
+}))
+
+/**
+ * What each mask lights on the selected target, by `maskKey`: asked of Rust once
+ * per mask, the window never resolving one itself (`api/layers.ts`).
+ */
+const resolved = ref<Record<string, number[]>>({})
+const resolving = new Set<string>()
+
+/** The positions a mask lights here; `null` for the whole target, and while unknown. */
+function positionsOf(mask: Mask | undefined): number[] | null {
+  const where = target.value
+  if (!where || !cleanMask(mask)) return null
+  return resolved.value[maskKey(where, mask)] ?? null
+}
+
+/** How many lights a mask lights here: the whole target's when it names nothing. */
+function countOf(mask: Mask | undefined): number | null {
+  if (!cleanMask(mask)) return selectedRegion.value?.positions.length ?? board.value?.keys.length ?? null
+  return positionsOf(mask)?.length ?? null
+}
+
+function resolveMissing(): void {
+  const where = target.value
+  if (!where) return
+  for (const mask of [...stack.value.map((l) => l.mask), rowLook.value?.mask]) {
+    const clean = cleanMask(mask)
+    if (!clean) continue
+    const k = maskKey(where, clean)
+    if (k in resolved.value || resolving.has(k)) continue
+    resolving.add(k)
+    resolveMask(where, clean)
+      .then((positions) => {
+        resolved.value = { ...resolved.value, [k]: positions }
+      })
+      // Unknown rather than empty: a row then says nothing instead of *Nothing to light here*.
+      .catch(() => {})
+      .finally(() => resolving.delete(k))
+  }
+}
+
+/** A saved mask changed, was deleted or put back: what masks light is asked again. */
+function forgetResolved(): void {
+  resolved.value = {}
+}
+
+watch([targetId, stack, () => rowLook.value?.mask], resolveMissing, { immediate: true })
+
+/** What the mask picker offers on the selected target; `null` until Rust answered. */
+const choicesHere = ref<MaskChoices | null>(null)
+
+async function readMaskChoices(): Promise<void> {
+  const where = target.value
+  const wanted = targetId.value
+  // Asked only once a layer's row is selected: the base has no mask.
+  if (!where || selection.value.kind === 'base') return
+  try {
+    const answer = await maskChoices(where)
+    if (targetId.value === wanted) choicesHere.value = answer
+  } catch {
+    // The picker keeps the whole target and *Choose keys…*.
+    if (targetId.value === wanted) choicesHere.value = null
+  }
+}
+
+watch(targetId, () => {
+  choicesHere.value = null
+})
+watch(
+  [targetId, () => selection.value.kind !== 'base', savedMasks],
+  () => void readMaskChoices(),
+  { immediate: true },
+)
+
+/** The engine's state of each layer of the selected target. */
+const layerStatuses = computed(
+  () => (selectedRegion.value ? regionState.value?.layers : status.value?.layers) ?? [],
+)
+
+/** An effect's swatch, from the library: empty for a firmware effect or one gone. */
+function swatchOf(id: string | null): string[] {
+  return library.value.find((e) => e.id === id)?.swatch ?? []
+}
+
+/** A layer just removed, in its place, until the next change to its stack (§4.5). */
+const removed = ref<{ key: string; record: LayerRecord; at: number } | null>(null)
+const removedHere = computed(() => (removed.value?.key === targetId.value ? removed.value : null))
+
+/** The stack's rows, top first, as `LayerStack` words them. */
+const stackRows = computed<Array<StackRowView | { kind: 'removed' }>>(() => {
+  const ctx = maskCtx.value
+  const row = selection.value
+  return stackItems(stack.value, removedHere.value?.at ?? null).map((item) => {
+    if (item.kind === 'removed') return item
+    const l = item.layer
+    const editing = row.kind === 'layer' && row.id === l.id
+    // The row says what the preview shows in its place, as the card does.
+    const effect = editing && previewing.value && selectedEffect.value ? selectedEffect.value.id : l.effect
+    const look = editing && savedPick.value ? savedLook(savedPick.value) : l
+    const positions = positionsOf(look.mask)
+    const engine = editing && previewing.value ? undefined : layerStatuses.value.find((s) => s.layer === l.id)
+    return {
+      kind: 'layer' as const,
+      id: l.id,
+      name: effectName(effect) ?? effect,
+      line: layerLine(look, ctx, positions?.length ?? null),
+      swatch: swatchOf(effect),
+      state: rowState(engine, positions),
+      position: item.position,
+    }
+  })
+})
+
+/** The base's row: what runs under the layers, or what the gallery previews there. */
+const baseRow = computed(() => {
+  const where = target.value
+  const id =
+    selection.value.kind === 'base' && selectedEffect.value
+      ? selectedEffect.value.id
+      : (runningOn(where) ?? lastAppliedOn(where))
+  return {
+    name: effectName(id) ?? t('effects.deviceIdle'),
+    line: firmwareRuns.value ? t('layers.baseHardware') : t('layers.base'),
+    swatch: swatchOf(id),
+  }
+})
+
+/** The add row's words while it is selected: *New layer · Rain*, or *choose an effect*. */
+const newRowLabel = computed(() => {
+  const c = selectedEffect.value
+  if (selection.value.kind !== 'new' || !c) return t('layers.newChoose')
+  return t('layers.newOf', { effect: savedPick.value?.name ?? c.name })
+})
+
+/** A hardware effect is the base: the layers are set aside (`composition.md` §3.2). */
+const waiting = computed(() => firmwareRuns.value && stack.value.length > 0)
+
+// ---------------------------------------------------------------- layers: selecting
+
+/** Drops what belonged to the row left: a saved layer previewed, *Only this layer*, a selection, a draft. */
+function leaveRow(): void {
+  savedPicked.value = null
+  solo.value = false
+  selecting.value = null
+  draft.value = null
+  dialog.value = null
+  maskDeleted.value = null
+}
+
+/** Selects a row of the stack: a preview, never a write (§9, P0 2). */
+function selectRow(next: Selection): void {
+  const k = targetId.value
+  if (k === null) return
+  leaveRow()
+  selections.value = { ...selections.value, [k]: next }
+  void followDevice()
+}
+
+/** An effect picked in the gallery: previewed in the selected row's place. */
+function pickEffect(id: string): void {
+  chosenEffect.value = id
+  savedPicked.value = null
+}
+
+/** A saved layer picked: previewed whole, effect, settings, mask and look (§5.3). */
+function pickSaved(name: string): void {
+  const saved = savedLayers.value.find((s) => s.name === name)
+  if (!saved) return
+  savedPicked.value = name
+  chosenEffect.value = saved.effect
+}
+
+/** Back to what the row runs: its effect, its look. */
+function cancelPreview(): void {
+  savedPicked.value = null
+  draft.value = null
+  void followDevice()
+}
+
+/** *Cancel preview* goes back to something only where something runs or is set. */
+const canCancelPreview = computed(
+  () => previewing.value && (selection.value.kind !== 'base' || activeId.value !== null),
+)
+
+/** *Only this layer*, for a layer, or a new layer with its effect. */
+const offersSolo = computed(
+  () => selection.value.kind === 'layer' || (selection.value.kind === 'new' && edited.value !== null),
+)
+
+// ---------------------------------------------------------------- layers: the card
+
+const cardKickerText = computed(() =>
+  cardKicker(
+    selection.value,
+    stack.value,
+    savedPick.value?.name ?? null,
+    Boolean(selectedEffect.value?.hardware),
+  ),
+)
+
+/** The card's title: the effect shown, else what the layer names, else *Choose an effect*. */
+const cardTitle = computed(() => {
+  if (selectedEffect.value) return selectedEffect.value.name
+  const l = layer.value
+  if (l) return effectName(l.effect) ?? l.effect
+  return t('layers.card.choose')
+})
+
+/** *Save the layer…* saves what the device runs: absent while the row previews (§5.2). */
+const canSaveLayer = computed(
+  () => layer.value !== null && !previewing.value && savedPick.value === null,
+)
+
+/** The effect's origin, as *Effect* says it: *Built-in*, *Yours*, *Hardware*. */
+function originText(c: Choice): string {
+  const origin = t(`layers.effect.${c.nature}`)
+  return c.modified ? t('layers.effect.modified', { origin }) : origin
+}
+
+/** The one state the preview's header says (§3). */
+const stateLine = computed(() =>
+  previewState(Boolean(selectedEffect.value?.hardware), showsDevice.value),
+)
+
+/** The selected layer's lights, outlined in dashes over the frame (§4.3). */
+const outlined = computed<number[] | null>(() => {
+  if (selecting.value || selection.value.kind === 'base') return null
+  if (selection.value.kind === 'new' && !edited.value) return null
+  return positionsOf(rowLook.value?.mask)
+})
+
+/** How many layers name the saved mask in force. */
+const maskUsage = computed(() => {
+  const id = rowLook.value?.mask?.saved
+  return id ? usageOf(id, stacks.value, savedLayers.value) : 0
+})
+
+// ---------------------------------------------------------------- layers: look and mask
+
+/**
+ * A look changed: the new layer's, kept with it; an applied layer's, live on
+ * the device and in the preview, written at the end of the gesture (#218).
+ */
+function changeLook(patch: Look, commit: boolean): void {
+  if (savedPick.value) return
+  const where = target.value
+  if (selection.value.kind === 'new') {
+    const look = cleanLook({ ...pending.value.look, ...patch })
+    pending.value = { ...pending.value, look }
+    const id = editedId.value
+    if (!solo.value && previewRuns(id)) sendLive(`preview-look:${id}`, (v) => setPreviewLook(id!, v), look)
+    return
+  }
+  const l = layer.value
+  if (!where || !l) return
+  const look = cleanLook({ ...lookOf(l), ...patch })
+  removed.value = null
+  installStack(
+    where,
+    stack.value.map((x) => (x.id === l.id ? withLook(x, look) : x)),
+  )
+  sendLive(`look:${targetKey(where)}#${l.id}`, (v) => setLayerLook(where, l.id, v), look)
+  // *Only this layer* draws it covering at full opacity, whatever its look.
+  if (!solo.value && previewRuns(l.id)) {
+    sendLive(`preview-look:${l.id}`, (v) => setPreviewLook(l.id, v), look)
+  }
+  if (commit) void rememberLayerLook(where, l.id, look).catch(fail)
+}
+
+function onBlend(blend: Blend): void {
+  changeLook({ blend }, true)
+}
+
+function onOpacity(opacity: number, commit: boolean): void {
+  changeLook({ opacity }, commit)
+}
+
+function onFollows(follows: Dimming | null, commit: boolean): void {
+  changeLook({ follows: follows ?? undefined }, commit)
+}
+
+/**
+ * Runs a layer command after the window installed what it asked for: on
+ * refusal, says why. Either way the file and the engine are read back, which
+ * puts the stack as it really is.
+ */
+async function layerCommand(command: () => Promise<unknown>): Promise<boolean> {
+  problem.value = null
+  try {
+    await command()
+    return true
+  } catch (e) {
+    problem.value = e
+    return false
+  } finally {
+    await reloadSettings()
+    await refreshStatus()
+  }
+}
+
+/** Another mask: the new layer keeps it; an applied layer runs through it at once. */
+async function changeMask(mask: Mask | undefined): Promise<void> {
+  if (selection.value.kind === 'new') {
+    pending.value = { ...pending.value, mask: cleanMask(mask) }
+    return
+  }
+  const where = target.value
+  const l = layer.value
+  if (!where || !l || savedPick.value) return
+  const next = withMask(l, mask)
+  removed.value = null
+  installStack(
+    where,
+    stack.value.map((x) => (x.id === l.id ? next : x)),
+  )
+  await layerCommand(() => replaceLayer(where, next))
+}
+
+function onMaskPick(pick: MaskPick): void {
+  maskDeleted.value = null
+  if (pick.kind === 'choose') void startChoosing(null)
+  else if (pick.kind === 'mask') void changeMask(pick.mask)
+}
+
+function onMaskAction(action: MaskAction): void {
+  const saved = rowLook.value?.mask?.saved
+  if (action === 'edit') void startChoosing(saved ?? null)
+  else if (action === 'saveAs') dialog.value = { kind: 'mask' }
+  else if (action === 'rename' && saved) dialog.value = { kind: 'renameMask', id: saved }
+  else if (action === 'delete' && saved) void removeSavedMask(saved)
+}
+
+// ---------------------------------------------------------------- layers: choosing keys
+
+/** The keys being chosen, and the saved mask they edit, if they do. `null` out of a selection. */
+const selecting = ref<{ positions: number[]; editing: string | null } | null>(null)
+
+/** Turns the preview into a selection, on the row's mask or a saved mask's keys (§4.3, §5.4). */
+async function startChoosing(editing: string | null): Promise<void> {
+  const where = target.value
+  if (!where) return
+  const mask = cleanMask(editing !== null ? { saved: editing } : rowLook.value?.mask)
+  // The whole target starts from nothing chosen: choosing is narrowing it.
+  const positions = mask ? await resolveMask(where, mask).catch(() => positionsOf(mask) ?? []) : []
+  selecting.value = { positions, editing }
+}
+
+function onToggleKey(position: number): void {
+  const s = selecting.value
+  if (s) selecting.value = { ...s, positions: toggled(s.positions, position) }
+}
+
+function onPaintKey(position: number, on: boolean): void {
+  const s = selecting.value
+  if (s) selecting.value = { ...s, positions: painted(s.positions, position, on) }
+}
+
+function selectNone(): void {
+  const s = selecting.value
+  if (s) selecting.value = { ...s, positions: [] }
+}
+
+function cancelChoosing(): void {
+  selecting.value = null
+}
+
+/**
+ * *Done*: the keys become the row's mask, or the saved mask's new keys — every
+ * layer naming it follows, on every device. Refused at zero keys.
+ */
+async function finishChoosing(): Promise<void> {
+  const s = selecting.value
+  const where = target.value
+  if (!s || !where || s.positions.length === 0) return
+  problem.value = null
+  try {
+    const mask = await maskOfPositions(where, s.positions)
+    if (s.editing !== null) {
+      // Keys without a scancode come back as lights, which mean something on
+      // this definition only: its model goes with them.
+      const n = await updateMask(s.editing, mask, deviceOf(where))
+      forgetResolved()
+      announce(t('layers.announce.maskUpdated', { n }, n))
+      await reloadSettings()
+      restartPreview()
+    } else {
+      await changeMask(mask)
+    }
+    selecting.value = null
+  } catch (e) {
+    problem.value = e
+  }
+}
+
+/** The selection bar's words: *Click the keys to light:*, or *Edit "Game keys", used by 3 layers:*. */
+const selectingHint = computed(() => {
+  const s = selecting.value
+  if (!s) return ''
+  if (s.editing !== null) {
+    const name = savedMaskName(s.editing, savedMasks.value) ?? ''
+    const n = usageOf(s.editing, stacks.value, savedLayers.value)
+    return t('layers.select.editing', { name, n }, n)
+  }
+  return maskCtx.value.lights === 'zones' ? t('layers.select.hintZones') : t('layers.select.hintKeys')
+})
+
+const selectingCount = computed(() =>
+  selecting.value ? countText(selecting.value.positions.length, maskCtx.value.lights) : '',
+)
+
+// ---------------------------------------------------------------- layers: order
+
+async function reorder(order: string[] | null, id: string): Promise<void> {
+  const where = target.value
+  if (!order || !where) return
+  removed.value = null
+  installStack(where, inOrder(stack.value, order))
+  announce(t('layers.announce.moved', { n: order.indexOf(id) + 1, total: order.length }))
+  await layerCommand(() => orderLayers(where, order))
+}
+
+function moveRow(id: string, delta: 1 | -1): void {
+  void reorder(movedOrder(stack.value, id, delta), id)
+}
+
+function dropRow(id: string, onto: string): void {
+  void reorder(droppedOrder(stack.value, id, onto), id)
+}
+
+/** *Remove*: at once, no question; *Undo* puts it back with its place, mask and settings (§4.5). */
+async function removeRow(id: string): Promise<void> {
+  const where = target.value
+  const k = targetId.value
+  const at = stack.value.findIndex((l) => l.id === id)
+  if (!where || k === null || at < 0) return
+  const record = stack.value[at]
+  if (selection.value.kind === 'layer' && selection.value.id === id) selectRow(BASE)
+  installStack(
+    where,
+    stack.value.filter((l) => l.id !== id),
+  )
+  removed.value = { key: k, record, at }
+  announce(t('layers.announce.removed'))
+  await layerCommand(() => removeLayer(where, id))
+}
+
+async function undoRemove(): Promise<void> {
+  const r = removedHere.value
+  const where = target.value
+  if (!r || !where) return
+  removed.value = null
+  problem.value = null
+  try {
+    const id = await addLayer(where, r.record, r.at)
+    await reloadSettings()
+    selectRow(layerRow(id))
+    announce(t('layers.announce.restored'))
+  } catch (e) {
+    problem.value = e
+    await reloadSettings()
+  } finally {
+    await refreshStatus()
+  }
+}
+
+// ---------------------------------------------------------------- layers: sending
+
+/** The sending button's words, by outcome (§3). */
+const sendLabel = computed(() => t(applyLabel(selection.value, previewing.value)))
+
+/** Whether the sending button sends something: a preview to put where the row is. */
+const canSend = computed(() => {
+  const c = selectedEffect.value
+  if (!selectedDevice.value || working.value || !c || c.state !== 'ready' || !previewing.value) {
+    return false
+  }
+  if (selection.value.kind === 'base') return true
+  // A layer runs a library effect, through a mask that lights something here.
+  return !c.hardware && countOf(rowLook.value?.mask) !== 0
+})
+
+/**
+ * Sends the row's preview: *Apply* for the base, as before layers; *Add the
+ * layer* on top; *Apply to this layer* in the layer's place, its mask and
+ * look kept — or a saved layer's, copied (§5.1).
+ */
+async function send(): Promise<void> {
+  const row = selection.value
+  if (row.kind === 'base') return applyEffect()
+  const where = target.value
+  const c = selectedEffect.value
+  const look = rowLook.value
+  if (!where || !c || c.hardware || !look) return
+  const parts: EditedLayer = {
+    effect: c.id,
+    values: apart(specs.value, paramValues.value),
+    bindings: paramBindings.value,
+    mask: look.mask,
+    look: look.look,
+  }
+  problem.value = null
+  working.value = true
+  try {
+    if (row.kind === 'new') {
+      const id = await addLayer(where, newLayer(parts))
+      pending.value = { look: {} }
+      removed.value = null
+      await reloadSettings()
+      selectRow(layerRow(id))
+      announce(t('layers.announce.added'))
+    } else {
+      const record = layerRecord(row.id, parts)
+      await replaceLayer(where, record)
+      installStack(
+        where,
+        stack.value.map((x) => (x.id === row.id ? record : x)),
+      )
+      removed.value = null
+      savedPicked.value = null
+      draft.value = null
+      announce(t('layers.announce.replaced'))
+    }
+  } catch (e) {
+    problem.value = e
+  } finally {
+    working.value = false
+    await refreshStatus()
+    await reloadSettings()
+  }
+}
+
+// ---------------------------------------------------------------- layers: saved
+
+/** *Your layers* shows for a layer's row and the new layer's: the base has no mask nor blend. */
+const showSavedLayers = computed(
+  () =>
+    selection.value.kind !== 'base' &&
+    (savedLayers.value.length > 0 || savedDeleted.value !== null),
+)
+
+const savedViews = computed<SavedLayerView[]>(() =>
+  savedLayers.value.map((s) => ({
+    name: s.name,
+    line: savedLine(s, effectName(s.effect) ?? s.effect, maskCtx.value, null),
+    swatch: swatchOf(s.effect),
+    pressed: savedPicked.value === s.name,
+  })),
+)
+
+/** A saved layer just deleted, at its place, until the next change to the list. */
+const savedDeleted = ref<{ record: SavedLayerRecord; at: number } | null>(null)
+const savedDeletedView = computed(() =>
+  savedDeleted.value ? { at: savedDeleted.value.at, name: savedDeleted.value.record.name } : null,
+)
+
+async function deleteSaved(name: string): Promise<void> {
+  const at = savedLayers.value.findIndex((s) => s.name === name)
+  if (at < 0) return
+  const record = savedLayers.value[at]
+  problem.value = null
+  try {
+    installSavedLayers(await deleteSavedLayer(name))
+    savedDeleted.value = { record, at }
+    if (savedPicked.value === name) cancelPreview()
+    announce(t('layers.announce.savedDeleted'))
+  } catch (e) {
+    problem.value = e
+  }
+}
+
+async function undoDeleteSaved(): Promise<void> {
+  const d = savedDeleted.value
+  if (!d) return
+  savedDeleted.value = null
+  try {
+    installSavedLayers(await restoreSavedLayer(d.record, d.at))
+    announce(t('layers.announce.savedRestored'))
+  } catch (e) {
+    problem.value = e
+  }
+}
+
+/** A saved mask just deleted, under the `select`, until the next change (§5.4). */
+const maskDeleted = ref<{ deleted: DeletedMask; name: string; count: number } | null>(null)
+const maskDeletedView = computed(() =>
+  maskDeleted.value ? { name: maskDeleted.value.name, count: maskDeleted.value.count } : null,
+)
+
+/**
+ * Deletes a saved mask: Rust writes its keys into every layer and saved layer
+ * naming it. The new layer, which only the window knows, gets them here.
+ */
+async function removeSavedMask(id: string): Promise<void> {
+  const name = savedMaskName(id, savedMasks.value) ?? ''
+  problem.value = null
+  try {
+    const deleted = await deleteMask(id)
+    maskDeleted.value = { deleted, name, count: deleted.layers.length + deleted.savedLayers.length }
+    if (pending.value.mask?.saved === id) {
+      const r = deleted.record
+      pending.value = {
+        ...pending.value,
+        mask: cleanMask({ group: r.group, keys: r.keys, lights: r.lights, region: r.region }),
+      }
+    }
+    forgetResolved()
+    announce(t('layers.announce.maskDeleted'))
+  } catch (e) {
+    problem.value = e
+  } finally {
+    await reloadSettings()
+    await refreshStatus()
+  }
+}
+
+async function undoMaskDeletion(): Promise<void> {
+  const d = maskDeleted.value
+  if (!d) return
+  maskDeleted.value = null
+  problem.value = null
+  try {
+    await undeleteMask(d.deleted)
+    forgetResolved()
+    announce(t('layers.announce.maskRestored'))
+  } catch (e) {
+    problem.value = e
+  } finally {
+    await reloadSettings()
+    await refreshStatus()
+  }
+}
+
+/** Saves the row's chosen keys as a mask, and links the row to it (§5.4). */
+async function saveAsMask(name: string, mask: Mask | undefined): Promise<void> {
+  const where = target.value
+  const clean = cleanMask(mask)
+  if (!where || !clean) return
+  // Lights and regions mean something on one definition only: its model goes with them.
+  const model = clean.lights || clean.region ? deviceOf(where) : null
+  const record = await saveMask(name, clean, model)
+  installSavedMasks([...savedMasks.value, record])
+  announce(t('layers.announce.maskSaved', { name }))
+  await changeMask({ saved: record.id })
+}
+
+// ---------------------------------------------------------------- layers: dialog
+
+/** The save dialog open, and for what. */
+type Dialog =
+  | { kind: 'layer' }
+  | { kind: 'mask' }
+  | { kind: 'renameMask'; id: string }
+  | { kind: 'renameLayer'; name: string }
+const dialog = ref<Dialog | null>(null)
+
+interface DialogContent {
+  title: string
+  name: string
+  items: SavedItem[]
+  note?: string
+  confirm: string
+  taken: (name: string) => boolean
+  submit: (name: string) => Promise<void>
+}
+
+const dialogContent = computed<DialogContent | null>(() => {
+  const d = dialog.value
+  if (!d) return null
+  const ctx = maskCtx.value
+  const layerNames = savedLayers.value.map((s) => s.name)
+  const maskNames = savedMasks.value.map((m) => m.name)
+  if (d.kind === 'layer') {
+    const l = layer.value
+    const c = selectedEffect.value
+    if (!l || !c) return null
+    const count = countOf(l.mask)
+    return {
+      title: t('layers.save.layerTitle'),
+      name: proposedName(c.name, maskName(l.mask, ctx, count)),
+      items: layerSaveItems(c.name, l, ctx, count),
+      note: t('layers.save.layerNote'),
+      confirm: t('layers.save.save'),
+      taken: (name) => nameTaken(name, layerNames),
+      // What the device runs, every declared value with it (§5.5).
+      submit: async (name) => {
+        installSavedLayers(await saveLayer(name, layerToSave(l, paramValues.value)))
+        savedDeleted.value = null
+        announce(t('layers.announce.layerSaved', { name }))
+      },
+    }
+  }
+  if (d.kind === 'mask') {
+    const mask = rowLook.value?.mask
+    return {
+      title: t('layers.save.maskTitle'),
+      name: '',
+      items: maskSaveItems(countOf(mask) ?? 0, ctx.lights),
+      note: t('layers.save.maskNote'),
+      confirm: t('layers.save.save'),
+      taken: (name) => nameTaken(name, maskNames),
+      submit: (name) => saveAsMask(name, mask),
+    }
+  }
+  if (d.kind === 'renameMask') {
+    const current = savedMaskName(d.id, savedMasks.value) ?? ''
+    const n = usageOf(d.id, stacks.value, savedLayers.value)
+    return {
+      title: t('layers.save.renameMaskTitle', { name: current }),
+      name: current,
+      items: [],
+      note: t('layers.save.renameMaskNote', { n }, n),
+      confirm: t('layers.save.rename'),
+      taken: (name) => nameTaken(name, maskNames, current),
+      submit: async (name) => {
+        installSavedMasks(await renameMask(d.id, name))
+        announce(t('layers.announce.renamed', { name }))
+      },
+    }
+  }
+  return {
+    title: t('layers.save.renameLayerTitle', { name: d.name }),
+    name: d.name,
+    items: [],
+    confirm: t('layers.save.rename'),
+    taken: (name) => nameTaken(name, layerNames, d.name),
+    submit: async (name) => {
+      installSavedLayers(await renameSavedLayer(d.name, name))
+      if (savedPicked.value === d.name) savedPicked.value = name
+      savedDeleted.value = null
+      announce(t('layers.announce.renamed', { name }))
+    },
+  }
+})
 
 // ---------------------------------------------------------------- brightness
 
@@ -1696,6 +2852,22 @@ onBeforeUnmount(() => {
                     @change="onDimming"
                   />
                 </div>
+                <!-- Each region carries its own stack when selected; the header none (§4.7). -->
+                <LayerStack
+                  v-if="regionSelected(d, r) && loaded"
+                  :target="`${d.name} · ${localized(r.name)}`"
+                  :rows="stackRows"
+                  :base="baseRow"
+                  :selection="selection"
+                  :new-label="newRowLabel"
+                  :full="atLimit(stack)"
+                  :waiting="waiting"
+                  @select="selectRow"
+                  @move="moveRow"
+                  @drop="dropRow"
+                  @remove="removeRow"
+                  @undo="undoRemove"
+                />
               </div>
             </div>
           </div>
@@ -1794,6 +2966,26 @@ onBeforeUnmount(() => {
                 @change="onDimming"
               />
             </div>
+            <!--
+              The stack, under its target as regions are (`layers-ui.md` §2):
+              only the selected card carries one, as only it carries the
+              brightness.
+            -->
+            <LayerStack
+              v-if="deviceKey === key(d) && loaded"
+              :target="d.name"
+              :rows="stackRows"
+              :base="baseRow"
+              :selection="selection"
+              :new-label="newRowLabel"
+              :full="atLimit(stack)"
+              :waiting="waiting"
+              @select="selectRow"
+              @move="moveRow"
+              @drop="dropRow"
+              @remove="removeRow"
+              @undo="undoRemove"
+            />
           </div>
         </template>
 
@@ -1802,6 +2994,8 @@ onBeforeUnmount(() => {
           <RouterLink to="/devices" class="link">{{ t('effects.chooseDevice') }}</RouterLink>
         </p>
       </div>
+      <!-- Outside the body, which a collapsed column hides: a layer moved is still said. -->
+      <p class="sr-only" aria-live="polite">{{ announcement }}</p>
     </section>
 
     <!-- --------------------------------------------------------- effects -->
@@ -1821,6 +3015,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div id="col-effects" ref="effectsList" class="col-body">
+        <!-- Above the effects, for a layer's row and the new layer's (§5.3). -->
+        <SavedLayers
+          v-if="showSavedLayers"
+          :items="savedViews"
+          :deleted="savedDeletedView"
+          @pick="pickSaved"
+          @rename="(name) => (dialog = { kind: 'renameLayer', name })"
+          @delete="deleteSaved"
+          @undo="undoDeleteSaved"
+        />
         <template v-for="g in grouped" :key="g.nature">
           <!--
             The title attribute names the button once the column is collapsed
@@ -1873,17 +3077,17 @@ onBeforeUnmount(() => {
               class="entry"
               type="button"
               :data-effect="c.id"
-              :aria-pressed="selectedEffect?.id === c.id"
+              :aria-pressed="savedPicked === null && selectedEffect?.id === c.id"
               :aria-label="entryLabel(c)"
               :title="c.name"
-              @click="chosenEffect = c.id"
+              @click="pickEffect(c.id)"
             >
               <EffectSwatch class="mark" :colors="c.swatch" />
               <span class="fx-name">{{ c.name }}</span>
-              <span v-if="activeId !== c.id && c.state === 'broken'" class="fx-state broken">
+              <span v-if="rowEffectId !== c.id && c.state === 'broken'" class="fx-state broken">
                 {{ t('effects.entryBroken') }}
               </span>
-              <span v-else-if="activeId !== c.id && c.state === 'stale'" class="fx-state stale">
+              <span v-else-if="rowEffectId !== c.id && c.state === 'stale'" class="fx-state stale">
                 {{ t('effects.entryStale') }}
               </span>
               <!--
@@ -1970,7 +3174,7 @@ onBeforeUnmount(() => {
                 <path d="M3 3a7 7 0 0 0 0 10M13 3a7 7 0 0 1 0 10" />
               </svg>
               <svg
-                v-if="activeId === c.id"
+                v-if="rowEffectId === c.id"
                 class="fx-applied"
                 viewBox="0 0 16 16"
                 width="14"
@@ -2084,234 +3288,327 @@ onBeforeUnmount(() => {
         <RouterLink to="/devices" class="link">{{ t('effects.chooseDevice') }}</RouterLink>
       </p>
 
-      <template v-if="selectedEffect">
-        <header class="fx-head">
-          <h1>{{ selectedEffect.name }}</h1>
-          <span class="badge" :class="selectedEffect.nature">
-            {{
-              selectedEffect.modified
-                ? t('effects.modified', { nature: t(`effects.natures.${selectedEffect.nature}`) })
-                : t(`effects.natures.${selectedEffect.nature}`)
-            }}
-          </span>
-          <span v-if="selectedEffect.readsKeys" class="badge keys">{{ t('effects.readsKeys') }}</span>
-          <span v-if="selectedEffect.readsClock" class="badge keys">{{
-            t('effects.readsClock')
-          }}</span>
-          <span v-if="selectedEffect.readsSignals" class="badge keys">{{
-            t('effects.readsSignals')
-          }}</span>
-          <span v-if="selectedEffect.readsAudio" class="badge keys">{{
-            t('effects.readsAudio')
-          }}</span>
-          <span v-if="selectedEffect.readsSystem" class="badge keys">{{
-            t('effects.readsSystem')
-          }}</span>
-        </header>
-
-        <p class="desc">{{ selectedEffect.description }}</p>
-        <!-- A load error its author reads, and copies into the editor: it stays
-             as long as the file does not compile. -->
-        <FailureNote v-if="selectedEffect.state === 'broken'" class="failure" :closable="false">
-          {{ selectedEffect.error }}
-        </FailureNote>
-        <p class="cost">{{ cost(selectedEffect.nature) }}</p>
-
-        <div class="preview">
-          <p class="cost">{{ previewNote }}</p>
-          <!--
-            The layout comes from Rust: it is null for the length of a round
-            trip. No empty keyboard is drawn in the meantime.
-          -->
-          <!--
-            On a split device, still the whole device: the selected region in
-            full colour, the others faded with their real frames, and what the
-            region's effect measures as its device drawn over it.
-          -->
-          <KeyboardSimulator
-            v-if="board"
-            class="sim"
-            :layout="board"
-            :frame="frame"
-            :focus="selectedRegion?.positions"
-            :focus-name="selectedRegion ? localized(selectedRegion.name) : undefined"
-          />
-          <p v-if="regionShare" class="cost">{{ regionShare }}</p>
-          <p v-if="board && !opened" class="cost">{{ t('effects.preview.defaultLayout') }}</p>
-        </div>
-
-        <!--
-          Named settings for this effect, above the settings they fill: a
-          preset is picked, then tuned.
-        -->
-        <EffectPresets
-          v-if="offersPresets"
-          :presets="presets"
-          :specs="specs"
-          :shown="shownSettings"
-          :pickable="pickable"
-          :save="onPresetSave"
-          :update="onPresetUpdate"
-          :rename="onPresetRename"
-          :remove="onPresetDelete"
-          @pick="onPresetPick"
-        />
-
-        <!--
-          The settings, generated from the manifest. The form knows no effect in
-          particular: it knows the four kinds of `ParamSpec`, and nothing else.
-        -->
-        <EffectParamsForm
-          ref="paramsForm"
-          :specs="specs"
-          :values="paramValues"
-          :bindings="paramBindings"
-          :bindable="selectedEffect.hardware === null"
-          :signals="held"
-          :receiving="receiving"
-          :frozen="frozen"
-          :empty="noParams"
-          @change="onParamChange"
-          @commit="onParamCommit"
-          @bind="onParamBind"
-          @reset="onParamReset"
-        />
-
-        <p v-if="signalsOff" class="warn">{{ t('effects.signalsOff') }}</p>
-        <p v-if="soundUnavailable" class="warn">{{ t('effects.soundUnavailable') }}</p>
-
-        <!-- What is remembered, said where it is made. See `savedNote`. -->
-        <p v-if="savedNote" class="cost">{{ savedNote }}</p>
-
-        <footer class="actions">
-          <button
-            class="solid"
-            :disabled="!selectedDevice || working || applied || selectedEffect.state !== 'ready'"
-            @click="applyEffect"
-          >
-            {{ applied ? t('effects.applied') : t('effects.apply') }}
+      <!--
+        The preview, with one state in words over it (`layers-ui.md` §3); during
+        a key selection, the selection's bar instead. The layout comes from Rust:
+        it is null for the length of a round trip, and no empty keyboard is
+        drawn in the meantime.
+      -->
+      <div v-if="board" class="preview">
+        <div
+          v-if="selecting"
+          class="bar choosing"
+          role="toolbar"
+          :aria-label="t('layers.select.bar')"
+          @keydown.esc.prevent="cancelChoosing"
+        >
+          <span class="hint">{{ selectingHint }}</span>
+          <span class="count" aria-live="polite">{{ selectingCount }}</span>
+          <span class="spacer" />
+          <button type="button" class="ghost small" @click="selectNone">
+            {{ t('layers.select.none') }}
           </button>
+          <button type="button" class="ghost small" @click="cancelChoosing">
+            {{ t('layers.select.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="solid small"
+            :disabled="selecting.positions.length === 0"
+            @click="finishChoosing"
+          >
+            {{ selecting.editing !== null ? t('layers.select.update') : t('layers.select.done') }}
+          </button>
+        </div>
+        <div v-else class="bar">
+          <span class="state" :class="stateLine" role="status">
+            <span class="dot" aria-hidden="true" />
+            {{ t(`layers.state.${stateLine}`) }}
+          </span>
+          <span class="spacer" />
+          <label v-if="offersSolo" class="solo">
+            <input v-model="solo" type="checkbox" />
+            {{ t('layers.solo') }}
+          </label>
+        </div>
+        <!--
+          On a split device, still the whole device: the selected region in
+          full colour, the others faded with their real frames, and what the
+          region's effect measures as its device drawn over it.
+        -->
+        <KeyboardSimulator
+          class="sim"
+          :layout="board"
+          :frame="frame"
+          :focus="selectedRegion?.positions"
+          :focus-name="selectedRegion ? localized(selectedRegion.name) : undefined"
+          :selecting="selecting?.positions ?? null"
+          :outlined="outlined"
+          @toggle="onToggleKey"
+          @paint="onPaintKey"
+          @done="finishChoosing"
+          @cancel="cancelChoosing"
+        />
+        <p v-if="regionShare" class="cost">{{ regionShare }}</p>
+        <p v-if="!opened" class="cost">{{ t('effects.preview.defaultLayout') }}</p>
+      </div>
 
+      <!--
+        The card of the selected row (§3). Inert while keys are chosen: the
+        selection ends by its own bar, *Done* or *Cancel*.
+      -->
+      <DetailCard
+        v-if="selectedEffect || selection.kind !== 'base'"
+        :inert="selecting !== null || undefined"
+        :kicker="cardKickerText"
+        :title="cardTitle"
+        :swatch="selectedEffect ? selectedEffect.swatch : null"
+        :hint="selection.kind === 'new' && !selectedEffect ? t('layers.card.chooseHint') : undefined"
+        :saveable="canSaveLayer"
+        @save="dialog = { kind: 'layer' }"
+      >
+        <!-- What concerns the base alone: the device's loop, and a rule interrupting it. -->
+        <template v-if="selection.kind === 'base'" #actions>
           <!--
             Stops the **device**'s loop, not the selected effect's: it is the one
             that writes, whatever effect is being watched.
           -->
-          <button v-if="runningHere" class="ghost" :disabled="working" @click="halt">
+          <button v-if="runningHere" type="button" class="ghost" :disabled="working" @click="halt">
             {{ t('effects.stop') }}
           </button>
-
           <!-- A rule interrupts the device: the gesture that ends it now. -->
-          <button v-if="status?.interruption" class="ghost" :disabled="working" @click="resume">
+          <button
+            v-if="status?.interruption"
+            type="button"
+            class="ghost"
+            :disabled="working"
+            @click="resume"
+          >
             {{ t('effects.resume') }}
           </button>
+        </template>
 
-          <!-- A hardware effect has no code: saying so is better than letting
-               people click into the void. -->
-          <button
-            class="ghost"
-            :disabled="selectedEffect.hardware !== null"
-            @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
-          >
-            {{ selectedEffect.nature === 'builtin' ? t('effects.viewCode') : t('effects.edit') }}
-          </button>
+        <LayerLook
+          v-if="rowLook && (selectedEffect || selection.kind === 'layer')"
+          :mask="rowLook.mask"
+          :look="rowLook.look"
+          :read-only="savedPick !== null"
+          :choices="choicesHere"
+          :ctx="maskCtx"
+          :count="countOf(rowLook.mask)"
+          :usage="maskUsage"
+          :deleted="maskDeletedView"
+          :signals="held"
+          @mask="onMaskPick"
+          @mask-action="onMaskAction"
+          @undo-mask="undoMaskDeletion"
+          @blend="onBlend"
+          @opacity="onOpacity"
+          @follows="onFollows"
+        />
 
-          <button
-            v-if="selectedEffect.hardware === null"
-            class="ghost"
-            :disabled="working"
-            @click="duplicateSelected"
-          >
-            {{ t('effects.duplicate') }}
-          </button>
-
-          <button
-            v-if="selectedEffect.modified"
-            class="ghost"
-            :disabled="working"
-            @click="pendingRestore = selectedEffect.id"
-          >
-            {{ t('effects.restoreOriginal') }}
-          </button>
-
-          <!--
-            Offered for the user's effects only.
-
-            It stays in place and enabled while the question is asked: hiding or
-            disabling it would take keyboard focus away at the very moment it
-            must reach the answer, which follows in the document.
-          -->
-          <button
-            v-if="removable"
-            class="ghost danger"
-            :disabled="working"
-            @click="pendingRemoval = selectedEffect.id"
-          >
-            {{ t('effects.delete') }}
-          </button>
-
-          <span class="spacer" />
-
-          <p class="cost">
-            {{ selectedEffect.hardware ? t('effects.footerHardware') : t('effects.footerPreview') }}
-          </p>
-        </footer>
-
-        <!--
-          The question is asked in the column, not in a modal box: it stays next
-          to what it describes, and does not prevent looking elsewhere while
-          thinking it over.
-
-          **After** the button that triggers it, and that is what makes the
-          whole keyboard path: the answer is the next tab stop. The title
-          carries `role="alert"`: the box appears without anything moving on
-          screen, so it has to be announced.
-        -->
-        <div
-          v-if="pendingRemoval"
-          class="confirm"
-          role="group"
-          aria-labelledby="confirm-remove"
-        >
-          <p id="confirm-remove" class="confirm-title" role="alert">
-            {{ t('effects.deleteTitle', { name: selectedEffect.name }) }}
-          </p>
-          <!--
-            What goes, spelled out. The source is the only irreplaceable item on
-            the list: settings can be redone, the loop restarted, hand-written
-            code cannot be reinstalled.
-          -->
-          <p class="cost">{{ t('effects.deleteDetail') }}</p>
-          <div class="confirm-actions">
-            <button class="solid danger" :disabled="working" @click="removeEffect">
-              {{ t('effects.deleteConfirm') }}
+        <section v-if="selectedEffect" class="section effect" aria-labelledby="effect-title">
+          <div class="effect-head">
+            <h2 id="effect-title" class="section-title">{{ t('layers.effect.title') }}</h2>
+            <!-- The cost, which tells the natures apart, on hover of the origin. -->
+            <span class="badge" :class="selectedEffect.nature" :title="cost(selectedEffect.nature)">
+              {{ originText(selectedEffect) }}
+            </span>
+            <span v-if="selectedEffect.readsKeys" class="badge keys">{{ t('effects.readsKeys') }}</span>
+            <span v-if="selectedEffect.readsClock" class="badge keys">{{
+              t('effects.readsClock')
+            }}</span>
+            <span v-if="selectedEffect.readsSignals" class="badge keys">{{
+              t('effects.readsSignals')
+            }}</span>
+            <span v-if="selectedEffect.readsAudio" class="badge keys">{{
+              t('effects.readsAudio')
+            }}</span>
+            <span v-if="selectedEffect.readsSystem" class="badge keys">{{
+              t('effects.readsSystem')
+            }}</span>
+            <span class="spacer" />
+            <!--
+              In *Effect*, not the action bar: they concern the effect alone
+              (§3). A hardware effect has no code: none to view.
+            -->
+            <button
+              v-if="selectedEffect.hardware === null"
+              type="button"
+              class="text-button"
+              @click="router.push({ name: 'editor', params: { id: selectedEffect.id } })"
+            >
+              {{ selectedEffect.nature === 'builtin' ? t('effects.viewCode') : t('effects.edit') }}
             </button>
-            <button class="ghost" :disabled="working" @click="pendingRemoval = null">
-              {{ t('effects.cancel') }}
+            <button
+              v-if="selectedEffect.hardware === null"
+              type="button"
+              class="text-button"
+              :disabled="working"
+              @click="duplicateSelected"
+            >
+              {{ t('effects.duplicate') }}
             </button>
-          </div>
-        </div>
-
-        <!-- Same placement and keyboard path as the removal question above. -->
-        <div
-          v-if="pendingRestore"
-          class="confirm"
-          role="group"
-          aria-labelledby="confirm-restore"
-        >
-          <p id="confirm-restore" class="confirm-title" role="alert">
-            {{ t('effects.restoreOriginalTitle', { name: selectedEffect.name }) }}
-          </p>
-          <p class="cost">{{ t('effects.restoreOriginalDetail') }}</p>
-          <div class="confirm-actions">
-            <button class="solid danger" :disabled="working" @click="restoreOriginal">
+            <button
+              v-if="selectedEffect.modified"
+              type="button"
+              class="text-button"
+              :disabled="working"
+              @click="pendingRestore = selectedEffect.id"
+            >
               {{ t('effects.restoreOriginal') }}
             </button>
-            <button class="ghost" :disabled="working" @click="pendingRestore = null">
-              {{ t('effects.cancel') }}
+            <!--
+              Offered for the user's effects only. It stays in place and enabled
+              while the question is asked: hiding or disabling it would take
+              keyboard focus away at the very moment it must reach the answer,
+              which follows in the document.
+            -->
+            <button
+              v-if="removable"
+              type="button"
+              class="text-button danger"
+              :disabled="working"
+              @click="pendingRemoval = selectedEffect.id"
+            >
+              {{ t('effects.delete') }}
             </button>
           </div>
-        </div>
-      </template>
+
+          <p class="desc">{{ selectedEffect.description }}</p>
+          <!-- A load error its author reads, and copies into the editor: it stays
+               as long as the file does not compile. -->
+          <FailureNote v-if="selectedEffect.state === 'broken'" class="failure" :closable="false">
+            {{ selectedEffect.error }}
+          </FailureNote>
+
+          <!--
+            The question is asked in the column, not in a modal box: it stays next
+            to what it describes, and does not prevent looking elsewhere while
+            thinking it over.
+
+            **After** the button that triggers it, and that is what makes the
+            whole keyboard path: the answer is the next tab stop. The title
+            carries `role="alert"`: the box appears without anything moving on
+            screen, so it has to be announced.
+          -->
+          <div
+            v-if="pendingRemoval"
+            class="confirm"
+            role="group"
+            aria-labelledby="confirm-remove"
+          >
+            <p id="confirm-remove" class="confirm-title" role="alert">
+              {{ t('effects.deleteTitle', { name: selectedEffect.name }) }}
+            </p>
+            <!--
+              What goes, spelled out. The source is the only irreplaceable item on
+              the list: settings can be redone, the loop restarted, hand-written
+              code cannot be reinstalled.
+            -->
+            <p class="cost">{{ t('effects.deleteDetail') }}</p>
+            <div class="confirm-actions">
+              <button class="solid danger" :disabled="working" @click="removeEffect">
+                {{ t('effects.deleteConfirm') }}
+              </button>
+              <button class="ghost" :disabled="working" @click="pendingRemoval = null">
+                {{ t('effects.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Same placement and keyboard path as the removal question above. -->
+          <div
+            v-if="pendingRestore"
+            class="confirm"
+            role="group"
+            aria-labelledby="confirm-restore"
+          >
+            <p id="confirm-restore" class="confirm-title" role="alert">
+              {{ t('effects.restoreOriginalTitle', { name: selectedEffect.name }) }}
+            </p>
+            <p class="cost">{{ t('effects.restoreOriginalDetail') }}</p>
+            <div class="confirm-actions">
+              <button class="solid danger" :disabled="working" @click="restoreOriginal">
+                {{ t('effects.restoreOriginal') }}
+              </button>
+              <button class="ghost" :disabled="working" @click="pendingRestore = null">
+                {{ t('effects.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <!--
+            Named settings for this effect, above the settings they fill: a
+            preset is picked, then tuned. *Save as preset…* sits here, in what a
+            preset keeps.
+          -->
+          <EffectPresets
+            v-if="offersPresets"
+            :presets="presets"
+            :specs="specs"
+            :shown="shownSettings"
+            :pickable="pickable"
+            :save="onPresetSave"
+            :update="onPresetUpdate"
+            :rename="onPresetRename"
+            :remove="onPresetDelete"
+            @pick="onPresetPick"
+          />
+
+          <!--
+            The settings, generated from the manifest. The form knows no effect in
+            particular: it knows the four kinds of `ParamSpec`, and nothing else.
+          -->
+          <EffectParamsForm
+            ref="paramsForm"
+            :specs="specs"
+            :values="paramValues"
+            :bindings="paramBindings"
+            :bindable="selectedEffect.hardware === null"
+            :signals="held"
+            :receiving="receiving"
+            :frozen="frozen"
+            :empty="noParams"
+            @change="onParamChange"
+            @commit="onParamCommit"
+            @bind="onParamBind"
+            @reset="onParamReset"
+          />
+
+          <p v-if="signalsOff" class="warn">{{ t('effects.signalsOff') }}</p>
+          <p v-if="soundUnavailable" class="warn">{{ t('effects.soundUnavailable') }}</p>
+
+          <!-- What is remembered, said where it is made. See `savedNote`. -->
+          <p v-if="savedNote" class="cost">{{ savedNote }}</p>
+        </section>
+      </DetailCard>
+
+      <!--
+        The button that sends, labelled by its outcome, and *Cancel preview*
+        while there is one: nothing else (§3, P0 4).
+      -->
+      <footer v-if="selectedEffect || selection.kind !== 'base'" class="actions" :inert="selecting !== null || undefined">
+        <button type="button" class="solid" :disabled="!canSend" @click="send">
+          {{ sendLabel }}
+        </button>
+        <button v-if="canCancelPreview" type="button" class="ghost" @click="cancelPreview">
+          {{ t('layers.apply.cancelPreview') }}
+        </button>
+      </footer>
+
+      <SaveDialog
+        v-if="dialogContent"
+        open
+        :title="dialogContent.title"
+        :name="dialogContent.name"
+        :items="dialogContent.items"
+        :note="dialogContent.note"
+        :confirm="dialogContent.confirm"
+        :taken="dialogContent.taken"
+        :submit="dialogContent.submit"
+        @close="dialog = null"
+      />
     </section>
   </section>
 </template>
@@ -2324,7 +3621,8 @@ onBeforeUnmount(() => {
  * the others: there is nothing to settle.
  */
 .studio {
-  --col-devices: 212px;
+  /* 264 px: a layer's row holds a swatch, a name, a line and its tools (`layers-ui.md` §2). */
+  --col-devices: 264px;
   --col-effects: 244px;
 
   display: grid;
@@ -2879,18 +4177,6 @@ onBeforeUnmount(() => {
   border-right: none;
 }
 
-.fx-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--gap-2);
-  align-items: baseline;
-}
-
-.fx-head h1 {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 .badge {
   flex: none;
   padding: 2px var(--gap-2);
@@ -2947,6 +4233,119 @@ onBeforeUnmount(() => {
   gap: var(--gap-2);
 }
 
+/* Over the drawing: its one state, or the selection's bar. */
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  align-items: center;
+  min-height: 32px;
+  max-width: 760px;
+}
+
+.bar.choosing {
+  padding: 4px var(--gap-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+
+.count {
+  font-weight: 600;
+}
+
+/* In words, the colour a second channel: live, preview, hardware. */
+.state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.state.live {
+  color: var(--ok);
+}
+
+.state.preview {
+  color: var(--accent);
+}
+
+.state.hardware {
+  color: var(--text-muted);
+}
+
+.solo {
+  display: inline-flex;
+  gap: var(--gap-2);
+  align-items: center;
+  min-height: 24px;
+  font-size: 13px;
+}
+
+.solo input {
+  accent-color: var(--accent);
+}
+
+/* The card's *Effect* section: its title, the origin, and what concerns the effect alone. */
+.effect {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3);
+}
+
+.effect-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  align-items: center;
+}
+
+.section-title {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Actions in the accent's words, no frame: they sit in a heading's line. */
+.text-button {
+  min-height: 28px;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.text-button:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+
+.text-button.danger {
+  color: var(--bad);
+}
+
+.text-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.solid.small,
+.ghost.small {
+  min-height: 28px;
+  padding: 3px var(--gap-3);
+  font-size: 13px;
+}
+
 /* The drawing takes no more than its share: the column also holds the settings
    and the actions, and a keyboard pushing the rest off screen would mean
    scrolling to find a button. Bounded in **width** and not in height: the SVG
@@ -2955,14 +4354,19 @@ onBeforeUnmount(() => {
   max-width: 760px;
 }
 
+/* Kept in view at the bottom of the panel: the card above it runs long. */
 .actions {
+  position: sticky;
+  bottom: calc(-1 * var(--gap-4));
+  z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: var(--gap-2);
   align-items: center;
   margin-top: auto;
-  padding-top: var(--gap-3);
+  padding: var(--gap-3) 0;
   border-top: 1px solid var(--line);
+  background: var(--ground);
 }
 
 .spacer {
