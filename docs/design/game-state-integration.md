@@ -1,8 +1,8 @@
 # Game state integration
 
 What happens in a game — your health, the ammo left in the clip, a flashbang,
-the bomb — shown on the keyboard. Status: proposed, Counter-Strike 2 first;
-Dota 2 is the next table (§6).
+the bomb — shown on the keyboard. Status: implemented. Counter-Strike 2 came in
+#262, released in 0.15.0; Dota 2 (§6) in #287, released in 0.18.0.
 
 ## Why this needs a design
 

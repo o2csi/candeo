@@ -178,7 +178,7 @@ Each cell is detailed, with its source, in the section named on the left.
 
 | Product | Status | What, and on what condition | Sources |
 |---|---|---|---|
-| **Candeo** | planned | The second increment of [#360]: layers naming an effect or a preset, with masks and blending, on one device or region. Not designed yet, and two design notes still say layers are not planned (§9). | [issue][#360], [docs][c-regions] |
+| **Candeo** | planned | The second increment of [#360]: layers naming an effect or a preset, with masks and blending, on one device or region. Proposed in a design note, not built. | [issue][#360], [docs][c-composition] |
 | **OpenRGB** | partial (plugin) | The Effects plugin's *Layers* effect stacks layer groups with ten blend modes (multiply, screen, overlay, dodge, burn, mask, lighten, darken, exclusive, difference); a *Mask* effect works with it. | [code][o-layers], [code][o-blend] |
 | **SignalRGB** | partial | No layer stack offered to the user was found in the docs or the changelog. Game-integration effects compose a background, event triggers and HUD elements internally (Pro or Light Points). | [docs][s-gameint] |
 | **Artemis** | implemented | Layers and nested folders, blend modes, opacity, shapes, transforms, and display conditions per layer or folder (always, once, on a condition, on an event). | [code][a-general], [docs][a-conditions] |
@@ -367,16 +367,11 @@ could not be verified.
 
 - The column describes `main` at `e273c65`: presets were merged after 0.22.1
   and are not released yet.
-- Three design notes have status lines older than the code:
-  [`key-input.md`](../design/key-input.md) and
-  [`game-state-integration.md`](../design/game-state-integration.md) say
-  *proposed*, and [`inputs-and-automations.md`](../design/inputs-and-automations.md)
-  says sound is proposed. Key presses, games and sound ship ([code][c-presses],
-  [code][c-gsi-code], [code][c-audio]); the tables follow the code.
-- Composition: [#360] plans layers as its second increment, while
+- Composition: [#360] plans layers as its second increment, proposed in
+  [`composition.md`](../design/composition.md);
   [`regions.md`](../design/regions.md) §10 and
-  [`inputs-and-automations.md`](../design/inputs-and-automations.md) §5 still
-  say layers and masks are not planned. To settle in #360's design.
+  [`inputs-and-automations.md`](../design/inputs-and-automations.md) §5 point
+  to it since 2026-11-06, where they said layers were not planned.
 - Linux: the build, the packages and their udev rule are checked in CI; no
   device has been tried on Linux ([#230]). Sound, key presses and idle are
   Windows only.
@@ -471,7 +466,7 @@ Observations drawn from the tables, each with the issue it concerns.
   Artemis, Hypercolor and KeyGlow, and in OpenRGB's Effects plugin. Each pairs a
   layer with a selection of lights; KeyGlow's named key groups and Artemis's
   adaption hints keep that selection meaningful on another keyboard. Candeo's
-  notes disagree on whether layers are planned (§9).
+  proposal is [`composition.md`](../design/composition.md).
 - **Saved setups ([#367]).** OpenRGB, Artemis and Hypercolor save the whole rig.
   An OpenRGB profile chooses which devices it holds; Hypercolor snapshots what
   runs. Hypercolor's backup is applied as one transaction over its own state;
@@ -573,6 +568,7 @@ One product at a time, in a docs-only pull request:
 [c-other]: ../design/other-keyboards.md
 [c-regions]: ../design/regions.md
 [c-presets]: ../design/presets.md
+[c-composition]: ../design/composition.md
 [c-inputs]: ../design/inputs-and-automations.md
 [c-keys]: ../design/key-input.md
 [c-gsi]: ../design/game-state-integration.md
