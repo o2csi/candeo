@@ -270,6 +270,69 @@ impl Layout {
         regions.iter().find(|r| r.id == id)
     }
 
+    /// The device as an effect running on some of its lights sees it — a
+    /// region's (`docs/design/regions.md` §1), a layer's mask
+    /// (`docs/design/composition.md` §3.1): those lights alone in `keys` and
+    /// `matrix`, everything else the device's — the grid, the outline, the
+    /// length of a frame — so that its frame lays over the device's with
+    /// nothing to translate. No firmware effect and no region: they are the
+    /// whole device's.
+    pub fn narrowed(&self, positions: &[u16]) -> Layout {
+        let mut matrix = vec![EMPTY; self.matrix.len()];
+        for &position in positions {
+            if let Some(&address) = self.matrix.get(usize::from(position)) {
+                matrix[usize::from(position)] = address;
+            }
+        }
+        let keys: Vec<Key> = self
+            .keys
+            .iter()
+            .filter(|k| positions.contains(&k.index))
+            .copied()
+            .collect();
+        Layout {
+            name: self.name,
+            vid: self.vid,
+            pid: self.pid,
+            port: self.port,
+            machine: self.machine,
+            lighting: self.lighting,
+            surveyed_firmware: self.surveyed_firmware,
+            firmware_effects: &[],
+            lights: self.lights,
+            grid: self.grid,
+            rows: self.rows,
+            cols: self.cols,
+            matrix: Box::leak(matrix.into_boxed_slice()),
+            keys: Box::leak(keys.into_boxed_slice()),
+            outline: self.outline,
+            regions: &[],
+        }
+    }
+
+    /// [`Self::narrowed`] to `positions`, built once per layout and set of
+    /// lights and kept for the process, as every layout is. A layer's mask is
+    /// resolved each time its stack starts: leaking a layout each time would
+    /// grow with every start, where a few masks per device are ever drawn.
+    pub fn masked(&'static self, positions: &[u16]) -> &'static Layout {
+        type Masked = Vec<(usize, Vec<u16>, &'static Layout)>;
+        static MASKED: std::sync::Mutex<Masked> = std::sync::Mutex::new(Vec::new());
+        let mut wanted = positions.to_vec();
+        wanted.sort_unstable();
+        wanted.dedup();
+        // By address: two definitions may share a name and ids, never a place.
+        let of = std::ptr::from_ref(self) as usize;
+        let mut masked = MASKED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((_, _, layout)) = masked.iter().find(|(l, p, _)| *l == of && *p == wanted) {
+            return layout;
+        }
+        let layout: &'static Layout = Box::leak(Box::new(self.narrowed(&wanted)));
+        masked.push((of, wanted, layout));
+        layout
+    }
+
     /// True if this HID enumeration entry is **the lighting interface** of this
     /// layout.
     ///

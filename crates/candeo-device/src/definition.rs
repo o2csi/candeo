@@ -1092,7 +1092,8 @@ fn parse(json: &str) -> Result<(Layout, Vec<Example>, Vec<u16>), String> {
         .map(|(spec, positions)| Region {
             id: Box::leak(spec.id.into_boxed_str()),
             name: spec.name,
-            layout: Box::leak(Box::new(region_layout(&layout, &positions))),
+            // The device as the region's effect sees it (`regions.md` §11 a).
+            layout: Box::leak(Box::new(layout.narrowed(&positions))),
             positions: Box::leak(positions.into_boxed_slice()),
         })
         .collect();
@@ -1140,40 +1141,6 @@ fn region_positions(
         }
     }
     Ok(all)
-}
-
-/// The device as a region's effect sees it: its lights alone, everything else
-/// the device's, so a region's frame has the device's length and its
-/// positions (`docs/design/regions.md` §11 a).
-fn region_layout(device: &Layout, positions: &[u16]) -> Layout {
-    let mut matrix = vec![EMPTY; device.matrix.len()];
-    for &position in positions {
-        matrix[usize::from(position)] = device.matrix[usize::from(position)];
-    }
-    let keys: Vec<Key> = device
-        .keys
-        .iter()
-        .filter(|k| positions.contains(&k.index))
-        .copied()
-        .collect();
-    Layout {
-        name: device.name,
-        vid: device.vid,
-        pid: device.pid,
-        port: device.port,
-        machine: device.machine,
-        lighting: device.lighting,
-        surveyed_firmware: device.surveyed_firmware,
-        firmware_effects: &[],
-        lights: device.lights,
-        grid: device.grid,
-        rows: device.rows,
-        cols: device.cols,
-        matrix: Box::leak(matrix.into_boxed_slice()),
-        keys: Box::leak(keys.into_boxed_slice()),
-        outline: device.outline,
-        regions: &[],
-    }
 }
 
 /// Replays a definition's reference frames: the reports it gives must be the
