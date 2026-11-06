@@ -52,12 +52,6 @@
       "user": "yours",
       "game": "games"
     },
-    "natures": {
-      "hardware": "hardware",
-      "builtin": "built-in",
-      "user": "yours"
-    },
-    "modified": "{nature} · modified",
     "readsKeys": "reacts to key presses",
     "readsClock": "reads the clock",
     "readsSignals": "reads signals",
@@ -94,14 +88,6 @@
     "restore": "Restore",
     "forgetSettings": "Forget its settings",
     "preview": {
-      "device": "Frames from the engine, exactly the ones sent to the device.",
-      "hardware": "Run by the firmware: the application does not receive its frames, there is nothing to animate here.",
-      "illustration": "Run by the firmware. This is the application's drawing of what it does, not the device's own frames.",
-      "noDevice": "Preview on the default layout: nothing is sent anywhere, and no device is controlled.",
-      "elsewhere": "Preview: nothing is sent to the device, where “{name}” keeps running.",
-      "apply": "Preview: nothing is sent to the device. “Apply” sends this one there.",
-      "stopped": "The preview stopped on an error.",
-      "starting": "Preparing the preview…",
       "defaultLayout": "Drawn from the default layout: no device open."
     },
     "frozen": "The preview is not running. The values below stay remembered, and “Apply” will start the effect with them.",
@@ -118,8 +104,6 @@
     "duplicate": "Duplicate",
     "restoreOriginal": "Restore original",
     "delete": "Delete",
-    "footerHardware": "run by the device · nothing to edit",
-    "footerPreview": "the preview runs as soon as an effect is selected · “Apply” sends to the device",
     "deleteTitle": "Delete “{name}”?",
     "deleteDetail": "The effect's file is deleted: this is hand-written code, and nothing reinstalls it. The settings kept for it are forgotten, and its loop stops on the devices where it runs. Other effects are not touched.",
     "deleteConfirm": "Delete permanently",

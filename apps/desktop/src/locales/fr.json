@@ -52,12 +52,6 @@
       "user": "à vous",
       "game": "jeux"
     },
-    "natures": {
-      "hardware": "matériel",
-      "builtin": "intégré",
-      "user": "à vous"
-    },
-    "modified": "{nature} · modifié",
     "readsKeys": "réagit aux frappes",
     "readsClock": "lit l'horloge",
     "readsSignals": "lit les signaux",
@@ -94,14 +88,6 @@
     "restore": "Restaurer",
     "forgetSettings": "Oublier ses réglages",
     "preview": {
-      "device": "Images du moteur, exactement celles qui partent vers l'appareil.",
-      "hardware": "Exécuté par le micrologiciel : l'application ne reçoit pas ses images, il n'y a rien à animer ici.",
-      "illustration": "Exécuté par le micrologiciel. Ceci est le dessin qu'en fait l'application, pas les images de l'appareil.",
-      "noDevice": "Aperçu sur le gabarit par défaut : rien n'est envoyé nulle part, et aucun appareil n'est piloté.",
-      "elsewhere": "Aperçu : rien n'est envoyé à l'appareil, où « {name} » continue de tourner.",
-      "apply": "Aperçu : rien n'est envoyé à l'appareil. « Appliquer » y envoie celui-ci.",
-      "stopped": "L'aperçu s'est arrêté sur une erreur.",
-      "starting": "Aperçu en préparation…",
       "defaultLayout": "Dessin d'après le gabarit par défaut : aucun appareil ouvert."
     },
     "frozen": "L'aperçu ne tourne pas. Les valeurs ci-dessous restent retenues, et « Appliquer » lancera l'effet avec.",
@@ -118,8 +104,6 @@
     "duplicate": "Dupliquer",
     "restoreOriginal": "Rétablir l'original",
     "delete": "Supprimer",
-    "footerHardware": "exécuté par l'appareil · rien à modifier",
-    "footerPreview": "l'aperçu tourne dès la sélection · « Appliquer » envoie à l'appareil",
     "deleteTitle": "Supprimer « {name} » ?",
     "deleteDetail": "Le fichier de l'effet est supprimé : c'est du code écrit à la main, et rien ne le réinstalle. Les réglages retenus pour lui sont oubliés, et sa boucle s'arrête sur les appareils où il tourne. Les autres effets ne sont pas touchés.",
     "deleteConfirm": "Supprimer définitivement",
