@@ -21,9 +21,11 @@ None of it is sent anywhere. There is no account to create, no identifier
 assigned, and no telemetry: the application does not count launches, does not
 report which effects run, and sends nothing it reads about the computer.
 
-**A keyboard's serial number is never written down.** The log identifies a unit
-by a fingerprint derived from it, so two keyboards of the same model can be told
-apart in a bug report without the serial itself appearing.
+**A keyboard's serial number is never written down.** The settings and the log
+identify a unit by a fingerprint derived from it, so two keyboards of the same
+model can be told apart, in the settings or in a bug report, without the serial
+itself appearing. A serial that an earlier version wrote into the settings is
+replaced by its fingerprint the next time Candeo saves them.
 
 **Key presses are not read**, except by an effect that declares it reacts to
 typing — and then only as key positions and times, in memory, for the effect

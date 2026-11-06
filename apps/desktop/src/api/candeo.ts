@@ -521,8 +521,11 @@ export type EffectParams = Record<string, ParamValue>
 export interface DeviceRecord {
   vid: number
   pid: number
-  /** Absent when the system declares none — not `null`. */
-  serial?: string
+  /**
+   * The fingerprint of the unit's serial, never the serial itself
+   * (`PRIVACY.md`). Absent when the system declares none — not `null`.
+   */
+  fingerprint?: string
   state: DeviceState
   /**
    * Brightness remembered for **this** device. Absent = {@link BRIGHTNESS_DEFAULT}.

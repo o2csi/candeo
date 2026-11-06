@@ -299,12 +299,20 @@ pub enum DeviceState {
 pub struct DeviceRecord {
     pub vid: u16,
     pub pid: u16,
-    /// Serial number, when the system reports one.
+    /// The fingerprint of the unit's serial number, when the system reports one
+    /// ([`crate::journal::fingerprint`]). It tells two units of one model apart
+    /// without the serial itself being written down, as `PRIVACY.md` promises.
     ///
     /// Absent from the file rather than `null`: most entries will not have one,
     /// and a repeated empty key tells nothing to whoever rereads their settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub serial: Option<String>,
+    pub fingerprint: Option<String>,
+    /// The serial itself, as files written by earlier versions hold it: read,
+    /// turned into [`Self::fingerprint`] by [`Settings::absorb_legacy`], never
+    /// written back. Kept under its old key so that those versions, which match
+    /// an entry without one on its model, still find the device they control.
+    #[serde(default, rename = "serial", skip_serializing)]
+    legacy_serial: Option<String>,
     pub state: DeviceState,
     /// Brightness kept for **this** device.
     ///
@@ -364,10 +372,32 @@ impl DeviceRecord {
         if self.vid != vid || self.pid != pid {
             return false;
         }
-        match (self.serial.as_deref(), serial) {
-            (Some(ours), Some(theirs)) => ours == theirs,
+        match (self.kept_fingerprint(), serial) {
+            (Some(ours), Some(theirs)) => ours == crate::journal::fingerprint(theirs),
             _ => true,
         }
+    }
+
+    /// The fingerprint this entry holds, or the one of a serial an earlier
+    /// version wrote, while [`Settings::absorb_legacy`] has not run.
+    fn kept_fingerprint(&self) -> Option<String> {
+        self.fingerprint.clone().or_else(|| {
+            self.legacy_serial
+                .as_deref()
+                .map(crate::journal::fingerprint)
+        })
+    }
+
+    /// Fills in the fingerprint if it was just learned, never erases it: a
+    /// silent enumeration must not make the entry lose what tells it apart from
+    /// the unit next to it.
+    fn learn(&mut self, serial: Option<&str>) {
+        if self.fingerprint.is_none() {
+            self.fingerprint = self
+                .kept_fingerprint()
+                .or_else(|| serial.map(crate::journal::fingerprint));
+        }
+        self.legacy_serial = None;
     }
 }
 
@@ -824,6 +854,11 @@ impl Settings {
         if let Some(legacy_level) = self.legacy_log_level.take() {
             self.preferences.log_level.get_or_insert(legacy_level);
         }
+        // A serial an earlier version wrote becomes its fingerprint, and the
+        // next write leaves the serial out.
+        for record in &mut self.devices {
+            record.learn(None);
+        }
     }
 
     /// Index of the entry describing this device, if there is one.
@@ -836,7 +871,11 @@ impl Settings {
     fn position(&self, vid: u16, pid: u16, serial: Option<&str>) -> Option<usize> {
         self.devices
             .iter()
-            .position(|r| r.vid == vid && r.pid == pid && r.serial.as_deref() == serial)
+            .position(|r| {
+                r.vid == vid
+                    && r.pid == pid
+                    && r.kept_fingerprint() == serial.map(crate::journal::fingerprint)
+            })
             .or_else(|| {
                 self.devices
                     .iter()
@@ -863,17 +902,13 @@ impl Settings {
             Some(i) => {
                 let record = &mut self.devices[i];
                 record.state = state;
-                // The serial is filled in if we just learned it, but never
-                // erased: a silent enumeration must not make the entry lose
-                // what tells it apart from the unit next to it.
-                if record.serial.is_none() {
-                    record.serial = serial.map(str::to_owned);
-                }
+                record.learn(serial);
             }
             None => self.devices.push(DeviceRecord {
                 vid,
                 pid,
-                serial: serial.map(str::to_owned),
+                fingerprint: serial.map(crate::journal::fingerprint),
+                legacy_serial: None,
                 state,
                 brightness: None,
                 dimming: None,
@@ -901,16 +936,15 @@ impl Settings {
                     return false;
                 }
                 self.devices[i].dimming = dimming;
-                if self.devices[i].serial.is_none() {
-                    self.devices[i].serial = serial.map(str::to_owned);
-                }
+                self.devices[i].learn(serial);
             }
             None => {
                 let Some(dimming) = dimming else { return false };
                 self.devices.push(DeviceRecord {
                     vid,
                     pid,
-                    serial: serial.map(str::to_owned),
+                    fingerprint: serial.map(crate::journal::fingerprint),
+                    legacy_serial: None,
                     state: DeviceState::default(),
                     brightness: None,
                     dimming: Some(dimming),
@@ -993,11 +1027,7 @@ impl Settings {
                     return false;
                 }
                 self.devices[i].brightness = kept;
-                // Same rule as [`Self::set_device_state`]: the serial is filled
-                // in if we just learned it, it is never erased.
-                if self.devices[i].serial.is_none() {
-                    self.devices[i].serial = serial.map(str::to_owned);
-                }
+                self.devices[i].learn(serial);
             }
             None => {
                 // The default, on a device we keep nothing about: there is no
@@ -1006,7 +1036,8 @@ impl Settings {
                 self.devices.push(DeviceRecord {
                     vid,
                     pid,
-                    serial: serial.map(str::to_owned),
+                    fingerprint: serial.map(crate::journal::fingerprint),
+                    legacy_serial: None,
                     state: DeviceState::default(),
                     brightness: Some(level),
                     dimming: None,
@@ -4823,7 +4854,8 @@ mod tests {
             devices: vec![DeviceRecord {
                 vid: 0x1532,
                 pid: 0x0292,
-                serial: Some("XY01".into()),
+                fingerprint: Some(crate::journal::fingerprint("XY01")),
+                legacy_serial: None,
                 state: DeviceState::Adopted,
                 brightness: Some(128),
                 dimming: None,
@@ -5371,7 +5403,10 @@ mod tests {
         // And the serial is not erased along the way, otherwise the second unit
         // would become indistinguishable from the first.
         settings.set_device_state(VID, PID, None, DeviceState::Adopted);
-        assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
+        assert_eq!(
+            settings.devices[0].fingerprint.as_deref(),
+            Some(crate::journal::fingerprint("XY01").as_str())
+        );
     }
 
     /// A decision made without a serial is completed as soon as the serial is
@@ -5383,7 +5418,10 @@ mod tests {
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
 
         assert_eq!(settings.devices.len(), 1);
-        assert_eq!(settings.devices[0].serial.as_deref(), Some("XY01"));
+        assert_eq!(
+            settings.devices[0].fingerprint.as_deref(),
+            Some(crate::journal::fingerprint("XY01").as_str())
+        );
     }
 
     /// A file from an earlier version knows neither `devices` nor the current
@@ -6076,6 +6114,38 @@ mod tests {
     ///
     /// Same guard as `STATE_CHANGED` and the window label: the word "mirror" is a
     /// promise, and this keeps it.
+    /// PRIVACY.md: a unit's serial is never written down. A file an earlier
+    /// version wrote with it reads as its fingerprint, the next write leaves the
+    /// serial out, and the unit is still told apart from another of its model.
+    #[test]
+    fn a_serial_is_kept_as_its_fingerprint_only() {
+        let serial = "XY24ABCDEFG0001";
+        let mut settings: Settings = serde_json::from_value(serde_json::json!({
+            "devices": [{ "vid": 5426, "pid": 658, "serial": serial, "state": "adopted" }]
+        }))
+        .expect("settings");
+        settings.absorb_legacy();
+        assert_eq!(
+            settings.devices[0].fingerprint.as_deref(),
+            Some(crate::journal::fingerprint(serial).as_str())
+        );
+        assert!(!serde_json::to_string(&settings).unwrap().contains(serial));
+        assert_eq!(
+            settings.device_state(5426, 658, Some(serial)),
+            DeviceState::Adopted
+        );
+        assert_eq!(
+            settings.device_state(5426, 658, Some("XY24ABCDEFG0002")),
+            DeviceState::Detected,
+            "another unit of the model is not the one adopted"
+        );
+
+        let mut fresh = Settings::default();
+        fresh.set_device_state(5426, 658, Some(serial), DeviceState::Adopted);
+        fresh.set_brightness(5426, 658, Some(serial), 40);
+        assert!(!serde_json::to_string(&fresh).unwrap().contains(serial));
+    }
+
     /// #373: a build writes back what it does not know. One that kept only its
     /// own fields erased what a newer one had added: every rule, once.
     #[test]
@@ -6205,7 +6275,8 @@ mod tests {
             &DeviceRecord {
                 vid: 0x1532,
                 pid: 0x0290,
-                serial: Some("SN".into()),
+                fingerprint: Some("0123456789abcdef".into()),
+                legacy_serial: None,
                 state: DeviceState::Adopted,
                 brightness: Some(DEFAULT_BRIGHTNESS),
                 dimming: Some(following("sound:bass")),
