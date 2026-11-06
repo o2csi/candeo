@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.22.1"
+version = "0.23.0"
 edition = "2021"
 # What Oxc 0.157 requires, to compile effects (#381); 1.82 before it.
 rust-version = "1.97"

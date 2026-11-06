@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.23.0](https://github.com/o2csi/candeo/compare/v0.22.1...v0.23.0) (2026-11-06)
+
+
+### Features
+
+* **assistants:** offer Codex and GitHub Copilot CLI ([1b00f14](https://github.com/o2csi/candeo/commit/1b00f14812b239352f4929d5316935f3019bbc14))
+* compile effects in Rust instead of the window ([44f09d7](https://github.com/o2csi/candeo/commit/44f09d785fd76e5777e47693da7b7d1fa396e9cb))
+* **compiler:** compile effect TypeScript with Oxc ([91b9696](https://github.com/o2csi/candeo/commit/91b969618f895d74da195a3ea2ae7118ae20fdf3))
+* compose layers over a target's base in the engine ([546648b](https://github.com/o2csi/candeo/commit/546648be1fad2675f460fe4e966b282680e34693))
+* keep presets in settings.json, with commands to change them ([f9074f9](https://github.com/o2csi/candeo/commit/f9074f91fcda80fe61e5312b69e62a2b2162afea))
+* **mcp:** serve read-only tools over a pipe only the user opens ([eb791f5](https://github.com/o2csi/candeo/commit/eb791f54eb80f9caf79bdf092353993b720c5683))
+* name key groups by scancode ([a77e00a](https://github.com/o2csi/candeo/commit/a77e00ac646f9006aaa3dbd17878822601baaffc))
+* narrow a layout to a mask's lights, once per mask ([2dc87e6](https://github.com/o2csi/candeo/commit/2dc87e65ede2879f5e554b74dbea33abcc0f5013))
+* **openrgb:** add an SDK client and launcher behind a feature ([2ea1489](https://github.com/o2csi/candeo/commit/2ea1489a3a4dfdb3186037c794bb78bb799677cd))
+* **poc:** transpile effects with Oxc and compare them in the engine ([64f6e92](https://github.com/o2csi/candeo/commit/64f6e92cfb3689a4c1011f5ff79ece76b985876c))
+* save and pick presets above an effect's settings ([d69d2f3](https://github.com/o2csi/candeo/commit/d69d2f35cd13a8fc4f43fb547cc964581da086de))
+* **settings:** let assistants connect from Settings › Assistants ([49f5b52](https://github.com/o2csi/candeo/commit/49f5b52520dd4b4d5a704bed189b34b30414c5f4))
+
+
+### Bug Fixes
+
+* keep a unit's serial fingerprint, not its serial, in the settings ([eace4ed](https://github.com/o2csi/candeo/commit/eace4ed8f6c238a02125b3d131d9c38a69cf113b))
+* **mcp:** let the busy pipe state go unused on Unix ([7614ed3](https://github.com/o2csi/candeo/commit/7614ed31855d60bc9272919b53445d93fb3126b4))
+* say when Controlled folder access refuses a write ([5c6ae59](https://github.com/o2csi/candeo/commit/5c6ae5919530a0b81e1238a2ff036624a351e002))
+
+
+### Documentation
+
+* compare Candeo with six RGB controllers, with sources ([93217a9](https://github.com/o2csi/candeo/commit/93217a998f2d77c5ee1f5f6735ce7c283c32b0cb))
+* decide remote MCP over Streamable HTTP ([44092d5](https://github.com/o2csi/candeo/commit/44092d59c3d72c6ed840a4572ae251982d64e536))
+* decide the layer card and saved layers and masks ([1a8cb6c](https://github.com/o2csi/candeo/commit/1a8cb6c7e638918625606b9114cdfdc83670c13d))
+* decide the MCP server's transport, consent and tools ([9161441](https://github.com/o2csi/candeo/commit/916144151af13fb01f26cfcc12ac67fae0b520d9))
+* decide the OpenRGB output, started as Hypercolor does ([7e2b3f7](https://github.com/o2csi/candeo/commit/7e2b3f77e43b1bee2fe885e55858c6c053f9de4a))
+* describe effects compiled in Rust with Oxc ([4b27bdd](https://github.com/o2csi/candeo/commit/4b27bdd2a23e6e4d41d1434ca3206459926ed022))
+* describe how Candeo meets Controlled folder access ([d8cee0b](https://github.com/o2csi/candeo/commit/d8cee0b4f665d37beb9aa9450589f3e4f7c49d7e))
+* describe the OpenRGB output as decided ([c44adf1](https://github.com/o2csi/candeo/commit/c44adf18d92d30a06140baf045a91ad0ffc51e1e))
+* design presets, named settings for one effect ([a6fac2c](https://github.com/o2csi/candeo/commit/a6fac2c1dfe126d7f2ded7c6f6ec4cad1fcf57b0))
+* design the layers interface before step 2 ([4276812](https://github.com/o2csi/candeo/commit/4276812a9fc4a184b45f4a5a79db395855339274))
+* document the MCP server and what it reads ([3dfb3d8](https://github.com/o2csi/candeo/commit/3dfb3d8462c2d901262f21da0c29bf4f00153d4b))
+* link the MCP phases to their issues ([58a5777](https://github.com/o2csi/candeo/commit/58a577712f4804fbd0b062eba97f7ca3039c0ba8))
+* mark key presses, games and sound as implemented ([565bb4d](https://github.com/o2csi/candeo/commit/565bb4db62c49d4ca47432b0978ce9a8a7bea286))
+* mark the composition study decided ([4a0a639](https://github.com/o2csi/candeo/commit/4a0a6395255175d84a669791515cdb8e88d7cd81))
+* name candeo-compiler in the layout ([5bfa215](https://github.com/o2csi/candeo/commit/5bfa215a9c03afe6b4db40eefc26a4b4b011fe35))
+* name Codex and GitHub Copilot among the assistants ([c839e1b](https://github.com/o2csi/candeo/commit/c839e1b68cfab5ec8b56e06c40d65a972b030076))
+* name the products each privacy and MCP observation covers ([cf50ca9](https://github.com/o2csi/candeo/commit/cf50ca9a225c6f7027fa17badb54992d45deb98d))
+* point the OpenRGB design at its proof of concept ([f2d3fdb](https://github.com/o2csi/candeo/commit/f2d3fdb9ebd745025b7ca0ed1d9f747460815ae2))
+* present assistants in the README, the listings and the site ([6626a72](https://github.com/o2csi/candeo/commit/6626a72b5c160ed1cc3e7d93fb0a839535a9ea37))
+* presets in the Store listing, README, site and What's new ([1edae41](https://github.com/o2csi/candeo/commit/1edae418b61d1fc303436c17442e5c0f89b05edf))
+* propose layers and overlay rules for composition ([8b65f74](https://github.com/o2csi/candeo/commit/8b65f74f3708c2857928ce864a3de0b4c244f046))
+* record what the headless transpilation PoC measured ([c43e7f8](https://github.com/o2csi/candeo/commit/c43e7f81792e62b6f9c64f298010b12eca1a51cc))
+* say under what load the frame costs were measured ([98330f7](https://github.com/o2csi/candeo/commit/98330f76c43bfc10e8675f7b508a43265a7db919))
+* study OpenRGB as an optional output ([5a3a516](https://github.com/o2csi/candeo/commit/5a3a516e6d26308925ff8ab7201ce9d3294aa76c))
+* the MCP architecture note in English ([a8ad4d7](https://github.com/o2csi/candeo/commit/a8ad4d735fb85304563c0cc8aab00c7e998599c2))
+
 ## [0.22.1](https://github.com/o2csi/candeo/compare/v0.22.0...v0.22.1) (2026-11-05)
 
 
