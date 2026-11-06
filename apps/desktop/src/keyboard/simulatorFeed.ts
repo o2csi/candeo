@@ -21,6 +21,7 @@
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 
 import { startPreview, stopPreview, type Bindings, type EffectParams } from '../api/candeo'
+import { startPreviewStack, type LayerRecord, type PreviewBase } from '../api/layers'
 import { deviceOf, targetKey, type Target } from '../api/target'
 import type { Rgb } from '../api/types'
 import { overlay } from '../composables/regions'
@@ -50,6 +51,22 @@ const ILLUSTRATION_PACE = 40
 
 const BLACK: Rgb = [0, 0, 0]
 
+/**
+ * A stack to preview instead of one effect: a target's layers with the row
+ * being edited in the gallery's effect (`docs/design/composition.md` §3.9).
+ */
+export interface PreviewedStack {
+  /**
+   * Changes when the stack must start again: an effect, a mask, the order.
+   * Settings and looks go to the running preview live.
+   */
+  key: string
+  /** `null` draws the layers over black: *Only this layer*. */
+  base: PreviewBase | null
+  /** Bottom to top. */
+  layers: LayerRecord[]
+}
+
 export interface SimulatorFeedOptions {
   /** The layout black frames are drawn with until the first frame arrives. */
   layout: () => LayoutView | null
@@ -77,6 +94,11 @@ export interface SimulatorFeedOptions {
   deviceLoop?: () => string | null
   /** The effect to preview when the device is not shown, or `null`. */
   previewed: () => string | null
+  /**
+   * A stack to preview when the device is not shown, or `null`; it wins over
+   * {@link previewed}. Read when the preview starts, but for its `key`.
+   */
+  previewedStack?: () => PreviewedStack | null
   /**
    * The firmware effect to **illustrate** instead, or `null`.
    *
@@ -124,6 +146,10 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
   // Doubling the device's real frames in a second engine would cost a context
   // for nothing.
   const previewed = computed(() => (showsDevice.value ? null : options.previewed()))
+  /** What restarts a stack preview; `null` while no stack is previewed. */
+  const stackKey = computed(() =>
+    showsDevice.value ? null : (options.previewedStack?.()?.key ?? null),
+  )
   /** The device's frames are wanted under a region's preview: they exist only while its loop runs. */
   const under = computed(() => !showsDevice.value && focus.value !== null && deviceLoop.value !== null)
 
@@ -150,17 +176,22 @@ export function useSimulatorFeed(options: SimulatorFeedOptions) {
   // running 180 ms after an apply would make the simulator flicker between two
   // sources.
   watch(
-    [previewed, previewKey, revision],
-    ([id]) => {
+    [previewed, stackKey, previewKey, revision],
+    ([id, stacked]) => {
       window.clearTimeout(timer)
-      if (id === null) {
+      if (id === null && stacked === null) {
         onPreview.stop(true)
         void stopPreview()
         return
       }
       timer = window.setTimeout(() => {
         const d = options.device()
-        startPreview(d, id, options.params(), options.bindings?.() ?? {})
+        const stack = stacked === null ? null : (options.previewedStack?.() ?? null)
+        let started: Promise<void>
+        if (stack) started = startPreviewStack(d, stack.base, stack.layers)
+        else if (id !== null) started = startPreview(d, id, options.params(), options.bindings?.() ?? {})
+        else return
+        started
           // Resubscribing after every start is mandatory. The channel lives in
           // the loop state and `start_preview` builds a new one: without this,
           // the simulator would freeze on the previous preview's last frame and
