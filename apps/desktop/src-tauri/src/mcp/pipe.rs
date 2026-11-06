@@ -42,7 +42,9 @@ pub(crate) enum BindError {
 pub(crate) enum Unreachable {
     /// No pipe: Candeo is not running, still starting, or MCP is off.
     Absent,
-    /// Every instance is in use: the bridge waits for one.
+    /// Every instance is in use: the bridge waits for one. A Unix socket keeps
+    /// accepting, and never says so.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Busy,
     /// Served by a process of another user.
     NotOurs,
