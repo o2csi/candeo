@@ -124,8 +124,8 @@ const saved = ref('')
 const loading = ref(true)
 const restored = ref(false)
 const busy = ref(false)
-/** What stopped the last action, already readable. */
-const problem = ref<string | null>(null)
+/** What stopped the last action, as it was thrown: the note says it. */
+const problem = ref<unknown>(null)
 
 /**
  * The parameters the saved version declares.
@@ -166,7 +166,7 @@ async function open(): Promise<void> {
   } catch (e) {
     // An unreadable effect must not leave an empty editor: if a draft is left,
     // that is what is shown, along with what failed.
-    problem.value = message(e)
+    problem.value = e
     saved.value = draft ?? ''
     source.value = draft ?? ''
     restored.value = draft !== null
@@ -292,7 +292,7 @@ async function refreshStatus(): Promise<void> {
   try {
     report.value = await engineStatus()
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   }
 }
 
@@ -385,7 +385,7 @@ const { frame, restartPreview } = useSimulatorFeed({
   params: () => valuesFor(target.value, id.value ?? '', savedSpecs.value),
   bindings: () => bindingsFor(target.value, id.value ?? '', savedSpecs.value),
   onError: (e) => {
-    problem.value = message(e)
+    problem.value = e
   },
 })
 
@@ -471,12 +471,12 @@ async function act(task: () => Promise<void>): Promise<void> {
   try {
     await task()
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
     // **The only place the language service's refusal exists**, and the only
     // place a save's error is said: without this line it is gone from the
     // screen by the time the log is opened. The effect id goes with it, since
     // a log read an hour later does not know what was displayed.
-    error('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
+    error('editor', `${id.value ?? 'new effect'}: ${message(e)}`, e)
   } finally {
     busy.value = false
     await refreshStatus()
@@ -682,9 +682,7 @@ onBeforeUnmount(() => {
           describes the last gesture, whereas a loop error describes something
           that keeps running.
         -->
-        <FailureNote v-if="problem" class="failure" @close="problem = null">
-          {{ problem }}
-        </FailureNote>
+        <FailureNote v-if="problem" class="failure" :failure="problem" @close="problem = null" />
         <!-- The loop keeps raising: closing this would only hide what is happening. -->
         <FailureNote v-else-if="effectError" class="failure" :closable="false">
           {{ t('editor.effectError', { error: effectError }) }}

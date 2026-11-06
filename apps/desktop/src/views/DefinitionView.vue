@@ -15,7 +15,6 @@ import {
   readDeviceDefinition,
   saveDeviceDefinition,
 } from '../api/candeo'
-import { message } from '../api/journal'
 import CodeEditor from '../components/CodeEditor.vue'
 import EditorShortcuts from '../components/EditorShortcuts.vue'
 import FailureNote from '../components/FailureNote.vue'
@@ -40,8 +39,8 @@ const busy = ref(false)
 const restored = ref(false)
 /** Why the file drives nothing, in English, as its author reads it. */
 const reason = ref<string | null>(null)
-/** What went wrong with the last action. */
-const problem = ref<string | null>(null)
+/** What went wrong with the last action, as it was thrown. */
+const problem = ref<unknown>(null)
 
 const unsaved = computed(() => !builtIn.value && text.value !== saved.value)
 
@@ -60,7 +59,7 @@ async function load(): Promise<void> {
       reason.value = problems.find((p) => p.file === file.value)?.reason ?? null
     }
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     loading.value = false
   }
@@ -93,7 +92,7 @@ async function act(action: () => Promise<void>): Promise<void> {
   try {
     await action()
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     busy.value = false
   }
@@ -162,7 +161,7 @@ const copy = () =>
         @save="busy || !unsaved || save()"
       />
 
-      <FailureNote v-if="problem" class="failure" @close="problem = null">{{ problem }}</FailureNote>
+      <FailureNote v-if="problem" class="failure" :failure="problem" @close="problem = null" />
       <FailureNote v-else-if="reason" class="failure" :closable="false">
         {{ t('definition.drivesNothing', { reason }) }}
       </FailureNote>

@@ -112,6 +112,16 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
+# Whether Windows' Controlled folder access refused a write to `Documents`
+# (`src/controlled_folders.rs`, #394): `MSFT_MpPreference` through WMI, readable
+# without administrator rights. `wmi` rather than COM of our own: the locator,
+# the proxy security and the VARIANTs are its whole job, on the `windows` crate
+# already in the tree; it only adds the `futures` facade, whose parts are there
+# too. Without its default `chrono`: no date is read.
+wmi = { version = "0.18", default-features = false }
+# The `Documents` folder, found as Tauri's `document_dir()` finds it. Already in
+# the tree through Tauri.
+dirs = "7"
 
 # Launch at login inside an MSIX package (`src/autostart.rs`): there the `Run`
 # value goes to a store nothing reads at login, and Windows offers `StartupTask`

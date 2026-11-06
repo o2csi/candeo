@@ -86,8 +86,8 @@ const opened = reactive<Record<string, boolean>>({})
 /** Your files that drive nothing, and why. */
 const problems = ref<DefinitionProblem[]>([])
 const files = computed(() => yourFiles(devices.value, problems.value))
-/** What went wrong with a file or the folder, said once, under the list. */
-const fileError = ref<string | null>(null)
+/** What went wrong with a file or the folder, as it was thrown, said once under the list. */
+const fileError = ref<unknown>(null)
 
 /**
  * Reads your definitions again first: a file just saved may define a device to
@@ -106,7 +106,7 @@ async function detect(): Promise<void> {
 async function attempt(action: () => Promise<unknown>): Promise<void> {
   fileError.value = null
   await action().catch((e: unknown) => {
-    fileError.value = message(e)
+    fileError.value = e
   })
 }
 
@@ -526,7 +526,7 @@ onMounted(reread)
       </li>
     </ul>
     <p v-else class="note">{{ t('devices.yoursNone') }}</p>
-    <FailureNote v-if="fileError" class="err" @close="fileError = null">{{ fileError }}</FailureNote>
+    <FailureNote v-if="fileError" class="err" :failure="fileError" @close="fileError = null" />
   </section>
 </template>
 

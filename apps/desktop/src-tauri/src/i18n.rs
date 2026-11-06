@@ -76,6 +76,7 @@ mod tests {
     #[test]
     fn every_key_used_from_rust_exists() {
         let sources = [
+            include_str!("controlled_folders.rs"),
             include_str!("failure.rs"),
             include_str!("journal.rs"),
             include_str!("lib.rs"),

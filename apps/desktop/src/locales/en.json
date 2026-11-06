@@ -14,7 +14,8 @@
       "light": "Light theme",
       "dark": "Dark theme"
     },
-    "dismiss": "Close this message"
+    "dismiss": "Close this message",
+    "openWindowsSecurity": "Open Windows Security"
   },
   "effects": {
     "columns": {
@@ -400,6 +401,7 @@
   },
   "errors": {
     "unexpected": "Something went wrong: {detail}",
+    "controlledFolderAccess": "Windows' Controlled folder access is blocking Candeo from writing to its folder in Documents: allow Candeo's program, not the folder, in Windows Security.",
     "startupHeldByUser": "Launch at login was turned off in Task Manager. Turn it back on there, under Startup apps.",
     "startupHeldByPolicy": "A policy on this computer keeps Candeo from starting at login.",
     "nameEmpty": "An effect needs a name.",

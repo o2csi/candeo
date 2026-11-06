@@ -366,10 +366,10 @@ interface Choice {
 const library = ref<EffectEntry[]>([])
 /** False until the library was read once: before that, every effect looks missing. */
 const libraryRead = ref(false)
-/** Already readable: Rust's messages are shown as they are. */
-const listError = ref<string | null>(null)
-/** What prevented applying or stopping. Already readable too. */
-const problem = ref<string | null>(null)
+/** What reading or opening the library threw: the note says it. */
+const listError = ref<unknown>(null)
+/** What prevented applying, stopping or changing an effect, as it was thrown. */
+const problem = ref<unknown>(null)
 
 function fromEntry(e: EffectEntry): Choice {
   return {
@@ -744,7 +744,7 @@ async function refreshStatus(): Promise<void> {
   try {
     report.value = await engineStatus()
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   }
 }
 
@@ -866,7 +866,7 @@ const { frame, restartPreview } = useSimulatorFeed({
   params: () => paramValues.value,
   bindings: () => paramBindings.value,
   onError: (e) => {
-    problem.value = message(e)
+    problem.value = e
   },
 })
 
@@ -956,7 +956,7 @@ async function applyEffect(): Promise<void> {
       await startEffect(where, c.id, paramValues.value, paramBindings.value)
     }
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     working.value = false
     await refreshStatus()
@@ -986,7 +986,7 @@ async function halt(): Promise<void> {
   try {
     await stopEffect(where)
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     working.value = false
     await refreshStatus()
@@ -1010,7 +1010,7 @@ async function resume(): Promise<void> {
   try {
     await resumeDevice({ vid: d.vid, pid: d.pid })
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     working.value = false
     await refreshStatus()
@@ -1048,13 +1048,13 @@ async function restore(names: readonly string[]): Promise<void> {
   try {
     for (const name of names) await restoreBuiltin(name)
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   }
   try {
     await readLibrary()
     restartPreview()
   } catch (e) {
-    listError.value = message(e)
+    listError.value = e
   } finally {
     working.value = false
   }
@@ -1095,7 +1095,7 @@ async function forgetMissing(name: string): Promise<void> {
     await forgetEffectSettings(name)
     dropEffect(name)
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   }
 }
 
@@ -1110,7 +1110,7 @@ async function duplicateSelected(): Promise<void> {
     await readLibrary()
     chosenEffect.value = name
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     working.value = false
   }
@@ -1120,7 +1120,7 @@ async function openFolder(): Promise<void> {
   try {
     await openEffectsDir()
   } catch (e) {
-    listError.value = message(e)
+    listError.value = e
   }
 }
 
@@ -1134,7 +1134,7 @@ async function refreshEffects(): Promise<void> {
   try {
     await readLibrary()
   } catch (e) {
-    listError.value = message(e)
+    listError.value = e
   } finally {
     working.value = false
   }
@@ -1193,7 +1193,7 @@ async function removeEffect(): Promise<void> {
     if (chosenEffect.value === id) chosenEffect.value = null
     await readLibrary()
   } catch (e) {
-    problem.value = message(e)
+    problem.value = e
   } finally {
     working.value = false
     // The loop may have stopped: the engine state will only say so once read back.
@@ -1551,7 +1551,7 @@ onMounted(async () => {
     await readLibrary()
     libraryRead.value = true
   } catch (e) {
-    listError.value = message(e)
+    listError.value = e
   }
 
   await refreshStatus()
@@ -2028,10 +2028,13 @@ onBeforeUnmount(() => {
 
     <!-- --------------------------------------------------------- settings -->
     <section class="col detail" :aria-label="t('effects.columns.settings')">
-      <FailureNote v-if="listError" class="failure" @close="listError = null">
-        {{ listError }}
-      </FailureNote>
-      <FailureNote v-if="problem" class="failure" @close="problem = null">{{ problem }}</FailureNote>
+      <FailureNote
+        v-if="listError"
+        class="failure"
+        :failure="listError"
+        @close="listError = null"
+      />
+      <FailureNote v-if="problem" class="failure" :failure="problem" @close="problem = null" />
       <FailureNote v-if="applyError" class="failure" @close="dismissApplyError">
         {{ applyError }}
       </FailureNote>
