@@ -19,6 +19,7 @@ mod audio;
 mod automations;
 mod autostart;
 mod catalog;
+mod controlled_folders;
 mod failure;
 mod hotplug;
 mod i18n;
@@ -1341,9 +1342,7 @@ fn try_device_definition(
     let store = storage::store(&app)?;
     let path = store.user_devices_dir()?.join(&file);
     if !path.exists() {
-        std::fs::write(&path, json).map_err(|e| {
-            Failure::unexpected(format!("cannot write {}: {e}", crate::paths::shown(&path)))
-        })?;
+        storage::write(&path, json)?;
     }
     let mut settings = store.read_settings()?;
     settings.choose_definition(layout.vid, layout.pid, Some(&file));
@@ -2051,6 +2050,7 @@ pub fn run() {
             storage::open_effects_dir,
             storage::open_devices_dir,
             storage::open_site_devices,
+            controlled_folders::open_controlled_folder_access,
             storage::reload_device_definitions,
             storage::copy_device_definition,
             try_device_definition,

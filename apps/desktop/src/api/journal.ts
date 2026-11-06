@@ -66,6 +66,14 @@ function isFailure(e: unknown): e is Failure {
 }
 
 /**
+ * Windows' Controlled folder access refused a write to `Documents` (#394): the
+ * one failure whose way out is a page of the system's, which the note opens.
+ */
+export function blockedByWindows(e: unknown): boolean {
+  return isFailure(e) && e.code === 'controlledFolderAccess'
+}
+
+/**
  * An error as shown, in the interface language — or in `locale`: the log is
  * written in English.
  *

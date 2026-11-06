@@ -428,6 +428,14 @@ export function openSiteDevices(): Promise<void> {
 }
 
 /**
+ * Opens Windows Security where Controlled folder access lets a program write
+ * to `Documents`. Candeo only takes the person there: allowing it is theirs.
+ */
+export function openControlledFolderAccess(): Promise<void> {
+  return invoke('open_controlled_folder_access')
+}
+
+/**
  * Reads the folder of your device definitions again; the files that drive
  * nothing come back with their reason. A device already open keeps the
  * definition it opened with until it opens again.

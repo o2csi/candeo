@@ -936,6 +936,11 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             "missing: closing the window stops effects"
         },
     );
+    // The system's own words for the write Controlled folder access refused
+    // (#394): the window only says what to do about it.
+    if let Some(refusal) = crate::controlled_folders::last_refusal() {
+        line(&mut out, "controlled folder access", &refusal);
+    }
 
     out.push_str("\nDevices\n");
     for layout in crate::layouts() {
