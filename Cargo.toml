@@ -5,13 +5,16 @@ members = ["crates/*", "apps/desktop/src-tauri"]
 [workspace.package]
 version = "0.22.1"
 edition = "2021"
-rust-version = "1.82"
+# What Oxc 0.157 requires, to compile effects (#381); 1.82 before it.
+rust-version = "1.97"
 license = "GPL-3.0-only"
 repository = "https://github.com/o2csi/candeo"
 
 [workspace.dependencies]
 candeo-protocol = { path = "crates/candeo-protocol" }
 candeo-device   = { path = "crates/candeo-device" }
+candeo-compiler = { path = "crates/candeo-compiler" }
+candeo-openrgb  = { path = "crates/candeo-openrgb" }
 hidapi    = "2.6"
 thiserror = "2"
 serde     = { version = "1", features = ["derive"] }

@@ -264,8 +264,7 @@ export interface EffectManifest {
 
 /**
  * Writes one of the user's effects, `user:<name>`, to `<name>.ts` in the user's
- * folder, and returns its SHA-256, to hand back to {@link cacheEffect} with the
- * JavaScript compiled from it.
+ * folder, and returns its SHA-256, to hand to {@link compileEffect}.
  *
  * `create` says which gesture this is: creating never overwrites an effect of
  * that name, in any case, and saving again never creates one. A built-in is
@@ -276,14 +275,14 @@ export function saveEffectSource(key: string, source: string, create: boolean): 
 }
 
 /**
- * Records the JavaScript compiled from the version of the file that has `hash`.
+ * Compiles the version of the file that has `hash`, and records the result.
  *
- * Rust runs the module once to read what it declares and samples its swatch.
- * A module that does not load comes back `broken`, with its error; a file that
- * changed since `hash` is refused.
+ * Rust strips the types, runs the module once to read what it declares and
+ * samples its swatch. A file that does not compile or load comes back `broken`,
+ * with its error and where it is; a file that changed since `hash` is refused.
  */
-export function cacheEffect(key: string, hash: string, js: string): Promise<EffectEntry> {
-  return invoke('cache_effect', { key, hash, js })
+export function compileEffect(key: string, hash: string): Promise<EffectEntry> {
+  return invoke('compile_effect', { key, hash })
 }
 
 /**
@@ -450,7 +449,7 @@ export function forgetEffectSettings(id: string): Promise<void> {
  *
  * - `ready`: compiled for the file's current bytes;
  * - `stale`: never compiled, or changed since — see `refreshLibrary`;
- * - `broken`: compiled, and it does not load — `error` says why.
+ * - `broken`: it does not compile, or does not load — `error` says why.
  */
 export type EffectState = 'ready' | 'stale' | 'broken'
 
@@ -465,9 +464,9 @@ export interface EffectEntry extends EffectManifest {
   id: string
   kind: 'builtin' | 'user'
   state: EffectState
-  /** Why a `broken` effect does not load. */
+  /** Why a `broken` effect does not compile or load. */
   error?: string
-  /** SHA-256 of the source file, for {@link cacheEffect}. */
+  /** SHA-256 of the source file, for {@link compileEffect}. */
   hash?: string
   /** A built-in whose file was edited outside the application. */
   modified: boolean
@@ -521,8 +520,11 @@ export type EffectParams = Record<string, ParamValue>
 export interface DeviceRecord {
   vid: number
   pid: number
-  /** Absent when the system declares none — not `null`. */
-  serial?: string
+  /**
+   * The fingerprint of the unit's serial, never the serial itself
+   * (`PRIVACY.md`). Absent when the system declares none — not `null`.
+   */
+  fingerprint?: string
   state: DeviceState
   /**
    * Brightness remembered for **this** device. Absent = {@link BRIGHTNESS_DEFAULT}.

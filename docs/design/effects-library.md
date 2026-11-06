@@ -115,23 +115,24 @@ export default defineEffect({
 
 ## 3. Compiling and the cache
 
-The Rust side cannot strip TypeScript types, and the webview already can: the
-editor loads the TypeScript compiler for Monaco. The main window is created at
-startup and closing it only hides it, so a webview is always there while Candeo
-runs, tray-only use included.
+Rust compiles effects, with Oxc, since #381 (before, the webview did, with the
+TypeScript compiler Monaco loads): see
+[`headless-transpile-poc.md`](headless-transpile-poc.md) §9. Listing still runs
+nothing, so the window asks for what is stale to be compiled.
 
 1. **Rust lists the folder**: for each `.ts`, its name, the SHA-256 of its bytes,
    and whether the cache holds a result for that hash.
-2. **The webview compiles what is stale**, with `transpileModule`, at startup
-   and on **Refresh** in the gallery. The compiler is loaded only when at
-   least one file is stale.
-3. **Rust receives the JavaScript**, loads it once in QuickJS with the time
-   budget swatch sampling already uses, reads the manifest the module declares
-   (`__candeo_manifest`), checks `apiVersion`, samples the swatch, and writes
-   `app_cache_dir()/effects/<name>.json`: hash, JavaScript, manifest, swatch.
+2. **The window asks for what is stale**, at startup and on **Refresh** in the
+   gallery, and the editor for what it saves: `compile_effect`, with the hash it
+   read.
+3. **Rust compiles that version of the file**, loads it once in QuickJS with the
+   time budget swatch sampling already uses, reads the manifest the module
+   declares (`__candeo_manifest`), checks `apiVersion`, samples the swatch, and
+   writes `app_cache_dir()/effects/<name>.json`: hash, JavaScript, manifest,
+   swatch.
 4. A file that fails to compile or load is cached **with its error**, for that
-   hash: it is listed with an error state, opens in the editor, and is not
-   retried until it changes.
+   hash, and the line and column for a compile error: it is listed with an
+   error state, opens in the editor, and is not retried until it changes.
 
 The effects folder holds only the files people write. The engine and the tray
 run an effect only when its cache matches the file's current hash, so they

@@ -197,7 +197,7 @@ mod tests {
 
     /// **What keeps the Rust tests honest.** They run these sources without a
     /// compiler; a type annotation would make them fail to load here while the
-    /// window, which strips types, still ran them.
+    /// application, which strips types, still ran them.
     #[test]
     fn every_shipped_source_runs_as_it_is() {
         for s in &ALL {

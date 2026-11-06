@@ -1,0 +1,40 @@
+// TypeScript 5.9.3 (Monaco 0.57.0), transpileModule for ES2020, before #381. Source SHA-256: 3f978d2aff4248d6fe2f15e6d5152b580fb20042c46040dbb2400e812db43e82
+// Diagonal wave — a hue wave leaves the top-left corner and crosses the keyboard
+// in diagonals.
+//
+// The wave from before the geometry, and an effect in its own right: its
+// distance counts **steps through the matrix** (column + row), not millimetres,
+// and matrix holes count as distance.
+//
+// It starts from a corner, not from the center, on purpose. On a keyboard 22
+// cells wide and 6 high, any wave measured from the center turns into
+// near-vertical bands, whatever its shape: it looked like "Radial wave". A
+// corner changes the motion itself, and the two can be told apart at a glance.
+//
+// It reads neither `x` nor `y`: of the two waves, it is the only one that runs
+// on a layout nobody has drawn.
+import { defineEffect, hsv } from '@candeo/effects-api';
+export default defineEffect({
+    description: {
+        en: 'A hue wave leaves the top-left corner and crosses the keyboard in diagonals',
+        fr: 'Une onde de teinte part du coin supérieur gauche et traverse le clavier en diagonale',
+    },
+    kinds: 'all',
+    requires: ['matrix'],
+    params: {
+        speed: { kind: 'number', label: { en: 'Speed', fr: 'Vitesse' }, min: 0, max: 400, default: 120 },
+        scale: { kind: 'number', label: { en: 'Scale', fr: 'Échelle' }, min: 1, max: 60, default: 18 },
+    },
+    render({ layout, time, frame, params }) {
+        const speed = Number(params.speed ?? 120);
+        const scale = Number(params.scale ?? 18);
+        // `layout.keys` only holds positions that carry an LED: matrix holes stay
+        // dark, which is the right default.
+        for (const key of layout.keys) {
+            const steps = key.col + key.row;
+            // Minus: a given hue sits further from the corner as time passes, so the
+            // bands move away from it.
+            frame.set(key, hsv(time * speed - steps * scale, 1, 1));
+        }
+    },
+});
