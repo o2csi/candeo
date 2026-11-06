@@ -32,6 +32,8 @@ first four exist today.
 | **Mask** | the lights of the target a layer may touch | §3.3 |
 | **Stack** | the base, the applied effect as today, and the layers above it, on one target | §3.2 |
 | **Overlay** | a layer a rule adds while it is under way, instead of interrupting the device | §3.6 |
+| **Saved layer** | a named layer, put back as a copy on any target | `savedLayers`, step 2 ([`layers-ui.md`](layers-ui.md) §5) |
+| **Saved mask** | named keys or lights, linked to the layers drawn through it | `savedMasks`, step 2 ([`layers-ui.md`](layers-ui.md) §5) |
 | **Saved stack** | a named stack, picked again later, as a preset is | after the first version: §4, idea 9 |
 | **Saved setup** | effects assigned to several devices at once | [#367](https://github.com/o2csi/candeo/issues/367) |
 | **Spatial scene** | devices placed on one canvas, one animation sampled across them | not planned (#360) |
@@ -399,8 +401,9 @@ blending is three orders of magnitude below it.
 ### 3.10 The interface, in words
 
 > [`layers-ui.md`](layers-ui.md) designs this interface in full and moves the
-> stack into the devices column, under its target, as regions are; it keeps
-> the words below. This section stays as the study wrote it.
+> stack into the devices column, under its target, as regions are, frames the
+> detail panel as a card per selected row, and adds saved layers and saved
+> masks; it keeps the words below. This section stays as the study wrote it.
 
 **In *Effects***, the settings column of a device or a region gains a
 **Layers** block, above Presets:
@@ -583,7 +586,9 @@ the README and the site before the release that ships them (AGENTS.md).
 
 **Left out of the first version**: effects returning transparency; transitions;
 press to acknowledge; saved stacks and files; simulated inputs; MCP tools, which
-wait for #359; the tray's editing of layers; masks computed per frame.
+wait for #359; the tray's editing of layers; masks computed per frame. Saved
+layers and saved masks, which the interface's review asked for, come with
+step 2 ([`layers-ui.md`](layers-ui.md) §5).
 
 ### 5.2 After it, in the order the value comes
 
