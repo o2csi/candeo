@@ -62,6 +62,13 @@ async function move(id: string, delta: 1 | -1): Promise<void> {
   target?.focus()
 }
 
+/** Removes a row; its *Undo* takes the focus, which the row took with it. */
+async function remove(id: string): Promise<void> {
+  emit('remove', id)
+  await nextTick()
+  root.value?.querySelector<HTMLButtonElement>('.removed .undo')?.focus()
+}
+
 function onDrop(onto: string): void {
   if (dragging.value !== null && dragging.value !== onto) emit('drop', dragging.value, onto)
   dragging.value = null
@@ -109,7 +116,7 @@ function onDrop(onto: string): void {
             @select="emit('select', { kind: 'layer', id: row.id })"
             @up="move(row.id, 1)"
             @down="move(row.id, -1)"
-            @remove="emit('remove', row.id)"
+            @remove="remove(row.id)"
             @dragstart="dragging = row.id"
             @dragend="dragging = null"
           />

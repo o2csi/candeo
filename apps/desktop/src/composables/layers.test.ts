@@ -41,6 +41,9 @@ import {
   standing,
   usageOf,
   withLayers,
+  withLook,
+  withMask,
+  withSettings,
   withStack,
   type MaskContext,
 } from './layers'
@@ -286,6 +289,32 @@ describe('preview', () => {
     expect(previewKey(keyboard, 'wave', [red, eq])).not.toBe(key)
     expect(previewKey(keyboard, 'wave', [eq, { ...red, mask: { group: 'wasd' } }])).not.toBe(key)
     expect(previewKey(lid, 'wave', stack)).not.toBe(key)
+  })
+
+  it('changes one part of a layer and keeps the rest', () => {
+    const l: LayerRecord = { ...red, values: { colour: 1 }, opacity: 50 }
+    expect(withLook(l, { blend: 'add' })).toEqual({
+      id: 'b',
+      effect: red.effect,
+      values: { colour: 1 },
+      mask: { saved: 'k1' },
+      blend: 'add',
+    })
+    expect(withMask(l, undefined)).toEqual({
+      id: 'b',
+      effect: red.effect,
+      values: { colour: 1 },
+      blend: 'cover',
+      opacity: 50,
+    })
+    expect(withSettings(l, {}, { colour: 'signal:ci' })).toEqual({
+      id: 'b',
+      effect: red.effect,
+      bindings: { colour: 'signal:ci' },
+      mask: { saved: 'k1' },
+      blend: 'cover',
+      opacity: 50,
+    })
   })
 
   it('writes a record without the defaults', () => {

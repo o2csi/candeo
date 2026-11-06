@@ -518,12 +518,46 @@ export function freshId(stack: readonly LayerRecord[]): string {
 
 /** A layer record from its parts, every field at its default left out. */
 export function layerRecord(id: string, edited: EditedLayer): LayerRecord {
-  const record: LayerRecord = { id, effect: edited.effect, ...cleanLook(edited.look) }
+  return { id, ...newLayer(edited) }
+}
+
+/** A layer before it has an id, what *Add the layer* sends. */
+export function newLayer(edited: EditedLayer): NewLayer {
+  const record: NewLayer = { effect: edited.effect, ...cleanLook(edited.look) }
   if (Object.keys(edited.values).length > 0) record.values = edited.values
   if (Object.keys(edited.bindings).length > 0) record.bindings = edited.bindings
   const mask = cleanMask(edited.mask)
   if (mask) record.mask = mask
   return record
+}
+
+/** A layer with another look — blend, opacity and follow all replaced — the rest of it kept. */
+export function withLook(layer: LayerRecord, look: Look): LayerRecord {
+  const out: LayerRecord = { id: layer.id, effect: layer.effect, ...cleanLook(look) }
+  if (layer.values) out.values = layer.values
+  if (layer.bindings) out.bindings = layer.bindings
+  const mask = cleanMask(layer.mask)
+  if (mask) out.mask = mask
+  return out
+}
+
+/** A layer drawing through another mask, the rest of it kept; `undefined` for the whole target. */
+export function withMask(layer: LayerRecord, mask: Mask | undefined): LayerRecord {
+  const out = withLook(layer, lookOf(layer))
+  const clean = cleanMask(mask)
+  if (clean) out.mask = clean
+  else delete out.mask
+  return out
+}
+
+/** A layer with other settings: what departs from the declared values, and its bindings. */
+export function withSettings(layer: LayerRecord, values: EffectParams, bindings: Bindings): LayerRecord {
+  const out = withMask(layer, layer.mask)
+  if (Object.keys(values).length > 0) out.values = values
+  else delete out.values
+  if (Object.keys(bindings).length > 0) out.bindings = bindings
+  else delete out.bindings
+  return out
 }
 
 /**
