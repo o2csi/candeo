@@ -534,10 +534,10 @@ French. Each is tried with a real assistant in the running app before review
 
 | Phase | Issue | What | Depends on |
 |---|---|---|---|
-| 1. The server, read-only | — | The server in Candeo, the pipe, `candeo --mcp`, the MSIX alias; *Settings › Assistants*; the reading tools (§4.2) and the resources (§6) without subscriptions; the connections logged; `PRIVACY.md`, the README, the Store listings and the site. `rust-version` raised to 1.88 if #381 has not raised it yet. | — |
-| 2. Validate, preview, save | — | `validate_effect`, `preview_effect` and its contact sheet, `save_effect` and `save_preset` for new names (`replace` refused until phase 3), `rename_preset`, the `create_effect` prompt, the guide's test, `candeo://library-changed`. An end-to-end test through rmcp's client and no device: a broken effect, its diagnostic, the fix, a preview, a save. It meets #365's acceptance. | 1, #381 |
-| 3. Confirmed changes | — | Consent (§3): requests, elicitation in both revisions, the window's dialog, *Confirm in Candeo*, the audit log. `apply_effect`, `stop_effect`, `save_effect` with `replace`, `delete_effect`, `save_preset` with `replace`, `delete_preset`. | 2 |
-| 4. Automations | — | `save_automation`, `delete_automation`, `try_automation`, the `create_automation` prompt, subscriptions to `candeo://state` and to the lists. | 3 |
+| 1. The server, read-only | [#384](https://github.com/o2csi/candeo/issues/384) | The server in Candeo, the pipe, `candeo --mcp`, the MSIX alias; *Settings › Assistants*; the reading tools (§4.2) and the resources (§6) without subscriptions; the connections logged; `PRIVACY.md`, the README, the Store listings and the site. `rust-version` raised to 1.88 if #381 has not raised it yet. | — |
+| 2. Validate, preview, save | [#385](https://github.com/o2csi/candeo/issues/385) | `validate_effect`, `preview_effect` and its contact sheet, `save_effect` and `save_preset` for new names (`replace` refused until phase 3), `rename_preset`, the `create_effect` prompt, the guide's test, `candeo://library-changed`. An end-to-end test through rmcp's client and no device: a broken effect, its diagnostic, the fix, a preview, a save. It meets #365's acceptance. | #384, #381 |
+| 3. Confirmed changes | [#386](https://github.com/o2csi/candeo/issues/386) | Consent (§3): requests, elicitation in both revisions, the window's dialog, *Confirm in Candeo*, the audit log. `apply_effect`, `stop_effect`, `save_effect` with `replace`, `delete_effect`, `save_preset` with `replace`, `delete_preset`. | #385 |
+| 4. Automations | [#387](https://github.com/o2csi/candeo/issues/387) | `save_automation`, `delete_automation`, `try_automation`, the `create_automation` prompt, subscriptions to `candeo://state` and to the lists. | #386 |
 
 Phases 1 and 2 need no confirmation: they change nothing that lights, and
 overwrite nothing.
