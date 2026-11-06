@@ -86,9 +86,9 @@ that your automation rules can react to. It is **off** until you turn it on.
 ## Assistants, if you turn them on
 
 Settings offers *Let assistants use Candeo*: an assistant on this computer that
-speaks the Model Context Protocol — Claude, Cursor, VS Code — can then read
-Candeo. It is **off** until you turn it on, and turning it off disconnects every
-assistant.
+speaks the Model Context Protocol — Claude, Codex, GitHub Copilot, Cursor,
+VS Code — can then read Candeo. It is **off** until you turn it on, and turning
+it off disconnects every assistant.
 
 - **What an assistant can read**: your devices and what runs on them, their
   layouts, your effects and their source, presets, automation rules, the

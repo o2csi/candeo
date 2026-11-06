@@ -18,9 +18,10 @@
 - **Reached through `candeo --mcp`.** An assistant starts Candeo's own
   executable with that argument. In that mode it starts nothing: it relays bytes
   between its standard input and output and a local pipe that only the signed-in
-  user can open. The four assistants checked (Claude Desktop, Claude Code,
-  VS Code, Cursor) can all start a server this way; Claude Desktop has no other
-  way to reach a local one. No TCP port opens, and no token is copied anywhere.
+  user can open. The assistants checked (Claude Desktop, Claude Code, Codex,
+  GitHub Copilot, VS Code, Visual Studio, Cursor) can all start a server this
+  way; Claude Desktop has no other way to reach a local one. No TCP port opens,
+  and no token is copied anywhere.
 - **Off by default**, turned on in *Settings › Assistants*.
 - **Candeo enforces confirmation.** Reading, validating, previewing and saving
   something new need none. Changing the lighting, replacing or deleting what the
@@ -766,12 +767,18 @@ effect to another device.
     |---|---|
     | Claude Desktop | in `claude_desktop_config.json`: `{ "mcpServers": { "candeo": { "command": "<path>", "args": ["--mcp"] } } }` |
     | Claude Code | `claude mcp add --scope user candeo -- "<path>" --mcp` |
-    | VS Code | in `mcp.json`: `{ "servers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"] } } }` |
+    | Codex | at the end of `~/.codex/config.toml`: `[mcp_servers.candeo]`, `command = '<path>'`, `args = ["--mcp"]` |
+    | GitHub Copilot CLI | in `~/.copilot/mcp-config.json`: `{ "mcpServers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"], "tools": ["*"] } } }` |
+    | VS Code, Visual Studio (GitHub Copilot) | in `mcp.json`, or Visual Studio's `%USERPROFILE%\.mcp.json`: `{ "servers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"] } } }` |
     | Cursor | in `~/.cursor/mcp.json`: as for Claude Desktop |
     | Another | the command and its argument |
 
     Each format comes from the assistant's documentation (§12), and is checked
-    again when implementing.
+    again when implementing. One entry per format, not per product: the
+    entry names every program that reads the same text. Codex and GitHub
+    Copilot CLI get the lines of their file rather than their `mcp add`
+    command, because their desktop apps and editor extensions read that file
+    and may be installed without the command.
 - **Turning it off is the revocation.** The pipe closes, connections drop, a
   request waiting is refused. An assistant's configuration may stay; it then
   gets the bridge's message.
@@ -903,7 +910,11 @@ Checked on 2026-11-06.
   [Claude Code and MCP][c-claude-code],
   [Claude Code's network configuration][c-claude-code-network],
   [VS Code's `mcp.json`][c-vscode], [VS Code's MCP support][c-vscode-api],
-  [Cursor and MCP][c-cursor].
+  [Cursor and MCP][c-cursor], [Codex and MCP][c-codex],
+  [GitHub Copilot CLI's MCP servers][c-copilot-cli] and
+  [its configuration fields][c-copilot-cli-reference],
+  [Copilot Chat's MCP servers in each editor][c-copilot-ide],
+  [Visual Studio's MCP servers][c-visual-studio].
 - **Windows**: [`CreateFileW`][w-createfile],
   [named pipe security][w-pipe-security],
   [`uap5:AppExecutionAlias`][w-alias].
@@ -939,6 +950,11 @@ Checked on 2026-11-06.
 [c-vscode]: https://code.visualstudio.com/docs/agents/reference/mcp-configuration
 [c-vscode-api]: https://code.visualstudio.com/api/extension-guides/ai/mcp
 [c-cursor]: https://cursor.com/docs/context/mcp
+[c-codex]: https://learn.chatgpt.com/docs/extend/mcp?surface=cli
+[c-copilot-cli]: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers
+[c-copilot-cli-reference]: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration
+[c-copilot-ide]: https://docs.github.com/en/copilot/how-tos/copilot-in-your-ide/customize-copilot/extend-copilot-with-tools-and-context/extend-copilot-chat-with-mcp
+[c-visual-studio]: https://learn.microsoft.com/en-us/visualstudio/ide/mcp-servers
 [w-createfile]: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew
 [w-pipe-security]: https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights
 [w-alias]: https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap5-appexecutionalias

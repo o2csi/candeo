@@ -546,14 +546,18 @@
       "names": {
         "claudeDesktop": "Claude Desktop",
         "claudeCode": "Claude Code",
-        "vscode": "VS Code",
+        "codex": "Codex",
+        "copilotCli": "GitHub Copilot CLI",
+        "vscode": "VS Code, Visual Studio (GitHub Copilot)",
         "cursor": "Cursor",
         "other": "Another assistant"
       },
       "where": {
         "claudeDesktop": "Add it to claude_desktop_config.json, beside the servers already there, then restart Claude Desktop.",
         "claudeCode": "Run it in a terminal: the assistant is added for all your projects.",
-        "vscode": "Add it to mcp.json, in your user profile or in a workspace's .vscode folder.",
+        "codex": "Add it at the end of ~/.codex/config.toml, which the Codex CLI, its IDE extension and the ChatGPT desktop app share.",
+        "copilotCli": "Add it to ~/.copilot/mcp-config.json, beside the servers already there: the GitHub Copilot app reads it too.",
+        "vscode": "In VS Code, add it to mcp.json, in your user profile or in a workspace's .vscode folder; in Visual Studio, to .mcp.json in your user folder.",
         "cursor": "Add it to ~/.cursor/mcp.json, beside the servers already there.",
         "other": "The command an assistant starts, as a local server."
       },
