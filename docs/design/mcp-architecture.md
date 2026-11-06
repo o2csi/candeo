@@ -209,14 +209,26 @@ differences and what remains: [`headless-transpile-poc.md`](headless-transpile-p
 
 ## 6. Questions for the decision record
 
+Answered in [`mcp-server.md`](mcp-server.md), the decision record, pending
+review:
+
 - MCP transport and host process (in the Tauri process, or a local sidecar).
+  **In the Tauri process**, on a local pipe only the user can open, reached
+  through `candeo --mcp`, a stdio bridge that is Candeo's own executable: its
+  §2.
 - Headless transpilation: Oxc, another option, or a bounded reuse of the existing
   pipeline. Measured in [`headless-transpile-poc.md`](headless-transpile-poc.md):
-  Oxc, under the conditions of its §6.
+  Oxc, under the conditions of its §6, carried out by
+  [#381](https://github.com/o2csi/candeo/issues/381).
 - Rendering preview frames as an image without duplicating the simulator's
-  geometry.
-- Output schemas, resource versioning and standard errors.
-- The consent model for applied effects and changed automations.
+  geometry. **Drawn in Rust from the layout's own geometry** in
+  `candeo-device`, the data the simulator draws: its §5.
+- Output schemas, resource versioning and standard errors. Schemas from the
+  Rust types, errors as the `Failure` codes, resources carrying the installed
+  API's version: its §4.1 and §6.
+- The consent model for applied effects and changed automations. **Enforced by
+  Candeo**, asked through the assistant's elicitation or in Candeo's window,
+  and logged: its §3.
 
 **External references (inspiration, not an implementation to copy):**
 
