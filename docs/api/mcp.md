@@ -1,11 +1,12 @@
 # Connecting an assistant to Candeo
 
 An assistant that speaks the Model Context Protocol — Claude Desktop, Claude
-Code, VS Code, Cursor — can read Candeo: the devices and what runs on them,
-their layouts, the effects library, presets, automation rules, the names of the
-signals held, and the installed effects API. **In this version it changes
-nothing**: no tool applies, saves or deletes anything. Why it is shaped this way
-is [`mcp-server.md`](../design/mcp-server.md); this is phase 1 of its §9.
+Code, Codex, GitHub Copilot, VS Code, Visual Studio, Cursor — can read Candeo:
+the devices and what runs on them, their layouts, the effects library, presets,
+automation rules, the names of the signals held, and the installed effects API.
+**In this version it changes nothing**: no tool applies, saves or deletes
+anything. Why it is shaped this way is [`mcp-server.md`](../design/mcp-server.md);
+this is phase 1 of its §9.
 
 ## Turning it on
 
@@ -25,9 +26,25 @@ The texts, with `<path>` the program Settings shows:
 |---|---|---|
 | Claude Desktop | `claude_desktop_config.json` | `{ "mcpServers": { "candeo": { "command": "<path>", "args": ["--mcp"] } } }` |
 | Claude Code | a terminal | `claude mcp add --transport stdio --scope user candeo -- "<path>" --mcp` |
-| VS Code | `mcp.json` | `{ "servers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"] } } }` |
+| Codex | the end of `~/.codex/config.toml` | `[mcp_servers.candeo]`, then `command = '<path>'` and `args = ["--mcp"]` on lines of their own |
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` | `{ "mcpServers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"], "tools": ["*"] } } }` |
+| VS Code, Visual Studio (GitHub Copilot) | VS Code's `mcp.json`; Visual Studio's `%USERPROFILE%\.mcp.json` | `{ "servers": { "candeo": { "type": "stdio", "command": "<path>", "args": ["--mcp"] } } }` |
 | Cursor | `~/.cursor/mcp.json` | as Claude Desktop |
 | Another | its server settings | the command `<path>`, the argument `--mcp` |
+
+- **Codex**: the Codex CLI, its IDE extension and the ChatGPT desktop app share
+  `config.toml`. The table goes at the end, since a TOML table takes every key
+  below it up to the next table. The path is a literal string, between single
+  quotes, which keeps a Windows path's backslashes; a path holding a single
+  quote is a basic string, between double quotes, its backslashes doubled.
+  `codex mcp add candeo -- "<path>" --mcp` writes the same table.
+- **GitHub Copilot CLI**: the GitHub Copilot app reads the same file, and
+  `copilot mcp add candeo -- "<path>" --mcp` writes the same server into it.
+  `tools` is required there; `"*"` enables every tool.
+- **GitHub Copilot in JetBrains IDEs, Eclipse and Xcode** reads a `servers`
+  block too, in the `mcp.json` its chat opens. Its documentation writes a local
+  server without `type`: `{ "servers": { "candeo": { "command": "<path>", "args": ["--mcp"] } } }`.
+  Not tried.
 
 `<path>` is, by build:
 

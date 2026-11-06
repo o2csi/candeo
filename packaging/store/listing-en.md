@@ -24,7 +24,7 @@ HIGHLIGHTS
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
 • Write your own: an effect is a small TypeScript file, previewed live on a keyboard simulator before it reaches the hardware. Edit it in Candeo or in the editor you already use.
 • Signals from your other tools: a build script or Home Assistant tells Candeo what happened. A rule switches the lighting while it holds, or any setting of the effect running follows the value sent — a colour, a speed. Off until you turn it on.
-• Your AI assistant, invited in: Claude, Cursor or VS Code read your devices, effects and rules through MCP, and help you write an effect for your keyboard — on this computer only, only once you turn it on, and they change nothing.
+• Your AI assistant, invited in: Claude, Codex, GitHub Copilot, Cursor or VS Code read your devices, effects and rules through MCP, and help you write an effect for your keyboard — on this computer only, only once you turn it on, and they change nothing.
 • Always on, never in the way: effects keep running with the window closed, from the notification area.
 • Private by design: no account, nothing collected, nothing sent — this Store version makes no network request at all, and updates come from the Store.
 • Starts with Windows if you want it to. Light and dark themes. English and French.
