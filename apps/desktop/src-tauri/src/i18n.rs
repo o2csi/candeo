@@ -143,6 +143,7 @@ mod tests {
             include_str!("controlled_folders.rs"),
             include_str!("failure.rs"),
             include_str!("journal.rs"),
+            include_str!("layers.rs"),
             include_str!("lib.rs"),
             include_str!("mcp/mod.rs"),
             include_str!("mcp/server.rs"),

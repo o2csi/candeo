@@ -213,7 +213,7 @@ impl Mask {
 
 /// A scancode as definitions write it: hexadecimal, the `e0` or `e1` prefix in
 /// the high byte. Zero is no key's.
-fn scancode(text: &str) -> Option<u16> {
+pub(crate) fn scancode(text: &str) -> Option<u16> {
     // `from_str_radix` alone takes a sign.
     if !(1..=4).contains(&text.len()) || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
@@ -300,14 +300,14 @@ impl StackStart {
 
 /// A layer's mask resolved on its device: the layout its effect sees — its
 /// mask as a device of its own (§3.1) — and the positions it may touch.
-pub(super) struct Masked {
+pub(crate) struct Masked {
     pub layout: &'static Layout,
     pub owns: Vec<u16>,
 }
 
 /// Resolves `mask` on a target of `device`. A whole mask keeps the target's
 /// own layout; any other is the device narrowed to its lights.
-pub(super) fn masked(
+pub(crate) fn masked(
     device: &'static Layout,
     target: Option<&'static Region>,
     mask: &Mask,

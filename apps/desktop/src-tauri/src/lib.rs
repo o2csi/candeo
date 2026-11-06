@@ -27,6 +27,7 @@ mod idle;
 mod journal;
 mod keys;
 mod language;
+mod layers;
 mod machine;
 mod mcp;
 mod msix;
@@ -1733,6 +1734,10 @@ fn set_effect(
         )));
     }
     let colours = triplets(&colours);
+    // A firmware effect sets the layers aside, kept in the file and not run
+    // (`docs/design/composition.md` §3.2): the loop stops, and is awaited, or
+    // its next frame would light again what the firmware was just told to do.
+    state.engine.stop(device);
     with_keyboard(&state, device, |kb| Ok(kb.set_effect(&effect, &colours)?))?;
     // A firmware effect chosen by hand ends an interruption, like any gesture.
     automations::dismiss(&app, device);
@@ -2100,6 +2105,31 @@ pub fn run() {
             presets::update_preset,
             presets::rename_preset,
             presets::delete_preset,
+            layers::mask_choices,
+            layers::resolve_mask,
+            layers::mask_of_positions,
+            layers::add_layer,
+            layers::replace_layer,
+            layers::remove_layer,
+            layers::order_layers,
+            layers::set_layer_look,
+            layers::remember_layer_look,
+            layers::set_layer_params,
+            layers::remember_layer_params,
+            layers::set_layer_bindings,
+            layers::start_preview_stack,
+            layers::set_preview_layer_params,
+            layers::set_preview_layer_bindings,
+            layers::set_preview_look,
+            layers::save_layer,
+            layers::rename_saved_layer,
+            layers::delete_saved_layer,
+            layers::restore_saved_layer,
+            layers::save_mask,
+            layers::update_mask,
+            layers::rename_mask,
+            layers::delete_mask,
+            layers::undelete_mask,
             journal::get_journal,
             journal::set_log_level,
             journal::set_log_files_kept,
