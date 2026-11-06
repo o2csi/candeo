@@ -1303,27 +1303,43 @@ fn follow_mask(app: &AppHandle, settings: &Settings, id: &str) {
 
 // ---------------------------------------------------------------- commands
 
-/// The window learns that the file changed, and the tray rebuilds its menu,
-/// whose lines count the layers.
-fn changed(app: &AppHandle) {
-    crate::tray::refresh(app);
-    crate::tray::notify_state_changed(app);
+/// Who learns that the file changed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tell {
+    /// Nobody: a setting remembered once a slider stops, which the window has
+    /// just set itself, as `remember_effect_params` tells nobody.
+    Nobody,
+    /// The window, which reads the file again: what its other views show
+    /// changed.
+    Window,
+    /// The window and the tray, whose lines count the layers drawing.
+    Everyone,
+}
+
+fn tell(app: &AppHandle, who: Tell) {
+    if who == Tell::Everyone {
+        crate::tray::refresh(app);
+    }
+    if who != Tell::Nobody {
+        crate::tray::notify_state_changed(app);
+    }
 }
 
 /// Reads the settings, applies `apply`, and writes them back when it changed
-/// something: the read, the change and the write in one go, as
-/// `remember_effect_params` does, so that a stale copy in the window never
+/// something, then tells `who`: the read, the change and the write in one go,
+/// as `remember_effect_params` does, so that a stale copy in the window never
 /// overwrites the file.
 fn change<T>(
     app: &AppHandle,
+    who: Tell,
     apply: impl FnOnce(&mut Settings) -> CmdResult<(bool, T)>,
 ) -> CmdResult<T> {
     let store = crate::storage::store(app)?;
     let mut settings = store.read_settings()?;
-    let (changed_it, answer) = apply(&mut settings)?;
-    if changed_it {
+    let (changed, answer) = apply(&mut settings)?;
+    if changed {
         store.write_settings(&settings)?;
-        changed(app);
+        tell(app, who);
     }
     Ok(answer)
 }
@@ -1418,7 +1434,7 @@ pub fn add_layer(
     settings.insert_layer(device, aim.region(), record, at);
     store.write_settings(&settings)?;
     order_live(&app, &aim, &settings);
-    changed(&app);
+    tell(&app, Tell::Everyone);
     Ok(id)
 }
 
@@ -1454,7 +1470,7 @@ pub fn replace_layer(
     kept.spec = layer.spec.stored(manifest);
     store.write_settings(&settings)?;
     order_live(&app, &aim, &settings);
-    changed(&app);
+    tell(&app, Tell::Everyone);
     Ok(())
 }
 
@@ -1472,7 +1488,7 @@ pub fn remove_layer(
     if running(&app, &aim).is_some() {
         state.engine.stop_layer(device, aim.region(), &id);
     }
-    change(&app, |settings| {
+    change(&app, Tell::Everyone, |settings| {
         Ok((settings.remove_layer(device, aim.region(), &id), ()))
     })
 }
@@ -1491,7 +1507,7 @@ pub fn order_layers(
     if settings.order_layers(device, aim.region(), &ids)? {
         store.write_settings(&settings)?;
         order_live(&app, &aim, &settings);
-        changed(&app);
+        tell(&app, Tell::Window);
     }
     Ok(())
 }
@@ -1526,7 +1542,7 @@ pub fn remember_layer_look(
 ) -> CmdResult<()> {
     let aim = Aim::of(&app, device, region.as_deref())?;
     look.checked()?;
-    change(&app, |settings| {
+    change(&app, Tell::Nobody, |settings| {
         let layer = settings.layer_mut(device, aim.region(), &id)?;
         let before = layer.spec.clone();
         layer.spec.set_look(look);
@@ -1566,7 +1582,7 @@ pub fn remember_layer_params(
 ) -> CmdResult<()> {
     let aim = Aim::of(&app, device, region.as_deref())?;
     let library = crate::storage::store(&app)?.list_effects()?;
-    change(&app, |settings| {
+    change(&app, Tell::Nobody, |settings| {
         let layer = settings.layer_mut(device, aim.region(), &id)?;
         let values = match library.iter().find(|e| e.id == layer.spec.effect) {
             Some(entry) => departures(params, &entry.manifest),
@@ -1597,7 +1613,7 @@ pub fn set_layer_bindings(
             .engine
             .set_bindings(device, aim.region(), Some(&id), bindings.clone());
     }
-    change(&app, |settings| {
+    change(&app, Tell::Nobody, |settings| {
         let layer = settings.layer_mut(device, aim.region(), &id)?;
         if layer.spec.bindings == bindings {
             return Ok((false, ()));
@@ -1730,7 +1746,7 @@ pub fn save_layer(
     // A layer of a stack sent whole: its id is its stack's, not the copy's.
     let mut layer = layer;
     layer.unknown.remove("id");
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         check_saved_layer(&layer, &library, &settings.saved_masks)?;
         settings.save_layer(&name, layer)?;
         Ok((true, settings.saved_layers.clone()))
@@ -1743,7 +1759,7 @@ pub fn rename_saved_layer(
     from: String,
     to: String,
 ) -> CmdResult<Vec<SavedLayerRecord>> {
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         let renamed = settings.rename_saved_layer(&from, &to)?;
         Ok((renamed, settings.saved_layers.clone()))
     })
@@ -1752,7 +1768,7 @@ pub fn rename_saved_layer(
 /// Deletes a saved layer; no layer changes. One already gone is no error.
 #[tauri::command]
 pub fn delete_saved_layer(app: AppHandle, name: String) -> CmdResult<Vec<SavedLayerRecord>> {
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         let deleted = settings.delete_saved_layer(&name);
         Ok((deleted, settings.saved_layers.clone()))
     })
@@ -1765,7 +1781,7 @@ pub fn restore_saved_layer(
     record: SavedLayerRecord,
     at: usize,
 ) -> CmdResult<Vec<SavedLayerRecord>> {
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         settings.restore_saved_layer(record, at)?;
         Ok((true, settings.saved_layers.clone()))
     })
@@ -1785,7 +1801,7 @@ pub fn save_mask(
     model: Option<DeviceRef>,
 ) -> CmdResult<SavedMaskRecord> {
     let (mask, anchor) = saved_mask_of(mask, model_layout(model)?)?;
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         Ok((true, settings.save_mask(&name, mask, anchor)?))
     })
 }
@@ -1825,14 +1841,14 @@ pub fn update_mask(
         *record = updated;
         store.write_settings(&settings)?;
         follow_mask(&app, &settings, &id);
-        changed(&app);
+        tell(&app, Tell::Everyone);
     }
     Ok(settings.mask_users(&id))
 }
 
 #[tauri::command]
 pub fn rename_mask(app: AppHandle, id: String, name: String) -> CmdResult<Vec<SavedMaskRecord>> {
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         let renamed = settings.rename_mask(&id, &name)?;
         Ok((renamed, settings.saved_masks.clone()))
     })
@@ -1842,13 +1858,15 @@ pub fn rename_mask(app: AppHandle, id: String, name: String) -> CmdResult<Vec<Sa
 /// written in, and runs on unchanged.
 #[tauri::command]
 pub fn delete_mask(app: AppHandle, id: String) -> CmdResult<DeletedMask> {
-    change(&app, |settings| Ok((true, settings.delete_mask(&id)?)))
+    change(&app, Tell::Window, |settings| {
+        Ok((true, settings.delete_mask(&id)?))
+    })
 }
 
 /// Puts a deleted mask back, and links again what named it: *Undo*.
 #[tauri::command]
 pub fn undelete_mask(app: AppHandle, deleted: DeletedMask) -> CmdResult<()> {
-    change(&app, |settings| {
+    change(&app, Tell::Window, |settings| {
         settings.undelete_mask(deleted)?;
         Ok((true, ()))
     })
