@@ -310,8 +310,9 @@ logs, docs and issues. What the proof of concept should hold:
 Seen while reading for this study: *Control* writes the unit's serial into
 `settings.json` — the one the device's protocol reports, the USB descriptor's
 otherwise ([code][c-record], [code][c-control]) — while PRIVACY.md says a
-keyboard's serial "is never written down". Out of scope here; an OpenRGB record
-should not follow that precedent.
+keyboard's serial "is never written down". Since fixed: `settings.json` keeps the
+serial's fingerprint, and a serial an earlier version wrote becomes its
+fingerprint at the next save. An OpenRGB record follows the same rule.
 
 ## 5. Options
 
