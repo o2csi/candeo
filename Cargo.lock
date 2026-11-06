@@ -452,6 +452,7 @@ dependencies = [
 name = "candeo-desktop"
 version = "0.22.1"
 dependencies = [
+ "candeo-compiler",
  "candeo-device",
  "candeo-protocol",
  "chrono",

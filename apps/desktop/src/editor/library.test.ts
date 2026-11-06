@@ -4,13 +4,9 @@ import type { EffectEntry } from '../api/candeo'
 
 const api = vi.hoisted(() => ({
   listEffects: vi.fn(),
-  readEffectSource: vi.fn(),
-  cacheEffect: vi.fn(),
+  compileEffect: vi.fn(),
 }))
 vi.mock('../api/candeo', () => api)
-
-const transpile = vi.hoisted(() => vi.fn())
-vi.mock('./effect', () => ({ transpile }))
 
 const warn = vi.hoisted(() => vi.fn())
 vi.mock('../api/journal', () => ({ warn, message: String }))
@@ -23,9 +19,7 @@ function entry(id: string, state: EffectEntry['state'], hash?: string): EffectEn
 
 beforeEach(() => {
   vi.resetAllMocks()
-  api.readEffectSource.mockImplementation(async (id: string) => `source of ${id}`)
-  transpile.mockImplementation(async (source: string) => `js of ${source}`)
-  api.cacheEffect.mockImplementation(async (id: string) => entry(id, 'ready', 'recorded'))
+  api.compileEffect.mockImplementation(async (id: string) => entry(id, 'ready', 'recorded'))
 })
 
 describe('refreshLibrary', () => {
@@ -38,13 +32,13 @@ describe('refreshLibrary', () => {
 
     const list = await refreshLibrary()
 
-    expect(api.cacheEffect.mock.calls).toEqual([['Wave', 'b', 'js of source of Wave']])
+    expect(api.compileEffect.mock.calls).toEqual([['Wave', 'b']])
     expect(list.map((e) => `${e.id}:${e.state}`)).toEqual(['Rain:ready', 'Wave:ready', 'Broken:broken'])
   })
 
   it('keeps compiling the others when one file fails', async () => {
     api.listEffects.mockResolvedValue([entry('Gone', 'stale', 'a'), entry('Wave', 'stale', 'b')])
-    api.readEffectSource.mockRejectedValueOnce('file not found')
+    api.compileEffect.mockRejectedValueOnce('file not found')
 
     const list = await refreshLibrary()
 
@@ -59,7 +53,7 @@ describe('refreshLibrary', () => {
 
     expect(first).toBe(second)
     expect(api.listEffects).toHaveBeenCalledTimes(1)
-    expect(api.cacheEffect).toHaveBeenCalledTimes(1)
+    expect(api.compileEffect).toHaveBeenCalledTimes(1)
 
     await refreshLibrary()
     expect(api.listEffects).toHaveBeenCalledTimes(2)

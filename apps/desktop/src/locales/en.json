@@ -211,7 +211,7 @@
     "draftRestored": "Draft restored — this version was not saved.",
     "discard": "Back to the saved version",
     "effectError": "Effect error, on the current frame: {error}",
-    "hint": "The code is transpiled here and run by Rust: an effect sees neither the DOM nor the application. This engine has no console, and autocompletion does not offer one.",
+    "hint": "The code is compiled and run by Rust: an effect sees neither the DOM nor the application. This engine has no console, and autocompletion does not offer one.",
     "simulator": "Simulator",
     "simDevice": "Frames from {device}",
     "theDevice": "the device",

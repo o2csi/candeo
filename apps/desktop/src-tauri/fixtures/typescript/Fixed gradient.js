@@ -1,0 +1,46 @@
+// TypeScript 5.9.3 (Monaco 0.57.0), transpileModule for ES2020, before #381. Source SHA-256: 2704cd784449af94b7cab7407f3116853cec8d4126b9d1e56d201b22c95236ec
+// Fixed gradient — two colors, and nothing moves.
+//
+// Its `render` does not use `time`: an effect does not have to be an animation.
+// It is also the one kept on while working.
+//
+// It interpolates over the **matrix column**, and was reviewed when "Radial wave"
+// moved to physical distances without being changed. What a gradient promises is
+// an order — "this color on one side, that one on the other" — not a distance,
+// and the order of the columns is the order of the keys. What shifts by a few
+// tenths is the bottom row, where three wide keys share four columns; it shows
+// when looked for, and making it exact would demand the geometry for an effect
+// that does not need it.
+import { defineEffect, mix } from '@candeo/effects-api';
+const DEFAULT_FROM = { r: 255, g: 0, b: 128 };
+const DEFAULT_TO = { r: 0, g: 128, b: 255 };
+export default defineEffect({
+    description: {
+        en: 'A motionless gradient between two colors',
+        fr: 'Un dégradé entre deux couleurs, immobile',
+    },
+    kinds: 'all',
+    requires: ['matrix'],
+    params: {
+        from: { kind: 'color', label: { en: 'Start color', fr: 'Couleur de départ' }, default: DEFAULT_FROM },
+        to: { kind: 'color', label: { en: 'End color', fr: "Couleur d'arrivée" }, default: DEFAULT_TO },
+        axis: {
+            kind: 'choice',
+            label: { en: 'Direction', fr: 'Sens' },
+            options: [
+                { value: 'horizontal', label: { en: 'Horizontal', fr: 'Horizontal' } },
+                { value: 'vertical', label: { en: 'Vertical', fr: 'Vertical' } },
+            ],
+            default: 'horizontal',
+        },
+    },
+    render({ layout, frame, params }) {
+        const from = params.from ?? DEFAULT_FROM;
+        const to = params.to ?? DEFAULT_TO;
+        const vertical = params.axis === 'vertical';
+        const span = vertical ? layout.rows - 1 : layout.cols - 1;
+        for (const key of layout.keys) {
+            frame.set(key, mix(from, to, (vertical ? key.row : key.col) / span));
+        }
+    },
+});

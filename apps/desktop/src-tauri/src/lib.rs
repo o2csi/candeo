@@ -787,8 +787,8 @@ fn wrong_unit(settings: &Settings, layout: &Layout, serial: Option<&str>) -> Opt
 }
 
 /// Brings the effect library up to date at startup — see
-/// [`storage::Store::migrate`] — copies the shipped effects, and declares again
-/// the caches of an older format ([`storage::Store::redeclare_cache`]).
+/// [`storage::Store::migrate`] — copies the shipped effects, and compiles again
+/// the caches of an older format ([`storage::Store::recompile_cache`]).
 ///
 /// A failure is logged and the startup goes on: the effects it did not reach are
 /// only missing from the library until the next launch, and the window is what
@@ -815,9 +815,9 @@ fn migrate_effects(app: &AppHandle) -> BTreeMap<String, String> {
     };
     // After the moves above, which may rename an effect and its cache.
     if let Ok(store) = storage::store(app) {
-        let redeclared = store.redeclare_cache();
-        if redeclared > 0 {
-            tracing::info!(effects = redeclared, "effect caches declared again");
+        let recompiled = store.recompile_cache();
+        if recompiled > 0 {
+            tracing::info!(effects = recompiled, "effect caches compiled again");
         }
     }
     renames
@@ -2040,7 +2040,7 @@ pub fn run() {
             idle::idle_available,
             storage::list_effects,
             storage::save_effect_source,
-            storage::cache_effect,
+            storage::compile_effect,
             storage::rename_effect,
             storage::delete_effect,
             storage::read_effect_source,
