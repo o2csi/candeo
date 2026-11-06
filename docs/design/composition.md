@@ -398,6 +398,10 @@ blending is three orders of magnitude below it.
 
 ### 3.10 The interface, in words
 
+> [`layers-ui.md`](layers-ui.md) designs this interface in full and moves the
+> stack into the devices column, under its target, as regions are; it keeps
+> the words below. This section stays as the study wrote it.
+
 **In *Effects***, the settings column of a device or a region gains a
 **Layers** block, above Presets:
 
