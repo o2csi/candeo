@@ -1080,7 +1080,9 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
             ),
         );
         // A split device's regions, each on its line: what one runs and why
-        // one stopped are not the device's.
+        // one stopped are not the device's. So for each layer, under the
+        // device or the region whose stack it is in.
+        layer_lines(&mut out, "    ", s.status.layers);
         for r in s.status.regions.into_iter().flatten() {
             line(
                 &mut out,
@@ -1095,6 +1097,7 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
                     )),
                 ),
             );
+            layer_lines(&mut out, "      ", r.layers);
         }
     }
 
@@ -1121,6 +1124,23 @@ pub fn diagnostic(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Strin
     );
 
     Ok(out)
+}
+
+/// A stack's layers in the diagnostic, bottom to top, one line each under the
+/// device or region whose stack they are in.
+fn layer_lines(out: &mut String, indent: &str, layers: Vec<crate::runtime::LayerEngineStatus>) {
+    for l in layers {
+        out.push_str(&format!(
+            "{indent}layer {}: {} · effect {}{}\n",
+            l.layer,
+            if l.running { "running" } else { "stopped" },
+            l.effect_id.as_deref().unwrap_or("none"),
+            l.error.map_or(String::new(), |e| format!(
+                " · effect error: {}",
+                crate::runtime::loggable(&e, l.reads_private)
+            )),
+        ));
+    }
 }
 
 /// The adoption decision, in the language of the bug report.
