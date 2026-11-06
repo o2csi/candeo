@@ -105,9 +105,10 @@ A full REST API stays out of scope until someone needs it.
 The services layer is a **refactoring target**, not a module that already exists
 under that name.
 
-The **OpenRGB adapter** is studied in [`openrgb-output.md`](openrgb-output.md)
-(#368): an optional output to an OpenRGB server the user runs, beside native
-HID and never in its place.
+The **OpenRGB adapter** is decided in [`openrgb-output.md`](openrgb-output.md)
+(#368): an optional output, beside native HID and never in its place. Candeo
+starts the OpenRGB the user installed, headless, with a private configuration,
+as Hypercolor does, or reuses an OpenRGB server already running.
 
 ## 3. Effects created by an agent: the proposed flow
 
