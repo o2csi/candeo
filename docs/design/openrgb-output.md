@@ -1,12 +1,15 @@
-# OpenRGB as an optional output — study (#368)
+# OpenRGB as an optional output (#368)
 
-> **Status: study, 2026-11-06. Nothing here is implemented.** It prepares the
-> proof of concept of [#368]: drive, through OpenRGB, a device Candeo has no
-> definition for, while native HID stays the default. It answers the two
-> questions asked before any code: **how does Hypercolor do it, and may Candeo
-> embed OpenRGB?** It is an engineering reading of licences and store policies,
-> not legal advice: §1's conclusions should be confirmed before anything of
-> OpenRGB is distributed.
+> **Status: decided, 2026-11-06. Not implemented.** Candeo drives, through
+> OpenRGB, a device it has no definition for, while native HID stays the
+> default ([#368]). §1 to §5 are the study that prepared the decision: how
+> Hypercolor does it, and whether Candeo may embed OpenRGB. **The decision is
+> option B′ of §5: do as Hypercolor does.** Candeo never ships OpenRGB; when
+> the user has installed it and turns the option on, Candeo starts that
+> OpenRGB headless, with a configuration of its own in which the detectors of
+> every device Candeo drives natively are off. §6 is the design, §7 what the
+> Store build allows, §8 the proof of concept, §9 what is not verified. §1 is
+> an engineering reading of licences and store policies, not legal advice.
 
 **In short.**
 
@@ -15,25 +18,37 @@
   controller among them. The program as built can therefore only be passed on
   under GPLv2, which is not compatible with Candeo's GPL-3.0-only: **its code
   cannot be linked into Candeo.** Talking to an unmodified OpenRGB over its
-  documented socket keeps the two programs separate. **Connecting to a server
-  the user installed carries no obligation. Shipping OpenRGB's executable is
-  allowed as an aggregate**, but Candeo would then owe the GPLv2 text and the
-  exact corresponding source of OpenRGB and of every library its build bundles,
-  and Store users terms no stricter than the GPL's.
+  documented socket keeps the two programs separate. **Starting or connecting
+  to an OpenRGB the user installed carries no obligation**: Candeo distributes
+  nothing of it.
 - **Hypercolor does not embed OpenRGB.** It finds an OpenRGB the user
   installed and, on request, starts it headless on `127.0.0.1` with a
   configuration folder of its own, in which it turns off the OpenRGB detectors
   for hardware its native drivers own. It stops only the server it started, and
   its SDK client, Apache-2.0, is written from OpenRGB's public documentation
-  and never sends `SAVEMODE`. Shipping OpenRGB is deferred in its own specs
-  until a legal review.
-- **Recommendation: option A** (§5): connect only to an OpenRGB 1.0 or later
-  that the user runs, opt-in, over loopback, with a fixed list of packets that
-  excludes every persistent or administrative one, and native first on every
-  device Candeo knows. The main risk: **two programs writing one device**.
-  Candeo can refuse to route a device it drives natively through OpenRGB, but
-  it cannot stop the user's OpenRGB from writing it, and it cannot see whether
-  a mode OpenRGB selects writes to the device's memory.
+  and never sends `SAVEMODE`.
+- **Decision: B′, as Hypercolor does** (§5). Off by default. On, Candeo finds
+  the installed OpenRGB 1.0 or later, writes a private configuration with the
+  detectors of its native devices off, starts it with its SDK server on
+  `127.0.0.1` and a port Candeo picks, and stops it with itself. An OpenRGB
+  server already running is reused instead; Candeo cannot turn off that one's
+  detectors, and says so once. The study had recommended A (connect only); A
+  leaves out of Candeo's reach the one defence that acts before a device is
+  opened: the detectors.
+- **The client** is Candeo's own, written from OpenRGB's two public documents.
+  It speaks protocol 4 to 6 and sends six packets: the handshake, the
+  controller list, the mode and the colours. Never `SAVEMODE`, profiles,
+  settings, rescans nor local status (§6.6). **Native first**: a controller
+  Candeo has a definition for is never driven through OpenRGB (§6.8). An
+  OpenRGB device is known by a fingerprint; its serial and location stay in
+  memory (§6.9).
+- **The Store build may do it** (§7): a full-trust packaged app may start an
+  executable outside its package, as Candeo already starts the file manager.
+  Never elevated, no driver of Candeo's, OpenRGB never offered for download.
+- **The remaining risk is still two writers on one device**: an OpenRGB
+  server Candeo reuses, or one the user starts beside Candeo's, may write a
+  device Candeo drives natively. Candeo then refuses its own route and says so;
+  it cannot stop the other program.
 
 ## Sources and versions
 
@@ -43,11 +58,14 @@ documents below, read on 2026-11-06.
 | What | Version read | Date |
 |---|---|---|
 | OpenRGB | tag `release_1.1`, commit `8e16de27` ([code][o-tree]); licence headers counted on `master` at `4f2d8920` through the GitHub mirror's code search ([search][o-search]) | released 2026-10-16; `master` of 2026-11-05 |
+| OpenRGB's documents for the client | `OpenRGBSDK.md` and `RGBControllerAPI.md` at `release_1.1` ([docs][o-sdkdoc], [docs][o-apidoc]); for §6.2 and §6.5, the command-line help in `cli.cpp` at `release_1.0` and `release_1.1`, and for §6.4 `DetectionManager.cpp` and `LogManager.cpp` at `release_1.1`, none of them used for the client | 1.1 of 2026-10-16; 1.0 of 2026-09-11 |
+| winget's OpenRGB package | `OpenRGB.OpenRGB` 1.1.0 ([data][w-winget]) | 2026-10-16 |
 | Hypercolor | 0.9.0, commit `02f53272` ([code][h-tree]); the OpenRGB paths are identical on `main` at `1bb9a58e` | 2026-11-03 |
 | PawnIO | driver repository at `9d529658` ([code][p-readme]); installer 2.2.0 ([notes][p-setup]) | 2026-08-14; 2026-03-15 |
 | Microsoft Store Policies | 7.20 ([docs][m-policies]) | 2026-09-14 |
 | App Developer Agreement | 8.11 ([docs][m-ada]) | published 2026-03-17, effective 2026-04-17 |
 | MSIX preparation guide | ([docs][m-prepare]) | updated 2025-06-10 |
+| How packaged desktop apps run; `UpdateProcThreadAttribute`; nested jobs | ([docs][m-behind], [docs][m-procattr], [docs][m-nested]) | 2026-09-30; updated 2025-07-01; 2025-07-14 |
 | FSF licence list and GPL FAQ | ([docs][f-list], [docs][f-faq]) | 2026-04-22; 2026-01-13 |
 
 ## 1. Licensing
@@ -186,9 +204,8 @@ also predate OpenRGB 1.0 in places: protocol 5 as "OpenRGB 1.0", and no
   already starts the file manager, which the certification kit reports in an
   optional test ([`msix.md`](msix.md) §4). The package is read only, so a
   bundled OpenRGB would keep its configuration and logs in a folder Candeo
-  names with `--config`. Not verified: starting an executable shipped inside
-  the package, whether that child keeps the package's identity, and whether its
-  writes are redirected.
+  names with `--config`. For an OpenRGB installed outside the package, which
+  is what was decided, §7 answers.
 - **Disclosure.** Policy 10.2.4: depending on non-integrated software for the
   primary functionality must be said at the beginning of the description. An
   optional OpenRGB output is not Candeo's primary functionality; the listing
@@ -253,8 +270,8 @@ and closes the connection on the first byte of an HTTP request
 | Measure | Option A | Options B, B′ (§5) |
 |---|---|---|
 | Connect to loopback only, no setting to change it in the proof of concept | yes | yes |
-| Require protocol 6, OpenRGB 1.0 or later: its default bind is loopback and its controller ids are stable | yes | yes |
-| A fixed list of packets in the encoder, the rest impossible to build, tested: handshake (40, 50), controller count and data (0, 1), mode selection (1100, 1101, 1103), colours (1050, 1051); received, `ACK` (10) and `DEVICE_LIST_UPDATED` (100). Never `SAVEMODE`, profiles, settings, rescans, zone or segment edits, device configuration | yes | yes |
+| Require protocol 6, OpenRGB 1.0 or later: its default bind is loopback and its controller ids are stable. Decided (§6.2, §6.6): required of what Candeo starts; a server the user runs is accepted from protocol 4 | yes | yes |
+| A fixed list of packets in the encoder, the rest impossible to build, tested: handshake (40, 50), controller count and data (0, 1), mode selection (1100, 1101, 1103), colours (1050, 1051); received, `ACK` (10) and `DEVICE_LIST_UPDATED` (100). Never `SAVEMODE`, profiles, settings, rescans, zone or segment edits, device configuration. Decided narrower (§6.6): 1100, 1103 and 1051 left out | yes | yes |
 | Never ask for local status; never send the client's host name, so the server never sends its own ([code][o-server]) | yes | yes |
 | Bounded parsing: lengths, counts, multiplication overflow, as Hypercolor tests | yes | yes |
 | Off by default; no connection attempt, no process started while off | yes | yes |
@@ -294,7 +311,7 @@ logs, docs and issues. What the proof of concept should hold:
    accident.
 2. **Used in memory only**, for two things: an identity, through
    `journal::fingerprint` ([code][c-fingerprint]); and, for a HID path, the
-   VID:PID that the conflict guard compares with Candeo's definitions (§6).
+   VID:PID that the conflict guard compares with Candeo's definitions (§6.8).
 3. **settings.json keys an OpenRGB device by fingerprint**: of the serial when
    there is one, otherwise of vendor, name and zone shape, marked as the weaker
    kind. Hypercolor keeps the raw serial in its fingerprint and its
@@ -304,8 +321,8 @@ logs, docs and issues. What the proof of concept should hold:
    OpenRGB's version and the negotiated protocol. Never its serial, nor its
    location, whatever that holds: a path or an address.
 5. **PRIVACY.md gains a paragraph** before it ships: off by default; on, Candeo
-   connects to OpenRGB on this computer, reads the devices it lists and sends
-   colours, nothing else.
+   starts or connects to OpenRGB on this computer, reads the devices it lists
+   and sends colours, nothing else.
 
 Seen while reading for this study: *Control* writes the unit's serial into
 `settings.json` — the one the device's protocol reports, the USB descriptor's
@@ -343,69 +360,452 @@ fingerprint at the next save. An OpenRGB record follows the same rule.
 | **Effort** | SDK client, conversion of zones and matrix maps to a layout, a `DeviceOut` ([code][c-deviceout]), settings, *Devices*, a conflict guard, tests on a fake server. Hypercolor's client and bridge driver: about 190 KB of Rust sources, test folders aside | A, plus process supervision, a detector-to-USB-id map per OpenRGB release, packaging for MSIX, NSIS, MSI, `.deb` and `.rpm`, the source offer, and an OpenRGB update in Candeo's releases | A, plus supervision and the detector map. Hypercolor's host crate and supervisor: about 150 KB more | a generator per family; bounded by what a definition can express ([`other-keyboards.md`](other-keyboards.md) §3) |
 | **Risks** | two writers, which Candeo detects but cannot prevent; mode writes that persist unseen; a user's server bound beyond loopback | Candeo opens the unauthenticated port (§4.1) and answers for OpenRGB's flaws and updates; a Store package that drives HID only | Candeo opens the port; the partition is rewritable by any local client | a definition wrong for a model nobody verified, which *Not verified* already says |
 | **User experience** | install OpenRGB, start its server, keep it running; nothing to do when it is absent | one switch | one switch once OpenRGB is installed | nothing to install; *Try* and *Report* per device |
-| **Store** | compatible: loopback client, no driver, no elevation | HID only; the licence terms and the source offer to settle; a package about 22 MB larger, the size of 1.1's Windows zip ([notes][o-release]) | technically possible from full trust; not verified | compatible, as today |
+| **Store** | compatible: loopback client, no driver, no elevation | HID only; the licence terms and the source offer to settle; a package about 22 MB larger, the size of 1.1's Windows zip ([notes][o-release]) | allowed from full trust (§7) | compatible, as today |
 | **Coverage** | everything the user's OpenRGB drives, SMBus included when the user set PawnIO up | HID and USB in the Store; more elsewhere | everything the user's OpenRGB drives | keyboards and laptop zones a definition can express; no RAM, motherboards, GPUs or network lights |
 
-### Recommendation
+### Recommendation, and the decision
 
-**A, as [#368] scopes it, beside C.** C stays the path for keyboards and
-laptops: native, verified when possible, and first. A reaches what C never
-will (RAM, fans, strips, motherboards, network lights) at no legal cost and
-without Candeo opening a port. B is not worth it: in the Store it would drive
-only what the user's own OpenRGB drives without it, and it would make Candeo
-answer for a GPLv2 source offer and an unauthenticated server. B′ is the step
-to reconsider after A's proof of concept, if starting the server proves the
-main friction, outside the Store first.
+The study recommended **A beside C**: A reaches at no legal cost what C never
+will (RAM, fans, strips, motherboards, network lights), C stays the path for
+keyboards and laptops, B is not worth a GPLv2 source offer for a Store
+package that would drive HID only, and B′ was to be reconsidered after A's
+proof of concept.
 
-**Main risk: two writers on one device.** Under A Candeo cannot configure the
-user's detectors without rewriting the user's OpenRGB settings, which it must
-not do. It can refuse to route through OpenRGB a device it drives natively,
-and say once, on that device, that another program may write it too. It
-cannot stop the user's OpenRGB, its profiles or its Effects plugin from
-writing that device, and nothing in Windows or Linux reserves a HID device for
-one program (hidapi opens with shared read and write, [code][hidapi-open]).
+**Decided on 2026-11-06: B′, beside C.** What tipped it:
 
-## 6. What the proof of concept should hold
+- **Under A, nothing acts before OpenRGB opens a device.** Candeo must not
+  rewrite the user's settings, so the user's OpenRGB detects, opens and
+  initialises every device it knows, Candeo's native ones included; the
+  conflict guard can only refuse Candeo's own route afterwards. Under B′,
+  Candeo's OpenRGB never runs the detectors of the devices Candeo drives
+  natively: they are off in its configuration before it starts (§6.4).
+- **A's friction is the server**: start it, keep it running. B′ is one switch
+  once OpenRGB is installed.
+- **Nothing is shipped**: B′'s legal row is A's. Starting a program the user
+  installed distributes nothing of it (§1.3, last row).
 
-Mapped to [#368]'s steps, with what this study found:
+What it costs, accepted: while the option is on, Candeo opens an
+unauthenticated port on loopback (§4.1), which any local process can reach;
+a detector map to refresh with each OpenRGB release (§6.4); process
+supervision (§6.5). C stays first: a device Candeo has a definition for never
+goes through OpenRGB (§6.8).
 
-1. **Connect** to `127.0.0.1:6742` only, when opted in; negotiate; refuse a
-   protocol below 6 with one sentence and the action ("Update OpenRGB to 1.0 or
-   later"). Not reachable: one sentence, nothing retried in a loop.
-2. **Capabilities as reported**: a controller with no mode flagged per-LED is
-   listed and not driven; zones without a matrix map become zones, a matrix
-   map becomes keys with positions; LED names are OpenRGB's.
-3. **One effect** on a per-key device and a zones device.
-4. **Reconnects**: protocol 6's controller ids hold while the server runs; on
-   `DEVICE_LIST_UPDATED`, compare the lists as the documentation describes. A
-   server restart gives new ids: rebind by fingerprint before the next frame.
-   Two controllers with one fingerprint: listed, not driven.
-5. **Native first**: an OpenRGB controller whose HID path gives a VID:PID that
-   a Candeo definition for this computer describes — built in, yours or
-   unverified — is not driven through OpenRGB, controlled or not. On Linux,
-   `/dev/hidrawN` resolves to its VID:PID through sysfs. A location that is not
-   HID is not a device Candeo drives natively.
-6. **Trust**: §4.2's list, enforced in the encoder and tested. On release,
-   restore the mode read on take-over; never `SAVEMODE`.
-7. **Measure** latency and frame rate against native HID; pace each controller
-   with the latest frame kept and the others dropped.
-8. **Attribution**: none required (§1.3); OpenRGB named in the docs and the
-   listing as the program the user installs.
+It departs from [#368] on one point: step 6 excluded a background server
+start. The server starts only once the user has turned the option on, with
+Candeo, and it never outlives Candeo (§6.5).
 
-## 7. Not verified
+## 6. Design
 
-- Whether a full-trust MSIX app's child process keeps its package identity, and
-  where its writes land (§3.2): to measure on the package if B or B′ is
-  pursued.
+### 6.1 The switch
+
+- *Settings* gets an **OpenRGB** switch, off by default. Off, Candeo looks for
+  no executable, opens no port, connects to nothing, starts nothing and writes
+  nothing: install and startup are unchanged, as [#368] requires.
+- On, §6.2 to §6.5 run at once, and again each time Candeo starts while it
+  stays on. Turned off, or Candeo quitting: the OpenRGB devices are released
+  (§6.7), the connection closed, and the OpenRGB Candeo started is stopped
+  (§6.5).
+- One at a time: Candeo runs as a single instance (`single_instance.rs`), and
+  so does the OpenRGB it starts.
+
+### 6.2 Finding the installed OpenRGB
+
+Looked for in this order; the first found is used.
+
+| Platform | Where | Why there |
+|---|---|---|
+| Windows | `%ProgramFiles%\OpenRGB\OpenRGB.exe` | the MSI's default folder. winget's `OpenRGB.OpenRGB` 1.1.0 installs that MSI, machine-wide, with `DefaultInstallLocation: %ProgramFiles%\OpenRGB` ([data][w-winget]) |
+| Windows | `OpenRGB.exe` in a `PATH` folder | a portable zip someone put on the path |
+| Linux | `openrgb` in a `PATH` folder | the distribution packages and upstream's `.deb` and `.rpm` |
+| Linux | the Flatpak `org.openrgb.OpenRGB` ([readme][o-readme]): `/var/lib/flatpak/app/org.openrgb.OpenRGB/current`, or `~/.local/share/flatpak/app/org.openrgb.OpenRGB/current` for a user installation, with `flatpak` on the `PATH` | started through `flatpak run` (§6.5) |
+
+- **Not looked for**: an AppImage or a portable zip off the `PATH`, which have
+  no standard place, and an MSI installed with another `INSTALLDIR`. A path
+  the user picks comes before the table; the proof of concept takes one, the
+  interface for it is left for later.
+- **The version, before starting.** `OpenRGB --version` prints a `Version:`
+  line and exits before any detection, in 1.0 and 1.1 ([code][o-cli-10],
+  [code][o-cli]). Candeo reads that line, allowing three seconds and 4 KiB of
+  output, and **starts only 1.0 or later**: the first release read here whose
+  help documents `--server-host` with a loopback default, and whose default
+  bind is loopback (§3.4). Candeo does not find out by trying: 1.1 reports an
+  option it does not know only after detection, once devices are opened
+  ([code][o-cli]). A pipeline build reads `0.9+ (1.0rc3)`: the version in
+  parentheses counts ([docs][h-host]). The 1.0 release candidates are refused.
+- **Not found, or older than 1.0**: one sentence and the action (§6.10).
+
+### 6.3 A server already running
+
+Before starting anything, Candeo tries `127.0.0.1:6742`, the default port
+([docs][o-sdkdoc], *Protocol Basics*): connecting within half a second, the
+protocol version answered within a second.
+
+- **It answers: Candeo reuses it**, and never stops it. Candeo cannot turn off
+  that server's detectors. That would mean rewriting the user's OpenRGB
+  settings, which Candeo refuses to do (§5), and over the SDK it would take the
+  local status Candeo never asks for (§6.6). It says so once (§6.10). Its
+  controllers go through the same guard (§6.8). Protocol 4 or later is
+  accepted, OpenRGB 0.9 onwards: the server is the user's and runs already;
+  Candeo only connects to it.
+- **Nothing answers, or something that is not OpenRGB**: Candeo starts its own
+  (§6.5), on another port.
+- **An OpenRGB runs without its server** (a process named `OpenRGB.exe` or
+  `openrgb`, the user's window): Candeo does not start a second one, which
+  would detect the same devices, and says what to do (§6.10). It reads process
+  names, nothing else.
+- A server the user runs on another port is not found; that case is the
+  user's OpenRGB beside Candeo's (§6.8).
+
+### 6.4 The private configuration
+
+- **The folder**: `openrgb` in Candeo's local data folder
+  (`app_local_data_dir()`: `%LOCALAPPDATA%\com.o2csi.candeo\openrgb`,
+  `~/.local/share/com.o2csi.candeo/openrgb`), given to OpenRGB with `--config`.
+  The user's own configuration (`%APPDATA%\OpenRGB`, `~/.config/OpenRGB`) is
+  never read nor written, so none of the user's profiles is loaded.
+- **`OpenRGB.json`**, written before each start, through a temporary file and
+  a rename. Candeo sets two things and keeps every other key as it finds it:
+
+| Key | Value | Why |
+|---|---|---|
+| `Detectors.detectors.<name>` | `false` for each detector to turn off; **removed** for the other names the map knows | OpenRGB skips a detector turned off before running its function, so before the device is opened ([code][o-detection]). A removed name gets OpenRGB's registered default back at its next start, where `true` would turn on a detector OpenRGB ships off |
+| `LogManager.log_file` | `false` | OpenRGB logs device paths on hot plug at *info* ([code][o-detection]), and its log files would land in Candeo's folder, under `logs` ([code][o-logmanager]) |
+
+- OpenRGB adds the detector names it lacks and drops those it no longer
+  registers, then saves, before it detects ([code][o-detection]): a name
+  this OpenRGB does not know is harmless, and OpenRGB removes it itself.
+- An `OpenRGB.json` Candeo cannot read is replaced by a fresh one: the file is
+  Candeo's own, in Candeo's folder, and the log says so.
+
+**Which detectors are turned off.**
+
+1. **Candeo's native ids**: the VID:PID of every definition Candeo has for
+   this computer, built in, unverified or yours, plugged in or not, controlled
+   or not. Interface and usage are ignored: a detector claiming that VID:PID
+   on any interface is off.
+2. **The map**: from each OpenRGB detector name to the USB ids it claims,
+   generated for one OpenRGB release and embedded with `include_str!`, as
+   Hypercolor's ([code][h-host], [data][h-detectors]). Its source is the
+   `60-openrgb.rules` that release installs ([docs][o-udevdoc]), read as data:
+   each entry names the detector it comes from, which is what Hypercolor's
+   generator relies on. The file records the release and the rules file's
+   SHA-256. Hypercolor's holds about 1,100 names for 1.0.
+3. **Turned off**: every detector whose ids meet Candeo's, and **every generic
+   HID detector**, registered for any VID and PID and turned on or off by the
+   same setting ([code][o-detection]): one cannot be told to leave a single
+   device alone. The rules file cannot list those; the generator finds them in
+   the release's detector registrations, read as data, each file's SPDX line
+   checked first like the device generators (§5, C). The cost: a device only a
+   generic detector reaches, such as a LampArray device Candeo has no
+   definition for, is not reached through OpenRGB either (§9); [#330] reopens
+   it.
+4. **An OpenRGB newer than the map** runs its new detectors; the guard (§6.8)
+   remains. The log says the installed release is newer than the map's.
+5. **A definition added while OpenRGB runs** (*Yours*): its detectors are off
+   from the next start; the guard covers the time between.
+
+### 6.5 Starting and stopping it
+
+The arguments, and nothing else:
+
+```
+OpenRGB --server --server-host 127.0.0.1 --server-port <port> --noautoconnect --config <folder> --loglevel 2
+```
+
+| Argument | Why |
+|---|---|
+| `--server` | starts the SDK server. The help shows the window with `--gui`, or with no argument at all ([code][o-cli]) |
+| `--server-host 127.0.0.1` | the default since 1.0, passed anyway, as Hypercolor does ([code][h-process]): no setting of OpenRGB's can then widen it |
+| `--server-port <port>` | a free port Candeo picks by binding `127.0.0.1:0`. Never 6742, where other clients look first and where Candeo looks for the user's server (§6.3). If it was taken in the meantime, the handshake never answers: Candeo stops the child and tries once more with another |
+| `--noautoconnect` | without it, OpenRGB tries at startup to connect to a local server ([docs][o-man]), which may be the user's |
+| `--config <folder>` | §6.4 |
+| `--loglevel 2` | warnings and above, below the *info* level where paths are logged ([code][o-logmanager]) |
+
+- **Flatpak**: `flatpak run --filesystem=<folder> org.openrgb.OpenRGB` and the
+  same arguments. The folder must exist first, `--filesystem` ignoring one that
+  does not, and hold no `:` ([code][h-process]).
+- **Its output goes nowhere**: what OpenRGB prints may carry device paths, which
+  Candeo's log must not. On Windows it starts with `CREATE_NO_WINDOW`, so no
+  console appears.
+- **Tied to Candeo's lifetime.** Windows: a job object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, the child assigned to it as soon as it
+  is created, Candeo holding the only handle: however Candeo ends, Windows
+  closes the handle and kills the child. Inside the Store package Candeo's
+  process is itself in a job, and jobs nest since Windows 8 ([docs][m-nested]).
+  Linux: `PR_SET_PDEATHSIG` with `SIGTERM` set in the child before `exec`, and
+  a process group of its own. That signal follows the *thread* that started the
+  child, so a supervisor thread lives as long as the output.
+- **Ready** when the handshake answers on the port: polled every 250 ms for at
+  most 15 seconds. Devices then arrive as OpenRGB detects them, each list change
+  announced by `DEVICE_LIST_UPDATED` ([docs][o-sdkdoc]).
+- **Stopping**: on Windows the job is terminated; on Linux `SIGTERM`, then
+  `SIGKILL` after three seconds. Only the OpenRGB Candeo started is ever
+  stopped.
+- **If it exits on its own**, it is not restarted: the switch says so and gives
+  the action (§6.10). No loop.
+
+### 6.6 The client
+
+Written from OpenRGB's public documentation only: the SDK document and the
+RGBController API document at `release_1.1` ([docs][o-sdkdoc],
+[docs][o-apidoc]). No OpenRGB source and no GPL-2.0 crate (§1.2), the rule
+Hypercolor's client follows ([code][h-cleanroom]). It is Candeo's code, under
+Candeo's licence.
+
+**Framing** ([docs][o-sdkdoc], *NetPacketHeader structure*): sixteen bytes,
+`ORGB`, `pkt_dev_id`, `pkt_id`, `pkt_size`, then the payload. Neither document
+states the byte order: Candeo uses little endian, the order of every platform
+OpenRGB is released for (§9). A colour is `0x00BBGGRR` ([docs][o-apidoc]),
+so red, green, blue and a zero byte on the wire. A string's length counts its
+terminating zero ([docs][o-sdkdoc]).
+
+**Negotiation** ([docs][o-sdkdoc], *NET_PACKET_ID_REQUEST_PROTOCOL_VERSION*):
+Candeo sends 6, the server answers its own highest, the lower of the two is
+used. No answer means a version 0 server; below 4, Candeo stops there with one
+sentence (§6.10). Then `SET_CLIENT_NAME` carries `Candeo`, the program's name,
+never the computer's.
+
+| | 4 (0.9) | 5 (1.0rc1, rc2) | 6 (1.0, 1.1) |
+|---|---|---|---|
+| A controller in `pkt_dev_id` | its index | its index | its id, kept while the server runs |
+| `REQUEST_CONTROLLER_COUNT` answers | the count | the count | the count and the ids |
+| `mode_value`, `led_value` | present; `mode_value` sent back in `UPDATEMODE` | same | gone |
+| Zones | segments | segments, zone flags | matrix maps in segments, zone modes |
+| Controller | — | flags, LED display names | display name, configuration |
+| On `DEVICE_LIST_UPDATED` | every controller read again | same | the ids read again; gone ones dropped, new ones read |
+
+Candeo starts only 1.0 or later (§6.2): versions 4 and 5 come only from a
+server the user runs (§6.3).
+
+**The packets.** Each is in [docs][o-sdkdoc] under its own name.
+
+| Direction | Packet | Id | When |
+|---|---|---|---|
+| sent | `REQUEST_PROTOCOL_VERSION` | 40 | once, on connecting |
+| sent | `SET_CLIENT_NAME` | 50 | once |
+| sent | `REQUEST_CONTROLLER_COUNT` | 0 | after connecting, and on each `DEVICE_LIST_UPDATED` |
+| sent | `REQUEST_CONTROLLER_DATA` | 1 | for each controller to read, with the negotiated version |
+| sent | `RGBCONTROLLER_UPDATEMODE` | 1101 | on *Control*, to the direct mode; on *Release*, back to the mode found (§6.7) |
+| sent | `RGBCONTROLLER_UPDATELEDS` | 1050 | each frame, every LED of the controller |
+| received | the answers to 40, 0 and 1 | | |
+| received | `DEVICE_LIST_UPDATED` | 100 | the list is read again |
+| received | `ACK` | 10 | protocol 6; a failure is logged with its status code |
+| received | anything else | | read to its length and dropped |
+
+**Everything else cannot be encoded**, and a test tries every documented id:
+`SAVEMODE` (1102); `SETCUSTOMMODE` (1100), which lets OpenRGB pick a mode by
+name, Direct, then Custom, then Static ([docs][o-apidoc]), possibly one Candeo
+would refuse (§6.7); `UPDATEZONEMODE`, `UPDATEZONELEDS` and
+`UPDATESINGLELED` (1103, 1051, 1052), not needed; zone resizing, segments,
+zone and device configuration and hiding (1000 to 1005); device-specific
+configuration (1130, 1131); rescanning (140); profiles (150 to 161); plugins
+(200, 201); settings (250 to 254); the log (300 to 303); the device listings
+(120 to 124); and `SET_CLIENT_FLAGS` (52), the only way to ask for local
+status, which the server grants a loopback client that asks ([docs][o-sdkdoc]).
+It is narrower than §4.2's list: 1100, 1103 and 1051 are gone.
+
+The client also refuses any address that is not loopback.
+
+**Reading.** A thread reads each connection, so packets nobody asked for never
+fill the socket. A payload above 8 MiB drops the connection. Every length and
+count is checked against the bytes left and every product for overflow, a
+matrix map's `8 + 4 × width × height` against the length announced
+([docs][o-sdkdoc], *Matrix Map Data*). Strings are decoded as UTF-8, invalid
+bytes replaced. `data_size` is "the size of all data in packet": Candeo writes
+the whole payload's length, itself included, and when reading only checks
+that it fits (§9).
+
+### 6.7 Control and Release
+
+- **Control.** Candeo reads the controller again and picks its **direct mode**:
+  a mode with per-LED colours (flag bit 5 and colour mode 1, [docs][o-apidoc],
+  *Mode Flags*, *Color Mode Values*) **that does not save itself** (bit 9,
+  "automatically saves"), the one named `Direct` first. It sends
+  `UPDATEMODE` with that mode, at its maximum brightness when it has one
+  (bit 4), then reads the controller back to check the active mode: the
+  hardware rule of [`AGENTS.md`](../../AGENTS.md), as far as the SDK reaches.
+- **No such mode**: the device is listed and not driven (§6.10).
+- **A mode flagged "automatically saves" is never selected**, neither on
+  *Control* nor on *Release*: it is the one sign the documentation gives of a
+  mode written to the device's memory. A controller that persists a mode
+  without the flag remains invisible (§4.2).
+- **Each frame**: `UPDATELEDS` with every LED's colour, in OpenRGB's LED
+  order. Zones keep their LED range; a matrix map gives positions. Only the
+  latest frame is kept for each controller.
+- **Release**: `UPDATEMODE` back to the mode active on *Control*, unless that
+  mode saves itself; then the lights keep the last frame. Never `SAVEMODE`.
+- **A zone OpenRGB reports with no LED** (an addressable header whose length
+  the user sets) has nothing to drive. `RESIZEZONE` stays out of the list: a
+  later decision, which Hypercolor takes only for lengths the user entered.
+
+### 6.8 Native first
+
+After each read of the list, before anything is driven, each controller is
+sorted:
+
+| Controller | Result |
+|---|---|
+| `location` is `HID: ` and a path (§4.3) whose VID:PID is one of Candeo's (§6.4): on Windows, `VID_xxxx&PID_xxxx` in the path; on Linux, `/dev/hidrawN` read through `/sys/class/hidraw/hidrawN/device/uevent` (`HID_ID=bus:vid:pid`) | **native**: not listed as an OpenRGB device, never driven through OpenRGB; the log says it was set aside |
+| its serial's fingerprint is that of a unit Candeo has open natively | native, likewise |
+| `HID: ` with a path that gives no VID:PID | not driven: Candeo cannot tell it is not one of its own |
+| another kind of location: SMBus, network, serial port | an OpenRGB device |
+| two controllers with one fingerprint | listed as duplicates, neither driven |
+
+What the guard cannot do, since nothing in Windows or Linux reserves a HID
+device for one program (hidapi opens it for shared reading and writing,
+[code][hidapi-open]):
+
+- **A reused server** has its own detectors on: it may write a native device
+  while Candeo writes it too. Candeo says so once (§6.10).
+- **The user's own OpenRGB started beside Candeo's** looks for a server on
+  6742, not on Candeo's port, so it detects on its own: two OpenRGBs on the
+  same devices, the native ones among them. Candeo does not watch for it.
+- **A device OpenRGB reaches through libusb** has no HID location; only the
+  serial rule can catch it (§9).
+- A definition added in *Yours* for a device driven through OpenRGB: Candeo
+  releases it from OpenRGB first, then drives it natively.
+
+### 6.9 Identity
+
+- `serial` and `location` are parsed into a type that prints neither: its
+  `Debug` writes a placeholder, it has no `Display` and no `Serialize`. They
+  live in memory for the connection only, for two uses: the fingerprint, and
+  the guard's VID:PID. Never in `settings.json`, the log, the copied
+  diagnostic, *Report* or a `Failure`.
+- **The fingerprint** is `journal::fingerprint`'s function ([code][c-fingerprint]),
+  of the serial when there is one, otherwise of the vendor, the name and each
+  zone's name and LED count. The second kind is the weaker: two identical
+  units share it, and §6.8 lists them as duplicates.
+- `settings.json` keys an OpenRGB device by its fingerprint and kind. Protocol
+  6 ids last as long as the server; after a reconnection or a new server,
+  devices are bound again by fingerprint before the next frame.
+- The log and the diagnostic name an OpenRGB device by its fingerprint,
+  OpenRGB's name for it, its type, its zones and LED counts, OpenRGB's version
+  and the negotiated protocol.
+- [`PRIVACY.md`](../../PRIVACY.md) gains its paragraph (§4.3) before the
+  option ships.
+
+### 6.10 What the user sees
+
+Beside the switch, states and actions only ([`AGENTS.md`](../../AGENTS.md),
+*Interface text*); the English below is a draft for the catalogs:
+
+| State | Text | When |
+|---|---|---|
+| looking | *Looking for OpenRGB* | §6.2 to §6.5 running |
+| not found | *OpenRGB was not found. Install OpenRGB 1.0 or later, then turn this on again.* | §6.2 |
+| too old | *This OpenRGB is too old. Update it to 1.0 or later.* | §6.2 |
+| open without its server | *OpenRGB is open without its server. Start its SDK server, or quit it.* | §6.3 |
+| connected, started | *Connected to OpenRGB 1.1* | §6.5 |
+| connected, reused | *Connected to the OpenRGB already running* and, once: *Candeo cannot turn off this OpenRGB's detection: it may also write the devices Candeo drives.* | §6.3; the one warning, for what is surprising |
+| stopped | *OpenRGB has stopped. Turn this off and on again to restart it.* | §6.5 |
+| protocol below 4 | *This OpenRGB is too old. Update it to 1.0 or later.* | §6.6 |
+
+In *Devices*, OpenRGB devices are listed with the others, marked **via
+OpenRGB**, with *Control* and *Release* like any device and the existing
+states: *controlled*, *not open*, and *unplugged* when OpenRGB no longer lists
+them. Two new states: **no direct mode** (§6.7) and **duplicate** (§6.8), both
+listed, with no *Control*. A controller set aside as native (§6.8) is not
+listed a second time: the native entry is the only one.
+
+New terms, to settle with the interface: *via OpenRGB* (*via OpenRGB*),
+*no direct mode* (*sans mode direct*), *duplicate* (*en double*). Text goes
+through the catalogs (`openrgb.*`), errors as `Failure` codes under `errors.`.
+
+## 7. What the Store build allows
+
+Candeo's package is full trust (`runFullTrust`, [`msix.md`](msix.md) §1). For
+starting an OpenRGB installed outside it:
+
+| Question | Answer | Source |
+|---|---|---|
+| May a full-trust packaged app start an executable outside its package? | Yes. Candeo's package already starts the file manager through `CreateProcessW`; the certification kit passes, reporting it in an optional test only | [`msix.md`](msix.md) §4 |
+| Does that child run inside the package? | Not by default. For a process with no policy, the documented default is that it creates its children "outside of the desktop app runtime environment"; `PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY` changes it. Candeo sets none: OpenRGB runs as if started from the Start menu, without the package's identity | [docs][m-procattr]; to measure (§9) |
+| Does the private configuration land where OpenRGB reads it? | Yes, either way: it is under `%LOCALAPPDATA%`, which was measured not redirected for Candeo's own package, and a child outside the package is not redirected at all | [`msix.md`](msix.md) §2, [docs][m-behind] |
+| Can Candeo tie it to its lifetime? | Yes: a job object of Candeo's own, nested in the package's, Windows 8 and later | [docs][m-nested] |
+| Elevation | Never: "apps that require elevation for any part of their functionality" are refused. Started as the user, OpenRGB reaches HID and USB devices, not SMBus ones (§3.1) | [docs][m-prepare] |
+| Drivers | None of Candeo's (policy 10.2.4). winget's OpenRGB package pulls in PawnIO as a dependency: that is the user's installation, not Candeo's | [docs][m-policies], [data][w-winget] |
+| Offering OpenRGB | Never for download nor installation: 10.2.3 forbids offering secondary software the publisher did not develop and that does not enhance the product, and 10.1.5 limits what an app may offer to acquire to Store products and add-ons. Candeo names OpenRGB and says it is needed | [docs][m-policies] |
+| Dynamic code (10.2.2) | Candeo runs no code it downloads; it starts a program the user installed, for a function its listing describes | [docs][m-policies] |
+| Disclosure (10.2.4) | Required at the start of the description for a dependency of the *primary* functionality, which this is not; the listing names OpenRGB where it presents the option | [docs][m-policies] |
+| S mode | Store apps must be compatible with it, and there only Store apps run: OpenRGB cannot be installed, and the option says it is not | [docs][m-prepare] |
+| Loopback | A full-trust client and its child on `127.0.0.1` declare nothing (§3.2) | |
+
+Everything else is as in the MSI and NSIS builds.
+
+## 8. The proof of concept
+
+In a pull request of its own, after this one: the client and the process
+management in a crate of their own, behind an `openrgb` feature of the desktop
+application, off by default, wired into nothing yet. Mapped to [#368]'s steps:
+
+1. **Connect**: framing, negotiation from 4 to 6, the packets of §6.6 and the
+   refusal of every other, the reader thread, the list kept in step with
+   `DEVICE_LIST_UPDATED`.
+2. **Capabilities as reported**: the controller data of protocols 4, 5 and 6
+   parsed into zones and LEDs, matrix maps into positions, the direct mode
+   chosen or refused (§6.7), serial and location kept out (§6.9).
+3. **One effect**: `UPDATELEDS` from a frame; running a real effect needs the
+   wiring.
+4. **Reconnects**: ids against indexes, fingerprints.
+5. **Native first**: the guard of §6.8 on Windows paths and Linux sysfs.
+6. **Trust and lifecycle**: discovery, the version check, the configuration
+   writer, the launch decision of §6.3, the arguments of §6.5, the child tied
+   to the process.
+7. **Measures** and 8. **attribution**: §9, and none owed (§1.3).
+
+Tested without OpenRGB: byte fixtures built from the documents, each citing
+its section; a fake server in the test process for the round trip; the
+configuration writer on a sample file; discovery on a fake file system.
+
+## 9. Not verified
+
+Nothing below was run: no OpenRGB was installed, started or connected to.
+
+**What needs a real OpenRGB, and a device:**
+
+- The client against a server: the byte order and colour order (§6.6), what
+  `data_size` counts, whether a protocol 6 server sends `ACK` or other packets
+  unasked, and the parsing of real controller data, protocols 4 to 6.
+- The direct mode chosen by §6.7 lighting each LED, the read-back of the mode,
+  and the release putting the previous mode back; `UPDATEMODE` on a protocol 6
+  device whose zones have modes of their own.
+- Latency and frame rate against native HID, and OpenRGB's start time
+  ([#368], step 7).
+- Each entry of `60-openrgb.rules` naming its detector, as Hypercolor's
+  generator relies on; the generic HID detectors' names; the map for 1.1.
+- A detector turned off leaving its device untouched, and whether OpenRGB
+  writes to a device when it detects it, which makes the partition matter
+  beyond the guard.
+- Whether OpenRGB's LampArray controller, which OpenRGB turns off where its
+  Razer driver knows the device
+  ([`rgb-controllers.md`](../comparison/rgb-controllers.md) §10), claims the
+  DeathStalker V2 Pro once the Razer detector for it is off, and whether it is
+  one of the generic HID detectors §6.4 turns off.
+- Plugins: whether a private configuration folder is the only place OpenRGB
+  loads them from, on Linux in particular.
+- Headless on Windows: no window, no notification area icon, and no dialog,
+  the *Dialog* log level always showing one ([code][o-logmanager]).
+- `--version`'s line on 1.0 and 1.1 as built, and the pipeline banner.
+- Flatpak: whether the sandboxed OpenRGB dies with `flatpak run`, and its
+  access to devices.
+- A device reached through libusb rather than HID (§6.8).
+
+**What needs the Store package:**
+
+- Whether the child runs outside the package as the documentation says, where
+  its writes land, and the job object nesting in the package's.
+
+**Carried from the study:**
+
 - Which licence terms Candeo's Store listing gives (§3.3).
 - Whether Defender or the vulnerable driver blocklist list PawnIO, and whether
   the current blocklist names WinRing0 (§3.1).
 - The licences of the NVAPI wrapper (`dependencies/NVFC`) and the colour wheel
   widget in OpenRGB's tree: no statement found in their headers.
-- Which OpenRGB controllers persist a mode change without `SAVEMODE` (§4.2):
-  per controller, in OpenRGB's code.
-- Whether OpenRGB reaches, through libusb, a device Candeo drives over HID: its
-  location would not be a HID path, and §6's guard would not see it.
+- Which OpenRGB controllers persist a mode change without `SAVEMODE` and
+  without the automatic-save flag (§4.2, §6.7): per controller, in OpenRGB's
+  code.
 - The licence counts of §1.1 come from `master` at `4f2d8920`, twenty days
   after 1.1; the LampArray header was checked at `release_1.1`.
 
@@ -434,7 +834,11 @@ Mapped to [#368]'s steps, with what this study found:
 [o-proto-rc2]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_candidate_1.0rc2/NetworkProtocol.h
 [o-server]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/NetworkServer.cpp
 [o-sdkdoc]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/Documentation/OpenRGBSDK.md
+[o-apidoc]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/Documentation/RGBControllerAPI.md
+[o-udevdoc]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/Documentation/UdevRules.md
+[o-readme]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/README.md
 [o-cli]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/cli.cpp
+[o-cli-10]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.0/cli.cpp
 [o-resources]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/ResourceManager.cpp
 [o-detection]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/DetectionManager.cpp
 [o-logmanager]: https://gitlab.com/CalcProgrammer1/OpenRGB/-/blob/release_1.1/LogManager.cpp
@@ -453,6 +857,7 @@ Mapped to [#368]'s steps, with what this study found:
 [o-release]: https://codeberg.org/OpenRGB/OpenRGB/releases/tag/release_1.1
 [o-debian]: https://sources.debian.org/src/openrgb/1.0+ds-0.1/debian/copyright/
 [o-fedora]: https://mdapi.fedoraproject.org/rawhide/pkg/openrgb
+[o-man]: https://manpages.debian.org/testing/openrgb/openrgb.1.en.html
 
 <!-- Libraries OpenRGB bundles -->
 
@@ -462,6 +867,10 @@ Mapped to [#368]'s steps, with what this study found:
 [libusb-lic]: https://github.com/libusb/libusb/blob/master/COPYING
 [r-openrgb]: https://crates.io/crates/openrgb
 [r-openrgb2]: https://crates.io/crates/openrgb2
+
+<!-- Installing OpenRGB -->
+
+[w-winget]: https://github.com/microsoft/winget-pkgs/blob/master/manifests/o/OpenRGB/OpenRGB/1.1.0/OpenRGB.OpenRGB.installer.yaml
 
 <!-- Hypercolor 0.9.0 (02f53272) -->
 
@@ -493,11 +902,14 @@ Mapped to [#368]'s steps, with what this study found:
 [w-defender]: https://www.microsoft.com/en-us/wdsi/threats/malware-encyclopedia-description?Name=VulnerableDriver:WinNT/Winring0.A
 [w-blocklist]: https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/design/microsoft-recommended-driver-block-rules
 
-<!-- Microsoft Store and MSIX -->
+<!-- Microsoft Store, MSIX and Windows -->
 
 [m-policies]: https://learn.microsoft.com/en-us/windows/apps/publish/store-policies
 [m-ada]: https://go.microsoft.com/fwlink/?linkid=528905
 [m-prepare]: https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-prepare
+[m-behind]: https://learn.microsoft.com/en-us/windows/msix/desktop/desktop-to-uwp-behind-the-scenes
+[m-procattr]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute
+[m-nested]: https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs
 
 <!-- Free Software Foundation -->
 
