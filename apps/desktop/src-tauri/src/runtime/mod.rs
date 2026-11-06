@@ -2420,8 +2420,10 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
         shared.reaching.store(false, Ordering::Relaxed);
     } else {
         let colors: Vec<Rgb> = bytes
-            .chunks_exact(3)
-            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         // A keyboard unplugged midway does not stop the effect: the simulator
         // carries on, and reconnecting goes through the existing commands. But

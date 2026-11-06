@@ -340,8 +340,10 @@ pub(crate) const OFF: &str = "hardware:off";
 /// trailing byte or two is dropped rather than made into a colour.
 pub(crate) fn triplets(bytes: &[u8]) -> Vec<Rgb> {
     bytes
-        .chunks_exact(3)
-        .map(|c| Rgb::new(c[0], c[1], c[2]))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|&[r, g, b]| Rgb::new(r, g, b))
         .collect()
 }
 
@@ -1820,8 +1822,10 @@ fn present(state: State<'_, AppState>, device: DeviceRef, frame: Vec<u8>) -> Cmd
             )));
         }
         let colors: Vec<Rgb> = frame
-            .chunks_exact(3)
-            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         Ok(kb.present(&colors)?)
     })
@@ -1844,14 +1848,16 @@ fn write_row(
     colors: Vec<u8>,
 ) -> CmdResult<()> {
     with_keyboard(&state, device, |kb| {
-        if colors.len() % 3 != 0 || colors.is_empty() {
+        if !colors.len().is_multiple_of(3) || colors.is_empty() {
             return Err(Failure::unexpected(
                 "colors must be a non-empty list of RGB triplets",
             ));
         }
         let c: Vec<Rgb> = colors
-            .chunks_exact(3)
-            .map(|x| Rgb::new(x[0], x[1], x[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         Ok(kb.write_row(row, col_start, &c)?)
     })
