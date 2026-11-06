@@ -87,7 +87,7 @@ defineExpose({ close: () => close(false) })
 </script>
 
 <template>
-  <span ref="root" class="actions">
+  <span ref="root" class="menu-button">
     <button
       ref="button"
       type="button"
@@ -132,7 +132,7 @@ defineExpose({ close: () => close(false) })
 </template>
 
 <style scoped>
-.actions {
+.menu-button {
   position: relative;
   display: inline-flex;
   flex: none;

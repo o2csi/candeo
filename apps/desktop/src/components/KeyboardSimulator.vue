@@ -260,6 +260,21 @@ const OUTLINE_INSET = 0.02
 /** The key holding the board's one tab stop; arrows move it. */
 const current = ref<number | null>(null)
 
+/**
+ * The board holds the focus: a ring goes around the current key, drawn apart
+ * from the light, whose own colour may be anything, the accent included.
+ */
+const boardFocused = ref(false)
+
+const ring = computed(() =>
+  chosen.value && boardFocused.value
+    ? (props.layout.keys.find((k) => k.index === current.value) ?? null)
+    : null,
+)
+
+/** How far the focus ring sits outside its key, in pitch units. */
+const RING_MARGIN = 0.06
+
 /** A key's name as it is read out: its legend, else its place in the layout. */
 function legend(index: number): string {
   const keys = props.layout.keys
@@ -348,6 +363,8 @@ function onKeyDown(e: KeyboardEvent, index: number): void {
       preserveAspectRatio="xMidYMid meet"
       :role="chosen ? 'group' : 'img'"
       :aria-label="chosen ? t('layers.select.board') : label"
+      @focusin="boardFocused = true"
+      @focusout="boardFocused = false"
     >
       <!-- What lights nothing: drawn first, faint, and themed like the chassis. -->
       <rect
@@ -426,6 +443,16 @@ function onKeyDown(e: KeyboardEvent, index: number): void {
         :width="Math.max(0, k.w - 2 * OUTLINE_INSET)"
         :height="Math.max(0, k.h - 2 * OUTLINE_INSET)"
         :rx="RADIUS"
+        vector-effect="non-scaling-stroke"
+      />
+      <rect
+        v-if="ring"
+        class="ring"
+        :x="ring.x - RING_MARGIN"
+        :y="ring.y - RING_MARGIN"
+        :width="ring.w + 2 * RING_MARGIN"
+        :height="ring.h + 2 * RING_MARGIN"
+        :rx="RADIUS * 1.5"
         vector-effect="non-scaling-stroke"
       />
       <!-- Drawn over the lights: interface, in the accent, like a selection. -->
@@ -510,10 +537,12 @@ function onKeyDown(e: KeyboardEvent, index: number): void {
   opacity: 0.35;
 }
 
-/* The focus, visible on any light: the text colour around the key. */
-.key:focus-visible > :first-child {
+/* The focus: a ring in the text colour around the key, outside the accent's outline. */
+.ring {
+  fill: none;
   stroke: var(--text);
-  stroke-width: 0.08;
+  stroke-width: 2;
+  pointer-events: none;
 }
 
 .check {

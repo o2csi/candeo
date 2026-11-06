@@ -36,7 +36,7 @@ const uid = useId()
 </script>
 
 <template>
-  <section class="card" :aria-labelledby="`${uid}-title`">
+  <section class="detail-card" :aria-labelledby="`${uid}-title`">
     <header class="head">
       <EffectSwatch v-if="swatch" class="mark" :colors="swatch" />
       <span v-else class="mark none" aria-hidden="true" />
@@ -65,7 +65,9 @@ const uid = useId()
 </template>
 
 <style scoped>
-.card {
+/* Not `.card`: the devices column's cards are styled under that name, and the
+   parent's styles reach a child's root. */
+.detail-card {
   display: flex;
   flex-direction: column;
   background: var(--raised);
@@ -138,7 +140,7 @@ h1 {
 }
 
 /* Each section under a rule of its own, as the card frames them. */
-.card > :deep(.section) {
+.detail-card > :deep(.section) {
   padding: 14px var(--gap-4) var(--gap-4);
   border-top: 1px solid var(--line);
 }

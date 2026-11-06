@@ -98,6 +98,7 @@ function shownLine(): string {
 
 <style scoped>
 .lrow {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -170,13 +171,22 @@ function shownLine(): string {
   color: var(--warn);
 }
 
-/* Shown on hover and focus, always there for Tab and screen readers. */
+/*
+ * Shown on hover and focus, always there for Tab and screen readers. Laid over
+ * the end of the row rather than beside it: the line keeps the row's width
+ * the rest of the time, and its whole text is in the row's title.
+ */
 .tools {
+  position: absolute;
+  top: 50%;
+  right: 2px;
   display: inline-flex;
-  flex: none;
   align-items: center;
-  padding-right: 2px;
+  padding: 0 2px;
+  border-radius: var(--r-sm);
+  background: var(--raised-2);
   opacity: 0;
+  transform: translateY(-50%);
 }
 
 .lrow:hover .tools,
