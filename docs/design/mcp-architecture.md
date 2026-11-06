@@ -18,22 +18,23 @@ flowchart TB
     subgraph Frontend["Tauri window / Vue 3"]
         Monaco["Monaco: editing, types, diagnostics"]
         TS["TypeScript source (.ts)"]
-        Transpile["ts.transpileModule: TS → JS"]
         Sim["Vue simulator: draws the frames it receives"]
-        Monaco --> TS --> Transpile
+        Monaco --> TS
     end
     subgraph Backend["Candeo's Rust backend"]
         IPC["Typed Tauri IPC commands"]
+        Compiler["candeo-compiler (Oxc): TS → JS, located diagnostics"]
         Store["Effect library: source + compiled cache"]
         Runtime["One QuickJS engine"]
         Preview["Preview loop: nothing sent to the hardware"]
         Applied["Applied loop: hardware output"]
+        Compiler --> Store
         Store --> Runtime
         Runtime --> Preview
         Runtime --> Applied
     end
-    Transpile -->|"save_effect_source / cache_effect"| IPC
-    IPC --> Store
+    TS -->|"save_effect_source / compile_effect"| IPC
+    IPC --> Compiler
     Preview -->|"frames"| Sim
     Applied --> Native["Native HID device"]
     Ext["Local applications / Home Assistant"] --> Signal["Local HTTP signals API: opt-in, token, limited capabilities"]
@@ -41,11 +42,12 @@ flowchart TB
     Rules --> Runtime
 ```
 
-**Checked in:** `apps/desktop/src/editor/effect.ts`, `apps/desktop/src/editor/library.ts`,
+**Checked in:** `apps/desktop/src/editor/library.ts`,
 `apps/desktop/src/views/EditorView.vue`, `apps/desktop/src-tauri/src/storage.rs`,
-`docs/api/commands.md`. The window compiles TypeScript sources with the compiler
-Monaco ships. Preview and applied rendering use the same QuickJS runtime; only the
-applied loop writes to the hardware.
+`docs/api/commands.md`, `crates/candeo-compiler`. Rust compiles TypeScript
+sources with Oxc since #381; the window keeps Monaco for editing, completion and
+type diagnostics. Preview and applied rendering use the same QuickJS runtime;
+only the applied loop writes to the hardware.
 
 The HTTP **signals** API exists already. It is **not** a general control API: the
 sender supplies named values, and the person decides in the application which
@@ -158,10 +160,11 @@ intentions alone.
 
 ## 4. The TypeScript compiler — an open decision
 
-**Today:** the TypeScript service shipped with Monaco produces the diagnostics and
-runs `transpileModule` in the WebView. Monaco's plain syntax colouring does not
-depend on the Rust backend having a compiler, but its semantic diagnostics,
-completion and type tooling depend on the editor's TypeScript service.
+**Before #381:** the TypeScript service shipped with Monaco produced the
+diagnostics and ran `transpileModule` in the WebView. Monaco's plain syntax
+colouring does not depend on the Rust backend having a compiler, but its
+semantic diagnostics, completion and type tooling depend on the editor's
+TypeScript service, which stays.
 
 **The likely need:** an MCP server reachable without an open window must not
 depend on a call into a hidden WebView. A TS → JS transpilation on the Rust side
@@ -189,6 +192,10 @@ can crash the process on deep nesting, one Rust validation contract shared by
 IPC and MCP, and Rust 1.97. Types stay with the editor; TypeScript's checker
 running in QuickJS is the measured option for an explicit check. Tables,
 differences and what remains: [`headless-transpile-poc.md`](headless-transpile-poc.md).
+
+**Adopted in #381:** every effect compiles in Rust, through one function,
+`runtime::compile`, that the MCP server's validation is to call
+(`headless-transpile-poc.md` §9).
 
 ## 5. Access, safety and scope
 

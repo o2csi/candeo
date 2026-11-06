@@ -447,11 +447,11 @@ characters, no leading or trailing space or dot, not a reserved device name
 (`CON`, `NUL`, `COM1`…), at most 64 characters. Two names that differ only by case
 are one effect.
 
-**Rust cannot strip TypeScript types, the window can.** Listing reports each
-file with the hash of its bytes and whether the cache holds a result for that
-hash; the window compiles what is `stale` — at startup and on Refresh — and hands
-the JavaScript back through `cache_effect`. The engine and the tray only run
-JavaScript compiled from a file's **current** bytes.
+**Rust compiles effects, and only when asked.** Listing reports each file with
+the hash of its bytes and whether the cache holds a result for that hash, and
+runs nothing; the window asks for what is `stale` — at startup and on Refresh —
+through `compile_effect`. The engine and the tray only run JavaScript compiled
+from a file's **current** bytes.
 
 ### `list_effects() -> EffectEntry[]`
 
@@ -484,7 +484,7 @@ true for a built-in whose file no longer has the recorded hash.
 | `state` | Meaning |
 |---|---|
 | `ready` | compiled for the file's current bytes: it can be previewed, applied, offered in the tray |
-| `stale` | never compiled, or changed since: only `name` and `hash` are meaningful until the window compiles it |
+| `stale` | never compiled, or changed since: only `name` and `hash` are meaningful until it is compiled |
 | `broken` | compiled for the current bytes, and the module does not load: `error` says why. Not retried until the file changes |
 
 Listing reads and hashes files, and **runs nothing**. A file that cannot be read,
@@ -500,12 +500,22 @@ already has, in any case; saving again refuses a name none has. A `shipped:` key
 is refused: a built-in is not saved over. The file is written through a temporary
 file and a rename, so that a Refresh never compiles half a file.
 
-### `cache_effect(key, hash, js) -> EffectEntry`
+### `compile_effect(key, hash) -> EffectEntry`
 
-Records the JavaScript the window compiled from the version of the file that has
-`hash`, and returns the entry. Refused when the file no longer has that hash: it
-changed while the window compiled, and recording would pair this code with
-another version of the source. The entry is marked built-in as in the listing.
+Compiles the version of the file that has `hash`, records the result, and
+returns the entry. Refused when the file no longer has that hash: it changed
+since it was read, and the result would answer for another version. The entry
+is marked built-in as in the listing.
+
+Rust strips the types with Oxc (`docs/design/headless-transpile-poc.md` §9). It
+does not check them: the editor's language service does, before a save. A file
+that does not compile is recorded `broken`, with its first problem and where it
+is: ``compiling the effect: line 4, column 35: Expected `)` but found
+`Identifier` ``. Besides syntax errors, that covers what the engine would refuse
+when it loads the module: an early error (a redeclared `let`, `with`), an import
+of anything but `@candeo/effects-api` or of a name it does not export,
+decorators and `accessor`, CommonJS forms (`import x = require()`, `export =`),
+a file over 1 MiB or not UTF-8 text.
 
 Rust loads the module **once**, under the time budget swatch sampling uses, and
 reads what it declares: `description`, `params`, `apiVersion`. `description`,
@@ -563,18 +573,19 @@ a uniform effect cannot look alike.
 
 #### When it is computed, and where it is stored
 
-**Once per version of a file**, by `cache_effect`, in the cache record next to the
+**Once per version of a file**, by `compile_effect`, in the cache record next to the
 JavaScript — never when the list is displayed, which remains a disk read.
 
-A record carries the `format` it was written in. When what a record declares
-changes shape — the order of the settings, kept since #177 — the records of an
-older format are declared again from their own JavaScript at startup, without
-the window: a launch at login builds none.
+A record carries the `format` it was written in. When what a record holds
+changes — the order of the settings, kept since #177, or the compiler that
+wrote its JavaScript, Oxc since #381 — the records of an older format are
+compiled again from their file at startup, without the window: a launch at
+login builds none. A record whose file changed since is left stale.
 
 #### What can go wrong
 
 This is user code: it can throw, fail to load, or loop forever. Sampling is
-time-bounded, otherwise a `while (true)` would block `cache_effect`. An effect
+time-bounded, otherwise a `while (true)` would block `compile_effect`. An effect
 that loads but throws while rendering is `ready` with an empty `swatch`, and the
 interface shows a neutral dot. An effect that renders black everywhere is not a
 failure: its swatch is black, and that is the truth about what it does.
@@ -859,7 +870,7 @@ adoption, and when it is plugged back in. On by default; only `false` is written
 with the settings saved for it on that device, so it works with the window
 hidden. Nothing starts when the effect already runs there. An effect that cannot
 start keeps its `activeEffects` entry and is logged; one edited outside Candeo
-waits for the window to compile it, and `cache_effect` resumes it then.
+waits for the window to have it compiled, and `compile_effect` resumes it then.
 
 ### `get_launch_at_login() -> LaunchAtLogin` · `set_launch_at_login(on) -> LaunchAtLogin`
 
