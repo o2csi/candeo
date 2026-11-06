@@ -100,6 +100,8 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use crate::journal;
 
 pub mod dimming;
+#[cfg(test)]
+mod equivalence;
 pub mod presses;
 pub mod swatch;
 
@@ -115,6 +117,49 @@ const API_JS: &str = include_str!("api.js");
 
 /// The glue that imports the effect and installs the render function.
 const BOOTSTRAP_JS: &str = include_str!("bootstrap.js");
+
+/// An effect's TypeScript to the JavaScript this engine loads, or every
+/// problem found, each with its line and column (#381).
+///
+/// The one contract every caller compiles through: the library recording a
+/// file, and the MCP server validating a source to come. Imports are checked
+/// against what this engine's `api.js` exports.
+pub(crate) fn compile(
+    source: &str,
+) -> Result<candeo_compiler::Compiled, Vec<candeo_compiler::Diagnostic>> {
+    static API: std::sync::OnceLock<candeo_compiler::Api> = std::sync::OnceLock::new();
+    candeo_compiler::compile(
+        source,
+        API.get_or_init(|| candeo_compiler::Api::from_module(API_JS)),
+    )
+}
+
+/// The stack of a thread loading effect code outside a render loop: what a
+/// render loop's thread has, Rust's default.
+const ENGINE_STACK: usize = 2 * 1024 * 1024;
+
+/// Runs `f`, which loads effect code, on a thread of its own.
+///
+/// QuickJS stops a runaway recursion at its own limit, 1 MiB below where its
+/// runtime was created, which protects only a thread with more stack than
+/// that. Tauri runs sync commands and its setup on the main thread, which has
+/// 1 MiB on Windows: 744 nested arrays loaded there abort the whole process
+/// (`docs/design/headless-transpile-poc.md` §3.9). The window's TypeScript
+/// refused more than 585; Oxc compiles whatever nesting a source has.
+pub(crate) fn on_engine_thread<T: Send>(f: impl FnOnce() -> T + Send) -> crate::CmdResult<T> {
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("candeo-compile".into())
+            .stack_size(ENGINE_STACK)
+            .spawn_scoped(scope, f)
+            .map_err(|e| {
+                crate::failure::Failure::unexpected(format!("compile thread not started: {e}"))
+            })?;
+        Ok(worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
+    })
+}
 
 /// 30 frames per second — **measured, not assumed**.
 ///
@@ -2420,8 +2465,10 @@ fn emit(shared: &Shared, out: &dyn DeviceOut, bytes: &[u8]) {
         shared.reaching.store(false, Ordering::Relaxed);
     } else {
         let colors: Vec<Rgb> = bytes
-            .chunks_exact(3)
-            .map(|c| Rgb::new(c[0], c[1], c[2]))
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[r, g, b]| Rgb::new(r, g, b))
             .collect();
         // A keyboard unplugged midway does not stop the effect: the simulator
         // carries on, and reconnecting goes through the existing commands. But
@@ -2856,7 +2903,7 @@ pub(crate) fn start_saved_region(
 ///
 /// An effect that cannot start keeps its record: deleted, it is the gallery's
 /// "no longer in the folder" notice; edited outside Candeo, it waits for the
-/// window to compile it, and [`resume_waiting`] tries again then.
+/// window to have it compiled, and [`resume_waiting`] tries again then.
 pub(crate) fn resume_applied(app: &AppHandle, device: DeviceRef) {
     // An interruption under way keeps the device: the rule gives the applied
     // effect back itself when it ends.
@@ -2955,7 +3002,7 @@ fn regions_to_resume(
 }
 
 /// Resumes, on every open device, `effect` if it is the one applied there, or
-/// on one of its regions: called once the window has compiled it.
+/// on one of its regions: called once it is compiled.
 pub(crate) fn resume_waiting(app: &AppHandle, effect: &str) {
     let Ok(settings) = crate::storage::store(app).and_then(|s| s.read_settings()) else {
         return;

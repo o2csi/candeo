@@ -2,3 +2,7 @@
 # bytes: the same bytes on every build machine, whatever its Git settings. A
 # Windows runner checks out with CRLF, and every built-in then read as updated.
 packages/** text eol=lf
+
+# What the window's TypeScript compiled before #381, recognized by the hash of
+# its source: the same bytes on every machine.
+apps/desktop/src-tauri/fixtures/** text eol=lf

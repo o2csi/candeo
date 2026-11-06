@@ -77,7 +77,7 @@ your files live, the editor, the references.
 ## Contribute
 
 Candeo is a [Tauri](https://tauri.app) application: Rust underneath, Vue 3 and
-TypeScript for the window. With stable Rust, Node 22+ and pnpm 10+ — and on
+TypeScript for the window. With stable Rust 1.97+, Node 22+ and pnpm 10+ — and on
 Linux the packages in [`docs/linux.md`](docs/linux.md):
 
 ```bash

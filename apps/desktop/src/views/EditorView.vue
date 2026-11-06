@@ -12,17 +12,17 @@
  * take over the lighting in use nor require owning a keyboard.
  *
  * - Save chains the error check, `save_effect_source` (the file named
- *   after the effect), `transpileModule()` and `cache_effect`, then restarts the
- *   effect in the **preview loop**, on the current device's layout. Not a byte
- *   reaches a keyboard.
+ *   after the effect) and `compile_effect`, then restarts the effect in the
+ *   **preview loop**, on the current device's layout. Not a byte reaches a
+ *   keyboard.
  * - Apply starts it on the current device for real, saving first
  *   when the code differs from the saved version, with the parameters the
  *   gallery would use.
  *
  * The save steps fail differently, and each says why: the language service
- * rejects code that does not compile, Rust rejects a name that cannot be a file
- * name, and a module that does not load is saved but reported with its error.
- * Those messages are written to be read, and shown as they are.
+ * rejects code with errors, Rust rejects a name that cannot be a file name, and
+ * a file Rust cannot compile or load is saved but reported with its error and
+ * where it is. Those messages are written to be read, and shown as they are.
  *
  * ## The name is the file name
  *
@@ -66,7 +66,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { ParamSpec } from '@candeo/effects-api'
 
 import {
-  cacheEffect,
+  compileEffect,
   duplicateEffect,
   engineStatus,
   getDefaultLayout,
@@ -92,7 +92,7 @@ import { useLayouts } from '../composables/layouts'
 import { isSplit, regionStatus } from '../composables/regions'
 import { useSettings } from '../composables/useSettings'
 import { clearDraft, migrateDrafts, moveDraft, readDraft, writeDraft } from '../editor/draft'
-import { transpile } from '../editor/effect'
+
 import { refreshLibrary } from '../editor/library'
 import { errors } from '../editor/monaco'
 import { t } from '../i18n'
@@ -131,7 +131,7 @@ const problem = ref<string | null>(null)
  * The parameters the saved version declares.
  *
  * Kept from the library listing at open and from each save, so that applying
- * an unchanged effect does not load the compiler again just to read them.
+ * an unchanged effect does not compile it again just to read them.
  */
 const savedSpecs = ref<Record<string, ParamSpec>>({})
 
@@ -422,9 +422,9 @@ const simNote = computed(() => {
  * Checks the source, writes its file in the user's folder, compiles it and
  * records the result, and returns the effect's key.
  *
- * Refusals come in this order: the language service rejects code that does not
- * compile, Rust rejects a name that cannot be a file name or that is taken. A
- * module that does not load is **saved anyway** and reported with its error: the
+ * Refusals come in this order: the language service rejects code with errors,
+ * Rust rejects a name that cannot be a file name or that is taken. A file that
+ * does not compile or load is **saved anyway** and reported with its error: the
  * file is the author's work, and it can only be fixed once it exists.
  *
  * The text is read once, up front: what is typed while saving was not saved and
@@ -456,7 +456,7 @@ async function install(): Promise<string> {
   // effect back, and what the preview follows.
   if (id.value !== key) await router.replace({ name: 'editor', params: { id: key } })
 
-  const entry = await cacheEffect(key, hash, await transpile(text))
+  const entry = await compileEffect(key, hash)
   savedSpecs.value = entry.params ?? {}
   if (entry.state === 'broken') {
     throw new Error(entry.error ?? t('editor.savedButBroken'))
@@ -472,10 +472,10 @@ async function act(task: () => Promise<void>): Promise<void> {
     await task()
   } catch (e) {
     problem.value = message(e)
-    // **The only place an effect compile error exists.** The transpiler lives
-    // in the window: without this line the refusal is gone from the screen by
-    // the time the log is opened. The effect id goes with it, since a log read
-    // an hour later does not know what was displayed.
+    // **The only place the language service's refusal exists**, and the only
+    // place a save's error is said: without this line it is gone from the
+    // screen by the time the log is opened. The effect id goes with it, since
+    // a log read an hour later does not know what was displayed.
     error('editor', `${id.value ?? 'new effect'}: ${problem.value}`, e)
   } finally {
     busy.value = false

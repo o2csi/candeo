@@ -8,8 +8,9 @@ the moment a key lights up. The **interface** decisions are in
 > directory per effect written through `install_effect`, with built-ins compiled
 > into the binary and a reserved built-in identifier. Effects are now `.ts`
 > files named after the effect, compiled into a cache, and the manifest is read
-> by running the module: see [`effects-library.md`](effects-library.md). The
-> engine part is unchanged.
+> by running the module: see [`effects-library.md`](effects-library.md). Since
+> #381 Rust compiles them, with Oxc, not the front end (§2's step 1). The engine
+> part is unchanged.
 
 ---
 

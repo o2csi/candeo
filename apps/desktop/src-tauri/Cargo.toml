@@ -18,6 +18,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 candeo-protocol.workspace = true
 candeo-device.workspace = true
+# Effects from TypeScript to JavaScript, in Rust (#381): see `runtime::compile`.
+candeo-compiler.workspace = true
 hidapi.workspace = true
 serde.workspace = true
 # `tray-icon`: the notification area icon — see `src/tray.rs`. It is not an

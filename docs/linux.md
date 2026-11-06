@@ -36,7 +36,7 @@ Key presses and sound are read on Windows only for now.
 
 ## Building
 
-Stable Rust, Node 22+, pnpm 10+, and on Debian or Ubuntu the Tauri 2 system
+Stable Rust 1.97+, Node 22+, pnpm 10+, and on Debian or Ubuntu the Tauri 2 system
 dependencies, plus `libudev-dev`, which `hidapi` resolves through `pkg-config`:
 
 ```bash

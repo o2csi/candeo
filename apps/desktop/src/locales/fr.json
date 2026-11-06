@@ -211,7 +211,7 @@
     "draftRestored": "Brouillon restauré — cette version n'a pas été enregistrée.",
     "discard": "Revenir à la version enregistrée",
     "effectError": "Erreur de l'effet, à l'image en cours : {error}",
-    "hint": "Le code est transpilé ici, exécuté côté Rust : un effet ne voit ni le DOM, ni l'application. Ce moteur n'a pas de console, et l'autocomplétion n'en propose pas.",
+    "hint": "Le code est compilé et exécuté côté Rust : un effet ne voit ni le DOM, ni l'application. Ce moteur n'a pas de console, et l'autocomplétion n'en propose pas.",
     "simulator": "Simulateur",
     "simDevice": "Images de {device}",
     "theDevice": "l'appareil",

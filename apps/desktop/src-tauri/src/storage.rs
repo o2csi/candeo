@@ -21,10 +21,11 @@
 //! `settings.json`, the engine, the tray menu. Renaming from the application
 //! moves those references; renaming outside it makes a new effect.
 //!
-//! The Rust side cannot strip TypeScript types, the window can: it compiles the
-//! files whose cache is stale and hands the JavaScript back through
-//! [`Store::cache_effect`], which runs the module once to read what it declares.
-//! Nothing runs code whose cache does not match the file's current bytes.
+//! A file is compiled here, by [`Store::compile_effect`]: Oxc strips its types
+//! ([`crate::runtime::compile`]), then the module runs once to read what it
+//! declares. The window asks for the files whose cache is stale, at startup and
+//! on Refresh. Nothing runs code whose cache does not match the file's current
+//! bytes.
 //!
 //! # The shape of the file: preferences on one side, devices on the other
 //!
@@ -202,11 +203,11 @@ pub enum EffectState {
     /// Compiled for the file's current bytes: it can be previewed, applied and
     /// listed in the tray. Built-in effects are always ready.
     Ready,
-    /// Never compiled, or changed since: the window compiles it at startup and
-    /// on Refresh. Until then its manifest is only its name.
+    /// Never compiled, or changed since: the window has it compiled at startup
+    /// and on Refresh. Until then its manifest is only its name.
     Stale,
-    /// Compiled for the file's current bytes, and it does not load: `error`
-    /// says why. Not retried until the file changes.
+    /// Compiled for the file's current bytes, and it does not compile or load:
+    /// `error` says why. Not retried until the file changes.
     Broken,
 }
 
@@ -218,11 +219,11 @@ pub struct EffectEntry {
     pub id: String,
     pub kind: EffectKind,
     pub state: EffectState,
-    /// Why a [`EffectState::Broken`] effect does not load.
+    /// Why a [`EffectState::Broken`] effect does not compile or load.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// SHA-256 of the source file, to hand back to [`Store::cache_effect`]
-    /// with its JavaScript. Absent for built-ins.
+    /// SHA-256 of the source file, to hand back to [`Store::compile_effect`]:
+    /// the version to compile.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hash: Option<String>,
     /// A built-in whose file no longer has the hash recorded when it was copied:
@@ -1674,10 +1675,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 // ---------------------------------------------------------------- storage
 
-/// The shape of what a cache record declares. A record of an older shape is
-/// declared again from its own JavaScript at startup
-/// ([`Store::redeclare_cache`]), without the window, which a launch at login
-/// does not build.
+/// The shape of what a cache record holds. A record of an older shape is
+/// compiled again from its file at startup ([`Store::recompile_cache`]),
+/// without the window, which a launch at login does not build.
 ///
 /// - 1: an effect's settings in the order it declares them (#177); before,
 ///   sorted by key.
@@ -1686,7 +1686,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// - 4: the game it is for.
 /// - 5: the lights it makes sense on, and what it requires.
 /// - 6: whether it reads what the computer is doing.
-const CACHE_FORMAT: u32 = 6;
+/// - 7: JavaScript compiled by Oxc, in Rust (#381); before, by the window's
+///   TypeScript. Both give the same frames (`runtime::equivalence`), but one
+///   compiler for every record is what keeps an effect from running from an
+///   old record while a new save of it would be refused.
+const CACHE_FORMAT: u32 = 7;
 
 /// What compiling an effect produced, for one version of its file.
 ///
@@ -1853,7 +1857,7 @@ impl Store {
     /// The library: every file of both sources, with its state.
     ///
     /// Listing reads files and hashes them, and runs nothing: whatever has to run
-    /// happened in [`Self::cache_effect`].
+    /// happened in [`Self::compile_effect`].
     pub fn list_effects(&self) -> CmdResult<Vec<EffectEntry>> {
         let shipped = self.shipped_records();
         let mut effects = Vec::new();
@@ -1919,25 +1923,24 @@ impl Store {
         Ok(sha256_hex(source.as_bytes()))
     }
 
-    /// Records the JavaScript the window compiled for this version of the file.
+    /// Compiles the version of the file that has `hash`, and records the result.
     ///
     /// The module is loaded once, under the time budget swatch sampling uses, to
-    /// read what it declares; a module that does not load is recorded **with its
-    /// error**, so that it is not retried until the file changes.
+    /// read what it declares. A file that does not compile, or a module that
+    /// does not load, is recorded **with its error**, so that it is not retried
+    /// until the file changes.
     ///
-    /// Refused when the file no longer has `hash`: it changed while the window
-    /// was compiling, and recording would pair this JavaScript with other code.
-    pub fn cache_effect(&self, key: &EffectKey, hash: &str, js: &str) -> CmdResult<EffectEntry> {
+    /// Refused when the file no longer has `hash`: it changed since whoever asked
+    /// read it, and the result would answer for another version.
+    pub fn compile_effect(&self, key: &EffectKey, hash: &str) -> CmdResult<EffectEntry> {
         self.require(key)?;
-        let current = sha256_hex(
-            &fs::read(self.source_path(key))
-                .map_err(|e| Failure::unexpected(format!("cannot read “{key}”: {e}")))?,
-        );
-        if current != hash {
+        let bytes = fs::read(self.source_path(key))
+            .map_err(|e| Failure::unexpected(format!("cannot read “{key}”: {e}")))?;
+        if sha256_hex(&bytes) != hash {
             return Err(Failure::new("effectChanged").with("name", &key.name));
         }
 
-        let record = compile_record(hash, js);
+        let record = compile_record(hash, &bytes)?;
         let path = self.cache_path(key);
         create_dir(path.parent().unwrap_or(&self.cache_dir))?;
         let json = serde_json::to_string(&record)
@@ -1951,14 +1954,14 @@ impl Store {
         ))
     }
 
-    /// Declares again, from their own JavaScript, the cache records written in an
-    /// older [`CACHE_FORMAT`], and returns how many were.
+    /// Compiles again, from their file, the cache records written in an older
+    /// [`CACHE_FORMAT`], and returns how many were.
     ///
-    /// Only what the module declares can change: the JavaScript and its hash stay
-    /// as they were. A record that cannot be rewritten stays too — it still runs,
-    /// and shows what it showed before.
-    pub fn redeclare_cache(&self) -> usize {
-        let mut redeclared = 0;
+    /// A record whose file changed since describes no file any more: it is left
+    /// as it is, stale, for the next Refresh. A record that cannot be rewritten
+    /// stays too — it still runs, and shows what it showed before.
+    pub fn recompile_cache(&self) -> usize {
+        let mut recompiled = 0;
         for source in Source::ALL {
             let Ok(names) = self.names(source) else {
                 continue;
@@ -1971,17 +1974,26 @@ impl Store {
                 if record.format >= CACHE_FORMAT {
                     continue;
                 }
-                let fresh = compile_record(&record.hash, &record.js);
-                let written = serde_json::to_string(&fresh)
-                    .map_err(|e| Failure::unexpected(format!("cache record not serialisable: {e}")))
-                    .and_then(|json| write_atomically(&self.cache_path(&key), &json));
+                let Ok(bytes) = fs::read(self.source_path(&key)) else {
+                    continue;
+                };
+                if sha256_hex(&bytes) != record.hash {
+                    continue;
+                }
+                let written = compile_record(&record.hash, &bytes).and_then(|fresh| {
+                    serde_json::to_string(&fresh)
+                        .map_err(|e| {
+                            Failure::unexpected(format!("cache record not serialisable: {e}"))
+                        })
+                        .and_then(|json| write_atomically(&self.cache_path(&key), &json))
+                });
                 match written {
-                    Ok(()) => redeclared += 1,
-                    Err(e) => tracing::warn!(effect = %key, "cache not declared again: {e}"),
+                    Ok(()) => recompiled += 1,
+                    Err(e) => tracing::warn!(effect = %key, "cache not compiled again: {e}"),
                 }
             }
         }
-        redeclared
+        recompiled
     }
 
     /// An effect's executable JavaScript: what the engine loads.
@@ -2664,6 +2676,32 @@ fn library_entry(
     }
 }
 
+/// Compiles a version of a file, loads the result once, and records what it
+/// declares, or why it does not compile or load.
+///
+/// On a thread of its own ([`crate::runtime::on_engine_thread`]): the commands
+/// and the startup that call this run on the main thread, whose stack is too
+/// small for QuickJS to stop a deep nesting itself. The error is the effect's,
+/// for its author: English, like a load error. Its first problem only, as the
+/// window's compiler gave it.
+fn compile_record(hash: &str, bytes: &[u8]) -> CmdResult<CacheRecord> {
+    crate::runtime::on_engine_thread(|| {
+        let compiled = std::str::from_utf8(bytes)
+            .map_err(|_| "the file is not UTF-8 text".to_owned())
+            .and_then(|source| {
+                crate::runtime::compile(source).map_err(|problems| problems[0].to_string())
+            });
+        match compiled {
+            Ok(compiled) => load_record(hash, compiled.js),
+            Err(problem) => broken_record(
+                hash,
+                String::new(),
+                format!("compiling the effect: {problem}"),
+            ),
+        }
+    })
+}
+
 /// Loads the JavaScript once and records what it declares, or why it does not
 /// load.
 ///
@@ -2672,13 +2710,17 @@ fn library_entry(
 /// effect does not. **Nothing is reported about the swatch**, not even a failure:
 /// an effect that loads but throws while sampling is ready, just without a
 /// thumbnail.
-fn compile_record(hash: &str, js: &str) -> CacheRecord {
-    let declared = crate::runtime::declared_manifest(js).and_then(|raw| declared_fields(&raw));
+fn load_record(hash: &str, js: String) -> CacheRecord {
+    let declared = crate::runtime::declared_manifest(&js).and_then(|raw| declared_fields(&raw));
     match declared {
         Ok(declared) => CacheRecord {
             format: CACHE_FORMAT,
             hash: hash.to_owned(),
-            js: js.to_owned(),
+            // The default layout, never the one of the plugged-in keyboard: a
+            // swatch that depended on the hardware present would be comparable
+            // neither from one effect to another, nor from one machine to another.
+            swatch: swatch::sample(&js, crate::default_layout()),
+            js,
             description: declared.description,
             params: declared.params,
             api_version: declared.api_version,
@@ -2690,30 +2732,31 @@ fn compile_record(hash: &str, js: &str) -> CacheRecord {
             game: declared.game,
             kinds: declared.kinds,
             requires: declared.requires,
-            // The default layout, never the one of the plugged-in keyboard: a
-            // swatch that depended on the hardware present would be comparable
-            // neither from one effect to another, nor from one machine to another.
-            swatch: swatch::sample(js, crate::default_layout()),
             error: None,
         },
-        Err(error) => CacheRecord {
-            format: CACHE_FORMAT,
-            hash: hash.to_owned(),
-            js: js.to_owned(),
-            description: empty_text(),
-            params: serde_json::Map::new(),
-            api_version: EFFECTS_API_VERSION,
-            reads_keys: false,
-            reads_clock: false,
-            reads_signals: false,
-            reads_audio: false,
-            reads_system: false,
-            game: None,
-            kinds: keys_only(),
-            requires: Vec::new(),
-            swatch: Swatch::new(),
-            error: Some(error),
-        },
+        Err(error) => broken_record(hash, js, error),
+    }
+}
+
+/// A record of what does not run, saying why.
+fn broken_record(hash: &str, js: String, error: String) -> CacheRecord {
+    CacheRecord {
+        format: CACHE_FORMAT,
+        hash: hash.to_owned(),
+        js,
+        description: empty_text(),
+        params: serde_json::Map::new(),
+        api_version: EFFECTS_API_VERSION,
+        reads_keys: false,
+        reads_clock: false,
+        reads_signals: false,
+        reads_audio: false,
+        reads_system: false,
+        game: None,
+        kinds: keys_only(),
+        requires: Vec::new(),
+        swatch: Swatch::new(),
+        error: Some(error),
     }
 }
 
@@ -2954,16 +2997,11 @@ pub fn save_effect_source(
     store(&app)?.save_effect_source(&EffectKey::parse(&key)?, &source, create)
 }
 
-/// Records the JavaScript compiled from this version of an effect. See
-/// [`Store::cache_effect`].
+/// Compiles this version of an effect and records the result. See
+/// [`Store::compile_effect`].
 #[tauri::command]
-pub fn cache_effect(
-    app: AppHandle,
-    key: String,
-    hash: String,
-    js: String,
-) -> CmdResult<EffectEntry> {
-    let entry = store(&app)?.cache_effect(&EffectKey::parse(&key)?, &hash, &js)?;
+pub fn compile_effect(app: AppHandle, key: String, hash: String) -> CmdResult<EffectEntry> {
+    let entry = store(&app)?.compile_effect(&EffectKey::parse(&key)?, &hash)?;
     // An applied effect edited outside Candeo waits for this compilation to
     // resume: see [`crate::runtime::resume_applied`].
     crate::runtime::resume_waiting(&app, &key);
@@ -3514,9 +3552,8 @@ mod tests {
             .collect()
     }
 
-    /// A module that loads, declares a parameter and paints one color. It is
-    /// valid JavaScript, so it stands for both the source and what compiling it
-    /// gives.
+    /// A module that loads, declares a parameter and paints one color: valid
+    /// JavaScript, and so valid TypeScript.
     fn solid_effect(hex: &str) -> String {
         format!(
             "export default {{ description: 'Uni', \
@@ -3530,9 +3567,14 @@ mod tests {
     }
 
     /// Creates then compiles, as the window does.
-    fn create_and_cache(store: &Store, name: &str, js: &str) -> EffectEntry {
-        let hash = store.save_effect_source(&user(name), js, true).unwrap();
-        store.cache_effect(&user(name), &hash, js).unwrap()
+    fn create_and_compile(store: &Store, name: &str, source: &str) -> EffectEntry {
+        let hash = store.save_effect_source(&user(name), source, true).unwrap();
+        store.compile_effect(&user(name), &hash).unwrap()
+    }
+
+    /// What the engine is handed for this source.
+    fn js_of(source: &str) -> String {
+        crate::runtime::compile(source).unwrap().js
     }
 
     /// What the gallery marks: an effect declaring keys, and only that one.
@@ -3542,13 +3584,13 @@ mod tests {
         let keys = "export default { inputs: ['keys'], render() {} }";
 
         assert!(
-            create_and_cache(&store, "Frappes", keys)
+            create_and_compile(&store, "Frappes", keys)
                 .manifest
                 .reads_keys
         );
         assert!(user_effect(&store, "Frappes").manifest.reads_keys);
         assert!(
-            !create_and_cache(&store, "Uni", &solid_effect("00ff00"))
+            !create_and_compile(&store, "Uni", &solid_effect("00ff00"))
                 .manifest
                 .reads_keys
         );
@@ -3573,7 +3615,7 @@ mod tests {
         let declared = ["color", "background", "speed"];
 
         assert_eq!(
-            param_keys(&create_and_cache(&store, "Ordered", ORDERED)),
+            param_keys(&create_and_compile(&store, "Ordered", ORDERED)),
             declared
         );
         assert_eq!(
@@ -3583,19 +3625,22 @@ mod tests {
         );
     }
 
-    /// A cache written before the order was kept is declared again from its own
-    /// JavaScript, once, and still runs the same code.
+    /// A cache written by an older version is compiled again from its file,
+    /// once: what it declares in the shape this version reads, and the
+    /// JavaScript of the compiler this version has.
     #[test]
-    fn a_cache_of_an_older_format_is_declared_again() {
+    fn a_cache_of_an_older_format_is_compiled_again() {
         let (tmp, store) = temp_store();
-        create_and_cache(&store, "Ordered", ORDERED);
+        create_and_compile(&store, "Ordered", ORDERED);
 
-        // As an older version wrote it: no format, settings sorted by key.
+        // As an older version wrote it: no format, settings sorted by key, and
+        // the JavaScript the window's TypeScript gave.
         let path = cache_file(&tmp, "Ordered");
         let mut record: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let fields = record.as_object_mut().unwrap();
         fields.remove("format");
+        fields.insert("js".into(), ORDERED.into());
         let mut params: Vec<_> = fields["params"]
             .as_object()
             .unwrap()
@@ -3613,13 +3658,121 @@ mod tests {
             ["background", "color", "speed"]
         );
 
-        assert_eq!(store.redeclare_cache(), 1);
+        assert_eq!(store.recompile_cache(), 1);
         assert_eq!(
             param_keys(&user_effect(&store, "Ordered")),
             ["color", "background", "speed"]
         );
-        assert_eq!(store.effect_js(&user("Ordered")).unwrap(), ORDERED);
-        assert_eq!(store.redeclare_cache(), 0, "declared again once");
+        assert_eq!(store.effect_js(&user("Ordered")).unwrap(), js_of(ORDERED));
+        assert_eq!(store.recompile_cache(), 0, "compiled again once");
+    }
+
+    /// An old record of a file changed since describes no file any more: it
+    /// stays stale, for the next Refresh, rather than compiled from a version
+    /// nobody asked about at startup.
+    #[test]
+    fn an_old_record_of_a_changed_file_is_left_stale() {
+        let (tmp, store) = temp_store();
+        create_and_compile(&store, "Onde", &solid_effect("00ff00"));
+        let path = cache_file(&tmp, "Onde");
+        let mut record: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        record.as_object_mut().unwrap().remove("format");
+        fs::write(&path, record.to_string()).unwrap();
+        fs::write(effects_dir(&tmp).join("Onde.ts"), solid_effect("ff0000")).unwrap();
+
+        assert_eq!(store.recompile_cache(), 0);
+        assert_eq!(user_effect(&store, "Onde").state, EffectState::Stale);
+    }
+
+    /// A file that does not compile is recorded broken, saying where, like a
+    /// module that does not load: the effects list and the editor show that
+    /// error, and it is not retried until the file changes.
+    #[test]
+    fn a_file_that_does_not_compile_is_broken_and_says_where() {
+        let (_tmp, store) = temp_store();
+        let missing = [
+            "import { defineEffect } from '@candeo/effects-api'",
+            "export default defineEffect({",
+            "  render({ layout, frame }) {",
+            "    for (const key of layout.keys frame.set(key, { r: 0, g: 0, b: 0 })",
+            "  },",
+            "})",
+        ]
+        .join("\n");
+        let entry = create_and_compile(&store, "Parenthèse", &missing);
+        assert_eq!(entry.state, EffectState::Broken);
+        let error = entry.error.unwrap();
+        assert!(
+            error.starts_with("compiling the effect: line 4, column 35: "),
+            "{error}"
+        );
+        assert_eq!(
+            store.effect_js(&user("Parenthèse")).unwrap_err().code,
+            "effectBroken"
+        );
+
+        // What the window's TypeScript lowered and the engine cannot parse.
+        let decorated = "function sealed(c: unknown, _: unknown) {}\n@sealed\nclass A {}\nexport default { render() {} }\n";
+        let error = create_and_compile(&store, "Décoré", decorated)
+            .error
+            .unwrap();
+        assert_eq!(
+            error,
+            "compiling the effect: line 2, column 1: decorators are not supported by the effects engine"
+        );
+    }
+
+    #[test]
+    fn a_file_that_is_not_text_is_broken_and_says_so() {
+        let (tmp, store) = temp_store();
+        let hash = store
+            .save_effect_source(&user("Binaire"), "export default {}", true)
+            .unwrap();
+        let bytes = [0xff, 0xfe, 0x00, 0x41];
+        fs::write(effects_dir(&tmp).join("Binaire.ts"), bytes).unwrap();
+        assert_ne!(sha256_hex(&bytes), hash);
+
+        let entry = store
+            .compile_effect(&user("Binaire"), &sha256_hex(&bytes))
+            .unwrap();
+        assert_eq!(entry.state, EffectState::Broken);
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("compiling the effect: the file is not UTF-8 text")
+        );
+    }
+
+    /// Nesting the window's TypeScript refused (more than 585 arrays) now
+    /// reaches the engine, and loading it on a thread of 1 MiB, what a Windows
+    /// main thread has and where Tauri runs this command, aborted the whole
+    /// process at 744 levels (`docs/design/headless-transpile-poc.md` §3.9).
+    /// Compiled from such a thread, it is an effect that does not load.
+    #[test]
+    fn deep_nesting_from_a_small_stack_is_an_effect_that_does_not_load() {
+        let (_tmp, store) = temp_store();
+        let depth = 20_000;
+        let source = format!(
+            "export default {{ deep: {}{}, render() {{}} }}\n",
+            "[".repeat(depth),
+            "]".repeat(depth)
+        );
+        let hash = store
+            .save_effect_source(&user("Profond"), &source, true)
+            .unwrap();
+
+        let entry = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(1024 * 1024)
+                .spawn_scoped(scope, || store.compile_effect(&user("Profond"), &hash))
+                .unwrap()
+                .join()
+                .unwrap()
+        })
+        .unwrap();
+        assert_eq!(entry.state, EffectState::Broken);
+        let error = entry.error.unwrap();
+        assert!(error.starts_with("loading the effect: "), "{error}");
     }
 
     // ------------------------------------------------------------ files
@@ -3637,13 +3790,13 @@ mod tests {
         );
         assert_eq!(hash, sha256_hex(js.as_bytes()));
 
-        // Listed right away, as a name only, until the window compiles it.
+        // Listed right away, as a name only, until it is compiled.
         let stale = user_effect(&store, "Onde circulaire");
         assert_eq!(stale.state, EffectState::Stale);
         assert_eq!(stale.hash.as_deref(), Some(hash.as_str()));
         assert!(store.effect_js(&key).is_err());
 
-        let entry = store.cache_effect(&key, &hash, &js).unwrap();
+        let entry = store.compile_effect(&key, &hash).unwrap();
         assert_eq!(entry.state, EffectState::Ready);
         assert_eq!(entry.id, "user:Onde circulaire");
         assert_eq!(entry.manifest.name, "Onde circulaire");
@@ -3653,7 +3806,7 @@ mod tests {
         assert_eq!(entry.swatch, vec!["#00ff00"; 4]);
 
         assert_eq!(user_effect(&store, "Onde circulaire"), entry);
-        assert_eq!(store.effect_js(&key).unwrap(), js);
+        assert_eq!(store.effect_js(&key).unwrap(), js_of(&js));
         assert_eq!(store.effect_source(&key).unwrap(), js);
     }
 
@@ -3662,7 +3815,7 @@ mod tests {
     #[test]
     fn a_file_changed_on_disk_is_stale_until_recompiled() {
         let (tmp, store) = temp_store();
-        create_and_cache(&store, "Onde", &solid_effect("00ff00"));
+        create_and_compile(&store, "Onde", &solid_effect("00ff00"));
 
         fs::write(effects_dir(&tmp).join("Onde.ts"), solid_effect("ff0000")).unwrap();
 
@@ -3671,19 +3824,17 @@ mod tests {
         assert_eq!(err.code, "effectNotCompiled");
     }
 
-    /// Recording JavaScript for a hash the file no longer has would pair this code
-    /// with another version of the source.
+    /// Compiling for a hash the file no longer has would answer for another
+    /// version of the source than the one asked about.
     #[test]
-    fn caching_refuses_code_compiled_from_another_version() {
+    fn compiling_refuses_a_version_the_file_no_longer_has() {
         let (tmp, store) = temp_store();
         let hash = store
             .save_effect_source(&user("Onde"), &solid_effect("00ff00"), true)
             .unwrap();
         fs::write(effects_dir(&tmp).join("Onde.ts"), solid_effect("ff0000")).unwrap();
 
-        let err = store
-            .cache_effect(&user("Onde"), &hash, &solid_effect("00ff00"))
-            .unwrap_err();
+        let err = store.compile_effect(&user("Onde"), &hash).unwrap_err();
         assert_eq!(err.code, "effectChanged");
         assert!(!cache_file(&tmp, "Onde").exists());
     }
@@ -3693,7 +3844,7 @@ mod tests {
     #[test]
     fn a_module_that_does_not_load_is_broken_until_it_changes() {
         let (tmp, store) = temp_store();
-        let entry = create_and_cache(
+        let entry = create_and_compile(
             &store,
             "Cassé",
             "export default { description: 'sans render' }",
@@ -3719,11 +3870,11 @@ mod tests {
     fn an_effect_that_throws_while_rendering_is_ready_without_a_swatch() {
         let (_tmp, store) = temp_store();
         let js = "export default { render() { throw new Error('boum') } }";
-        let entry = create_and_cache(&store, "Instable", js);
+        let entry = create_and_compile(&store, "Instable", js);
 
         assert_eq!(entry.state, EffectState::Ready);
         assert!(entry.swatch.is_empty());
-        assert_eq!(store.effect_js(&user("Instable")).unwrap(), js);
+        assert_eq!(store.effect_js(&user("Instable")).unwrap(), js_of(js));
     }
 
     #[test]
@@ -3733,7 +3884,7 @@ mod tests {
             "export default {{ apiVersion: {}, render() {{}} }}",
             EFFECTS_API_VERSION + 1
         );
-        let entry = create_and_cache(&store, "Futur", &js);
+        let entry = create_and_compile(&store, "Futur", &js);
 
         assert_eq!(entry.state, EffectState::Broken);
         let error = entry.error.unwrap();
@@ -3745,7 +3896,7 @@ mod tests {
         let (_tmp, store) = temp_store();
         for (name, version) in [("Chaine", "'1'"), ("Decimale", "1.5")] {
             let js = format!("export default {{ apiVersion: {version}, render() {{}} }}");
-            let entry = create_and_cache(&store, name, &js);
+            let entry = create_and_compile(&store, name, &js);
             assert_eq!(entry.state, EffectState::Broken, "{version}");
             let error = entry.error.unwrap();
             assert!(error.contains("whole number"), "{version}: {error}");
@@ -3757,7 +3908,7 @@ mod tests {
     #[test]
     fn a_localized_description_is_kept_and_anything_else_dropped() {
         let (_tmp, store) = temp_store();
-        let localized = create_and_cache(
+        let localized = create_and_compile(
             &store,
             "Bilingue",
             "export default { description: { en: 'A wave', fr: 'Une onde' }, render() {} }",
@@ -3779,7 +3930,7 @@ mod tests {
                 "export default { description: {}, render() {} }",
             ),
         ] {
-            let entry = create_and_cache(&store, name, js);
+            let entry = create_and_compile(&store, name, js);
             assert_eq!(entry.state, EffectState::Ready, "{name}");
             assert_eq!(entry.manifest.description, serde_json::json!(""), "{name}");
         }
@@ -3853,7 +4004,7 @@ mod tests {
     fn a_shipped_and_a_user_effect_may_share_a_name() {
         let (_tmp, store) = temp_store();
         store.seed_shipped(&shipped_v1()).unwrap();
-        create_and_cache(&store, "Livré", &solid_effect("00ff00"));
+        create_and_compile(&store, "Livré", &solid_effect("00ff00"));
 
         let ids: Vec<String> = store
             .list_effects()
@@ -3868,7 +4019,7 @@ mod tests {
         );
         assert_eq!(
             store.effect_js(&user("Livré")).unwrap(),
-            solid_effect("00ff00")
+            js_of(&solid_effect("00ff00"))
         );
     }
 
@@ -4013,8 +4164,8 @@ mod tests {
     fn renaming_moves_the_file_and_its_cache() {
         let (tmp, store) = temp_store();
         let js = solid_effect("00ff00");
-        create_and_cache(&store, "Onde", &js);
-        create_and_cache(&store, "Autre", &solid_effect("ff0000"));
+        create_and_compile(&store, "Onde", &js);
+        create_and_compile(&store, "Autre", &solid_effect("ff0000"));
 
         assert_eq!(
             store.rename_effect(&user("Onde"), "Vague").unwrap(),
@@ -4024,7 +4175,7 @@ mod tests {
         assert!(!cache_file(&tmp, "Onde").exists());
         let entry = user_effect(&store, "Vague");
         assert_eq!(entry.state, EffectState::Ready);
-        assert_eq!(store.effect_js(&user("Vague")).unwrap(), js);
+        assert_eq!(store.effect_js(&user("Vague")).unwrap(), js_of(&js));
 
         let err = store.rename_effect(&user("Vague"), "autre").unwrap_err();
         assert_eq!(err.code, "effectExists");
@@ -4039,7 +4190,7 @@ mod tests {
     #[test]
     fn delete_removes_the_file_and_its_cache() {
         let (tmp, store) = temp_store();
-        create_and_cache(&store, "Onde", &solid_effect("00ff00"));
+        create_and_compile(&store, "Onde", &solid_effect("00ff00"));
 
         store.check_deletable(&user("Onde")).unwrap();
         assert!(
@@ -4061,7 +4212,7 @@ mod tests {
     fn duplicating_makes_a_ready_copy_under_a_free_name() {
         let (tmp, store) = temp_store();
         let js = solid_effect("00ff00");
-        create_and_cache(&store, "Onde", &js);
+        create_and_compile(&store, "Onde", &js);
 
         let duplicate = |key: EffectKey| store.duplicate_effect(&key).unwrap();
         assert_eq!(duplicate(user("Onde")), user("Onde (2)"));
@@ -4070,7 +4221,7 @@ mod tests {
 
         let copy = user_effect(&store, "Onde (2)");
         assert_eq!(copy.state, EffectState::Ready);
-        assert_eq!(store.effect_js(&user("Onde (2)")).unwrap(), js);
+        assert_eq!(store.effect_js(&user("Onde (2)")).unwrap(), js_of(&js));
         assert!(effects_dir(&tmp).join("Onde (3).ts").is_file());
         assert!(store.duplicate_effect(&user("Absent")).is_err());
     }
@@ -4288,7 +4439,7 @@ mod tests {
         assert!(library.iter().all(|e| e.kind == EffectKind::Builtin));
         assert!(library.iter().all(|e| e.id.starts_with("shipped:")));
         assert!(!effects_dir(&tmp).exists(), "the user's folder was created");
-        // Copied, not compiled: the window compiles them at startup.
+        // Copied, not compiled: the window has them compiled at startup.
         assert!(library.iter().all(|e| e.state == EffectState::Stale));
 
         // And the next launch finds nothing to do.
@@ -4311,9 +4462,8 @@ mod tests {
 
         for s in &crate::shipped::ALL {
             let hash = sha256_hex(s.source.as_bytes());
-            // The window compiles the TypeScript; shipped sources run as they are.
             let shipped = store
-                .cache_effect(&EffectKey::shipped(s.name), &hash, s.source)
+                .compile_effect(&EffectKey::shipped(s.name), &hash)
                 .unwrap();
 
             let pasted_name = format!("Pasted {}", s.name);
@@ -4323,7 +4473,7 @@ mod tests {
             )
             .unwrap();
             let pasted = store
-                .cache_effect(&EffectKey::user(&pasted_name), &hash, s.source)
+                .compile_effect(&EffectKey::user(&pasted_name), &hash)
                 .unwrap();
 
             let copy = store
@@ -4559,9 +4709,7 @@ mod tests {
         store.seed_shipped(&shipped_v1()).unwrap();
         let hash = sha256_hex(shipped_v1()[0].source.as_bytes());
 
-        let entry = store
-            .cache_effect(&shipped("Livré"), &hash, &solid_effect("00ff00"))
-            .unwrap();
+        let entry = store.compile_effect(&shipped("Livré"), &hash).unwrap();
 
         assert_eq!(entry.kind, EffectKind::Builtin);
         assert_eq!(entry.id, "shipped:Livré");
@@ -5264,7 +5412,7 @@ mod tests {
     fn reset_forgets_configuration_and_keeps_effects() {
         let (tmp, store) = temp_store();
         let js = solid_effect("00ff00");
-        let id = create_and_cache(&store, "Onde", &js).id;
+        let id = create_and_compile(&store, "Onde", &js).id;
 
         let mut settings = Settings::default();
         settings.set_device_state(VID, PID, Some("XY01"), DeviceState::Adopted);
@@ -5285,7 +5433,7 @@ mod tests {
         // reinstalled.
         assert_eq!(user_effects(&store).len(), 1);
         assert_eq!(store.effect_source(&user("Onde")).unwrap(), js);
-        assert_eq!(store.effect_js(&user("Onde")).unwrap(), js);
+        assert_eq!(store.effect_js(&user("Onde")).unwrap(), js_of(&js));
     }
 
     // ------------------------------------------------------- adoption
