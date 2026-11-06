@@ -838,3 +838,75 @@ describe('regions', () => {
     expect(s.keptFor(lid, 'Wave')).toBe(false)
   })
 })
+
+describe('layers', () => {
+  const eq = { id: 'a', effect: 'Equalizer', mask: { group: 'numberRow' } }
+  const red = { id: 'b', effect: 'Fixed colour', blend: 'cover' as const }
+  const lidRegion = { ...keyboard, region: 'lid' }
+
+  it('reads each target’s stack, a region’s apart from its device’s', async () => {
+    const s = await fresh({
+      layers: [
+        { ...keyboard, stack: [eq, red] },
+        { ...lidRegion, stack: [red] },
+      ],
+      savedLayers: [{ name: 'CI on Escape', effect: 'Breathing', mask: { group: 'escape' } }],
+      savedMasks: [{ id: 'k1', name: 'Game keys', keys: ['11'] }],
+    })
+
+    expect(s.stackOf(keyboard)).toEqual([eq, red])
+    expect(s.stackOf(lidRegion)).toEqual([red])
+    expect(s.stackOf(other)).toEqual([])
+    expect(s.stackOf(null)).toEqual([])
+    expect(s.savedLayers.value.map((l) => l.name)).toEqual(['CI on Escape'])
+    expect(s.savedMasks.value.map((m) => m.id)).toEqual(['k1'])
+  })
+
+  it('keeps a stack the window installed over a read that left before it', async () => {
+    const s = await fresh({ layers: [{ ...keyboard, stack: [eq] }] })
+
+    let land!: (v: Settings) => void
+    api.getSettings.mockReturnValueOnce(new Promise<Settings>((r) => (land = r)))
+    const reading = s.reload()
+    s.installStack(keyboard, [eq, red])
+    land(settings({ layers: [{ ...keyboard, stack: [eq] }] }))
+    await reading
+
+    expect(s.stackOf(keyboard)).toEqual([eq, red])
+
+    // A read leaving after it takes the file as it is.
+    api.getSettings.mockResolvedValueOnce(settings({ layers: [{ ...keyboard, stack: [red] }] }))
+    await s.reload()
+    expect(s.stackOf(keyboard)).toEqual([red])
+  })
+
+  it('drops a target’s record once its last layer goes', async () => {
+    const s = await fresh({ layers: [{ ...keyboard, stack: [eq] }] })
+    s.installStack(keyboard, [])
+    expect(s.stacks.value).toEqual([])
+  })
+
+  it('forgets every layer and saved list on a reset', async () => {
+    const s = await fresh({
+      layers: [{ ...keyboard, stack: [eq] }],
+      savedMasks: [{ id: 'k1', name: 'Game keys', keys: ['11'] }],
+    })
+    s.dropAll()
+    expect(s.stackOf(keyboard)).toEqual([])
+    expect(s.savedMasks.value).toEqual([])
+  })
+})
+
+describe('sendLive', () => {
+  it('keeps the pace of settings for a layer’s look, the last value always sent', async () => {
+    const { sendLive } = await import('./useSettings')
+    const send = vi.fn().mockResolvedValue(undefined)
+
+    for (const opacity of [10, 20, 30]) sendLive('look:test', send, { opacity })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(send.mock.calls).toEqual([[{ opacity: 10 }]])
+
+    await vi.advanceTimersByTimeAsync(40)
+    expect(send.mock.calls).toEqual([[{ opacity: 10 }], [{ opacity: 30 }]])
+  })
+})
