@@ -1,0 +1,2 @@
+en: Layers, in Effects: put a second effect over the one you run, on the keys you choose — a spectrum along the number row, the movement keys in red — and save a layer or a set of keys to use again on any keyboard.
+fr: Calques, dans Effets : posez un deuxième effet par-dessus celui qui tourne, sur les touches de votre choix — un spectre sur la rangée des chiffres, les touches de déplacement en rouge — et enregistrez un calque ou des touches pour les réutiliser sur n'importe quel clavier.

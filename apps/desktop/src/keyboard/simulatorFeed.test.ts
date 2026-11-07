@@ -13,7 +13,10 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('../api/candeo', () => api)
 
-import { useSimulatorFeed } from './simulatorFeed'
+const layersApi = vi.hoisted(() => ({ startPreviewStack: vi.fn() }))
+vi.mock('../api/layers', () => layersApi)
+
+import { useSimulatorFeed, type PreviewedStack } from './simulatorFeed'
 
 const keyboard = { vid: 1, pid: 2 }
 
@@ -41,6 +44,7 @@ beforeEach(() => {
   stubWindow()
   vi.resetAllMocks()
   api.startPreview.mockResolvedValue(undefined)
+  layersApi.startPreviewStack.mockResolvedValue(undefined)
   api.stopPreview.mockResolvedValue(undefined)
   api.subscribeFrames.mockResolvedValue(() => {})
   api.subscribePreviewFrames.mockResolvedValue(() => {})
@@ -223,5 +227,48 @@ describe('a region of a split device', () => {
     await nextTick()
 
     expect(api.subscribeFrames).toHaveBeenCalledTimes(2)
+  })
+
+  it('previews a stack instead of one effect, and starts it again only when its key changes', async () => {
+    const device = ref<DeviceRef | null>(keyboard)
+    const layers = [{ id: 'a', effect: 'shipped:Rain', mask: { group: 'wasd' } }]
+    const stack = ref<PreviewedStack | null>({
+      key: 'one',
+      base: { effect: 'shipped:Wave', params: { speed: 1 }, bindings: {} },
+      layers,
+    })
+    withSetup(() =>
+      useSimulatorFeed({
+        layout: () => null,
+        device: () => device.value,
+        showsDevice: () => false,
+        previewed: () => null,
+        previewedStack: () => stack.value,
+        params: () => ({}),
+        onError: vi.fn(),
+      }),
+    )
+    await vi.advanceTimersByTimeAsync(180)
+    expect(layersApi.startPreviewStack.mock.calls).toEqual([
+      [keyboard, { effect: 'shipped:Wave', params: { speed: 1 }, bindings: {} }, layers],
+    ])
+    expect(api.startPreview).not.toHaveBeenCalled()
+    expect(api.subscribePreviewFrames).toHaveBeenCalledTimes(1)
+
+    // A look moved: the same key, nothing restarts.
+    stack.value = { ...stack.value!, layers: [{ ...layers[0], opacity: 50 }] }
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(180)
+    expect(layersApi.startPreviewStack).toHaveBeenCalledTimes(1)
+
+    // Only this layer: no base, another key.
+    stack.value = { key: 'solo', base: null, layers }
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(180)
+    expect(layersApi.startPreviewStack).toHaveBeenLastCalledWith(keyboard, null, layers)
+
+    stack.value = null
+    await nextTick()
+    expect(api.stopPreview).toHaveBeenCalled()
   })
 })

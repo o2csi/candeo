@@ -76,10 +76,12 @@ import type { ParamSpec, ParamValue, Rgb } from '@candeo/effects-api'
 
 import * as api from '../api/candeo'
 import type { Bindings, Dimming, EffectParams, PresetRecord, Settings } from '../api/candeo'
+import type { LayerRecord, SavedLayerRecord, SavedMaskRecord, StackRecord } from '../api/layers'
 import { message } from '../api/journal'
 import { targetKey, type Target } from '../api/target'
 import type { DeviceRef } from '../api/types'
 import { declaredBindings, rebound } from './bindings'
+import { stackIn, withStack } from './layers'
 
 /**
  * Maximum pace of live sends, in milliseconds.
@@ -168,6 +170,26 @@ const presets = ref<Record<string, PresetRecord[]>>({})
  * command has just replaced.
  */
 let presetChanges = 0
+
+/**
+ * Each target's layers, bottom to top, as the file keeps them
+ * (`docs/design/composition.md` §3.11). The layer commands answer with no
+ * stack: the window installs what it asked for at once, and reads the file
+ * back once the command has answered.
+ */
+const stacks = ref<StackRecord[]>([])
+
+/** Named layers and named masks, in their order (`docs/design/layers-ui.md` §5.5). */
+const savedLayers = ref<SavedLayerRecord[]>([])
+const savedMasks = ref<SavedMaskRecord[]>([])
+
+/**
+ * Stacks and lists installed by the window since a read left: that read is
+ * older than them, and must not put back what they replaced — a slider's
+ * opacity moving back under the hand that holds it.
+ */
+let layerChanges = 0
+let savedChanges = 0
 
 /** What prevented reading, adjusting or remembering. Already readable. */
 const error = ref<string | null>(null)
@@ -259,8 +281,11 @@ export function merge(specs: Record<string, ParamSpec>, kept: EffectParams): Eff
   return out
 }
 
-/** What departs from the manifest, and nothing else — it is what goes to disk. */
-function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectParams {
+/**
+ * What departs from the manifest, and nothing else — it is what goes to disk. A
+ * layer's `values` keep the same (`composition.md` §3.11).
+ */
+export function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectParams {
   const out: EffectParams = {}
   for (const [id, spec] of Object.entries(specs)) {
     const v = values[id]
@@ -283,8 +308,11 @@ function apart(specs: Record<string, ParamSpec>, values: EffectParams): EffectPa
  * always goes out again, once the current send has come back.
  */
 interface Sender {
-  /** Last requested state, not yet sent. `null` if everything is up to date. */
-  pending: EffectParams | null
+  /**
+   * Last requested state, not yet sent. `null` if everything is up to date.
+   * An effect's settings, or a layer's look: both go at the same pace.
+   */
+  pending: object | null
   /** A send is in flight: on its return, we go again if `pending` moved. */
   inFlight: boolean
   /** Time of the last departure, to keep the pace. */
@@ -292,7 +320,7 @@ interface Sender {
   /** Pace wait timer, `0` if there is none. */
   timer: number
   /** Where these values go. See {@link hot}. */
-  send: (params: EffectParams) => Promise<void>
+  send: (value: object) => Promise<void>
 }
 
 /**
@@ -315,17 +343,29 @@ const PREVIEW = 'preview'
  * have put back into this module the confusion the engine has just taken out of
  * it.
  */
-function hot(k: string, send: Sender['send'], params: EffectParams): void {
+function hot<T extends object>(k: string, send: (value: T) => Promise<void>, params: T): void {
+  // One table for every kind of value: a key names one loop part and one kind.
+  const sendAny = send as (value: object) => Promise<void>
   let s = senders.get(k)
   if (!s) {
-    s = { pending: null, inFlight: false, last: 0, timer: 0, send }
+    s = { pending: null, inFlight: false, last: 0, timer: 0, send: sendAny }
     senders.set(k, s)
   }
   // The preview changes loop on every selection: the send must follow the
   // latest, not the one that lived when the sender was created.
-  s.send = send
+  s.send = sendAny
   s.pending = params
   pump(s)
+}
+
+/**
+ * Sends a value to a loop at the pace settings go, for what is not an effect's
+ * settings on a device: a layer's settings and look while a slider moves
+ * (`docs/design/layers-ui.md` §4.4). `k` names the loop part and the kind of
+ * value, apart from the keys used here: `layer:…`, `look:…`.
+ */
+export function sendLive<T extends object>(k: string, send: (value: T) => Promise<void>, value: T): void {
+  hot(k, send, value)
 }
 
 function pump(s: Sender): void {
@@ -590,6 +630,8 @@ function presetsByEffect(records: readonly PresetRecord[]): Record<string, Prese
 function read(): Promise<void> {
   const mine = ++generation
   const changes = presetChanges
+  const layersSince = layerChanges
+  const savedSince = savedChanges
 
   const run = api
     .getSettings()
@@ -600,6 +642,11 @@ function read(): Promise<void> {
 
       // A preset command answered meanwhile: its list is newer than this read.
       if (changes === presetChanges) presets.value = presetsByEffect(s.presets ?? [])
+      if (layersSince === layerChanges) stacks.value = s.layers ?? []
+      if (savedSince === savedChanges) {
+        savedLayers.value = s.savedLayers ?? []
+        savedMasks.value = s.savedMasks ?? []
+      }
 
       const disk = onDisk(s)
       const values = disk.values
@@ -1090,6 +1137,37 @@ export function useSettings() {
     dimming.value = {}
     presetChanges++
     presets.value = {}
+    layerChanges++
+    stacks.value = []
+    savedChanges++
+    savedLayers.value = []
+    savedMasks.value = []
+  }
+
+  /** A target's layers, bottom to top; empty when it has none. */
+  function stackOf(target: Target | null): LayerRecord[] {
+    return target ? stackIn(stacks.value, target) : []
+  }
+
+  /**
+   * Installs a target's stack as a command has just made it: the window shows
+   * it at once, before the file is read back.
+   */
+  function installStack(target: Target, layers: readonly LayerRecord[]): void {
+    layerChanges++
+    stacks.value = withStack(stacks.value, target, layers)
+  }
+
+  /** Installs the saved layers a command answered with. */
+  function installSavedLayers(list: SavedLayerRecord[]): void {
+    savedChanges++
+    savedLayers.value = list
+  }
+
+  /** Installs the saved masks a command answered with, or one it added. */
+  function installSavedMasks(list: SavedMaskRecord[]): void {
+    savedChanges++
+    savedMasks.value = list
   }
 
   /**
@@ -1140,6 +1218,14 @@ export function useSettings() {
     setBrightness,
     dimmingOf,
     setDimming,
+    // Read only through these: the window changes them by the install functions.
+    stacks: computed(() => stacks.value),
+    stackOf,
+    installStack,
+    savedLayers: computed(() => savedLayers.value),
+    installSavedLayers,
+    savedMasks: computed(() => savedMasks.value),
+    installSavedMasks,
     flush: flushAll,
     error: readonly(error),
     dismissError,

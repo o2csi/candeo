@@ -19,6 +19,7 @@ HIGHLIGHTS
 • Twenty-six effects, ready to go: ripples that follow your typing, rain, a starry night, lightning, a clock that scrolls the time across the keys, any text you choose scrolling the same way, bars and bursts that dance to the music you play, a status row for what your other tools report… Tune each one while you watch it, and keep the settings you like as presets, back in one click.
 • Every key, its own colour: the whole matrix, gradients, and the effects built into your device's firmware.
 • One device, several effects: split a laptop's lights into regions, each with its own effect — the keyboard dancing to the music while the lid shows how hot the computer runs.
+• Effects over effects: put a second effect over the one you run, on the keys you choose — a spectrum along the number row, the movement keys in red over your waves. Save a layer or a set of keys, and use it again on any keyboard.
 • Your games on your keyboard: your health, ammo, flashes and the bomb in Counter-Strike 2, your hero's health, mana and stuns in Dota 2 — then your effect comes back after the match.
 • Your computer, at a glance: CPU and GPU load, memory and temperatures can drive any setting or the brightness.
 • Lighting that follows your day: the time on the hour, the keyboard dark at night or when you step away — and your effect comes back on its own.
@@ -38,6 +39,7 @@ Open source, under the GPL-3.0.
 - Effects that dance to the music you play
 - Every key its own colour, plus your device's firmware effects
 - Split a device into regions, one effect each
+- Layer effects over each other, on the keys you choose
 - Counter-Strike 2 and Dota 2 on your keyboard
 - CPU and GPU load and temperature drive the lighting
 - Automations: the time on the hour, dark at night or when you step away

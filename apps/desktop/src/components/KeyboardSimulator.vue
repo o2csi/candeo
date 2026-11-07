@@ -33,13 +33,27 @@
  * the size the gallery gives the preview: shrinking them until they were dropped
  * left some keys labelled and others blank. What an effect works with is the
  * arrangement, and that is what is drawn.
+ *
+ * ## Choosing keys
+ *
+ * With `selecting`, the drawing becomes a mask's selection
+ * (`docs/design/layers-ui.md` §4.3): each key a toggle button named by its
+ * legend, the chosen ones outlined in the accent with a check, the others
+ * faded — never the fading alone (§8, 1.4.1). A click toggles a key, a drag
+ * paints from the first key's new state; arrows move between keys, Space
+ * toggles, Enter is *Done*, Escape *Cancel*. The parent keeps the selection:
+ * this only says what was asked.
+ *
+ * Out of a selection, `outlined` draws the selected layer's mask in dashes
+ * over the final frame.
  */
 
-import { computed, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { error } from '../api/journal'
 import { t } from '../i18n'
 import type { KeyShape, Rgb } from '../api/types'
+import { ARROWS, nearestKey, startKey } from '../keyboard/keySelection'
 import { extent, focusBounds, layoutProblems, type LayoutView } from '../keyboard/layout'
 import { archPath, archStroke } from '../keyboard/shapes'
 
@@ -55,6 +69,21 @@ const props = defineProps<{
   focus?: readonly number[]
   /** The region's name, for what the drawing is said to show. */
   focusName?: string
+  /** The positions chosen while keys are being chosen; absent or `null` otherwise. */
+  selecting?: readonly number[] | null
+  /** The selected layer's lights, drawn in dashes over the frame. */
+  outlined?: readonly number[] | null
+}>()
+
+const emit = defineEmits<{
+  /** A click, or Space: this key in or out. */
+  toggle: [position: number]
+  /** A drag went over this key: in or out, as the key it started on went. */
+  paint: [position: number, on: boolean]
+  /** Enter: *Done*. */
+  done: []
+  /** Escape: *Cancel*. */
+  cancel: []
 }>()
 
 /**
@@ -210,16 +239,132 @@ if (import.meta.env.DEV) {
     { immediate: true },
   )
 }
+
+// ------------------------------------------------------------ choosing keys
+
+const board = ref<SVGSVGElement | null>(null)
+
+/** The chosen positions, as a set to look keys up in; `null` out of a selection. */
+const chosen = computed(() => (props.selecting ? new Set(props.selecting) : null))
+
+/** The keys an outline goes around: the chosen ones while choosing, the mask's otherwise. */
+const outlines = computed(() => {
+  const wanted = chosen.value ?? (props.outlined ? new Set(props.outlined) : null)
+  if (!wanted) return []
+  return props.layout.keys.filter((k) => wanted.has(k.index))
+})
+
+/** How far an outline sits inside its key's rectangle, in pitch units: on the seam, it would read as a light. */
+const OUTLINE_INSET = 0.02
+
+/** The key holding the board's one tab stop; arrows move it. */
+const current = ref<number | null>(null)
+
+/**
+ * The board holds the focus: a ring goes around the current key, drawn apart
+ * from the light, whose own colour may be anything, the accent included.
+ */
+const boardFocused = ref(false)
+
+const ring = computed(() =>
+  chosen.value && boardFocused.value
+    ? (props.layout.keys.find((k) => k.index === current.value) ?? null)
+    : null,
+)
+
+/** How far the focus ring sits outside its key, in pitch units. */
+const RING_MARGIN = 0.06
+
+/** A key's name as it is read out: its legend, else its place in the layout. */
+function legend(index: number): string {
+  const keys = props.layout.keys
+  const at = keys.findIndex((k) => k.index === index)
+  const label = keys[at]?.label
+  if (label) return label
+  return props.layout.lights === 'zones'
+    ? t('layers.select.zone', { n: at + 1 })
+    : t('layers.select.key', { n: at + 1 })
+}
+
+/** Dark on a bright light, white on a dark one: the check stays readable on any colour. */
+function ink(fill: string): string {
+  const v = parseInt(fill.slice(1), 16)
+  const luminance = 0.2126 * ((v >> 16) & 255) + 0.7152 * ((v >> 8) & 255) + 0.0722 * (v & 255)
+  return luminance > 128 ? '#14131a' : '#ffffff'
+}
+
+function focusKey(index: number | null): void {
+  if (index === null) return
+  current.value = index
+  void nextTick(() => {
+    board.value?.querySelector<SVGGElement>(`[data-key="${index}"]`)?.focus()
+  })
+}
+
+// A selection starting takes the focus to its first key: the keyboard path goes
+// on in the drawing, where the keys are.
+watch(
+  () => props.selecting != null,
+  (on, was) => {
+    if (on && !was) focusKey(startKey(props.layout.keys, props.selecting ?? []))
+  },
+  { immediate: true },
+)
+
+/** What a drag paints with, `null` while none runs. */
+const painting = ref<boolean | null>(null)
+
+function endPaint(): void {
+  painting.value = null
+}
+window.addEventListener('pointerup', endPaint)
+onBeforeUnmount(() => window.removeEventListener('pointerup', endPaint))
+
+function onPointerDown(e: PointerEvent, index: number): void {
+  if (!chosen.value || e.button !== 0) return
+  // No text selection nor drag image: the drag paints.
+  e.preventDefault()
+  painting.value = !chosen.value.has(index)
+  focusKey(index)
+  emit('toggle', index)
+}
+
+function onPointerEnter(index: number): void {
+  if (!chosen.value || painting.value === null) return
+  if (chosen.value.has(index) !== painting.value) emit('paint', index, painting.value)
+}
+
+function onKeyDown(e: KeyboardEvent, index: number): void {
+  if (!chosen.value) return
+  const direction = ARROWS[e.key]
+  if (direction) {
+    e.preventDefault()
+    const next = nearestKey(props.layout.keys, index, direction)
+    if (next !== null) focusKey(next)
+  } else if (e.key === ' ') {
+    e.preventDefault()
+    emit('toggle', index)
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    emit('done')
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('cancel')
+  }
+}
 </script>
 
 <template>
-  <div class="board">
+  <div class="board" :class="{ choosing: chosen !== null }">
     <svg
+      ref="board"
       class="draw"
       :viewBox="`0 0 ${size.w} ${size.h}`"
       preserveAspectRatio="xMidYMid meet"
-      role="img"
-      :aria-label="label"
+      :role="chosen ? 'group' : 'img'"
+      :aria-label="chosen ? t('layers.select.board') : label"
+      @focusin="boardFocused = true"
+      @focusout="boardFocused = false"
     >
       <!-- What lights nothing: drawn first, faint, and themed like the chassis. -->
       <rect
@@ -233,7 +378,24 @@ if (import.meta.env.DEV) {
         :rx="part.r"
         vector-effect="non-scaling-stroke"
       />
-      <template v-for="cap in caps" :key="cap.index">
+      <!--
+        Each light in a group: a plain drawing, or while choosing, a toggle
+        button named by its legend, the board holding one tab stop.
+      -->
+      <g
+        v-for="cap in caps"
+        :key="cap.index"
+        :data-key="cap.index"
+        :class="{ key: chosen !== null, off: chosen !== null && !chosen.has(cap.index) }"
+        :role="chosen ? 'button' : undefined"
+        :tabindex="chosen ? (current === cap.index ? 0 : -1) : undefined"
+        :aria-pressed="chosen ? chosen.has(cap.index) : undefined"
+        :aria-label="chosen ? legend(cap.index) : undefined"
+        @pointerdown="onPointerDown($event, cap.index)"
+        @pointerenter="onPointerEnter(cap.index)"
+        @keydown="onKeyDown($event, cap.index)"
+        @focus="current = cap.index"
+      >
         <path
           v-if="cap.path"
           :class="{ faded: cap.faded }"
@@ -261,7 +423,38 @@ if (import.meta.env.DEV) {
           :rx="RADIUS"
           :fill="cap.fill"
         />
-      </template>
+        <!-- Chosen says itself in a shape too, not by the outline's colour alone. -->
+        <path
+          v-if="chosen?.has(cap.index)"
+          class="check"
+          :d="`M ${cap.x + cap.w - 0.36} ${cap.y + cap.h - 0.24} l 0.09 0.09 l 0.17 -0.2`"
+          :stroke="ink(cap.fill)"
+          vector-effect="non-scaling-stroke"
+        />
+      </g>
+      <!-- Interface over the lights, in the accent: solid for the chosen keys, dashed for a mask. -->
+      <rect
+        v-for="k in outlines"
+        :key="`outline-${k.index}`"
+        class="outline"
+        :class="{ dashed: chosen === null }"
+        :x="k.x + OUTLINE_INSET"
+        :y="k.y + OUTLINE_INSET"
+        :width="Math.max(0, k.w - 2 * OUTLINE_INSET)"
+        :height="Math.max(0, k.h - 2 * OUTLINE_INSET)"
+        :rx="RADIUS"
+        vector-effect="non-scaling-stroke"
+      />
+      <rect
+        v-if="ring"
+        class="ring"
+        :x="ring.x - RING_MARGIN"
+        :y="ring.y - RING_MARGIN"
+        :width="ring.w + 2 * RING_MARGIN"
+        :height="ring.h + 2 * RING_MARGIN"
+        :rx="RADIUS * 1.5"
+        vector-effect="non-scaling-stroke"
+      />
       <!-- Drawn over the lights: interface, in the accent, like a selection. -->
       <template v-if="bounds">
         <rect
@@ -327,6 +520,49 @@ if (import.meta.env.DEV) {
    is looked at and the device stays whole around it. */
 .faded {
   opacity: 0.3;
+}
+
+/* Choosing keys: the board is where the hand works, a drag paints rather than scrolls. */
+.choosing .draw {
+  touch-action: none;
+}
+
+.key {
+  cursor: pointer;
+  outline: none;
+}
+
+/* Not chosen: faded; the outline and the check say which are, not the fading alone. */
+.key.off {
+  opacity: 0.35;
+}
+
+/* The focus: a ring in the text colour around the key, outside the accent's outline. */
+.ring {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.check {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.outline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.outline.dashed {
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
 }
 
 /* What the region's effect sees as its device: interface, themed. */

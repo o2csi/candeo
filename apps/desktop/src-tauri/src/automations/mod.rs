@@ -460,19 +460,19 @@ fn give_back(app: &AppHandle, device: DeviceRef) {
             crate::runtime::run_regions(app, device)
         }
         Resting::Applied => match crate::storage::store(app).and_then(|s| s.read_settings()) {
+            // The applied effect with its layers, each from zero: the rule's
+            // effect was no base of the device's.
             Ok(settings) => match settings.active_effect(device.vid, device.pid) {
-                Some(effect) => crate::runtime::run_with(
+                Some(effect) => crate::runtime::run_applied_with(
                     app,
                     device,
                     effect,
                     settings.effect_params(device.vid, device.pid, effect),
                     settings.effect_bindings(device.vid, device.pid, effect),
                 ),
-                // Stopped meanwhile from elsewhere: nothing to go back to.
-                None => {
-                    state.engine.stop(device);
-                    Ok(())
-                }
+                // Stopped meanwhile from elsewhere: nothing to go back to
+                // but its layers, over black, if it has any.
+                None => crate::runtime::run_stack(app, device, None),
             },
             Err(e) => Err(e),
         },

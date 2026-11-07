@@ -40,7 +40,30 @@ const props = defineProps<{
   firmware: boolean
   /** The signals held now, suggested to the name field. */
   signals: readonly HeldSignal[]
+  /**
+   * What follows: a device's brightness, or a layer's opacity
+   * (`docs/design/layers-ui.md` §4.4). The switch is the same; only what its
+   * fields are named after changes. Absent: the brightness.
+   */
+  subject?: 'brightness' | 'opacity'
 }>()
+
+/** The fields' names, after what follows. */
+const labels = computed(() =>
+  props.subject === 'opacity'
+    ? {
+        group: t('layers.look.follows'),
+        sound: t('layers.look.sound'),
+        system: t('layers.look.system'),
+        signal: t('layers.look.signal'),
+      }
+    : {
+        group: t('effects.brightnessFollows'),
+        sound: t('effects.brightnessSound'),
+        system: t('effects.brightnessSystem'),
+        signal: t('effects.brightnessSignal'),
+      },
+)
 
 const emit = defineEmits<{
   /** `commit`: the end of a gesture, the moment to write it down. */
@@ -151,7 +174,7 @@ function onFloor(e: Event, commit: boolean): void {
       <span
         class="source"
         role="group"
-        :aria-label="t('effects.brightnessFollows')"
+        :aria-label="labels.group"
         :title="firmware ? t('effects.brightnessFirmware') : undefined"
       >
         <button type="button" class="seg" :aria-pressed="mode === 'value'" :disabled="firmware" @click="toValue">
@@ -172,7 +195,7 @@ function onFloor(e: Event, commit: boolean): void {
     <select
       v-if="mode === 'sound'"
       class="field"
-      :aria-label="t('effects.brightnessSound')"
+      :aria-label="labels.sound"
       :value="sound"
       :disabled="firmware"
       @change="onSound"
@@ -183,7 +206,7 @@ function onFloor(e: Event, commit: boolean): void {
     <select
       v-if="mode === 'system'"
       class="field"
-      :aria-label="t('effects.brightnessSystem')"
+      :aria-label="labels.system"
       :value="system"
       :disabled="firmware"
       @change="onSystem"
@@ -201,7 +224,7 @@ function onFloor(e: Event, commit: boolean): void {
         autocomplete="off"
         :list="`${id}-held`"
         :placeholder="t('effects.params.signalName')"
-        :aria-label="t('effects.brightnessSignal')"
+        :aria-label="labels.signal"
         :aria-invalid="refused"
         :value="name"
         :disabled="firmware"
@@ -273,6 +296,8 @@ function onFloor(e: Event, commit: boolean): void {
 .seg {
   flex: 1;
   min-width: 0;
+  /* 24 px at least, as a target must be (WCAG 2.5.8, `layers-ui.md` §8). */
+  min-height: 24px;
   padding: 1px 4px;
   border: 1px solid var(--line-strong);
   color: var(--text-faint);
