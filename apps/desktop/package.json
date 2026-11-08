@@ -17,7 +17,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@tauri-apps/api": "^2.12.4",
     "monaco-editor": "^0.57.0",
-    "vue": "^3.5.44",
+    "vue": "^3.5.45",
     "vue-i18n": "^11.4.16",
     "vue-router": "^5.4.0"
   },
@@ -25,7 +25,7 @@
     "@tauri-apps/cli": "^2.12.3",
     "@vitejs/plugin-vue": "^6.0.10",
     "typescript": "~6.0.3",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vitest": "^5.0.3",
     "vue-tsc": "^3.3.13"
   }
