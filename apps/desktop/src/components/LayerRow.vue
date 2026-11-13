@@ -31,6 +31,8 @@ const props = defineProps<{
   base?: boolean
   canUp?: boolean
   canDown?: boolean
+  /** The bottom layer over a base it can trade with: *Move down* swaps them. */
+  swapsDown?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -72,9 +74,9 @@ function shownLine(): string {
         :can-up="canUp ?? false"
         :can-down="canDown ?? false"
         :up-label="t('layers.moveUpOf', { name })"
-        :down-label="t('layers.moveDownOf', { name })"
+        :down-label="swapsDown ? t('layers.swapOf', { name }) : t('layers.moveDownOf', { name })"
         :up-title="t('layers.moveUp')"
-        :down-title="t('layers.moveDown')"
+        :down-title="swapsDown ? t('layers.swap') : t('layers.moveDown')"
         :drag-title="t('layers.drag')"
         @up="emit('up')"
         @down="emit('down')"

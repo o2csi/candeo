@@ -28,6 +28,8 @@ const props = defineProps<{
   full: boolean
   /** A hardware effect is the base: the layers wait (§4.6). */
   waiting: boolean
+  /** One of Candeo's effects runs as the base: a layer can trade places with it (§4.5). */
+  baseSwappable: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +37,8 @@ const emit = defineEmits<{
   /** `delta` +1 moves towards the top. */
   move: [id: string, delta: 1 | -1]
   drop: [id: string, onto: string]
+  /** Layer `id` and the base trade effects. */
+  swap: [id: string]
   remove: [id: string]
   undo: []
 }>()
@@ -53,7 +57,8 @@ function isSelected(selection: Selection): boolean {
  * own once it reached an end: the list is drawn again, and a node moved in
  * the DOM loses the focus it held.
  */
-async function move(id: string, delta: 1 | -1): Promise<void> {
+async function move(id: string, delta: 1 | -1, position: number): Promise<void> {
+  if (delta < 0 && position === 1) return swap(id)
   emit('move', id, delta)
   await nextTick()
   const row = root.value?.querySelector(`[data-layer="${CSS.escape(id)}"]`)
@@ -67,6 +72,18 @@ async function remove(id: string): Promise<void> {
   emit('remove', id)
   await nextTick()
   root.value?.querySelector<HTMLButtonElement>('.removed .undo')?.focus()
+}
+
+/** The bottom layer goes down, or a layer is dropped on the base: they trade, and the base takes the focus. */
+async function swap(id: string): Promise<void> {
+  emit('swap', id)
+  await nextTick()
+  root.value?.querySelector<HTMLButtonElement>('.lrow.base .pick')?.focus()
+}
+
+function onDropBase(): void {
+  if (dragging.value !== null && props.baseSwappable) void swap(dragging.value)
+  dragging.value = null
 }
 
 function onDrop(onto: string): void {
@@ -112,10 +129,11 @@ function onDrop(onto: string): void {
             :pressed="isSelected({ kind: 'layer', id: row.id })"
             :label="t('layers.rowName', { effect: row.name, line: row.line, n: row.position, total: layerCount() })"
             :can-up="row.position < layerCount()"
-            :can-down="row.position > 1"
+            :can-down="row.position > 1 || baseSwappable"
+            :swaps-down="row.position === 1 && baseSwappable"
             @select="emit('select', { kind: 'layer', id: row.id })"
-            @up="move(row.id, 1)"
-            @down="move(row.id, -1)"
+            @up="move(row.id, 1, row.position)"
+            @down="move(row.id, -1, row.position)"
             @remove="remove(row.id)"
             @dragstart="dragging = row.id"
             @dragend="dragging = null"
@@ -123,16 +141,19 @@ function onDrop(onto: string): void {
         </div>
       </template>
 
-      <LayerRow
-        base
-        :name="base.name"
-        :line="base.line"
-        :swatch="base.swatch"
-        state="default"
-        :pressed="isSelected({ kind: 'base' })"
-        :label="t('layers.baseName', { effect: base.name })"
-        @select="emit('select', { kind: 'base' })"
-      />
+      <!-- A layer dropped here trades effects with the base. -->
+      <div @dragover="baseSwappable && $event.preventDefault()" @drop.prevent="onDropBase">
+        <LayerRow
+          base
+          :name="base.name"
+          :line="base.line"
+          :swatch="base.swatch"
+          state="default"
+          :pressed="isSelected({ kind: 'base' })"
+          :label="t('layers.baseName', { effect: base.name })"
+          @select="emit('select', { kind: 'base' })"
+        />
+      </div>
     </div>
 
     <p v-if="waiting && layerCount() > 0" class="waiting-note">{{ t('layers.waiting') }}</p>

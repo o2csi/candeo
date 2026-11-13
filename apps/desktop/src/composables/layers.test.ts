@@ -39,6 +39,7 @@ import {
   stackIn,
   stackItems,
   standing,
+  swappedWithBase,
   usageOf,
   withLayers,
   withLook,
@@ -191,6 +192,36 @@ describe('rows', () => {
     expect(droppedOrder([eq, red, { id: 'c', effect: 'x' }], 'c', 'a')).toEqual(['c', 'a', 'b'])
     expect(droppedOrder(stack, 'a', 'a')).toBeNull()
     expect(inOrder(stack, ['b', 'a']).map((l) => l.id)).toEqual(['b', 'a'])
+  })
+
+  it('trades effects with the base, the layer keeping its place, mask and look', () => {
+    const layer: LayerRecord = {
+      id: 'l2',
+      effect: 'shipped:Ripples',
+      values: { ring: '#40c8ff' },
+      bindings: { ring: 'signal:build' },
+      mask: { group: 'wasd' },
+      blend: 'add',
+      opacity: 60,
+    }
+    const base = { effect: 'shipped:Bubbles', values: { speed: 3 }, bindings: {} }
+    expect(swappedWithBase(layer, base)).toEqual({
+      layer: {
+        id: 'l2',
+        effect: 'shipped:Bubbles',
+        values: { speed: 3 },
+        bindings: {},
+        mask: { group: 'wasd' },
+        blend: 'add',
+        opacity: 60,
+      },
+      base: { effect: 'shipped:Ripples', values: { ring: '#40c8ff' }, bindings: { ring: 'signal:build' } },
+    })
+    expect(swappedWithBase({ id: 'l1', effect: 'shipped:Rain' }, base).base).toEqual({
+      effect: 'shipped:Rain',
+      values: {},
+      bindings: {},
+    })
   })
 
   it('says the base and its layers on the device card', () => {

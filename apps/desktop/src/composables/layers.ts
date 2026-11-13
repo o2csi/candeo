@@ -388,6 +388,29 @@ export function movedOrder(stack: readonly LayerRecord[], id: string, delta: 1 |
   )
 }
 
+/** An effect and its settings: what the base runs, or what a layer gives it. */
+export interface EffectSettings {
+  effect: string
+  values: EffectParams
+  bindings: Bindings
+}
+
+/**
+ * A layer and the base trading effects (`layers-ui.md` §4.5): the layer keeps
+ * its id, place, mask and look and takes the base's effect and settings; the
+ * base takes the layer's. The base has no mask or look to give: it covers the
+ * whole target.
+ */
+export function swappedWithBase(
+  layer: LayerRecord,
+  base: EffectSettings,
+): { layer: LayerRecord; base: EffectSettings } {
+  return {
+    layer: { ...layer, effect: base.effect, values: base.values, bindings: base.bindings },
+    base: { effect: layer.effect, values: layer.values ?? {}, bindings: layer.bindings ?? {} },
+  }
+}
+
 /** The order once layer `id` is dropped on the row of layer `onto`. */
 export function droppedOrder(stack: readonly LayerRecord[], id: string, onto: string): string[] | null {
   const from = stack.findIndex((l) => l.id === id)

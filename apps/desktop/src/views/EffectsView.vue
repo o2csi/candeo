@@ -197,6 +197,7 @@ import {
   selectedLayer,
   standing,
   stackItems,
+  swappedWithBase,
   usageOf,
   withLayers,
   withLook,
@@ -2303,6 +2304,44 @@ function dropRow(id: string, onto: string): void {
   void reorder(droppedOrder(stack.value, id, onto), id)
 }
 
+/**
+ * The base a layer can trade with: one of Candeo's effects, running. A
+ * firmware effect cannot become a layer, and a stopped target has no base
+ * running to trade (`layers-ui.md` §4.5).
+ */
+const swappableBase = computed<Choice | null>(() => {
+  const id = runningOn(target.value)
+  const c = choices.value.find((x) => x.id === id)
+  return c && !c.hardware ? c : null
+})
+
+/**
+ * *Move down* on the bottom layer, or a layer dropped on the base: the base
+ * runs the layer's effect with its settings, the layer the base's, its place,
+ * mask and look kept. The base is selected after: it holds what was moved.
+ */
+async function swapWithBase(id: string): Promise<void> {
+  const where = target.value
+  const base = swappableBase.value
+  const layer = stack.value.find((l) => l.id === id)
+  const up = layer ? choices.value.find((c) => c.id === layer.effect) : undefined
+  if (!where || !base || !layer || !up || up.hardware) return
+  const traded = swappedWithBase(layer, {
+    effect: base.id,
+    values: apart(base.params, valuesFor(where, base.id, base.params)),
+    bindings: bindingsFor(where, base.id, base.params),
+  })
+  removed.value = null
+  const sent = await layerCommand(async () => {
+    await replaceLayer(where, traded.layer)
+    const next = replace(where, up.id, up.params, traded.base.values, traded.base.bindings, false)
+    await startEffect(where, up.id, next.values, next.bindings)
+  })
+  if (!sent) return
+  selectRow(BASE)
+  announce(t('layers.announce.swapped', { name: up.name }))
+}
+
 /** *Remove*: at once, no question; *Undo* puts it back with its place, mask and settings (§4.5). */
 async function removeRow(id: string): Promise<void> {
   const where = target.value
@@ -2862,9 +2901,11 @@ onBeforeUnmount(() => {
                   :new-label="newRowLabel"
                   :full="atLimit(stack)"
                   :waiting="waiting"
+                  :base-swappable="swappableBase !== null"
                   @select="selectRow"
                   @move="moveRow"
                   @drop="dropRow"
+                  @swap="swapWithBase"
                   @remove="removeRow"
                   @undo="undoRemove"
                 />
@@ -2980,9 +3021,11 @@ onBeforeUnmount(() => {
               :new-label="newRowLabel"
               :full="atLimit(stack)"
               :waiting="waiting"
+              :base-swappable="swappableBase !== null"
               @select="selectRow"
               @move="moveRow"
               @drop="dropRow"
+              @swap="swapWithBase"
               @remove="removeRow"
               @undo="undoRemove"
             />
