@@ -552,7 +552,7 @@ fn device_submenu(
     // nothing runs any more.
     let running_effect = current
         .filter(|s| s.running)
-        .and_then(|s| s.effect_id.as_deref());
+        .and_then(|s| Some((s.effect_id.as_deref()?, running_layers(&s.layers))));
 
     let view = presentation(controlled, current.is_some_and(|s| s.running), language);
 
@@ -596,7 +596,7 @@ fn device_submenu(
             let runs = regions
                 .iter()
                 .find(|r| r.region == region.id && r.running)
-                .and_then(|r| r.effect_id.as_deref());
+                .and_then(|r| Some((r.effect_id.as_deref()?, running_layers(&r.layers))));
             let mut entries: Vec<Box<dyn IsMenuItem<Wry>>> = Vec::new();
             effect_items(
                 app,
@@ -662,15 +662,36 @@ fn device_submenu(
         .map_err(|e| format!("submenu of {} not assembled: {e}", controlled.device))
 }
 
+/// How many layers of a stack draw now: one stopped on an error draws nothing.
+fn running_layers(layers: &[crate::runtime::LayerEngineStatus]) -> usize {
+    layers.iter().filter(|l| l.running).count()
+}
+
+/// An effect's line: its name, and the layers over it when it runs with some
+/// (`docs/design/layers-ui.md` §4.8). Choosing another changes the base and
+/// keeps the layers (decision 9 of `docs/design/composition.md`).
+fn effect_line(name: &str, layers: usize, language: Language) -> String {
+    if layers == 0 {
+        return name.to_owned();
+    }
+    i18n::tn(
+        language,
+        "tray.withLayers",
+        layers,
+        &BTreeMap::from([("effect", name.to_owned())]),
+    )
+}
+
 /// The effects that can start on `layout` — a device's, or a region's — the one
-/// running ticked, each item doing what `start` makes of its key.
+/// running ticked with the layers drawing over it, each item doing what
+/// `start` makes of its key.
 #[allow(clippy::too_many_arguments)]
 fn effect_items(
     app: &AppHandle,
     items: &mut Vec<Box<dyn IsMenuItem<Wry>>>,
     library: &[EffectEntry],
     layout: &'static Layout,
-    running: Option<&str>,
+    running: Option<(&str, usize)>,
     enabled: bool,
     language: Language,
     start: impl Fn(&str) -> Action,
@@ -699,12 +720,13 @@ fn effect_items(
             items.push(Box::new(inert_item(app, &i18n::text(language, heading))?));
         }
         for entry in ready.iter().filter(|e| e.kind == kind) {
+            let layers = running.filter(|(id, _)| *id == entry.id).map(|(_, n)| n);
             items.push(Box::new(check_item(
                 app,
                 &start(&entry.id),
-                &entry.manifest.name,
+                &effect_line(&entry.manifest.name, layers.unwrap_or(0), language),
                 enabled,
-                running == Some(entry.id.as_str()),
+                layers.is_some(),
             )?));
         }
     }
@@ -1101,6 +1123,37 @@ mod tests {
             Action::Resume { device: DEVICE },
             Action::ToggleAutomations,
         ]
+    }
+
+    /// The running effect's line counts the layers drawing over it, in the
+    /// menu's language (`layers-ui.md` §4.8); without one it is the name alone.
+    #[test]
+    fn an_effect_with_layers_says_how_many() {
+        assert_eq!(
+            effect_line("Diagonal wave", 0, Language::En),
+            "Diagonal wave"
+        );
+        assert_eq!(
+            effect_line("Diagonal wave", 1, Language::En),
+            "Diagonal wave + 1 layer"
+        );
+        assert_eq!(
+            effect_line("Diagonal wave", 2, Language::En),
+            "Diagonal wave + 2 layers"
+        );
+        assert_eq!(effect_line("Vague", 2, Language::Fr), "Vague + 2 calques");
+        let layer = |running| crate::runtime::LayerEngineStatus {
+            layer: "l1".into(),
+            running,
+            effect_id: Some("shipped:Rain".into()),
+            error: None,
+            reads_private: false,
+        };
+        assert_eq!(
+            running_layers(&[layer(true), layer(false)]),
+            1,
+            "a stopped one draws nothing"
+        );
     }
 
     /// A region's effect is written `regionEffect:<vid>:<pid>:<region>:<effect>`,

@@ -165,7 +165,21 @@ only.
 ### 4.5 Order and removal
 
 - **Move up / Move down** on each layer row, with the rules' grip for dragging.
-  The base never moves; *Add a layer* stays on top.
+  *Add a layer* stays on top. A row that can go neither way shows no controls:
+  disabled ones read as broken. The same holds for a lone rule.
+- **Swapping with the base.** The base stays at the bottom, but its effect can
+  trade places with a layer's. Four gestures do it:
+  - *Move down* on the bottom layer, named *Swap with the base*;
+  - *Move up* on the base, named *Swap with the layer above*;
+  - dropping a layer on the base;
+  - dropping the base on a layer.
+
+  After a swap:
+  - The base runs the layer's effect with its settings.
+  - The layer runs the base's effect, and keeps its place, mask and look.
+  - The row that now holds the effect that moved is selected.
+  - A firmware effect cannot become a layer, so it does not swap. Neither does a
+    target whose base is stopped.
 - **Remove** takes the row away at once and leaves *Layer removed · Undo* in its
   place until the next change to that stack. Undo puts it back with its place,
   mask and settings. No confirmation: nothing is deleted from the library.

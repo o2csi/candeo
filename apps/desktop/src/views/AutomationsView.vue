@@ -48,6 +48,7 @@ import DurationChip from '../components/DurationChip.vue'
 import EffectParamsForm from '../components/EffectParamsForm.vue'
 import FailureNote from '../components/FailureNote.vue'
 import FrequencyChip from '../components/FrequencyChip.vue'
+import ReorderControls from '../components/ReorderControls.vue'
 import { offeredFor } from '../composables/applies'
 import { declaredBindings, ruleReadsSignal, withBinding } from '../composables/bindings'
 import { hardwareEffectsFor, named, type HardwareEffect } from '../composables/useEffects'
@@ -420,15 +421,6 @@ function onDrop(to: number): void {
         <template v-if="editable(raw)">
           <div class="line">
             <div class="sentence">
-            <span
-              class="grip"
-              draggable="true"
-              :title="t('automations.dragHint')"
-              aria-hidden="true"
-              @dragstart="dragging = index"
-              @dragend="dragging = null"
-              >⋮⋮</span
-            >
             <input
               type="checkbox"
               class="switch"
@@ -537,26 +529,17 @@ function onDrop(to: number): void {
             <button type="button" class="ghost" @click="attempt(raw)">
               {{ t('automations.try') }}
             </button>
-            <button
-              type="button"
-              class="icon"
-              :disabled="index === 0"
-              :aria-label="t('automations.moveUp')"
-              :title="t('automations.moveUp')"
-              @click="move(index, index - 1)"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="icon"
-              :disabled="index === rules.length - 1"
-              :aria-label="t('automations.moveDown')"
-              :title="t('automations.moveDown')"
-              @click="move(index, index + 1)"
-            >
-              ↓
-            </button>
+            <ReorderControls
+              :can-up="index > 0"
+              :can-down="index < rules.length - 1"
+              :up-label="t('automations.moveUp')"
+              :down-label="t('automations.moveDown')"
+              :drag-title="t('automations.dragHint')"
+              @up="move(index, index - 1)"
+              @down="move(index, index + 1)"
+              @dragstart="dragging = index"
+              @dragend="dragging = null"
+            />
             <button type="button" class="ghost" @click="remove(index)">
               {{ t('automations.delete') }}
             </button>
@@ -759,13 +742,6 @@ function onDrop(to: number): void {
   cursor: pointer;
 }
 
-.grip {
-  color: var(--text-faint);
-  cursor: grab;
-  user-select: none;
-  letter-spacing: -2px;
-}
-
 .word {
   color: var(--text-muted);
 }
@@ -854,23 +830,6 @@ function onDrop(to: number): void {
 .ghost:hover:not(:disabled) {
   color: var(--text);
   background: var(--raised-2);
-}
-
-.icon {
-  width: 26px;
-  height: 26px;
-  border-radius: var(--r-md);
-  color: var(--text-muted);
-}
-
-.icon:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--raised-2);
-}
-
-.icon:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
 }
 
 .unreadable {

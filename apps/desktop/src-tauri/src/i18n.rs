@@ -29,18 +29,45 @@ fn lookup(language: Language, key: &str) -> Option<&'static str> {
         .as_str()
 }
 
-/// The text for `key` in `language`, then in English, with its `{name}`
-/// placeholders filled. A key missing from both gives the key itself, which a
-/// test keeps from happening.
-pub fn t(language: Language, key: &str, params: &BTreeMap<&str, String>) -> String {
-    let template = lookup(language, key)
+/// The template for `key` in `language`, then in English; the key itself when
+/// both lack it, which a test keeps from happening.
+fn template(language: Language, key: &str) -> &str {
+    lookup(language, key)
         .or_else(|| lookup(Language::En, key))
-        .unwrap_or(key);
+        .unwrap_or(key)
+}
+
+fn fill(template: &str, params: &BTreeMap<&str, String>) -> String {
     params
         .iter()
         .fold(template.to_owned(), |text, (name, value)| {
             text.replace(&format!("{{{name}}}"), value)
         })
+}
+
+/// The text for `key` in `language`, then in English, with its `{name}`
+/// placeholders filled. A key missing from both gives the key itself, which a
+/// test keeps from happening.
+pub fn t(language: Language, key: &str, params: &BTreeMap<&str, String>) -> String {
+    fill(template(language, key), params)
+}
+
+/// [`t`] for a text with plural forms, `{n} layer | {n} layers` as the
+/// catalogs write them for the window, the form chosen as vue-i18n chooses it
+/// by default, so that the tray and the window say the same: of two forms the
+/// first for one, the second otherwise; of three, none, one, many. `n` fills
+/// `{n}`.
+pub fn tn(language: Language, key: &str, n: usize, params: &BTreeMap<&str, String>) -> String {
+    let forms: Vec<&str> = template(language, key).split('|').map(str::trim).collect();
+    let form = match forms.len() {
+        1 => forms[0],
+        2 if n == 1 => forms[0],
+        2 => forms[1],
+        _ => forms[n.min(2)],
+    };
+    let mut params = params.clone();
+    params.insert("n", n.to_string());
+    fill(form, &params)
 }
 
 /// [`t`] for a text without placeholders.
@@ -71,6 +98,43 @@ mod tests {
         assert_eq!(text(Language::Fr, "no.such.key"), "no.such.key");
     }
 
+    /// The tray counts as the window does: vue-i18n's default rule, one form
+    /// for one, the other for every other count.
+    #[test]
+    fn a_plural_takes_the_form_vue_i18n_takes() {
+        let effect = BTreeMap::from([("effect", "Wave".to_owned())]);
+        assert_eq!(
+            tn(Language::En, "tray.withLayers", 1, &effect),
+            "Wave + 1 layer"
+        );
+        assert_eq!(
+            tn(Language::En, "tray.withLayers", 2, &effect),
+            "Wave + 2 layers"
+        );
+        assert_eq!(
+            tn(Language::Fr, "tray.withLayers", 3, &effect),
+            "Wave + 3 calques"
+        );
+        assert_eq!(
+            tn(
+                Language::En,
+                "devices.summary.controlled",
+                0,
+                &BTreeMap::new()
+            ),
+            "no device controlled"
+        );
+        assert_eq!(
+            tn(
+                Language::En,
+                "devices.summary.controlled",
+                5,
+                &BTreeMap::new()
+            ),
+            "5 devices controlled"
+        );
+    }
+
     /// Every key the Rust sources translate exists in both catalogs: read from the
     /// sources themselves, so that no list has to be kept in step.
     #[test]
@@ -79,6 +143,7 @@ mod tests {
             include_str!("controlled_folders.rs"),
             include_str!("failure.rs"),
             include_str!("journal.rs"),
+            include_str!("layers.rs"),
             include_str!("lib.rs"),
             include_str!("mcp/mod.rs"),
             include_str!("mcp/server.rs"),
