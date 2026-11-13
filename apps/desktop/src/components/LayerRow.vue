@@ -27,7 +27,10 @@ const props = defineProps<{
   pressed: boolean
   /** What it is read out as, its place included. */
   label: string
-  /** The bottom row: no tools, it never moves. */
+  /**
+   * The bottom row: it stays there, and is never removed. Its *Move up*, when
+   * `canUp`, trades its effect with the layer above (`layers-ui.md` §4.5).
+   */
   base?: boolean
   canUp?: boolean
   canDown?: boolean
@@ -69,13 +72,13 @@ function shownLine(): string {
         <span class="line">{{ shownLine() }}</span>
       </span>
     </button>
-    <span v-if="!base" class="tools">
+    <span v-if="!base || canUp" class="tools">
       <ReorderControls
         :can-up="canUp ?? false"
         :can-down="canDown ?? false"
-        :up-label="t('layers.moveUpOf', { name })"
+        :up-label="base ? t('layers.swapUpOf', { name }) : t('layers.moveUpOf', { name })"
         :down-label="swapsDown ? t('layers.swapOf', { name }) : t('layers.moveDownOf', { name })"
-        :up-title="t('layers.moveUp')"
+        :up-title="base ? t('layers.swapUp') : t('layers.moveUp')"
         :down-title="swapsDown ? t('layers.swap') : t('layers.moveDown')"
         :drag-title="t('layers.drag')"
         @up="emit('up')"
@@ -84,6 +87,7 @@ function shownLine(): string {
         @dragend="emit('dragend')"
       />
       <button
+        v-if="!base"
         type="button"
         class="remove"
         :aria-label="t('layers.removeOf', { name })"

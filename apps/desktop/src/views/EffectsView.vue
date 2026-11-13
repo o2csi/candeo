@@ -2316,11 +2316,12 @@ const swappableBase = computed<Choice | null>(() => {
 })
 
 /**
- * *Move down* on the bottom layer, or a layer dropped on the base: the base
- * runs the layer's effect with its settings, the layer the base's, its place,
- * mask and look kept. The base is selected after: it holds what was moved.
+ * *Move down* on the bottom layer, *Move up* on the base, or one dropped on the
+ * other: the base runs the layer's effect with its settings, the layer the
+ * base's, its place, mask and look kept. `follow` is the row that holds what
+ * was moved, selected after.
  */
-async function swapWithBase(id: string): Promise<void> {
+async function swapWithBase(id: string, follow: 'base' | 'layer'): Promise<void> {
   const where = target.value
   const base = swappableBase.value
   const layer = stack.value.find((l) => l.id === id)
@@ -2338,8 +2339,13 @@ async function swapWithBase(id: string): Promise<void> {
     await startEffect(where, up.id, next.values, next.bindings)
   })
   if (!sent) return
-  selectRow(BASE)
-  announce(t('layers.announce.swapped', { name: up.name }))
+  if (follow === 'base') {
+    selectRow(BASE)
+    announce(t('layers.announce.swapped', { name: up.name }))
+  } else {
+    selectRow(layerRow(id))
+    announce(t('layers.announce.swappedUp', { name: base.name }))
+  }
 }
 
 /** *Remove*: at once, no question; *Undo* puts it back with its place, mask and settings (§4.5). */

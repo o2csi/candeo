@@ -9,7 +9,7 @@
  * it, for the buttons to be pressed again (2.1.1); removing one leaves *Layer
  * removed · Undo* in its place until the next change (2.2.1).
  */
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 import { sameSelection, type Selection, type StackRowView } from '../composables/layers'
 import { t } from '../i18n'
@@ -38,7 +38,7 @@ const emit = defineEmits<{
   move: [id: string, delta: 1 | -1]
   drop: [id: string, onto: string]
   /** Layer `id` and the base trade effects. */
-  swap: [id: string]
+  swap: [id: string, follow: 'base' | 'layer']
   remove: [id: string]
   undo: []
 }>()
@@ -58,7 +58,7 @@ function isSelected(selection: Selection): boolean {
  * the DOM loses the focus it held.
  */
 async function move(id: string, delta: 1 | -1, position: number): Promise<void> {
-  if (delta < 0 && position === 1) return swap(id)
+  if (delta < 0 && position === 1) return swap(id, 'base')
   emit('move', id, delta)
   await nextTick()
   const row = root.value?.querySelector(`[data-layer="${CSS.escape(id)}"]`)
@@ -74,21 +74,44 @@ async function remove(id: string): Promise<void> {
   root.value?.querySelector<HTMLButtonElement>('.removed .undo')?.focus()
 }
 
-/** The bottom layer goes down, or a layer is dropped on the base: they trade, and the base takes the focus. */
-async function swap(id: string): Promise<void> {
-  emit('swap', id)
+/** What `dragging` holds while the base is dragged: no layer id is empty. */
+const BASE_DRAG = ''
+
+/** The layer right above the base, the one its *Move up* trades with. */
+const bottomId = computed(() => {
+  const row = props.rows.find((r) => r.kind === 'layer' && r.position === 1)
+  return row?.kind === 'layer' ? row.id : null
+})
+
+/**
+ * Layer `id` and the base trade effects; the row holding the effect that moved
+ * takes the focus: the base when a layer went down, the layer when the base
+ * went up.
+ */
+async function swap(id: string, follow: 'base' | 'layer'): Promise<void> {
+  emit('swap', id, follow)
   await nextTick()
-  root.value?.querySelector<HTMLButtonElement>('.lrow.base .pick')?.focus()
+  const row =
+    follow === 'base'
+      ? root.value?.querySelector('.lrow.base')
+      : root.value?.querySelector(`[data-layer="${CSS.escape(id)}"]`)
+  row?.querySelector<HTMLButtonElement>('.pick')?.focus()
 }
 
 function onDropBase(): void {
-  if (dragging.value !== null && props.baseSwappable) void swap(dragging.value)
+  const id = dragging.value
   dragging.value = null
+  if (id !== null && id !== BASE_DRAG && props.baseSwappable) void swap(id, 'base')
 }
 
 function onDrop(onto: string): void {
-  if (dragging.value !== null && dragging.value !== onto) emit('drop', dragging.value, onto)
+  const id = dragging.value
   dragging.value = null
+  if (id === BASE_DRAG) {
+    if (props.baseSwappable) void swap(onto, 'layer')
+  } else if (id !== null && id !== onto) {
+    emit('drop', id, onto)
+  }
 }
 </script>
 
@@ -141,7 +164,7 @@ function onDrop(onto: string): void {
         </div>
       </template>
 
-      <!-- A layer dropped here trades effects with the base. -->
+      <!-- A layer dropped here trades effects with the base; the base dropped on a layer, too. -->
       <div @dragover="baseSwappable && $event.preventDefault()" @drop.prevent="onDropBase">
         <LayerRow
           base
@@ -151,7 +174,11 @@ function onDrop(onto: string): void {
           state="default"
           :pressed="isSelected({ kind: 'base' })"
           :label="t('layers.baseName', { effect: base.name })"
+          :can-up="baseSwappable && bottomId !== null"
           @select="emit('select', { kind: 'base' })"
+          @up="bottomId !== null && swap(bottomId, 'layer')"
+          @dragstart="dragging = BASE_DRAG"
+          @dragend="dragging = null"
         />
       </div>
     </div>
