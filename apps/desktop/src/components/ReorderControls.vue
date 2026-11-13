@@ -9,6 +9,9 @@
  *
  * The labels come from the parent, which knows what the row is: *Move up* for
  * a rule, *Move "Equalizer" up* for a layer.
+ *
+ * Absent when the row can go neither way, a lone rule or layer: a grip and two
+ * disabled arrows read as broken, not as an order of one.
  */
 
 defineProps<{
@@ -40,7 +43,7 @@ function onDragStart(e: DragEvent): void {
 </script>
 
 <template>
-  <span class="reorder">
+  <span v-if="canUp || canDown" class="reorder">
     <!-- The pointer's way only: the buttons beside it are the keyboard's. -->
     <span
       class="grip"

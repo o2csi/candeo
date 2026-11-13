@@ -165,7 +165,8 @@ only.
 ### 4.5 Order and removal
 
 - **Move up / Move down** on each layer row, with the rules' grip for dragging.
-  The base never moves; *Add a layer* stays on top.
+  The base never moves; *Add a layer* stays on top. A lone layer shows neither:
+  with nothing to swap with, they would only be disabled. The same holds for a lone rule.
 - **Remove** takes the row away at once and leaves *Layer removed · Undo* in its
   place until the next change to that stack. Undo puts it back with its place,
   mask and settings. No confirmation: nothing is deleted from the library.
