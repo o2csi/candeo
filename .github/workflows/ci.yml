@@ -201,7 +201,7 @@ jobs:
       # Official binaries published by RustSec, checksum verified: a few
       # seconds, where letting `cargo install cargo-audit` compile the tool
       # cost six of the job's 6 min 08.
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with: { tool: cargo-audit }
       # A direct call rather than `rustsec/audit-check@v2.0.0`: the wrapper runs
       # on a deprecated Node.js 20, which GitHub already forces onto Node 24
